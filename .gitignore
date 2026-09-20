@@ -8,6 +8,6 @@ build/
 coverage/
 .data/
 docs/test-runs/
-brand/
+/brand/
 spike-m0/
 .DS_Store
