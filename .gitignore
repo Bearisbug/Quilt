@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+build/
+.turbo/
+coverage/
+.data/
+docs/test-runs/
+brand/
+spike-m0/
+.DS_Store

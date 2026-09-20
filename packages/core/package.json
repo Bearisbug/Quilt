@@ -1,0 +1,20 @@
+{
+  "name": "@quilt/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@material/material-color-utilities": "^0.4.0",
+    "linkedom": "^0.18.13",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

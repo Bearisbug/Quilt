@@ -1,0 +1,21 @@
+{
+  "name": "quilt",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm -r --parallel --stream dev",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm --filter @quilt/web build && pnpm --filter quilt-canvas build",
+    "db:migrate": "pnpm --filter @quilt/api db:migrate",
+    "seed": "pnpm --filter @quilt/api seed",
+    "seed:project": "pnpm --filter @quilt/api seed:project",
+    "seed:job": "pnpm --filter @quilt/api seed:job",
+    "seed:preview-token": "pnpm --filter @quilt/api seed:preview-token",
+    "seed:design-system": "pnpm --filter @quilt/api seed:design-system",
+    "mcp:call": "pnpm --filter @quilt/tests mcp:call"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12",
+    "typescript": "^7.0.2"
+  }
+}

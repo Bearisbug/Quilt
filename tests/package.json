@@ -1,0 +1,22 @@
+{
+  "name": "@quilt/tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e:smoke": "tsx e2e/smoke.ts",
+    "e2e:core": "tsx e2e/core.ts",
+    "e2e:proto": "tsx e2e/proto.ts",
+    "e2e:edit": "tsx e2e/edit.ts",
+    "e2e:agent": "tsx e2e/agent.ts",
+    "e2e:install": "tsx e2e/install.ts",
+    "mcp:call": "tsx e2e/mcp-call.ts"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "playwright": "^1.63.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "zod": "^4.0.0"
+  }
+}

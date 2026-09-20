@@ -1,0 +1,2 @@
+ALTER TABLE "projects" ADD COLUMN "chat_session_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "generation_jobs_active_chat_uq" ON "generation_jobs" USING btree ("project_id") WHERE status in ('queued','running') and kind = 'chat';

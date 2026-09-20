@@ -1,0 +1,50 @@
+/* Quilt 品牌变量层 —— 品牌数值在本项目内的唯一落点
+ *
+ * 来源：brand/Quilt-Brand-Design（Q-F-v6，造型 Q-F-v3），2026-09-16 接入。
+ * 数值事实源是该包的 brand.json；深底前景色取自它的 qa/mechanical.json 已验证组合。
+ * 品牌包在项目侧只读：要改品牌色或造型，回品牌包按 DESIGN-RULES.md 重跑 build.py，不在这里改。
+ *
+ * 本文件只声明「品牌说了什么」。「界面怎么用」在 styles.css 的 @theme 里映射，
+ * 组件一律用映射后的语义 token，不直接引用 --brand-*，更不写 hex。
+ */
+:root {
+  /* 品牌色版（brand.json variants，外层色）。主色 = 石墨灰 */
+  --brand-black: #000000;
+  --brand-graphite: #56616e;
+  --brand-silver: #9098a3;
+  --brand-mist: #769bb9;
+  --brand-blue: #356fd6;
+  --brand-navy: #263c63;
+
+  /* 语义色（BRAND.md §4）。注意：品牌明确不提供错误 / 警告 / 成功等状态色 */
+  --brand-ink: #142033;
+  --brand-muted: #596779;
+  --brand-paper: #f4f6f9;
+  --brand-line: #d9dfe7;
+
+  /* Ink 深底上的前景色，取自品牌包 qa/mechanical.json 的已验证组合：
+     12.49:1 与 8.96:1，两者都过正文 4.5:1 */
+  --brand-on-ink: #d8e2ee;
+  --brand-on-ink-muted: #b4c1d2;
+
+  /* 深色外壳的表面阶梯。品牌只定到 Ink 一层，界面需要的「更深的底 / 抬起面 / 分隔线」
+     由 Ink 按同一色相派生（hsl 217°），属产品侧决定，不是品牌包里的值。 */
+  --brand-ink-deep: #0e1725;
+  --brand-ink-raised: #202e46;
+  --brand-ink-line: #263449;
+  --brand-ink-line-strong: #3b4c68;
+
+  /* 字标与西文用 Space Grotesk（自托管 woff2，OFL 许可随附）；
+     中文走系统字体，品牌包的 Noto Sans SC 是 17.7 MB 全量 VF，不适合直接上网页——
+     BRAND.md §4 本就要求「项目网页使用前需要单独评估字体体积、分片和加载方式」。 */
+  --brand-font-latin: "Space Grotesk";
+  --brand-wordmark-tracking: -0.03em;
+}
+
+@font-face {
+  font-family: "Space Grotesk";
+  src: url("/brand/SpaceGrotesk-VF.woff2") format("woff2-variations");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}

@@ -1,0 +1,282 @@
+@import "tailwindcss";
+@import "./brand.css";
+
+/* 工具 UI 主题：深色专业工具风（Owner 决定），配色自 2026-09-16 起取自品牌包（见 brand.css）。
+   这里是品牌变量进入界面的唯一映射层；组件一律用 token 类，不写 hex、也不直接引 --brand-*。
+   深色是这个工具的形态决定：画布上铺的是用户设计稿的白底截图，外壳必须退后。
+   品牌对此有明确出口——BRAND.md §3「Ink 深底优先反白」。 */
+@theme {
+  /* 外壳表面：画布最深，面板落在品牌 Ink 上，抬起面与分隔线按同色相派生 */
+  --color-canvas: var(--brand-ink-deep);
+  --color-panel: var(--brand-ink);
+  --color-panel-2: var(--brand-ink-raised);
+  --color-line: var(--brand-ink-line);
+  --color-line-strong: var(--brand-ink-line-strong);
+  /* 前景：品牌包已验证的深底组合 */
+  --color-fg: var(--brand-on-ink);
+  --color-muted: var(--brand-on-ink-muted);
+  /* 动作色用界面蓝：白字压在它上面 4.78:1 过正文线。
+     主色石墨灰不做动作色——它在深底上轮廓对比偏低，品牌要求配浅色承载面（BRAND.md §3）。 */
+  --color-accent: var(--brand-blue);
+  /* 深底上的强调文字与 hover 用雾蓝：压在 Ink 上 5.57:1，界面蓝只有 3.42:1 不够正文 */
+  --color-accent-strong: var(--brand-mist);
+  /* 品牌其余角色：浅承载面、品牌强调、深墨。留给需要品牌在场的地方 */
+  --color-paper: var(--brand-paper);
+  --color-brand: var(--brand-graphite);
+  --color-ink: var(--brand-ink);
+  /* 压在实心动作色上的前景。恒定白：品牌的深底前景色 on-ink 是为 Ink 调的，
+     压在界面蓝上只有 2.6:1；白字才有 4.78:1（VIS-010 的「确需恒定色」情形） */
+  --color-on-accent: #ffffff;
+  /* 状态色不动：BRAND.md §4 明确「这些颜色不替代应用的错误、警告、成功等状态色」 */
+  --color-danger: #ff6b6b;
+  --color-success: #5fd3a4;
+  --color-warn: #f5c451;
+  --font-sans: var(--brand-font-latin), "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+  --tracking-wordmark: var(--brand-wordmark-tracking);
+  /* 中文正文行高（BRAND.md §4 建议 1.6）。只给成段文字用，
+     工具 chrome 的标签仍是紧排——画布工具的竖向空间比呼吸感值钱 */
+  --leading-cn: 1.6;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+}
+
+html, body, #root { height: 100%; }
+body { background: var(--color-canvas); color: var(--color-fg); font-family: var(--font-sans); font-size: 13px; line-height: 1.45; -webkit-font-smoothing: antialiased; overflow: hidden; }
+/* 字标：Space Grotesk 500 + -0.03 em（BRAND.md §4）。
+   竖向空间不够放完整符号时（符号下限 64 px、横向组合下限 240 px），字标是唯一可以缩小的品牌元素。 */
+.wordmark { font-family: var(--brand-font-latin), ui-sans-serif, sans-serif; font-weight: 500; letter-spacing: var(--brand-wordmark-tracking); }
+
+/* 浮层 chrome（VIS-011）：画布从其下平移缩放而过，半透明 + 背景模糊用来传达层级，不是装饰玻璃。
+   降低透明度 / 提高对比度偏好下退回实底。 */
+/* 底色接近实底：画布上铺的是白底截图，透过来的高亮会把面板文字糊掉（VIS-011 禁止亮材质叠亮材质）。
+   保留 blur 只为边缘那点景深。 */
+.chrome {
+  background: color-mix(in srgb, var(--color-panel) 93%, transparent);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid color-mix(in srgb, var(--color-line-strong) 65%, transparent);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .chrome { background: var(--color-panel); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  .chrome { background: var(--color-panel); border-color: var(--color-line-strong); }
+}
+/* 顶栏不是面板而是一层渐暗遮罩：画布连同点阵直接透上来，自上而下由暗转透明，没有边线、没有模糊。
+   交界靠渐隐而非 1px 硬线（VIS-011）。遮罩比内容行高，所以下半段必须 pointer-events:none 放画布操作过去。 */
+.scrim-top::before {
+  content: ''; position: absolute; inset-inline: 0; top: 0; height: 7rem; pointer-events: none; z-index: -1;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--color-canvas) 94%, transparent) 0%,
+    color-mix(in srgb, var(--color-canvas) 62%, transparent) 42%,
+    transparent 100%);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .scrim-top::before { height: 100%; background: var(--color-canvas); }
+}
+
+/* 画布外壳：chrome 各自浮在画布上，底部输入框居中于「左侧对话面板与右侧工具栏之间」的空白区。
+   各浮层的占位只在这里定义一次，宽度与避让都引用同一组变量。 */
+.canvas-shell {
+  --rail-w: 4.75rem;   /* 工具栏及其外边距 */
+  --dock-w: 20rem;     /* 左侧对话记录 */
+  --panel-w: 20rem;    /* 右侧滑出面板 */
+  --chrome-left: calc(var(--dock-w) + 1.5rem);
+  --chrome-right: var(--rail-w);
+  --chrome-top: 3.5rem;
+  --chrome-bottom: 11.5rem;  /* 首帧默认值（输入框一行时约 162px + 16px 底距）；输入框量到实际高度后由 Canvas 用内联变量覆盖——它会随内容增高、窄视口下工具条会折行 */
+}
+.canvas-shell[data-chat="collapsed"] { --chrome-left: var(--rail-w); }
+.canvas-shell[data-panel="open"] { --chrome-right: calc(var(--panel-w) + var(--rail-w) + 1rem); }
+.canvas-shell[data-composer="hidden"] { --chrome-bottom: 1rem; }  /* 收起后底部没有任何浮层，只留边距 */
+/* 窄视口：浮层不再横向互相避让（否则总宽超出视口），改为叠在画布上，输入框横跨整宽 */
+@media (max-width: 48rem) {
+  .canvas-shell {
+    --dock-w: min(20rem, calc(100vw - var(--rail-w) - 1.5rem));
+    --panel-w: min(20rem, calc(100vw - var(--rail-w) - 1.5rem));
+    --chrome-left: var(--rail-w);
+  }
+  .canvas-shell[data-panel="open"] { --chrome-right: var(--rail-w); }
+}
+/* 对话记录（v0.34）：贴左下角、底部对齐，从下往上长。窄视口下输入框横跨整宽，横条停在输入框上方（输入框收起时 --chrome-bottom 只剩 1rem，横条随之落底） */
+.chat-dock { bottom: 1rem; }
+@media (max-width: 48rem) { .chat-dock { bottom: var(--chrome-bottom); } }
+/* 底部输入框：实底外壳，不走 .chrome——它是主输入控件，需要一块与画布截图分离的稳定底色。
+   聚焦只加深投影、提亮边线（透明 outline 留给强制配色模式顶上，A11Y-008），不再套强调色描边。 */
+.composer {
+  /* 横向落点：默认压在视口正中，只有当侧边浮层真会压住它时才让位，且只让到不重叠为止。
+     不要写成「在两个浮层之间的空白里居中」——那样折叠一次对话面板就把用户正在打字的框
+     横向搬走 134 px（1440 视口实测）。clamp 的三个参数正好是「左浮层内边界 / 视口居中 / 右浮层内边界」，
+     宽视口下中间那项获胜，于是开合面板时它一动不动。 */
+  --composer-w: min(680px, calc(100% - var(--chrome-left) - var(--chrome-right)));
+  width: var(--composer-w);
+  left: clamp(
+    var(--chrome-left),
+    calc((100% - var(--composer-w)) / 2),
+    calc(100% - var(--chrome-right) - var(--composer-w))
+  );
+  right: auto;
+  background: var(--color-panel); border: 2px solid var(--color-line); border-radius: 1.75rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+  transition: left var(--duration-base) var(--ease-out), width var(--duration-base) var(--ease-out),
+    border-color var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out);
+}
+/* 收起（⌘/ / 聚焦某屏时自动）：不卸载，草稿留着；作者样式会压过 UA 的 [hidden]，这里显式兜底（COMP-008） */
+.composer[hidden] { display: none; }
+/* 拖着图片经过输入框时给出可放置的提示（REQ-CORE-012） */
+.composer[data-dropping] { border-color: var(--color-accent); border-style: dashed; }
+.composer:focus-within { border-color: var(--color-line-strong); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28), 0 16px 48px -12px rgba(0, 0, 0, 0.6); }
+.composer:has(textarea:focus-visible) { outline: 2px solid transparent; outline-offset: 2px; }
+.composer textarea { max-height: 224px; } /* 8 行 × 28px 行高，到顶后内部滚动 */
+/* 工具条空闲时略退后，聚焦、有内容或生成中回到全亮 */
+.composer-bar { opacity: 0.78; transition: opacity var(--duration-base) var(--ease-out); }
+.composer:focus-within .composer-bar, .composer[data-has-text] .composer-bar, .composer[data-busy] .composer-bar { opacity: 1; }
+/* 占位文案换词：新词从下方浮现，过渡期带一点模糊把两态糊成一次变形（MOTION-016） */
+@keyframes phrase-in { from { opacity: 0; transform: translateY(6px); filter: blur(4px); } to { opacity: 1; transform: none; filter: blur(0); } }
+.phrase-in { animation: phrase-in var(--duration-base) var(--ease-out); }
+/* 锚定菜单（通道下拉）：从触发器那条边长出来（MOTION-007），进 180ms 出 120ms（MOTION-015） */
+.menu {
+  background: var(--color-panel); border: 2px solid var(--color-line); border-radius: 1rem;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45); transform-origin: var(--radix-select-content-transform-origin);
+}
+@keyframes menu-in { from { opacity: 0; transform: translateY(4px) scale(0.96); filter: blur(4px); } to { opacity: 1; transform: none; filter: blur(0); } }
+@keyframes menu-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(3px) scale(0.98); } }
+.menu[data-state="open"] { animation: menu-in var(--duration-base) var(--ease-out); }
+.menu[data-state="closed"] { animation: menu-out var(--duration-fast) var(--ease-out); }
+/* 非 Radix 的锚定浮框（新建屏幕）：同一套进场，原点由 inline transform-origin 指到锚点那一角 */
+.pop-in { animation: menu-in var(--duration-base) var(--ease-out); }
+
+/* 右侧竖排工具栏（RESP-016 / RESP-017）：高度有界、自身滚动、无可见滚动条，溢出时边缘渐隐提示 */
+.rail { max-height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; mask-image: linear-gradient(180deg, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%); }
+.rail::-webkit-scrollbar { display: none; }
+
+@keyframes slide-in-right { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+.slide-in-right { animation: slide-in-right var(--duration-base) var(--ease-out); }
+/* 工具提示只淡入：它靠 -translate-y-1/2 对齐按钮，位移类动画会覆盖掉这个 transform */
+@keyframes tip-in { from { opacity: 0; } to { opacity: 1; } }
+.tip-in { animation: tip-in var(--duration-fast) var(--ease-out); }
+
+/* 滚动条：槽位恒定、外观定制（RESP-007 / RESP-015）；导航壳隐藏滚动条但保留滚动（RESP-016） */
+.scroll { overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--color-line-strong) transparent; }
+.scroll-nav { overflow-y: auto; scrollbar-width: none; }
+.scroll-nav::-webkit-scrollbar { display: none; }
+
+/* 画布 */
+/* 指针：平时是箭头（空白处按下是框选）；按住空格进入平移就绪才是抓手，平移中是握拳 */
+/* overflow:clip 而不是 hidden：hidden 只是不画滚动条，元素仍是滚动容器，浏览器会为了让格子里的输入框可见
+   把它程序化滚动（scroll-into-view），而画布的平移缩放全在 .world 的 transform 上、对这段 scrollLeft 一无所知，
+   屏幕→世界的换算（双击放锚点、框选命中）随之整体偏掉 */
+.viewport { position: relative; overflow: clip; height: 100%; user-select: none; cursor: default; background-color: var(--color-canvas); background-image: radial-gradient(var(--color-line) 1px, transparent 1px); background-size: 24px 24px; background-repeat: repeat; }
+.viewport.pan-ready, .viewport.pan-ready .card .gesture { cursor: grab; }
+.viewport.dragging { cursor: grabbing; }
+/* 选择元素 / 批注模式已开、尚未进任何一屏：光标提示「点一屏进去」 */
+.viewport.armed { cursor: crosshair; }
+.viewport.armed .card .gesture { cursor: crosshair; }
+.world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+/* 卡片底白是恒定色，不跟工具主题走：这块白属于用户的设计稿，是他们 APP 的画布底，
+   不是 Quilt 的外壳（VIS-010 的「确需恒定色」情形）。工具品牌只出现在卡片之外的 chrome 上。 */
+.card { position: absolute; left: 0; top: 0; background: #fff; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); outline: 2px solid transparent; outline-offset: 4px; transition: outline-color var(--duration-fast) var(--ease-out); }
+.card.selected { outline-color: var(--color-accent); }
+.card.focused { outline-color: var(--color-accent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 18%, transparent), 0 8px 30px rgba(0, 0, 0, 0.45); }
+.card .label { position: absolute; left: 0; top: -28px; color: var(--color-muted); font-size: 12px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.card .label b { color: var(--color-fg); }
+.card img, .card iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+/* 生成中占位：设备线框 + 斜向光带扫过 + 状态标签；多张卡按 animation-delay 错开相位。
+   这一层是 Quilt 在替尚未存在的用户界面占位，所以用品牌的浅承载面 Paper→Line 灰阶，
+   而不是卡片本身的纯白（那块白属于用户的设计稿）。 */
+.card .skeleton { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--brand-paper); display: flex; flex-direction: column; gap: 14px; padding: 0 16px 0; animation: sk-breathe 2.4s ease-in-out infinite; }
+.card .skeleton .sk { flex: none; border-radius: 10px; background: color-mix(in srgb, var(--brand-line) 55%, var(--brand-paper)); }
+.card .skeleton .sk-appbar { height: 56px; margin: 0 -16px; border-radius: 0; background: color-mix(in srgb, var(--brand-line) 40%, var(--brand-paper)); }
+.card .skeleton .sk-hero { height: 140px; margin-top: 4px; border-radius: 14px; }
+.card .skeleton .sk-line { height: 14px; width: 70%; }
+.card .skeleton .sk-line.short { width: 45%; margin-top: -6px; }
+.card .skeleton .sk-card { height: 72px; border-radius: 12px; }
+.card .skeleton .sk-cta { height: 48px; border-radius: 999px; background: var(--brand-line); }
+.card .skeleton .sk-tabbar { margin: auto -16px 0; height: 64px; border-radius: 0; background: color-mix(in srgb, var(--brand-line) 40%, var(--brand-paper)); display: flex; justify-content: space-around; align-items: center; }
+.card .skeleton .sk-tabbar i, .card .skeleton .sk-grid i { display: block; background: color-mix(in srgb, var(--brand-line) 80%, var(--brand-silver)); border-radius: 6px; }
+.card .skeleton .sk-tabbar i { width: 28px; height: 28px; }
+.card .skeleton.desktop { display: grid; grid-template-columns: 220px 1fr; grid-template-rows: 64px auto auto 1fr; column-gap: 24px; row-gap: 18px; padding: 0 24px 24px 0; }
+.card .skeleton.desktop .sk-side { grid-row: 1 / -1; border-radius: 0; background: color-mix(in srgb, var(--brand-line) 40%, var(--brand-paper)); }
+.card .skeleton.desktop .sk-topbar { border-radius: 0 0 0 0; margin-right: -24px; background: color-mix(in srgb, var(--brand-line) 40%, var(--brand-paper)); }
+.card .skeleton.desktop .sk-title { height: 28px; width: 40%; }
+.card .skeleton.desktop .sk-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; background: none; }
+.card .skeleton.desktop .sk-grid i { height: 110px; border-radius: 12px; }
+.card .skeleton.desktop .sk-table { min-height: 160px; border-radius: 12px; }
+.card .skeleton .sk-sweep { position: absolute; inset: 0; background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.75) 50%, transparent 65%); background-size: 250% 100%; animation: shimmer 1.8s ease-in-out infinite; animation-delay: inherit; }
+.card .skeleton .sk-label { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: color-mix(in srgb, var(--brand-ink) 78%, transparent); color: var(--color-on-accent); font-size: 12px; backdrop-filter: blur(6px); white-space: nowrap; }
+.card .skeleton .sk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); animation: sk-pulse 1.2s ease-in-out infinite; }
+@keyframes sk-breathe { 0%, 100% { background-color: var(--brand-paper); } 50% { background-color: color-mix(in srgb, var(--brand-line) 30%, var(--brand-paper)); } }
+@keyframes sk-pulse { 0%, 100% { opacity: 0.35; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.15); } }
+/* 页面地图连线（REQ-PROTO-002）：世界坐标系里的 SVG，随画布缩放 */
+.world .edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.world .edges path { fill: none; stroke: var(--color-accent); stroke-width: 2.5; stroke-linecap: round; opacity: 0.85; }
+.world .edges marker path { fill: var(--color-accent); stroke: none; opacity: 1; }
+.world .edges rect { fill: var(--color-accent); }
+.world .edges text { fill: var(--color-on-accent); font-size: 13px; font-weight: 600; font-family: var(--font-sans); }
+.card .gesture { position: absolute; inset: 0; cursor: default; }
+.card.dragging .gesture { cursor: grabbing; }
+.card .badge { position: absolute; right: 8px; top: 8px; background: var(--color-accent); color: var(--color-on-accent); font-size: 11px; padding: 2px 8px; border-radius: 999px; pointer-events: none; }
+/* 素材瓦片的底色（REQ-CORE-019）：品牌素材有白色版也有深墨版，固定一种底色必然有一半看不见，
+   所以按图的平均亮度选底（lib/assetTone.ts）。这三种底都是恒定色而非主题色——它们衬的是用户的品牌资产，
+   不是 Quilt 的外壳（VIS-010 的「确需恒定色」情形）。读不出亮度时用棋盘格，那是透明通道的通用指示。 */
+.asset-thumb { background-color: #fff; background-image: repeating-conic-gradient(#e7e7ea 0% 25%, #fff 0% 50%); background-size: 10px 10px; }
+.asset-on-light { background-color: #f4f4f6; }
+.asset-on-dark { background-color: #101216; }
+
+/* 候选就地展开（REQ-CORE-015 v0.34）：收起时卡片后面叠两张错位底板示意「还有几版」；展开层画在世界层、盖在卡片原位，
+   各版横向排成一行、每格与卡片同尺寸、里面是该版的活 iframe（截图垫底，iframe 就绪后盖住）；
+   动作收进每格右上方（格子外、右缘对齐）的浮层胶囊，按 1/zoom 反向缩放（--zoom 由 CanvasView 写在 .world 上），按钮始终是屏幕尺寸 */
+.cand-ghost { position: absolute; left: 0; top: 0; border-radius: 14px; background: color-mix(in srgb, #fff 84%, var(--brand-ink)); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35); pointer-events: none; }
+.cand-stack { position: absolute; left: 0; top: 0; z-index: 5; }
+.cand-cell { position: absolute; background: #fff; border-radius: 14px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); outline: 2px solid transparent; outline-offset: 4px; }
+.cand-cell[data-current] { outline-color: var(--color-accent); }
+.cand-cell > img, .cand-cell > iframe { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border: 0; border-radius: 14px; background: #fff; }
+.cand-cell > img { object-fit: cover; object-position: top; }
+/* 胶囊挂在格子上方、右缘对齐；宽度封在格子的屏幕宽度内（世界宽 × zoom），缩得太小放不下时向上折成两行（标签一行、图标一行），不越过格子左缘去撞左邻的胶囊 */
+.cand-cell .cand-actions { position: absolute; bottom: calc(100% + 10px / var(--zoom, 1)); right: 0; max-width: calc(100% * var(--zoom, 1)); display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; align-content: flex-end; gap: 2px; padding: 3px 3px 3px 10px; border-radius: 20px; border: 1px solid var(--color-line); background: color-mix(in srgb, var(--color-panel) 94%, transparent); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); white-space: nowrap; transform-origin: bottom right; transform: scale(calc(1 / var(--zoom, 1))); }
+.cand-cell .cand-tag { margin-right: 6px; color: var(--color-fg); font-size: 12px; font-weight: 600; }
+.cand-cell .cand-btns { display: flex; align-items: center; gap: 2px; }
+/* 候选角标（REQ-CORE-015）：可点，就地展开 / 收起。槽位与卡片同位、只占卡片宽度，本身不拦指针——
+   卡片其余部分被 .gesture 覆盖着做拖拽。展开时整个槽位浮到展开层（.cand-stack）之上，角标保持可点
+   （= 再点一次收起）；只抬展开那一屏的，否则展开层横向铺过去会被右邻卡片的角标戳出来 */
+.cand-badge-slot { position: absolute; left: 0; top: 0; pointer-events: none; }
+.cand-badge-slot.expanded { z-index: 6; }
+.cand-badge { position: absolute; right: 8px; top: 8px; background: var(--color-accent); color: var(--color-on-accent); font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 0; cursor: pointer; pointer-events: auto; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }
+.cand-badge:hover { background: var(--color-accent-strong); }
+.cand-badge:focus-visible { outline: 2px solid var(--color-on-accent); outline-offset: 2px; }
+/* 锚点（REQ-CORE-014）：新屏落点的幽灵框，虚线描边、不拦指针 */
+.anchor { position: absolute; left: 0; top: 0; border: 2px dashed var(--color-accent); border-radius: 14px; background: color-mix(in srgb, var(--color-accent) 8%, transparent); pointer-events: none; display: grid; place-items: center; }
+.anchor-label { padding: 6px 12px; border-radius: 999px; background: color-mix(in srgb, var(--brand-ink) 78%, transparent); color: var(--color-fg); font-size: 12px; white-space: nowrap; }
+.card .warn { position: absolute; left: 8px; top: 8px; background: var(--color-warn); color: var(--brand-ink); font-size: 11px; padding: 2px 8px; border-radius: 999px; pointer-events: none; }
+/* 局部修改中（REQ-EDIT-002）：未聚焦的卡片上标出有子树重生成作业在跑；聚焦后由屏内标记接手 */
+.card .working { position: absolute; right: 8px; top: 8px; z-index: 2; background: var(--color-accent); color: var(--color-on-accent); font-size: 11px; padding: 2px 8px; border-radius: 999px; pointer-events: none; }
+/* 同一张卡还挂着候选角标时错开一行：两者同位同色同尺寸，拉 z-index 只会换成谁盖谁 */
+.card .working.below { top: 34px; }
+.styleguide { position: absolute; left: 0; top: 0; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); outline: 2px solid transparent; outline-offset: 4px; cursor: pointer; }
+.styleguide.selected { outline-color: var(--color-accent); }
+.dangling-edge { position: absolute; left: 0; top: 0; pointer-events: none; }
+/* 批注气泡（REQ-EDIT-004）：画在卡片层、坐标是批注时记下的屏文档坐标，随世界层一起缩放。
+   pointer-events 单独打开——卡片其余部分被 .gesture 覆盖着做拖拽。 */
+.card .anno-pin { position: absolute; z-index: 2; display: grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; transform: translate(-50%, -50%); border-radius: 999px; border: 2px solid var(--color-on-accent); background: var(--color-accent); color: var(--color-on-accent); font-size: 11px; font-weight: 600; line-height: 1; cursor: pointer; pointer-events: auto; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }
+.card .anno-pin:hover { background: var(--color-accent-strong); }
+.card .anno-pin.sending { background: var(--color-warn); color: var(--brand-ink); }
+
+/* 框选（屏幕坐标系，不随世界层缩放） */
+.marquee { position: absolute; pointer-events: none; border: 1px solid var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, transparent); border-radius: 2px; }
+
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.fade-up { animation: fade-up var(--duration-base) var(--ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  .card, .fade-up, .card .skeleton, .card .skeleton .sk-sweep, .card .skeleton .sk-dot { transition: none; animation: none; }
+  .composer { transition: none; }
+  .slide-in-right { animation: fade-up var(--duration-fast) var(--ease-out); }
+  /* 少而柔：换词与菜单只保留淡入，去掉位移、缩放与模糊 */
+  .phrase-in, .menu[data-state="open"] { animation: tip-in var(--duration-fast) var(--ease-out); }
+  .menu[data-state="closed"] { animation: none; }
+}

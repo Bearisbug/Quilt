@@ -1,0 +1,22 @@
+# 仅仓库内开发用：想直接用 psql 查库时起这个 Postgres 并在 .env 设 DATABASE_URL。
+# 打包运行（npx quilt-canvas）不需要 Docker，DATABASE_URL 留空即用内置 PGlite（ADR-010 v0.32）。
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: quilt-pg
+    ports:
+      - "127.0.0.1:5439:5432"
+    environment:
+      POSTGRES_DB: quilt
+      POSTGRES_USER: quilt
+      POSTGRES_PASSWORD: quilt
+    volumes:
+      - quilt-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quilt -d quilt"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  quilt-pg-data:
