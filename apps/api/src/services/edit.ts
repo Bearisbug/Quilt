@@ -6,6 +6,7 @@ import { applyElementOps, extractBody, assembleDocument, buildPrelude, lintScree
 import { ownedScreen, hasActiveJob, createRevision, deriveLinks, revisionDto } from './screens.ts';
 import { ownedProject, designSystemDto } from './projects.ts';
 import { enqueueScreenshot } from './jobs.ts';
+import { assertNotLocked } from './components.ts';
 
 // API-EDIT-001：元素直改（零 token）：确定性 DOM 变换 → lint → 新修订 → 异步截图
 export async function applyElementEdit(ownerId: string, screenId: string, qid: string, ops: ElementOp[], expectedRevisionId: string): Promise<RevisionDto> {
@@ -14,7 +15,10 @@ export async function applyElementEdit(ownerId: string, screenId: string, qid: s
   if (screen.currentRevisionId !== expectedRevisionId) throw problems.revisionConflict();
   const [rev] = await db.select().from(schema.screenRevisions).where(eq(schema.screenRevisions.id, screen.currentRevisionId));
   const html = (await storage.get(rev.htmlKey)).toString('utf8');
-  const body = applyElementOps(extractBody(html), qid, ops);
+  const before = extractBody(html);
+  // 共享组件实例里的元素不能直改（REQ-EDIT-006）：改组件或先「脱离共享」——脱离本身是唯一放行的 op
+  await assertNotLocked(project.id, before, qid, ops);
+  const body = applyElementOps(before, qid, ops);
   if (body === null) throw problems.elementNotFound();
   const routes = (await db.select({ route: schema.screens.route }).from(schema.screens).where(eq(schema.screens.projectId, project.id))).map((r) => r.route);
   const report = lintScreenBody(body, routes, true);

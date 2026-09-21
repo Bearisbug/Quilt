@@ -4,8 +4,9 @@ import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
 import { verifyPreview } from '../lib/signing.ts';
 import { storage } from '../lib/storage.ts';
-import { withCurrentRuntime } from '@quilt/core';
+import { withCurrentRuntime, buildPrelude, type Tokens } from '@quilt/core';
 import { readAsset } from '../services/assets.ts';
+import { componentPreviewDocument } from '../services/components.ts';
 
 // 预览域服务（ADR-004 / API-CORE-016）：独立 origin、无 cookie、HMAC 签名、修订不可变可缓存。
 // CSP 在 v0.43 放开到任意 https: 源——屏里允许用 Chart.js 这类开源库（REQ-CORE-022）。
@@ -33,6 +34,20 @@ previewApp.get('/p/:projectId/:screenId', async (c) => {
   c.header('Access-Control-Allow-Origin', config.webOrigin);
   c.header('Vary', 'Origin');
   return c.body(html);
+});
+
+// 共享组件预览（REQ-EDIT-006）：画布上的组件卡是活 iframe，只渲染这一个组件；URL 带版本，改完即换、可缓存
+previewApp.get('/c/:projectId/:componentId', async (c) => {
+  const { projectId, componentId } = c.req.param();
+  if (!verifyPreview(c.req.query('t') ?? '', projectId)) return problem(c, 403, '/errors/preview-token-invalid', '预览签名无效或过期');
+  const [row] = await db.select().from(schema.components).where(and(eq(schema.components.id, componentId), eq(schema.components.projectId, projectId)));
+  if (!row) return problem(c, 404, '/errors/not-found', '组件不存在');
+  const [ds] = await db.select({ tokens: schema.designSystems.tokens }).from(schema.designSystems).where(eq(schema.designSystems.projectId, projectId));
+  c.header('Content-Type', 'text/html; charset=utf-8');
+  c.header('Cache-Control', 'private, max-age=600');
+  c.header('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https:; script-src 'unsafe-inline' 'unsafe-eval' https:; img-src * data: blob:; font-src https: data:; connect-src https:; frame-ancestors ${config.webOrigin}`);
+  c.header('Referrer-Policy', 'no-referrer');
+  return c.body(componentPreviewDocument(row, buildPrelude(ds.tokens as Tokens)));
 });
 
 // 项目素材（ADR-017）：不签名、不过期，凭 UUID 不可猜；URL 会被烤进修订 HTML，必须长期可用

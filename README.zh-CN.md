@@ -26,6 +26,7 @@ Quilt 整个跑在你自己的机器上：一个进程，无账号，无云端�
 - **无限画布**。截图平铺、平移缩放、拖动摆放、多选对齐与等距，位置持久化。双击一屏进入聚焦态，它变成活 iframe，可滚动、可输入、可点击。
 - **原型播放**。链接、表单提交、`data-href` 按钮在聚焦 iframe 内跳屏，状态保留、可后退。应用地图从 HTML 派生，断链标红、一键接上，缺失路由可懒生成。整套导出为单文件 HTML，离线可开。
 - **设计系统**。种子色派生 Material 3 token、`DESIGN.md` 与组件配方；可挂显式品牌色板（亮 / 暗各一套）、上传 logo 与素材、整套存成预设给下个项目用。改 token 后确定性回刷全部屏。
+- **共享组件**。把导航栏、顶栏、侧栏记为项目级组件，和屏并排放在画布上。屏引用它、不复制代码：每次写入时 Quilt 填入正式 HTML，并按路由标出激活项。改组件一次（手改、输入框、或经 MCP），所有用它的屏零模型调用同步。
 - **修订树**。每次生成、编辑、agent 写入都是一条带父修订的修订。可回溯任意一版，候选分支保留，随时采用。
 - **通道**。设置页管理生成通道：Anthropic、Gemini（AI Studio 或 Vertex）、OpenAI 兼容端点、本机 Claude 订阅、运行中的 Claude Code 会话。密钥加密落库，用量台账按作业记 token。
 - **MCP 双向**。编码 agent 连 `http://127.0.0.1:3100/mcp`，拿到 20 个工具与 7 个资源：读设计契约、取屏与截图、建屏改屏、连线、改设计系统。反过来 Quilt 也能把作业派给一个运行中的 Claude Code 会话并等它收口。
@@ -91,7 +92,7 @@ pnpm dev                         # API + Worker + 预览域在 3100/3101，Vite 
 claude mcp add --transport http quilt http://127.0.0.1:3100/mcp
 ```
 
-服务只绑回环地址，所以免鉴权。工具：`quilt.list_projects`、`create_project`、`get_project`、`get_outline`、`get_screen`、`get_screenshot`、`get_design_contract`、`validate_screen`、`create_screen`、`update_screen`、`link_screens`、`get_app_map`、`generate_screens`、`edit_screens`、`list_revisions`、`get_job`、`finish_job`、`update_design_system`、`update_project`、`create_upload_url`。资源：`design-md`、`tokens`、`app-map`、`golden`、`screen-html`、`screen-screenshot`、`attachment`。
+服务只绑回环地址，所以免鉴权。工具：`quilt.list_projects`、`create_project`、`get_project`、`get_outline`、`get_screen`、`get_screenshot`、`get_design_contract`、`validate_screen`、`create_screen`、`update_screen`、`link_screens`、`get_app_map`、`generate_screens`、`edit_screens`、`list_revisions`、`get_job`、`finish_job`、`update_design_system`、`update_project`、`create_component`、`update_component`、`create_upload_url`。资源：`design-md`、`tokens`、`app-map`、`golden`、`screen-html`、`screen-screenshot`、`attachment`。
 
 建议 agent 先 `get_outline`（每屏一份紧凑的结构摘要）再 `get_screen`（整屏 HTML）。写入都带 `expectedRevisionId`，基线过期返回 409，两个写入方不会互相覆盖。
 

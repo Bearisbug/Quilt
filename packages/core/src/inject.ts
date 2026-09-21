@@ -43,7 +43,8 @@ export function replaceSubtree(bodyHtml: string, qid: string, newHtml: string): 
   return { body: document.body.innerHTML, newQids };
 }
 
-export type ElementOp = { type: 'text'; value: string } | { type: 'classes'; value: string } | { type: 'style'; value: string } | { type: 'link'; value: string | null } | { type: 'remove' };
+// detach（REQ-EDIT-006）：把元素所在的共享组件实例脱离共享——摘掉实例根的 data-component，这一屏里的这份从此归屏自己管
+export type ElementOp = { type: 'text'; value: string } | { type: 'classes'; value: string } | { type: 'style'; value: string } | { type: 'link'; value: string | null } | { type: 'remove' } | { type: 'detach' };
 
 // 导航属性按元素类型落位：<a> 用 href、<form> 用 action、其他元素用 data-href（运行时三者同劫持）
 const navAttrOf = (el: Element): string => (el.tagName === 'A' ? 'href' : el.tagName === 'FORM' ? 'action' : 'data-href');
@@ -55,6 +56,7 @@ export function applyElementOps(bodyHtml: string, qid: string, ops: ElementOp[])
   if (!el) return null;
   for (const op of ops) {
     if (op.type === 'remove') { el.remove(); break; }
+    if (op.type === 'detach') { el.closest('[data-component]')?.removeAttribute('data-component'); continue; }
     if (op.type === 'classes') el.setAttribute('class', op.value.trim());
     if (op.type === 'style') el.setAttribute('style', op.value);
     // 「不跳转」：<a> 保留 href="#"（点击给「未设计」提示，样式不变），其他元素去掉 data-href / action

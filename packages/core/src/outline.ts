@@ -26,6 +26,9 @@ function describe(el: Element, tag: string): string {
   }
   const icon = Array.from(el.children).find((c) => c.tagName.toLowerCase() === 'i' && c.getAttribute('data-lucide'))?.getAttribute('data-lucide');
   if (icon) parts.push(`icon:${icon}`);
+  // 共享组件实例（REQ-EDIT-006）：标出来，读大纲的人就知道这一块不归屏管
+  const comp = el.getAttribute('data-component');
+  if (comp) parts.push(`[shared component: ${comp}]`);
   return parts.length ? ` ${parts.join(' ')}` : '';
 }
 

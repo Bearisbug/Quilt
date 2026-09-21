@@ -54,9 +54,12 @@ export async function runChatTurn(a: ChatTurnArgs): Promise<ChatTurnResult> {
   const rows = await db.select().from(schema.screens).where(eq(schema.screens.projectId, a.project.id)).orderBy(schema.screens.createdAt);
   const screens: ChatScreen[] = rows.map((s) => ({ id: s.id, name: s.name, route: s.route, purpose: s.purpose || undefined, currentRevisionId: s.currentRevisionId }));
   const names = new Map(rows.map((s) => [s.id, s.name]));
+  const { componentCards } = await import('../services/components.ts');
   const system = chatSystemPrompt({
     app: { name: a.project.name, description: 'existing app being discussed', brief: a.project.brief },
     device: a.project.deviceType as DeviceType, designMd: a.designMd, screens, projectId: a.project.id, jobId: a.job.id, designVersion: a.designVersion,
+    // 共享组件卡（REQ-EDIT-006）：助手改导航这类东西要走 quilt.update_component，而不是逐屏改副本
+    components: await componentCards(a.project.id),
   });
   const text = chatUserPrompt(input.prompt, screens.filter((s) => input.screenIds?.includes(s.id)));
   // cwd 固定：SDK 按 cwd 归档会话文件（~/.claude/projects/<cwd 编码>/），换目录就找不到上一轮

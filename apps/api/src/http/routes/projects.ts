@@ -71,6 +71,7 @@ function describeJob(input: CreateJobInput): string | null {
     case 'export_prototype': return '导出单文件原型';
     case 'edit_screens': return input.input.prompt === LINK_REPAIR_PROMPT ? `补链：把 ${input.input.screenIds.length} 屏的按钮 / 表单连上路由` : input.input.prompt === CONVENTIONS_REGENERATE_PROMPT ? `按新约定重生成 ${input.input.screenIds.length} 屏` : input.input.prompt;
     case 'chat': return input.input.prompt;
+    case 'edit_component': return `改组件：${input.input.prompt}`;
     default: return null;
   }
 }
@@ -98,6 +99,16 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
   const body = await parseBody(c, createMessageSchema);
   const screenCount = (await db.select({ id: schema.screens.id }).from(schema.screens).where(eq(schema.screens.projectId, project.id))).length;
   const targets = body.targetScreenIds?.length ? body.targetScreenIds : null;
+  // 共享组件目标（REQ-EDIT-006）：只有组件、没有屏也没有锚点 = 改这个组件（恰好 1 个）；其余情况它们的完整 HTML 进上下文
+  const compTargets = body.mode !== 'chat' && body.targetComponentIds?.length ? body.targetComponentIds : null;
+  if (compTargets) {
+    const mine = await db.select({ id: schema.components.id }).from(schema.components).where(and(eq(schema.components.projectId, project.id), inArray(schema.components.id, compTargets)));
+    if (mine.length !== compTargets.length) throw problems.validation([{ path: 'targetComponentIds', message: '有组件不属于这个项目或已被删除' }]);
+  }
+  const editComponent = !!compTargets && !targets && !body.anchor;
+  if (editComponent && compTargets!.length !== 1) throw problems.validation([{ path: 'targetComponentIds', message: '一次只能改一个组件' }]);
+  // 改组件只走模型通道：它是一次调用 + 确定性回刷，没有「投递到会话再收口」这条路
+  if (editComponent && body.runner?.kind === 'agent') throw problems.validation([{ path: 'runner', message: '改组件请换一个模型通道，本机会话不接这类作业' }]);
   // 参考图（REQ-CORE-012）：先把 id 解析成真实存在的对象，取不到就判非法——
   // 用户看得见自己贴了图，静默丢掉比报错更糟
   const attachments = await resolveForMessage(project.id, body.attachmentIds);
@@ -110,11 +121,14 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
   const runner = body.mode === 'chat' ? await chatRunner(user.id, body.runner) : body.runner;
   const imageKeys = attachments.length ? attachments.map((a) => a.key) : undefined;
   const versions = body.versions ?? 1;
+  const componentIds = compTargets ?? undefined;
   const input: CreateJobInput = body.mode === 'chat'
     ? { kind: 'chat', input: { prompt: body.content, screenIds: targets ?? undefined, runner, imageKeys } }
+    : editComponent
+    ? { kind: 'edit_component', input: { componentId: compTargets![0], prompt: body.content, runner, imageKeys } }
     : targets
-    ? { kind: 'edit_screens', input: { prompt: body.content, screenIds: targets, versions, runner, imageKeys } }
-    : { kind: 'generate', input: { prompt: body.content, count: body.count ?? (screenCount === 0 ? 'auto' : 1), versions, anchor: body.anchor, runner, imageKeys } };
+    ? { kind: 'edit_screens', input: { prompt: body.content, screenIds: targets, versions, runner, imageKeys, componentIds } }
+    : { kind: 'generate', input: { prompt: body.content, count: body.count ?? (screenCount === 0 ? 'auto' : 1), versions, anchor: body.anchor, runner, imageKeys, componentIds } };
   // 通道选「交给本机 Claude Code」（REQ-CORE-011 / ADR-015 v0.34）：同样是作业（runner=agent），由 agentDelivery 投递到选中的会话，
   // 不入 worker 队列、不记 LLM 用量；助手消息在会话收口（quilt.finish_job）时回填。
   const agent = runner?.kind === 'agent';

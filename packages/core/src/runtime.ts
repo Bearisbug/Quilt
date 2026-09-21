@@ -130,7 +130,8 @@ export const RUNTIME_JS = String.raw`(function () {
   function selection(t) {
     var r = t.getBoundingClientRect();
     var text = Array.prototype.filter.call(t.childNodes, function (n) { return n.nodeType === 3; }).map(function (n) { return n.textContent; }).join('').trim();
-    return { type: 'quilt:select', qid: t.getAttribute('data-qid'), tag: t.tagName.toLowerCase(), text: text, classes: t.getAttribute('class') || '', href: t.getAttribute('href') || t.getAttribute('data-href') || t.getAttribute('action') || null, rect: { x: Math.round(r.left + window.scrollX), y: Math.round(r.top + window.scrollY), w: Math.round(r.width), h: Math.round(r.height) } };
+    var comp = t.closest('[data-component]');
+    return { type: 'quilt:select', qid: t.getAttribute('data-qid'), tag: t.tagName.toLowerCase(), text: text, classes: t.getAttribute('class') || '', href: t.getAttribute('href') || t.getAttribute('data-href') || t.getAttribute('action') || null, component: comp ? comp.getAttribute('data-component') : null, rect: { x: Math.round(r.left + window.scrollX), y: Math.round(r.top + window.scrollY), w: Math.round(r.width), h: Math.round(r.height) } };
   }
   document.addEventListener('mousemove', function (e) { if (mode !== 'inspect') return; highlight(targetOf(e)); }, true);
   document.addEventListener('click', function (e) {

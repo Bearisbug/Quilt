@@ -2,7 +2,7 @@ import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type
 import { useNavigate } from 'react-router';
 import { Select } from 'radix-ui';
 import { ArrowUp, Check, ChevronDown, ChevronUp, ImagePlus, MapPin, Settings2, Square, X } from 'lucide-react';
-import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MAX_VERSIONS, SCREEN_COUNT_OPTIONS, estimateJob, type ScreenDto, type RunnerOptionDto, type AgentSessionDto, type ScreenCount } from '@quilt/core';
+import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MAX_VERSIONS, SCREEN_COUNT_OPTIONS, estimateJob, type ScreenDto, type ComponentDto, type RunnerOptionDto, type AgentSessionDto, type ScreenCount } from '@quilt/core';
 import { IconButton } from './ui';
 import { VendorIcon } from './VendorIcon';
 
@@ -20,6 +20,9 @@ export type ComposerProps = {
   blockedReason: string | null;
   /** 目标屏 = 改；为空 = 造（REQ-CORE-006 三条原则之一） */
   targets: ScreenDto[];
+  /** 共享组件目标（REQ-EDIT-006）：只有组件、没有屏也没有锚点 = 改这个组件；与屏 / 锚点同在 = 它们的完整 HTML 进上下文 */
+  componentTargets: ComponentDto[];
+  onRemoveComponentTarget: (id: string) => void;
   /** 项目总屏数：目标等于全部时动词行写「改全部」 */
   totalScreens: number;
   /** 双击空白处放下的锚点（REQ-CORE-014）；有它就是「造 · 此处」 */
@@ -112,6 +115,11 @@ export function Composer(p: ComposerProps) {
   const one = p.targets.length === 1 ? p.targets[0] : null;
   const over = p.targets.length > p.maxTargets;
   const all = !creating && p.totalScreens > 0 && p.targets.length >= p.totalScreens;
+  // 共享组件目标（REQ-EDIT-006）：只有组件、没有屏也没有锚点 = 改组件（一次一个，多选由父组件的 blockedReason 挡）；否则只是上下文
+  const comps = p.componentTargets;
+  const compNames = comps.map((c) => c.name).join('、');
+  const compOnly = !chat && comps.length > 0 && creating && !p.anchor;
+  const compSuffix = comps.length && !compOnly ? ` · ${creating ? '用' : '带'}组件 ${compNames}` : '';
 
   // 随内容增高；上限只有一个来源——styles.css 里 .composer textarea 的 max-height，到顶后内部滚动（INT-010）
   // 收起期间 display:none 量不到高度，叫回时要重量一次
@@ -191,14 +199,17 @@ export function Composer(p: ComposerProps) {
   // 聊天：范围由助手定，动词行只说这句话「关于」什么（选中的屏是上下文提示，不是目标锁）
   const verb = chat
     ? `聊 · ${one ? `关于「${one.name}」` : p.targets.length ? `关于 ${p.targets.length} 屏` : '整个项目'}`
+    : compOnly
+    ? (comps.length === 1 ? `改组件「${comps[0].name}」 · 同步 ${comps[0].usedBy.length} 屏` : `改组件 · ${comps.length} 个`)
     : agentRunner
-    ? (creating ? `造屏 · 交给本机会话${p.anchor ? ' · 此处' : ''}` : `改${all ? '全部' : ''} ${n} 屏 · 交给本机会话`)
+    ? `${creating ? `造屏 · 交给本机会话${p.anchor ? ' · 此处' : ''}` : `改${all ? '全部' : ''} ${n} 屏 · 交给本机会话`}${compSuffix}`
     : creating
-      ? `造${p.count === 'auto' ? '一组屏' : ` ${n} 屏`}${p.versions > 1 ? ` × ${p.versions} 版` : ''} · ${p.anchor ? '此处' : '自动摆放'}${many ? ` = ${estimate.calls} 次调用` : ''}`
-      : `改${all ? '全部' : ''} ${n} 屏${p.versions > 1 ? ` × ${p.versions} 版` : ''}${many ? ` = ${estimate.calls} 次调用` : ''}`;
+      ? `造${p.count === 'auto' ? '一组屏' : ` ${n} 屏`}${p.versions > 1 ? ` × ${p.versions} 版` : ''} · ${p.anchor ? '此处' : '自动摆放'}${many ? ` = ${estimate.calls} 次调用` : ''}${compSuffix}`
+      : `改${all ? '全部' : ''} ${n} 屏${p.versions > 1 ? ` × ${p.versions} 版` : ''}${many ? ` = ${estimate.calls} 次调用` : ''}${compSuffix}`;
 
   const phrases = chat
     ? (p.targets.length ? [`关于${one ? `「${one.name}」` : `选中的 ${p.targets.length} 屏`}问点什么，或说要怎么改`] : CHAT_PHRASES)
+    : compOnly && comps.length === 1 ? [`修改组件「${comps[0].name}」：例如 tab 改成 3 个、图标换成描边`]
     : one ? [`修改「${one.name}」：例如 改成分组列表`]
     : p.targets.length ? [`修改选中的 ${p.targets.length} 屏：例如 统一把顶部导航改成标签栏`]
     : p.anchor ? ['描述要在这里造的屏：例如 订单详情页，顶部是状态时间线，下面是商品清单']
@@ -207,7 +218,7 @@ export function Composer(p: ComposerProps) {
   return (
     <form
       ref={formRef} className="composer absolute bottom-4 z-20 p-3.5" onSubmit={submit} hidden={p.hidden}
-      data-has-text={text ? '' : undefined} data-busy={busy ? '' : undefined} data-dropping={dropping ? '' : undefined} data-verb={chat ? 'chat' : creating ? 'create' : 'edit'}
+      data-has-text={text ? '' : undefined} data-busy={busy ? '' : undefined} data-dropping={dropping ? '' : undefined} data-verb={chat ? 'chat' : compOnly ? 'component' : creating ? 'create' : 'edit'}
       onPaste={onPaste} onDrop={onDrop}
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropping(false); }}
@@ -256,12 +267,21 @@ export function Composer(p: ComposerProps) {
               </button>
             </li>
           ))}
+          {/* 共享组件目标（REQ-EDIT-006）：与屏标签同一排、同一形状，前缀「组件 ·」区分 */}
+          {p.componentTargets.map((c) => (
+            <li key={c.id} className="inline-flex items-center gap-1.5 rounded-full bg-panel-2 py-1 pl-2.5 pr-1 text-xs font-medium text-fg" data-testid="component-chip" data-name={c.name}>
+              <span className="max-w-40 truncate">组件 · {c.name}</span>
+              <button type="button" aria-label={`不再以组件「${c.name}」为目标`} onClick={() => p.onRemoveComponentTarget(c.id)} className="grid size-5 place-items-center rounded-full text-muted transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">
+                <X size={12} />
+              </button>
+            </li>
+          ))}
           {/* 动词行是变长文本：放在可截断的 flex 项里，改字不挤动旁边的按钮（RESP-010） */}
           <li className={`min-w-0 truncate text-xs ${over && !chat ? 'text-warn' : 'text-muted'}`} data-testid="verb-line" aria-live="polite">
             {over && !chat ? `已选 ${p.targets.length} 屏，一次最多改 ${p.maxTargets} 屏，只会发送前 ${p.maxTargets} 屏` : verb}
           </li>
         </ul>
-        {(p.targets.length > 0 || p.anchor) && (
+        {(p.targets.length > 0 || p.anchor || p.componentTargets.length > 0) && (
           <button type="button" data-testid="clear-targets" onClick={p.onClearTargets} className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-muted transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">清空</button>
         )}
       </div>
@@ -320,17 +340,17 @@ export function Composer(p: ComposerProps) {
         {/* 档位（REQ-CORE-003 / REQ-CORE-006）：屏数只在造时出现（几张不同的屏）；版数造改都有（同一屏的几种画法）；两者以分隔线隔开，不做同形并排 */}
         {/* 档位组自身也能换行：≤ 48rem 视口里输入框只有约 240px 宽，屏数 + 版数 + 发送一行放不下时各自折行、靠右 */}
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
-          {/* 本机 agent 通道没有档位（固定 1 版、屏数由会话自定），腾出的位置给会话下拉；聊天由助手定范围，同样没有档位 */}
-          {!chat && creating && !agentRunner && (
+          {/* 本机 agent 通道没有档位（固定 1 版、屏数由会话自定），腾出的位置给会话下拉；聊天由助手定范围，同样没有档位；改组件一次一个也没有档位 */}
+          {!chat && creating && !agentRunner && !compOnly && (
             <Segmented label="屏数（几张不同的屏）" testId="count" value={p.count} options={SCREEN_COUNT_OPTIONS.map((o) => ({ value: o, label: o === 'auto' ? '自动' : String(o) }))} onChange={p.onCount} />
           )}
-          {!chat && creating && !agentRunner && <span className="h-5 w-px bg-line" aria-hidden="true" />}
-          {!chat && !agentRunner && <Segmented label="版数（同一屏的几种画法）" testId="versions" value={p.versions} options={Array.from({ length: MAX_VERSIONS }, (_, i) => ({ value: i + 1, label: `${i + 1} 版` }))} onChange={p.onVersions} compact />}
+          {!chat && creating && !agentRunner && !compOnly && <span className="h-5 w-px bg-line" aria-hidden="true" />}
+          {!chat && !agentRunner && !compOnly && <Segmented label="版数（同一屏的几种画法）" testId="versions" value={p.versions} options={Array.from({ length: MAX_VERSIONS }, (_, i) => ({ value: i + 1, label: `${i + 1} 版` }))} onChange={p.onVersions} compact />}
           {/* 这个 40px 插槽永远是发送键（停止归在跑作业行上的取消键）；反色实心只给此刻唯一的主动作 */}
           <IconButton
-            type="submit" size="sm" tone={text.trim() ? 'invert' : 'default'} label={chat ? '发送（聊）' : creating ? '发送（造）' : '发送（改）'} hint="Enter" tip="top-end"
+            type="submit" size="sm" tone={text.trim() ? 'invert' : 'default'} label={chat ? '发送（聊）' : compOnly ? '发送（改组件）' : creating ? '发送（造）' : '发送（改）'} hint="Enter" tip="top-end"
             className={text.trim() ? undefined : 'bg-panel-2'}
-            unavailable={p.blockedReason ? p.blockedReason : uploading ? '参考图还在上传' : !sessionOk ? '先选要投递的会话' : !chatChannelOk ? '先添加「本机 Claude 订阅」通道' : !text.trim() && (chat ? '先说点什么' : creating ? '先描述要造的屏' : '先说要怎么改')}
+            unavailable={p.blockedReason ? p.blockedReason : uploading ? '参考图还在上传' : !sessionOk ? '先选要投递的会话' : !chatChannelOk ? '先添加「本机 Claude 订阅」通道' : !text.trim() && (chat ? '先说点什么' : compOnly ? '先说要怎么改组件' : creating ? '先描述要造的屏' : '先说要怎么改')}
           >
             {sending ? <span className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" /> : <ArrowUp size={16} />}
           </IconButton>

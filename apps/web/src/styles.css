@@ -259,6 +259,16 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 .card .working.below { top: 34px; }
 .styleguide { position: absolute; left: 0; top: 0; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); outline: 2px solid transparent; outline-offset: 4px; cursor: pointer; }
 .styleguide.selected { outline-color: var(--color-accent); }
+/* 共享组件卡（REQ-EDIT-006）：与屏卡片同一套选中 outline（单层高亮，INT-015），白底是用户设计稿的底；
+   里面是活 iframe 但不接指针——拖拽 / 选中全走盖在上面的 .gesture，与屏卡片一致 */
+.comp { position: absolute; left: 0; top: 0; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4); outline: 2px solid transparent; outline-offset: 4px; transition: outline-color var(--duration-fast) var(--ease-out); }
+.comp.selected { outline-color: var(--color-accent); }
+.comp .label { position: absolute; left: 0; top: -28px; color: var(--color-muted); font-size: 12px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.comp .label b { color: var(--color-fg); }
+.comp iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; pointer-events: none; }
+.comp .gesture { position: absolute; inset: 0; cursor: default; }
+.comp.dragging .gesture { cursor: grabbing; }
+.viewport.pan-ready .comp .gesture { cursor: grab; }
 .dangling-edge { position: absolute; left: 0; top: 0; pointer-events: none; }
 /* 批注气泡（REQ-EDIT-004）：画在卡片层、坐标是批注时记下的屏文档坐标，随世界层一起缩放。
    pointer-events 单独打开——卡片其余部分被 .gesture 覆盖着做拖拽。 */
@@ -273,7 +283,7 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 @keyframes fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .fade-up { animation: fade-up var(--duration-base) var(--ease-out); }
 @media (prefers-reduced-motion: reduce) {
-  .card, .fade-up, .card .skeleton, .card .skeleton .sk-sweep, .card .skeleton .sk-dot { transition: none; animation: none; }
+  .card, .comp, .fade-up, .card .skeleton, .card .skeleton .sk-sweep, .card .skeleton .sk-dot { transition: none; animation: none; }
   .composer { transition: none; }
   .slide-in-right { animation: fade-up var(--duration-fast) var(--ease-out); }
   /* 少而柔：换词与菜单只保留淡入，去掉位移、缩放与模糊 */

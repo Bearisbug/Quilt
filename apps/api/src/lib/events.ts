@@ -25,7 +25,7 @@ function projectProjection(type: JobEventType, data: unknown): Record<string, un
   const d = (data ?? {}) as Record<string, unknown>;
   const pick = (...keys: string[]) => Object.fromEntries(keys.filter((k) => d[k] !== undefined).map((k) => [k, d[k]]));
   switch (type) {
-    case 'progress': return pick('stage', 'attempt', 'step');
+    case 'progress': return pick('stage', 'attempt', 'step', 'screens');
     case 'screen_planned': return pick('name', 'route', 'screenId');
     case 'screen_html_ready': return pick('screenId', 'revisionId', 'lintPassed');
     case 'screen_screenshot_ready': return pick('screenId', 'revisionId');

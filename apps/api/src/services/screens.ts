@@ -4,7 +4,7 @@ import { problems } from '../lib/errors.ts';
 import { storage, objectKeys } from '../lib/storage.ts';
 import { config } from '../config.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
-import { extractLinks, extractBody, outlineBody, type RevisionDto, type SourceKind, type CandidatesDto, DEVICE_SIZE, type DeviceType } from '@quilt/core';
+import { extractLinks, extractBody, outlineBody, componentNamesIn, type RevisionDto, type SourceKind, type CandidatesDto, DEVICE_SIZE, type DeviceType } from '@quilt/core';
 import { ownedProject, type ScreenRow, type RevisionRow, type ProjectRow } from './projects.ts';
 
 type Tx = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -86,18 +86,23 @@ export async function listCandidates(project: ProjectRow, jobId: string): Promis
 }
 
 // 应用地图派生（ADR-008 / REQ-PROTO-002）：扫全部屏当前修订的链接，按 route 匹配。
+// 顺手重算哪些屏放着哪个共享组件（REQ-EDIT-006 component_uses）：同一趟读 HTML，不另跑一遍
 export async function deriveLinks(tx: Tx, projectId: string): Promise<void> {
   const screens = await tx.select().from(schema.screens).where(eq(schema.screens.projectId, projectId));
   const byRoute = new Map(screens.map((s) => [s.route, s.id]));
   const revIds = screens.map((s) => s.currentRevisionId).filter((x): x is string => !!x);
   const revs = revIds.length ? await tx.select().from(schema.screenRevisions).where(inArray(schema.screenRevisions.id, revIds)) : [];
   const rows: (typeof schema.links.$inferInsert)[] = [];
+  const uses: (typeof schema.componentUses.$inferInsert)[] = [];
   for (const rev of revs) {
-    const html = (await storage.get(rev.htmlKey)).toString('utf8');
-    for (const l of extractLinks(extractBody(html))) rows.push({ projectId, fromScreenId: rev.screenId, elementQid: l.qid, href: l.href, toScreenId: byRoute.get(l.href) ?? null });
+    const body = extractBody((await storage.get(rev.htmlKey)).toString('utf8'));
+    for (const l of extractLinks(body)) rows.push({ projectId, fromScreenId: rev.screenId, elementQid: l.qid, href: l.href, toScreenId: byRoute.get(l.href) ?? null });
+    for (const name of componentNamesIn(body)) uses.push({ projectId, screenId: rev.screenId, name });
   }
   await tx.delete(schema.links).where(eq(schema.links.projectId, projectId));
   if (rows.length) await tx.insert(schema.links).values(rows);
+  await tx.delete(schema.componentUses).where(eq(schema.componentUses.projectId, projectId));
+  if (uses.length) await tx.insert(schema.componentUses).values(uses);
 }
 
 export async function listRevisions(screenId: string): Promise<RevisionDto[]> {

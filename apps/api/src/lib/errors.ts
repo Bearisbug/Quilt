@@ -19,6 +19,9 @@ export const problems = {
   screenBusy: () => new Problem(409, '/errors/screen-busy', '目标屏有进行中的作业'),
   projectBusy: () => new Problem(409, '/errors/project-busy', '项目有进行中的作业，先取消或等它完成'),
   revisionConflict: () => new Problem(409, '/errors/revision-conflict', '修订已被更新'),
+  // 共享组件（REQ-EDIT-006）：实例里的元素不能直改，改组件或先脱离共享；名字项目内唯一
+  componentLocked: (component: string) => new Problem(409, '/errors/component-locked', `这个元素属于共享组件「${component}」，改组件或先脱离共享`, { component }),
+  componentNameTaken: () => new Problem(409, '/errors/component-name-taken', '组件名在项目内已占用'),
   versionConflict: () => new Problem(409, '/errors/version-conflict', '设计系统版本冲突'),
   jobFinished: () => new Problem(409, '/errors/job-finished', '作业已结束'),
   jobNotFinished: () => new Problem(409, '/errors/job-not-finished', '作业尚未完成'),

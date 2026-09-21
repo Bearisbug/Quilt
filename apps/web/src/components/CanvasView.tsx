@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { XYPanZoom, PanOnScrollMode, getViewportForBounds, type PanZoomInstance, type Viewport } from '@xyflow/system';
-import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type AnnotationDto } from '@quilt/core';
+import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type AnnotationDto, type ComponentDto } from '@quilt/core';
 import { StyleGuideCard, STYLE_GUIDE_SIZE, styleGuideSize } from './StyleGuideCard';
 
 // 角标里提示的进入选择元素模式的键，要与 Canvas.tsx 的键位表一致（REQ-EDIT-004）
@@ -22,7 +22,13 @@ export type CanvasProps = {
   styleGuideSelected: boolean;
   /** additive = Shift/⌘ 加选；id 为 null 表示清空 */
   onSelect: (id: string | null, additive?: boolean) => void;
-  onSelectMany: (ids: string[], additive: boolean) => void;
+  /** 框选：与选框相交的屏与组件一起交回（REQ-EDIT-006） */
+  onSelectMany: (screenIds: string[], componentIds: string[], additive: boolean) => void;
+  /** 共享组件（REQ-EDIT-006）：画布上的一等对象，活渲染、可拖、可框选、可当目标 */
+  components: ComponentDto[];
+  selectedComponentIds: string[];
+  onSelectComponent: (id: string, additive: boolean) => void;
+  onMoveComponent: (id: string, x: number, y: number) => void;
   onSelectStyleGuide: () => void;
   onFocus: (id: string | null) => void;
   onMove: (id: string, x: number, y: number) => void;
@@ -42,8 +48,8 @@ export type CanvasProps = {
   onCandidates: (jobId: string, screenId: string) => void;
   /** 正展开候选的屏：展开层画在世界层、盖在该卡片原位（节点由父组件提供） */
   candidateStack: { screenId: string; node: ReactNode } | null;
-  /** null = 热更新后元素已不在（被删 / 子树换了 qid），父页清空选中 */
-  onElementSelect: (sel: { qid: string; tag: string; text: string; classes: string; href: string | null; rect: { x: number; y: number; w: number; h: number } } | null) => void;
+  /** null = 热更新后元素已不在（被删 / 子树换了 qid），父页清空选中；component = 元素所在的共享组件名（REQ-EDIT-006） */
+  onElementSelect: (sel: { qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number } } | null) => void;
   /** 当前选中元素的 qid：热更新换了修订后让运行时按它重选，检查器不必退回空态 */
   selectedQid: string | null;
   /** 正在被子树重生成作业改的元素（REQ-EDIT-002）：聚焦屏内描边 + 「修改中…」，回写后换成「已更新」；未聚焦的卡片标「局部修改中」 */
@@ -79,6 +85,11 @@ export function CanvasView(p: CanvasProps) {
   const [panReady, setPanReady] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [dragPos, setDragPos] = useState<Record<string, { x: number; y: number }>>({});
+  // 共享组件卡（REQ-EDIT-006）：拖动中的位置与量到的尺寸。尺寸由预览页量根元素后上报（quilt:component-size）；
+  // 没上报前按整个设备尺寸渲染——h-dvh 这类按视口算高度的组件（Sidebar）得先在全高 iframe 里量一次才准
+  const [compDrag, setCompDrag] = useState<Record<string, { x: number; y: number }>>({});
+  const [compSize, setCompSize] = useState<Record<string, { w: number; h: number }>>({});
+  const compFrames = useRef(new Map<string, HTMLIFrameElement>());
   const [iframeReady, setIframeReady] = useState(false);
   // 重挂 iframe 用：从交互态切到选择元素态时，要把屏内导航过的 DOM 丢掉、回到这张卡片自己的那一屏
   const [reloadKey, setReloadKey] = useState(0);
@@ -96,7 +107,10 @@ export function CanvasView(p: CanvasProps) {
   const propsRef = useRef(p);
   propsRef.current = p;
   const pos = useCallback((s: ScreenDto) => dragPos[s.id] ?? { x: s.x, y: s.y }, [dragPos]);
+  const compPos = useCallback((c: ComponentDto) => compDrag[c.id] ?? { x: c.x, y: c.y }, [compDrag]);
+  const compBox = useCallback((c: ComponentDto) => compSize[c.id] ?? { w: p.screenSize.w, h: p.screenSize.h }, [compSize, p.screenSize.w, p.screenSize.h]);
   const byId = useMemo(() => Object.fromEntries(p.screens.map((s) => [s.id, s])), [p.screens]);
+  const selectedCompSet = useMemo(() => new Set(p.selectedComponentIds), [p.selectedComponentIds]);
   const focused = p.focusedId ? byId[p.focusedId] : null;
   const selectedSet = useMemo(() => new Set(p.selectedIds), [p.selectedIds]);
   const annoByScreen = useMemo(() => {
@@ -168,13 +182,31 @@ export function CanvasView(p: CanvasProps) {
   const fitView = useCallback(() => {
     const node = viewportRef.current;
     if (!node) return;
-    const rects = [...p.screens.map((s) => ({ ...pos(s), w: s.width, h: s.height })), { ...STYLE_GUIDE_POS, ...styleGuideSize(p.assets?.length ?? 0) }];
+    const rects = [...p.screens.map((s) => ({ ...pos(s), w: s.width, h: s.height })), ...p.components.map((c) => ({ ...compPos(c), ...compBox(c) })), { ...STYLE_GUIDE_POS, ...styleGuideSize(p.assets?.length ?? 0) }];
     const x0 = Math.min(...rects.map((r) => r.x)); const y0 = Math.min(...rects.map((r) => r.y)) - 40;
     const x1 = Math.max(...rects.map((r) => r.x + r.w)); const y1 = Math.max(...rects.map((r) => r.y + r.h));
     const a = safeArea();
     const v = getViewportForBounds({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 + 40 }, a.w, a.h, 0.1, 1.5, 0.08);
     panZoom.current?.setViewport({ x: v.x + a.x, y: v.y + a.y, zoom: v.zoom }, { duration: 300 });
-  }, [p.screens, pos, safeArea]);
+  }, [p.screens, p.components, p.assets?.length, pos, compPos, compBox, safeArea]);
+
+  // 组件预览页量完根元素就上报尺寸：只认本画布里某张组件卡的 iframe 发来的（按 source 对号），钳到设备尺寸以内
+  useEffect(() => {
+    const onSize = (e: MessageEvent) => {
+      if (e.origin !== propsRef.current.previewOrigin) return;
+      const d = e.data as { type?: string; w?: number; h?: number } | null;
+      if (!d || d.type !== 'quilt:component-size') return;
+      let id: string | null = null;
+      for (const [cid, frame] of compFrames.current) if (frame.contentWindow === e.source) { id = cid; break; }
+      if (!id) return;
+      const max = propsRef.current.screenSize;
+      const w = Math.min(max.w, Math.max(48, Math.ceil(Number(d.w) || 0)));
+      const h = Math.min(max.h, Math.max(32, Math.ceil(Number(d.h) || 0)));
+      setCompSize((m) => (m[id]?.w === w && m[id]?.h === h ? m : { ...m, [id]: { w, h } }));
+    };
+    window.addEventListener('message', onSize);
+    return () => window.removeEventListener('message', onSize);
+  }, []);
 
   const focusCardRef = useRef<(id: string) => void>(() => {});
   const fitViewRef = useRef(fitView);
@@ -319,7 +351,7 @@ export function CanvasView(p: CanvasProps) {
       const msg = e.data;
       if (msg.type === 'quilt:ready') { setIframeReady(true); postToPreview({ type: 'quilt:mode', mode: propsRef.current.inspectMode ? 'inspect' : 'interact' }); reselectAfterSwap(); }
       if (msg.type === 'quilt:swapped') reselectAfterSwap();
-      if (msg.type === 'quilt:select') p.onElementSelect({ qid: msg.qid, tag: msg.tag, text: msg.text, classes: msg.classes, href: msg.href ?? null, rect: msg.rect });
+      if (msg.type === 'quilt:select') p.onElementSelect({ qid: msg.qid, tag: msg.tag, text: msg.text, classes: msg.classes, href: msg.href ?? null, component: msg.component ?? null, rect: msg.rect });
       if (msg.type === 'quilt:deselect') p.onElementSelect(null);
       if (msg.type === 'quilt:navigate') {
         const t = p.screens.find((s) => s.route === msg.href);
@@ -363,9 +395,10 @@ export function CanvasView(p: CanvasProps) {
   // 框选（MOTION-017 同一套手势纪律）：空白处按下拖出选框，与选框相交的屏即选中；
   // 没越过迟滞就当普通单击处理——清空选择。
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number; additive: boolean } | null>(null);
-  // 拖拽过程中就把命中的屏亮起来（松手才亮的话，用户拖到一半不知道圈住了谁）
-  const [marqueeHits, setMarqueeHits] = useState<string[]>([]);
-  const hitSet = new Set(marqueeHits);
+  // 拖拽过程中就把命中的屏与组件亮起来（松手才亮的话，用户拖到一半不知道圈住了谁）
+  const [marqueeHits, setMarqueeHits] = useState<{ screens: string[]; comps: string[] }>({ screens: [], comps: [] });
+  const hitSet = new Set(marqueeHits.screens);
+  const compHitSet = new Set(marqueeHits.comps);
   const onViewportPointerDown = (e: ReactPointerEvent) => {
     if (e.button !== 0 || spaceDown.current) return;
     const node = viewportRef.current;
@@ -379,11 +412,12 @@ export function CanvasView(p: CanvasProps) {
       const toWorld = (sx: number, sy: number) => ({ x: (sx - v.x) / v.zoom, y: (sy - v.y) / v.zoom });
       const a = toWorld(Math.min(x0, x1), Math.min(y0, y1));
       const b = toWorld(Math.max(x0, x1), Math.max(y0, y1));
-      return propsRef.current.screens.filter((s) => {
-        const q = dragPos[s.id] ?? { x: s.x, y: s.y };
-        return q.x < b.x && a.x < q.x + s.width && q.y < b.y && a.y < q.y + s.height;
-      }).map((s) => s.id);
+      const inside = (q: { x: number; y: number }, w: number, h: number) => q.x < b.x && a.x < q.x + w && q.y < b.y && a.y < q.y + h;
+      const screens = propsRef.current.screens.filter((s) => inside(dragPos[s.id] ?? { x: s.x, y: s.y }, s.width, s.height)).map((s) => s.id);
+      const comps = propsRef.current.components.filter((c) => { const box = compBox(c); return inside(compDrag[c.id] ?? { x: c.x, y: c.y }, box.w, box.h); }).map((c) => c.id);
+      return { screens, comps };
     };
+    const same = (x: string[], y: string[]) => x.length === y.length && x.every((id, i) => y[i] === id);
     const move = (ev: PointerEvent) => {
       if (ev.pointerId !== e.pointerId) return;
       if (ev.buttons === 0) { finish(ev); return; }
@@ -392,14 +426,15 @@ export function CanvasView(p: CanvasProps) {
       moved = true;
       setMarquee({ x0, y0, x1, y1, additive });
       const hit = hitsIn(x1, y1);
-      setMarqueeHits((prev) => (prev.length === hit.length && hit.every((id, i) => prev[i] === id) ? prev : hit));
+      setMarqueeHits((prev) => (same(prev.screens, hit.screens) && same(prev.comps, hit.comps) ? prev : hit));
     };
     const finish = (ev: PointerEvent) => {
       if (ev.pointerId !== e.pointerId) return;
       window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', finish); window.removeEventListener('pointercancel', finish);
-      setMarquee(null); setMarqueeHits([]);
+      setMarquee(null); setMarqueeHits({ screens: [], comps: [] });
       if (!moved) { propsRef.current.onSelect(null); return; }
-      propsRef.current.onSelectMany(hitsIn(ev.clientX - nr.left, ev.clientY - nr.top), additive);
+      const hit = hitsIn(ev.clientX - nr.left, ev.clientY - nr.top);
+      propsRef.current.onSelectMany(hit.screens, hit.comps, additive);
     };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', finish); window.addEventListener('pointercancel', finish);
   };
@@ -408,7 +443,7 @@ export function CanvasView(p: CanvasProps) {
   // 这里再按目标兜一层：风格指南卡、批注钉、断链角标、候选角标、锚点自己都不算空白。聚焦态里 iframe 吃掉了双击，不会到这。
   const onViewportDoubleClick = (e: ReactMouseEvent) => {
     if (!propsRef.current.onAnchor || propsRef.current.focusedId) return;
-    if ((e.target as HTMLElement).closest('.card, .styleguide, .anno-pin, .warn, .cand-badge, .anchor')) return;
+    if ((e.target as HTMLElement).closest('.card, .comp, .styleguide, .anno-pin, .warn, .cand-badge, .anchor')) return;
     const node = viewportRef.current;
     if (!node) return;
     const nr = node.getBoundingClientRect();
@@ -443,6 +478,33 @@ export function CanvasView(p: CanvasProps) {
       } else if (propsRef.current.armed && !propsRef.current.focusedId) {
         focusCardRef.current(s.id);  // 模式已开：单击哪一屏就进哪一屏
       }
+    };
+    el.addEventListener('pointermove', move); el.addEventListener('pointerup', finish); el.addEventListener('pointercancel', finish);
+  };
+  // 组件卡的拖拽 / 选中：与屏卡片同一套手势纪律；双击不进屏（组件没有交互态）
+  const onCompPointerDown = (e: ReactPointerEvent, c: ComponentDto) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    p.onSelectComponent(c.id, e.shiftKey || e.metaKey || e.ctrlKey);
+    const start = { x: e.clientX, y: e.clientY };
+    const origin = compPos(c);
+    let moved = false;
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      if (ev.buttons === 0) { finish(ev); return; }
+      const dx = ev.clientX - start.x; const dy = ev.clientY - start.y;
+      if (!moved && Math.hypot(dx, dy) < 10) return;
+      moved = true;
+      const z = vp.current.zoom;
+      setCompDrag((m) => ({ ...m, [c.id]: { x: Math.round(origin.x + dx / z), y: Math.round(origin.y + dy / z) } }));
+    };
+    const finish = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', finish); el.removeEventListener('pointercancel', finish);
+      if (!moved) return;
+      setCompDrag((m) => { const q = m[c.id]; if (q) p.onMoveComponent(c.id, q.x, q.y); const { [c.id]: _drop, ...rest } = m; void _drop; return rest; });
     };
     el.addEventListener('pointermove', move); el.addEventListener('pointerup', finish); el.addEventListener('pointercancel', finish);
   };
@@ -539,6 +601,22 @@ export function CanvasView(p: CanvasProps) {
               </div>
             )}
             </Fragment>
+          );
+        })}
+        {/* 共享组件卡（REQ-EDIT-006）：活渲染在预览域里，尺寸由它量根元素后上报；同一套选中 outline，拖动走 .gesture。
+            iframe 与聚焦屏同样带 allow-same-origin：尺寸上报要按 origin 认，纯 allow-scripts 的沙箱 origin 是 "null" 对不上 */}
+        {p.components.map((c) => {
+          const q = compPos(c); const box = compBox(c);
+          const selected = marquee ? compHitSet.has(c.id) || (marquee.additive && selectedCompSet.has(c.id)) : selectedCompSet.has(c.id);
+          return (
+            <div key={c.id} data-testid="component-card" data-name={c.name} className={`comp${selected ? ' selected' : ''}${compDrag[c.id] ? ' dragging' : ''}`} style={{ width: box.w, height: box.h, transform: `translate(${q.x}px, ${q.y}px)` }}>
+              <div className="label"><b>{c.name}</b> · 用于 {c.usedBy.length} 屏</div>
+              <iframe
+                ref={(el) => { if (el) compFrames.current.set(c.id, el); else compFrames.current.delete(c.id); }}
+                className="nowheel nopan" src={c.previewUrl} title={c.name} sandbox="allow-scripts allow-same-origin"
+              />
+              <div className="gesture nopan" onPointerDown={(ev) => onCompPointerDown(ev, c)} onDoubleClick={(ev) => ev.stopPropagation()} />
+            </div>
           );
         })}
         {/* 候选就地展开（REQ-CORE-015）：盖在卡片原位；按下不冒泡给画布，否则会当成框选 / 选卡 */}

@@ -2,10 +2,11 @@ import { and, asc, eq, inArray } from 'drizzle-orm';
 import { annotationsPrompt, type AnnotationDto } from '@quilt/core';
 import { db, schema } from '../db/client.ts';
 import { problems } from '../lib/errors.ts';
-import { ownedScreen } from './screens.ts';
+import { ownedScreen, currentBody } from './screens.ts';
 import { ownedProject, type JobRow } from './projects.ts';
 import type { UserRow } from './user.ts';
 import { createJob } from './jobs.ts';
+import { assertNotLocked } from './components.ts';
 
 type Row = typeof schema.annotations.$inferSelect;
 
@@ -31,7 +32,10 @@ export async function listOpenForProject(projectId: string): Promise<AnnotationD
 }
 
 export async function create(ownerId: string, screenId: string, input: { qid: string; note: string; anchorText: string; rect: unknown }): Promise<AnnotationDto> {
-  await ownedScreen(ownerId, screenId);
+  const { screen } = await ownedScreen(ownerId, screenId);
+  // 共享组件实例里的元素不收批注（REQ-EDIT-006）：批注发出去是改屏作业，改了副本也会被组件盖回去
+  const body = await currentBody(screen.id);
+  if (body) await assertNotLocked(screen.projectId, body, input.qid);
   const [row] = await db.insert(schema.annotations).values({ screenId, qid: input.qid, note: input.note, anchorText: input.anchorText, rect: input.rect }).returning();
   return dto(row);
 }

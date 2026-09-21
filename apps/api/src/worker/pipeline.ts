@@ -14,9 +14,11 @@ import { createRevision, deriveLinks, pointCurrentToFirstCandidate, priorInstruc
 import { screenDtos } from '../services/projects.ts';
 import { timeoutFor } from '../services/jobs.ts';
 import { runChatTurn, ChatFailure } from './chat.ts';
+import { sharedComponentsOf, componentCards, reflowComponent } from '../services/components.ts';
 import {
   buildPrelude, lintScreenBody, injectQids, assembleDocument, extractBody, stripFences, buildPrototypeDocument, replaceSubtree, extractLinks,
-  type ProjectAsset,
+  expandComponents, validateComponentHtml, classifyComponentHtml, componentSummary, componentSystemPrompt, componentUserPrompt,
+  type ProjectAsset, type SharedComponent,
   screenSystemPrompt, planSystemPrompt, planUserPrompt, planOneScreenSystemPrompt, planOneScreenUserPrompt, screenUserPrompt, editUserPrompt, subtreeUserPrompt, linkRepairPrompt,
   proposeDesignSystemSystemPrompt, proposeDesignSystemUserPrompt, parseConventions, REFERENCE_IMAGE_NOTE, FONT_FAMILIES, RADIUS_SCALES, MAX_CONVENTIONS,
   DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput,
@@ -60,6 +62,8 @@ type Ctx = {
   images: { mediaType: string; dataBase64: string }[];
   // 本项目的素材清单（REQ-CORE-019），整轮只读一次，进每屏的 system 前缀
   assets: ProjectAsset[];
+  // 本项目的共享组件（REQ-EDIT-006）：每次落屏前把占位展开成正式 HTML；改组件的作业改完后自己刷新这一份
+  shared: SharedComponent[];
   produced: { screenId: string; revisionId: string; lintPassed: boolean }[];
   // 反向连线（REQ-CORE-014）：造一组屏后对入口屏跑了一次补链，回执里点名
   entryRepair: { name: string; added: string[] } | null;
@@ -117,14 +121,15 @@ const app = (ctx: Ctx, description: string) => ({ name: ctx.project.name, descri
 // 单屏单版：生成/编辑 → lint → 修复一回合 → 注入 qid → 落修订 → 截图
 async function produceScreen(ctx: Ctx, args: { screenId: string; system: string; prompt: string; sourceKind: 'generate' | 'edit'; expectedRevisionId?: string | null; parentRevisionId?: string | null; candidateIndex?: number | null; advanceCurrent?: boolean; model?: string }) {
   const raw = await llmCall(ctx, args.system, args.prompt, args.model, true);
-  const body = stripFences(raw);
+  const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, args.screenId));
+  // 共享组件占位（REQ-EDIT-006）在这里展开成正式 HTML，再 lint、再打 qid——模型手写的副本也会被盖成正式版
+  const body = expandComponents(stripFences(raw), ctx.shared, screen.route).html;
   const routes = (await db.select({ route: schema.screens.route }).from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id))).map((r) => r.route);
   // v0.43：偏离设计契约不再触发修复回合，也不再让作业失败——token 是共享词汇表，不是判分标准。
   // 报告照算，进 lintReport 与 screen_html_ready 事件，画布逐屏显示偏离了什么
   let report: LintReport = lintScreenBody(body, routes, true);
   const withQids = injectQids(body);
   report = lintScreenBody(withQids, routes, report.firstTry); // 违规带上 qid
-  const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, args.screenId));
   const html = assembleDocument(withQids, ctx.prelude, `${ctx.project.name} · ${screen.name}`);
   if (Buffer.byteLength(html) > config.maxScreenHtmlBytes) throw new JobFailure('validation', `screen html too large (${Buffer.byteLength(html)} bytes)`);
   const rev = await db.transaction((tx) => createRevision(tx, { projectId: ctx.project.id, screenId: args.screenId, html, sourceKind: args.sourceKind, jobId: ctx.job.id, lintReport: report, expectedRevisionId: args.expectedRevisionId, parentRevisionId: args.parentRevisionId, candidateIndex: args.candidateIndex, advanceCurrent: args.advanceCurrent }));
@@ -165,7 +170,7 @@ async function uniqueRoute(projectId: string, route: string): Promise<string> {
 // 每张新屏 × versions 版并行出屏；versions>1 时落为候选、current 指向第 1 版。
 // 规划器声明了入口屏（entryFrom）就对它跑一次补链——反向连线。
 async function runGenerate(ctx: Ctx) {
-  const input = ctx.job.input as { prompt: string; count: number | 'auto'; versions: number; anchor?: { x: number; y: number }; route?: string; name?: string; fromScreenId?: string; imageKeys?: string[] };
+  const input = ctx.job.input as { prompt: string; count: number | 'auto'; versions: number; anchor?: { x: number; y: number }; route?: string; name?: string; fromScreenId?: string; imageKeys?: string[]; componentIds?: string[] };
   const versions = Math.max(1, input.versions ?? 1);
   const existingRows = await db.select().from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id)).orderBy(schema.screens.createdAt);
   const existing: RegistryEntry[] = existingRows.map((s) => ({ route: s.route, name: s.name, purpose: s.purpose || undefined }));
@@ -218,7 +223,8 @@ async function runGenerate(ctx: Ctx) {
   const all = created.map((c) => c.s);
   const reg = await registry(ctx);
   const sourceId = input.fromScreenId ?? existingRows.find((s) => s.route === entryFrom)?.id ?? null;
-  const system = screenSystemPrompt(a, ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], reg, await references(ctx, { sourceScreenId: sourceId }), ctx.assets);
+  // 共享组件卡（REQ-EDIT-006）：每个组件一张卡，框选的那些附完整 HTML
+  const system = screenSystemPrompt(a, ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], reg, await references(ctx, { sourceScreenId: sourceId }), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds }));
   const tasks = created.flatMap((c) => Array.from({ length: versions }, (_, i) => ({ c, i })));
   await pool(tasks, config.screenConcurrency, async ({ c, i }) => {
     if (ctx.signal.aborted) return;
@@ -253,11 +259,12 @@ async function runGenerate(ctx: Ctx) {
 
 // 改（REQ-CORE-006）：目标屏当前 HTML + 本次指令 + 祖先链上的历史指令；versions>1 落为候选
 async function runEditScreens(ctx: Ctx) {
-  const input = ctx.job.input as { prompt: string; screenIds: string[]; versions?: number };
+  const input = ctx.job.input as { prompt: string; screenIds: string[]; versions?: number; componentIds?: string[] };
   const versions = Math.max(1, input.versions ?? 1);
   const screens = await db.select().from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id));
   const targets = screens.filter((s) => input.screenIds.includes(s.id) && s.currentRevisionId);
-  const system = screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], await registry(ctx), await references(ctx), ctx.assets);
+  // 共享组件卡（REQ-EDIT-006）：框选的与目标屏本来就用的附完整 HTML
+  const system = screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], await registry(ctx), await references(ctx), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds, screenIds: targets.map((s) => s.id) }));
   const prepared = await Promise.all(targets.map(async (screen) => {
     const [rev] = await db.select().from(schema.screenRevisions).where(eq(schema.screenRevisions.id, screen.currentRevisionId!));
     const body = extractBody((await storage.get(rev.htmlKey)).toString('utf8'));
@@ -310,7 +317,7 @@ async function runRegenerateSubtree(ctx: Ctx) {
   const body = extractBody((await storage.get(rev.htmlKey)).toString('utf8'));
   const reg = await registry(ctx);
   const routes = reg.map((r) => r.route);
-  const system = screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], reg, [], ctx.assets);
+  const system = screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], reg, [], ctx.assets, await componentCards(ctx.project.id, { screenIds: [screen.id] }));
   const { parseHTML } = await import('linkedom');
   const { document } = parseHTML(`<!doctype html><html><body>${body}</body></html>`);
   const el = document.querySelector(`[data-qid="${input.qid}"]`);
@@ -319,9 +326,11 @@ async function runRegenerateSubtree(ctx: Ctx) {
   const newFrag = stripFences(await llmCall(ctx, system, subtreeUserPrompt(screen.name, screen.route, exact, input.prompt)));
   const replaced = replaceSubtree(body, input.qid, newFrag);
   if (!replaced) throw new JobFailure('validation', 'replacement produced no element');
+  // 共享组件（REQ-EDIT-006）：新片段里放的占位在这里展开；实例根沿用 qid、新子树接着编号
+  const expanded = expandComponents(replaced.body, ctx.shared, screen.route).html;
   // v0.43：同 produceScreen——偏离只记录，不为它再烧一次调用
-  const report = lintScreenBody(replaced.body, routes, true);
-  const html = assembleDocument(replaced.body, ctx.prelude, `${ctx.project.name} · ${screen.name}`);
+  const report = lintScreenBody(expanded, routes, true);
+  const html = assembleDocument(expanded, ctx.prelude, `${ctx.project.name} · ${screen.name}`);
   const created = await db.transaction((tx) => createRevision(tx, { projectId: ctx.project.id, screenId: screen.id, html, sourceKind: 'subtree', jobId: ctx.job.id, lintReport: report, expectedRevisionId: input.expectedRevisionId }));
   if (!created) throw new JobFailure('validation', 'revision conflict');
   ctx.usage.screens += 1;
@@ -345,6 +354,36 @@ async function runApplyDesignSystem(ctx: Ctx) {
     await emitJobEvent(ctx.job.id, 'screen_html_ready', { screenId: screen.id, revisionId: created.id, lintPassed: true });
     await screenshotRevision(ctx, screen.id, created.id, html);
   });
+}
+
+// 改共享组件（REQ-EDIT-006）：一次模型调用只产出组件的单根元素 → 校验 → 升版落库 → 所有用它的屏确定性回刷（零 LLM）
+async function runEditComponent(ctx: Ctx): Promise<{ component: string; applied: number; skipped: string[] }> {
+  const input = ctx.job.input as { componentId: string; prompt: string };
+  const [comp] = await db.select().from(schema.components).where(and(eq(schema.components.id, input.componentId), eq(schema.components.projectId, ctx.project.id)));
+  if (!comp) throw new JobFailure('validation', 'component not found');
+  const uses = await db.select({ name: schema.screens.name }).from(schema.componentUses).innerJoin(schema.screens, eq(schema.screens.id, schema.componentUses.screenId))
+    .where(and(eq(schema.componentUses.projectId, ctx.project.id), eq(schema.componentUses.name, comp.name)));
+  const system = componentSystemPrompt({ app: app(ctx, 'existing app being revised'), device: ctx.device, tokens: ctx.tokens, designMd: ctx.ds.designMd, registry: await registry(ctx) });
+  const prompt = componentUserPrompt({ name: comp.name, instruction: input.prompt, currentHtml: comp.html, usedBy: uses.map((u) => u.name) });
+  let out = stripFences(await llmCall(ctx, system, prompt, undefined, true));
+  let v = validateComponentHtml(out);
+  // 结构不对（多根 / 带 script）修一回合：这是硬要求，不是设计偏离
+  if (!v.ok) { out = stripFences(await llmCall(ctx, system, `${prompt}\n\nYour previous output was rejected: ${v.error}. Return exactly ONE root element, no <script>/<style>.`)); v = validateComponentHtml(out); }
+  if (!v.ok) throw new JobFailure('validation', v.error);
+  const c = classifyComponentHtml(out);
+  const [updated] = await db.update(schema.components)
+    .set({ html: c.html, summary: componentSummary(c.html), activeClass: c.activeClass, inactiveClass: c.inactiveClass, version: comp.version + 1, updatedAt: new Date() })
+    .where(and(eq(schema.components.id, comp.id), eq(schema.components.version, comp.version))).returning();
+  if (!updated) throw new JobFailure('validation', '组件在这一轮里被别处改过，重新发一次');
+  ctx.shared = await sharedComponentsOf(ctx.project.id);
+  const { applied, skipped } = await reflowComponent(ctx.project.id, updated, { jobId: ctx.job.id });
+  await emitJobEvent(ctx.job.id, 'progress', { stage: 'component_synced', screens: applied.length });
+  for (const a of applied) {
+    ctx.produced.push({ screenId: a.screenId, revisionId: a.revisionId, lintPassed: true });
+    await emitJobEvent(ctx.job.id, 'screen_html_ready', { screenId: a.screenId, revisionId: a.revisionId, lintPassed: true });
+  }
+  await pool(applied, 4, (a) => screenshotRevision(ctx, a.screenId, a.revisionId, a.html));
+  return { component: updated.name, applied: applied.length, skipped: skipped.map((s) => s.name) };
 }
 
 // 聊天回合（REQ-CORE-023 / ADR-018）：借 Agent SDK 的回路，只对「本机 Claude 订阅」通道开放（SDK 只认 Claude）。
@@ -408,7 +447,8 @@ export async function runJob(jobId: string): Promise<void> {
   }
   const images = await loadForModel((claimed.input as { imageKeys?: string[] }).imageKeys);
   const assets = await assetsForPrompt(project.id);
-  const ctx: Ctx = { job: claimed, project, ds, device, tokens, prelude: buildPrelude(tokens), signal: abort.signal, usage: { tokensIn: 0, tokensOut: 0, screens: 0 }, runner, images, assets, produced: [], entryRepair: null };
+  const shared = await sharedComponentsOf(project.id);
+  const ctx: Ctx = { job: claimed, project, ds, device, tokens, prelude: buildPrelude(tokens), signal: abort.signal, usage: { tokensIn: 0, tokensOut: 0, screens: 0 }, runner, images, assets, shared, produced: [], entryRepair: null };
   await emitJobEvent(jobId, 'progress', { stage: 'running' });
   let failure: { errorClass: ErrorClass; message: string } | null = null;
   let extraOutput: Record<string, unknown> = {};
@@ -422,6 +462,7 @@ export async function runJob(jobId: string): Promise<void> {
       case 'apply_design_system': await runApplyDesignSystem(ctx); break;
       case 'propose_design_system': extraOutput = { proposal: await runProposeDesignSystem(ctx) }; break;
       case 'chat': extraOutput = await runChat(ctx); break;
+      case 'edit_component': extraOutput = await runEditComponent(ctx); break;
       default: throw new JobFailure('validation', `${job.kind} is not available yet`);
     }
     // v0.43：偏离设计契约不再是作业失败的理由（ADR-005 修订）。产出照样落地，偏离逐屏可见
@@ -457,6 +498,8 @@ export async function runJob(jobId: string): Promise<void> {
       // 聊天回执就是助手最后一段文字；它只动手没说话时至少报出改了哪几屏
       : job.kind === 'chat' ? ((extraOutput.reply as string | undefined) || (screens.length ? `已更新 ${screens.length} 屏：${names}` : '（助手没有回话）'))
       : job.kind === 'export_prototype' ? '原型已导出'
+      // 改组件的回执点名同步了哪几屏；有屏因作业在跑没同步上也说出来（它落地时会自己用上新版）
+      : job.kind === 'edit_component' ? `已更新组件「${extraOutput.component}」，同步 ${screens.length} 屏${names ? `：${names}` : ''}${(extraOutput.skipped as string[] | undefined)?.length ? `；${(extraOutput.skipped as string[]).join('、')} 正在改、落地后自动用新版` : ''}`
       : job.kind === 'apply_design_system' ? `设计系统已回刷 ${screens.length} 屏`
       : job.kind === 'propose_design_system' ? `设计系统提案已生成${proposal?.summary ? `：${proposal.summary}` : ''}，在设计系统面板预览后确认写入`
       : job.kind === 'regenerate_subtree' ? `已重生成「${names}」中的选中区域`

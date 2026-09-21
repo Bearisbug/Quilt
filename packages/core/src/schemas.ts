@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import { DEVICE_TYPES } from './device.ts';
 import { TOKEN_COLOR_KEYS } from './tokens.ts';
+import { COMPONENT_NAME_RE, MAX_COMPONENT_HTML_BYTES } from './components.ts';
 
 // 契约 schema（§8 / §9 / §24）：服务端校验与前端类型的唯一出处。
 // v0.31：三种 generate 合一（整组 / 单屏 / 懒生成都是 `generate`）；历史行里的旧 kind 只读保留
-export const JOB_KINDS = ['generate', 'edit_screens', 'regenerate_subtree', 'apply_design_system', 'propose_design_system', 'export_prototype', 'ingest_screen', 'chat'] as const;
+export const JOB_KINDS = ['generate', 'edit_screens', 'regenerate_subtree', 'apply_design_system', 'propose_design_system', 'export_prototype', 'ingest_screen', 'chat', 'edit_component'] as const;
 // 一次「造」最多几张不同的屏（屏数档位 1–4 / auto）与同一屏最多几版候选（REQ-CORE-003 / REQ-CORE-015）
 export const MAX_SCREENS_PER_GENERATE = 4;
 export const MAX_VERSIONS = 4;
@@ -15,7 +16,8 @@ export const JOB_RUNNERS = ['model', 'agent'] as const;
 export type JobRunner = (typeof JOB_RUNNERS)[number];
 export const JOB_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'cancelled'] as const;
 export const ERROR_CLASSES = ['provider', 'lint', 'timeout', 'validation', 'system', 'agent'] as const;
-export const SOURCE_KINDS = ['generate', 'edit', 'subtree', 'manual', 'restore', 'apply_ds', 'agent_ingest'] as const;
+// component（v0.46）：共享组件提取 / 同步 / 改组件后的确定性回刷（REQ-EDIT-006）
+export const SOURCE_KINDS = ['generate', 'edit', 'subtree', 'manual', 'restore', 'apply_ds', 'agent_ingest', 'component'] as const;
 export const JOB_EVENT_TYPES = ['screen_planned', 'screen_html_ready', 'screen_screenshot_ready', 'progress', 'succeeded', 'failed', 'cancelled'] as const;
 
 export const deviceTypeSchema = z.enum(DEVICE_TYPES);
@@ -57,6 +59,9 @@ const coord = z.number().int().min(-1_000_000).max(1_000_000);
 export const anchorSchema = z.object({ x: coord, y: coord });
 const screenCountSchema = z.union([z.number().int().min(1).max(MAX_SCREENS_PER_GENERATE), z.literal('auto')]);
 const versionsSchema = z.number().int().min(1).max(MAX_VERSIONS);
+// 共享组件（REQ-EDIT-006）：造 / 改时框选的组件，完整 HTML 进上下文；一次最多带 10 个
+export const MAX_COMPONENT_TARGETS = 10;
+const componentIdsSchema = z.array(z.uuid()).max(MAX_COMPONENT_TARGETS).optional();
 
 export const jobInputSchemas = {
   // 造（REQ-CORE-003 / REQ-CORE-014 / REQ-PROTO-003）：count 是屏数档位（1 单屏规划、2–4 与 auto 整组规划）；
@@ -71,8 +76,11 @@ export const jobInputSchemas = {
     fromScreenId: z.uuid().optional(),
     runner: runnerSchema.optional(),
     imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
+    componentIds: componentIdsSchema,
   }),
-  edit_screens: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).min(1).max(20), versions: versionsSchema.default(1), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional() }),
+  edit_screens: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).min(1).max(20), versions: versionsSchema.default(1), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), componentIds: componentIdsSchema }),
+  // 改共享组件（REQ-EDIT-006）：一次一个；成功后所有用到它的屏确定性回刷（零 LLM）
+  edit_component: z.object({ componentId: z.uuid(), prompt: z.string().trim().min(1).max(8000), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional() }),
   // 子树重生成（REQ-EDIT-002）：runner 可单独选（检查器里有自己的通道 / 会话选择器，记忆独立于输入框）
   regenerate_subtree: z.object({ screenId: z.uuid(), qid: z.string().regex(/^q\d+$/), prompt: z.string().trim().min(1).max(4000), expectedRevisionId: z.uuid(), runner: runnerSchema.optional() }),
   apply_design_system: z.object({ screenIds: z.union([z.literal('all'), z.array(z.uuid()).min(1)]) }),
@@ -93,6 +101,7 @@ export const createJobSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('export_prototype'), input: jobInputSchemas.export_prototype }),
   z.object({ kind: z.literal('ingest_screen'), input: jobInputSchemas.ingest_screen }),
   z.object({ kind: z.literal('chat'), input: jobInputSchemas.chat }),
+  z.object({ kind: z.literal('edit_component'), input: jobInputSchemas.edit_component }),
 ]);
 export type CreateJobInput = z.infer<typeof createJobSchema>;
 
@@ -110,6 +119,8 @@ export function estimateJob(input: CreateJobInput, allScreens: number): { calls:
     case 'propose_design_system': return { calls: 1, screens: 0 };
     // 聊天一轮是 3–8 次工具调用外加模型往返，按上限估：超时 3 + 8 分钟
     case 'chat': return { calls: 8, screens: 0 };
+    // 改组件只有一次模型调用；之后的回刷是确定性的，不占调用
+    case 'edit_component': return { calls: 1, screens: 0 };
     case 'apply_design_system': return { calls: 0, screens: 0 };
     default: void allScreens; return { calls: 0, screens: 0 };
   }
@@ -120,6 +131,8 @@ export const createMessageSchema = z.object({
   // 聊天（REQ-CORE-023 v0.45）：mode="chat" 时不看目标，targetScreenIds 转成上下文提示，count / versions / anchor 忽略
   mode: z.enum(['chat']).optional(),
   targetScreenIds: z.array(z.uuid()).max(20).optional(),
+  // 共享组件目标（REQ-EDIT-006）：只有组件没有屏 = 改这个组件（恰好 1 个）；与屏 / 锚点同在 = 它们的完整 HTML 进上下文
+  targetComponentIds: componentIdsSchema,
   // 造 / 改共用的档位（REQ-CORE-003 / REQ-CORE-006）：有目标时 count 忽略
   count: screenCountSchema.optional(),
   versions: versionsSchema.optional(),
@@ -167,6 +180,8 @@ export const elementOpSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('style'), value: z.string().max(2000) }),
   z.object({ type: z.literal('link'), value: z.string().max(200).nullable() }),
   z.object({ type: z.literal('remove') }),
+  // 脱离共享（REQ-EDIT-006）：唯一允许落在共享组件实例上的直改
+  z.object({ type: z.literal('detach') }),
 ]);
 export const applyElementEditSchema = z.object({ ops: z.array(elementOpSchema).min(1).max(10), expectedRevisionId: z.uuid() });
 
@@ -226,6 +241,35 @@ export type DesignProposalDto = {
   conventions: string[];
   tokens?: { seedColor?: string; fontFamily?: (typeof FONT_FAMILIES)[number]; radiusScale?: 'sharp' | 'default' | 'round' };
   regenerate: boolean;
+};
+
+// ---- 共享组件（REQ-EDIT-006 / API-EDIT-004）----
+export const componentNameSchema = z.string().trim().regex(COMPONENT_NAME_RE, '组件名只能是字母、数字、空格、下划线与连字符，最长 40 字');
+export const createComponentSchema = z.union([
+  // 直接给 HTML（MCP / 新建空组件）
+  z.object({ name: componentNameSchema, html: z.string().min(1).max(MAX_COMPONENT_HTML_BYTES) }),
+  // 从屏里提取（检查器「记为共享组件」）：applyToScreens 缺省 true = 其他屏里对应的元素也换成它
+  z.object({ name: componentNameSchema, fromScreenId: z.uuid(), qid: z.string().regex(/^q\d+$/), applyToScreens: z.boolean().optional() }),
+]);
+export const updateComponentSchema = z.object({
+  name: componentNameSchema.optional(),
+  html: z.string().min(1).max(MAX_COMPONENT_HTML_BYTES).optional(),
+  x: coord.optional(),
+  y: coord.optional(),
+  // 改 html / name 必带（乐观锁，409 version-conflict）；只挪位置不带
+  expectedVersion: z.number().int().min(1).optional(),
+}).refine((v) => Object.keys(v).length > 0, 'empty patch')
+  .refine((v) => (v.html === undefined && v.name === undefined) || v.expectedVersion !== undefined, { path: ['expectedVersion'], message: '改内容或改名要带 expectedVersion' });
+export type ComponentDto = {
+  id: string; projectId: string; name: string; summary: string; html: string; slots: string[];
+  /** 提取时分出了激活 / 未激活两套类的导航型组件：展开时按屏路由标激活项 */
+  nav: boolean;
+  x: number; y: number; version: number;
+  /** 画布上活渲染它的预览域地址（带版本，改完即换） */
+  previewUrl: string;
+  /** 当前修订里放着它的屏 */
+  usedBy: string[];
+  createdAt: string; updatedAt: string;
 };
 
 export const cursorQuerySchema = z.object({ cursor: z.string().optional(), limit: z.coerce.number().int().min(1).max(100).default(50) });
@@ -330,7 +374,7 @@ export type AgentSessionDto = { sessionId: string; name: string; named: boolean;
 export type JobEventDto = { seq: number; type: JobEventType; data: unknown; at: string };
 export type MessageDto = { id: string; projectId: string; role: 'user' | 'assistant'; content: string; attachments: AttachmentDto[]; jobId: string | null; jobKind: JobKind | null; affectedScreenIds: string[]; createdAt: string };
 export type ProjectDto = { id: string; name: string; deviceType: (typeof DEVICE_TYPES)[number]; status: 'active' | 'archived'; brief: string; exemplarScreenId: string | null; createdAt: string; updatedAt: string };
-export type ProjectDetailDto = { project: ProjectDto; designSystem: DesignSystemDto; screens: ScreenDto[]; links: LinkDto[]; activeJobs: JobDto[]; annotations: AnnotationDto[]; assets: AssetDto[] };
+export type ProjectDetailDto = { project: ProjectDto; designSystem: DesignSystemDto; screens: ScreenDto[]; links: LinkDto[]; activeJobs: JobDto[]; annotations: AnnotationDto[]; assets: AssetDto[]; components: ComponentDto[] };
 export type RevisionDto = { id: string; screenId: string; seq: number; sourceKind: SourceKind; jobId: string | null; parentRevisionId: string | null; candidateIndex: number | null; candidateSettledAt: string | null; htmlUrl: string; screenshotUrl: string | null; lintReport: unknown; createdAt: string };
 /** 候选覆盖层的数据（API-CORE-026）：列 = 版本、行 = 屏 */
 export type CandidatesDto = { jobId: string; versions: number; screens: { screenId: string; name: string; route: string; width: number; height: number; currentRevisionId: string | null; settled: boolean; revisions: { id: string; index: number; seq: number; screenshotUrl: string | null; htmlUrl: string; previewUrl: string }[] }[] };

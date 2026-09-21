@@ -7,6 +7,7 @@ export * from './protocol.ts';
 export * from './lint.ts';
 export * from './inject.ts';
 export * from './outline.ts';
+export * from './components.ts';
 export * from './contract.ts';
 export * from './schemas.ts';
 export * from './export.ts';

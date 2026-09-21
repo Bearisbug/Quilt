@@ -1,5 +1,6 @@
 import { COLOR_CLASS_NAMES, type Tokens } from './tokens.ts';
 import { DEVICE_SIZE, type DeviceType } from './device.ts';
+import { componentPlacement, sharedComponentsSection, type SharedComponentCard } from './components.ts';
 
 // 设计契约（ADR-005 / ADR-012）：每次生成都带，体积与屏幕数无关。组件配方来自设计系统 components。
 export type ComponentRecipe = { name: string; html: string; note?: string };
@@ -29,7 +30,8 @@ export const DEFAULT_COMPONENTS: ComponentRecipe[] = [
 // 同一作业里多屏并行共用这一份 system，prompt cache 命中的就是这个前缀。
 export type ProjectAsset = { name: string; url: string; width: number; height: number };
 
-export function screenSystemPrompt(app: AppContext, device: DeviceType, tokens: Tokens, designMd: string, components: ComponentRecipe[], registry: RegistryEntry[], refs: ReferenceScreen[], assets: ProjectAsset[] = []): string {
+// shared（REQ-EDIT-006）：项目的共享组件卡——每张都进前缀（名字 / 摘要 / 占位写法），与本次相关的附完整 HTML
+export function screenSystemPrompt(app: AppContext, device: DeviceType, tokens: Tokens, designMd: string, components: ComponentRecipe[], registry: RegistryEntry[], refs: ReferenceScreen[], assets: ProjectAsset[] = [], shared: SharedComponentCard[] = []): string {
   const size = DEVICE_SIZE[device];
   const deviceRules = device === 'mobile'
     ? `- Device: mobile, viewport ${size.w}×${size.h}. No device status bar. Main screens have a top AppBar and a bottom TabBar linking to the 4 main routes. Detail/flow screens have a back-arrow AppBar (<a href="/previous-route">) and no TabBar.`
@@ -68,7 +70,7 @@ ${designMd.trim()}
 
 COMPONENT RECIPES (reuse verbatim for consistency)
 ${recipes}
-${assetList}${brief}
+${sharedComponentsSection(shared)}${assetList}${brief}
 APP CONTEXT
 - App: ${app.name} — ${app.description}
 - ALLOWED ROUTES: ${routes}
@@ -143,11 +145,15 @@ export function editUserPrompt(screenName: string, route: string, currentBody: s
 // 聊天（REQ-CORE-023 / ADR-018）：住在 Quilt 进程里的助手的稳定前缀——每轮重发、随项目更新。
 // 不带任何整屏 HTML：屏的结构靠 quilt.get_outline 看目录，整屏只在助手用 get_screen 读时进上下文；对话记忆在 SDK 会话里。
 export type ChatScreen = { id: string; name: string; route: string; purpose?: string; currentRevisionId: string | null };
-export function chatSystemPrompt(args: { app: AppContext; device: DeviceType; designMd: string; screens: ChatScreen[]; projectId: string; jobId: string; designVersion: number }): string {
+export function chatSystemPrompt(args: { app: AppContext; device: DeviceType; designMd: string; screens: ChatScreen[]; projectId: string; jobId: string; designVersion: number; components?: SharedComponentCard[] }): string {
   const size = DEVICE_SIZE[args.device];
   const registry = args.screens.length
     ? args.screens.map((s) => `  - ${s.name} (${s.route}) screenId=${s.id} revision=${s.currentRevisionId ?? 'none'}${s.purpose ? ` — ${s.purpose}` : ''}`).join('\n')
     : '  (no screens yet)';
+  // 共享组件（REQ-EDIT-006）：助手改导航这类东西要走组件，而不是逐屏手改它的副本
+  const shared = args.components?.length
+    ? `\n- SHARED COMPONENTS (project-level; every screen places them by reference and Quilt fills them in — quilt.get_design_contract has their full HTML):\n${args.components.map((c) => `  - ${c.name} — ${c.summary} · placed with ${componentPlacement(c.name, c.tag, c.slots)}`).join('\n')}\n  To change how one looks everywhere, call quilt.update_component (expectedVersion from the contract) — never hand-edit its copy inside a screen (Quilt overwrites that on the next write). To turn part of a screen into a new shared component, quilt.create_component with that element's HTML, then place it on the screens with the tag above.`
+    : '';
   return `You are Quilt's design assistant, living inside the Quilt canvas for the app "${args.app.name}" (projectId ${args.projectId}, ${args.device} ${size.w}×${size.h}). The designer talks to you in the chat box. The app's screens live on an infinite canvas as separate HTML documents — one per screen, all sharing one design system — and you reach them only through the quilt.* tools. You decide the scope yourself: answer a question without touching anything, change one screen, change several, or change the design system — whatever the message actually asks for. When it is only a question or a request for an opinion, reply and change nothing.
 
 HOW TO SEE THE PROJECT
@@ -177,7 +183,7 @@ APP CONTEXT
 - App: ${args.app.name}${args.app.brief?.trim() ? ` — ${args.app.brief.trim()}` : ''}
 - Device: ${args.device}, viewport ${size.w}×${size.h}
 - SCREENS:
-${registry}`;
+${registry}${shared}`;
 }
 export function chatUserPrompt(instruction: string, selected: ChatScreen[]): string {
   const context = selected.length
@@ -186,6 +192,31 @@ export function chatUserPrompt(instruction: string, selected: ChatScreen[]): str
   return `${context}${instruction}`;
 }
 
+// 改共享组件（REQ-EDIT-006）：模型只产出组件自己的那一个根元素；激活态由 Quilt 按屏路由算，模型只需在正式 HTML 里标出一条 aria-current
+export function componentSystemPrompt(args: { app: AppContext; device: DeviceType; tokens: Tokens; designMd: string; registry: RegistryEntry[] }): string {
+  const size = DEVICE_SIZE[args.device];
+  const routes = args.registry.map((r) => `${r.route} (${r.name})`).join(', ') || '(none yet)';
+  return `You maintain ONE shared component of an app in Quilt. A shared component is a project-level HTML fragment (a tab bar, an app bar, a sidebar, a footer…) that every screen places by reference; Quilt fills it in on each screen, so what you return here is what every screen will show.
+
+OUTPUT RULES
+- Output ONLY the component's single root element HTML. No markdown fences, no explanation, no <html>/<head>/<body>, no <script>, no <style>, and never a whole screen around it.
+- Keep the root element's tag unless the instruction requires otherwise. Keep every data-slot="…" element that exists (screens fill them in per screen); you may add a data-slot where per-screen content belongs (a screen title, for example).
+- Tailwind utility classes with this project's token colours: bg-X / text-X / border-X where X is one of ${COLOR_CLASS_NAMES.join(', ')}. Radius: rounded-sm/md/lg/full. Icons: <i data-lucide="icon-name" class="w-5 h-5"></i>.
+- Navigation links are <a href="/route"> with routes from ALLOWED ROUTES only; keep the existing hrefs unless told to change them. For navigation components mark exactly ONE link with aria-current="page" and give it the active styling — Quilt derives which link is active on each screen from that pair of styles.
+- Device: ${args.device}, viewport ${size.w}×${size.h}. Stay self-contained: the component must look right on any screen of this app.
+- Content: realistic and specific; English UI copy.
+
+DESIGN SYSTEM
+${args.designMd.trim()}
+
+APP CONTEXT
+- App: ${args.app.name}${args.app.brief?.trim() ? ` — ${args.app.brief.trim()}` : ''}
+- ALLOWED ROUTES: ${routes}`;
+}
+export function componentUserPrompt(args: { name: string; instruction: string; currentHtml: string; usedBy: string[] }): string {
+  const where = args.usedBy.length ? `It is used on ${args.usedBy.length} screen${args.usedBy.length > 1 ? 's' : ''}: ${args.usedBy.join(', ')}.` : 'No screen uses it yet.';
+  return `Revise the shared component "${args.name}" according to this instruction:\n${args.instruction}\n${where}\nReturn the complete revised root element HTML only.\n\nCURRENT HTML:\n${args.currentHtml}`;
+}
 export function subtreeUserPrompt(screenName: string, route: string, fragment: string, instruction: string): string {
   return `Within the screen "${screenName}" at route ${route}, regenerate ONLY the following element according to this instruction:\n${instruction}\n\nReturn the complete replacement HTML for this single element (one root element, same role in the layout), nothing else. Keep the design system, recipes and any links intact unless the instruction says otherwise.\n\nCURRENT ELEMENT:\n${fragment}`;
 }

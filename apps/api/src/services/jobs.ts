@@ -69,7 +69,7 @@ export async function createJob(args: { user: UserRow; projectId: string; input:
   }
   assertRate(user.id);
   // 没带通道的 LLM 作业（MCP 建的、辅助作业）用用户自己配的默认通道；一条都没有才回落到 .env 的驱动
-  if (runner === 'model' && ['generate', 'edit_screens', 'regenerate_subtree', 'propose_design_system'].includes(input.kind)) {
+  if (runner === 'model' && ['generate', 'edit_screens', 'regenerate_subtree', 'propose_design_system', 'edit_component'].includes(input.kind)) {
     const inp = input.input as { runner?: unknown };
     if (!inp.runner) {
       const cat = await runnerCatalog(user);

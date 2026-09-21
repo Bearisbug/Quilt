@@ -139,6 +139,31 @@ export const jobEvents = pgTable('job_events', {
   createdAt: ts('created_at').notNull().default(now()),
 }, (t) => [uniqueIndex('job_events_job_seq_uq').on(t.jobId, t.seq)]);
 
+// 共享组件（v0.46 REQ-EDIT-006 / ENT-Component）：项目级一段 HTML，屏里放占位根元素、每次写入时展开。
+// active_class / inactive_class：提取时分出的激活 / 未激活两套类（导航型），展开时按屏路由标激活项；都空 = 非导航型。
+export const components = pgTable('components', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  html: text('html').notNull(),
+  summary: text('summary').notNull().default(''),
+  activeClass: text('active_class'),
+  inactiveClass: text('inactive_class'),
+  x: integer('x').notNull().default(0),
+  y: integer('y').notNull().default(0),
+  version: integer('version').notNull().default(1),
+  createdAt: ts('created_at').notNull().default(now()),
+  updatedAt: ts('updated_at').notNull().default(now()),
+}, (t) => [uniqueIndex('components_project_name_uq').on(t.projectId, t.name)]);
+
+// 哪些屏的当前修订放着哪个组件（按名字）：与 links 一起在 deriveLinks 时重算，详情里的 usedBy 从这里来
+export const componentUses = pgTable('component_uses', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  screenId: uuid('screen_id').notNull().references(() => screens.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+}, (t) => [index('component_uses_project_idx').on(t.projectId, t.name)]);
+
 export const links = pgTable('links', {
   id: uuid('id').primaryKey().defaultRandom(),
   projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),

@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useParams, useSearchParams } from 'react-router';
-import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, ArrowLeft, Bot, Crosshair, Download, History, Link2, Maximize2, MessageSquarePlus, Palette, Plus, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
-import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, type ProjectDetailDto, type MessageDto, type JobDto, type JobEventDto, type ScreenDto, type Tokens, type RunnerOptionDto, type AgentSessionDto, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core';
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, ArrowLeft, Bot, Component, Crosshair, Download, History, Link2, Maximize2, MessageSquarePlus, Palette, Plus, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
+import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, type ProjectDetailDto, type MessageDto, type JobDto, type JobEventDto, type ScreenDto, type ComponentDto, type Tokens, type RunnerOptionDto, type AgentSessionDto, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core';
 import { api, ApiError, loadConfig, subscribeProjectEvents } from '../lib/api';
 import { useToast } from '../lib/toast';
-import { Button, IconButton, Spinner } from '../components/ui';
+import { Button, IconButton, Input, Spinner } from '../components/ui';
+import { Overlay, useModal } from '../components/modal';
 import { TopNav } from '../components/TopNav';
 import { ProjectSwitcher } from '../components/ProjectSwitcher';
 import { SettingsModal } from '../components/SettingsModal';
@@ -36,11 +37,11 @@ const ALIGN_BTNS = [['left', '左对齐', AlignStartVertical], ['hcenter', '水�
 const SPACE_BTNS = [['hspace', '横向等距', AlignHorizontalDistributeCenter], ['vspace', '纵向等距', AlignVerticalDistributeCenter]] as const;
 const ARRANGE_N = ALIGN_BTNS.length + SPACE_BTNS.length;
 
-type JobInput = { count?: ScreenCount; versions?: number; screenIds?: string[] | 'all'; screenId?: string; fromScreenId?: string; prompt?: string };
+type JobInput = { count?: ScreenCount; versions?: number; screenIds?: string[] | 'all'; screenId?: string; fromScreenId?: string; prompt?: string; componentId?: string; componentIds?: string[] };
 // 一个在跑作业会改到哪些屏（REQ-CORE-020）。JobDto 不带 targetScreenId，只能按 kind 从 input 反推；
 // 口径与 apps/api/src/services/jobs.ts 的守卫对齐，但比它严：多屏 edit_screens 与回刷在后端落 target_screen_id=null，
 // 后端看不见它们实际改的屏（§16 真值表的缺口行），撞上的后果是一方作业 failed 或静默顶掉对方，所以前端按覆盖屏集拦。
-function coveredScreens(job: JobDto, allIds: string[]): string[] {
+function coveredScreens(job: JobDto, allIds: string[], components: ComponentDto[] = []): string[] {
   const i = job.input as JobInput;
   switch (job.kind) {
     case 'edit_screens':
@@ -51,12 +52,14 @@ function coveredScreens(job: JobDto, allIds: string[]): string[] {
     // 用 sourceKind=edit 给它落新修订（pipeline.ts 的入口屏补链）——那一屏同样被占着，
     // 不算进来的话用户同时改这一屏，谁后落库谁撞修订冲突整个作业 failed
     case 'generate': return i.fromScreenId ? [i.fromScreenId] : [];
+    // 改组件（REQ-EDIT-006）：成功后确定性回刷所有用它的屏
+    case 'edit_component': return components.find((c) => c.id === i.componentId)?.usedBy ?? [];
     // 提炼与导出只读
     default: return [];
   }
 }
 // 在跑作业行的文案（REQ-CORE-020）：沿用输入框动词行的口径说「这个作业在做什么」
-function jobLabel(job: JobDto, screens: ScreenDto[]): string {
+function jobLabel(job: JobDto, screens: ScreenDto[], components: ComponentDto[]): string {
   const i = job.input as JobInput;
   const name = (id: string | undefined) => screens.find((s) => s.id === id)?.name ?? '已删除的屏';
   const ver = (i.versions ?? 1) > 1 ? ` × ${i.versions} 版` : '';
@@ -73,8 +76,11 @@ function jobLabel(job: JobDto, screens: ScreenDto[]): string {
     case 'ingest_screen': return `写入「${name(i.screenId)}」`;
     // 聊天（REQ-CORE-023）：范围要等助手看完才知道，行上只写这句话的开头
     case 'chat': { const q = i.prompt ?? ''; return `聊「${q.length > 20 ? `${q.slice(0, 20)}…` : q}」`; }
+    case 'edit_component': return `改组件「${components.find((c) => c.id === i.componentId)?.name ?? '已删除的组件'}」`;
   }
 }
+// 新建组件时的占位内容（REQ-EDIT-006）：建完立刻在输入框里描述它，第一句「改组件」就把它写出来
+const NEW_COMPONENT_HTML = '<div class="p-4 text-sm text-on-surface-variant">New component</div>';
 
 // PAGE-CANVAS：画布 + 对话 + 修订/设计系统/检查器面板（面板状态进 URL，INT-020）
 export function CanvasPage() {
@@ -93,6 +99,10 @@ export function CanvasPage() {
   // 目标标签（REQ-CORE-006）与画布选中是两个状态：选中变化会写进目标，但清空选中（点空白 / Esc）不动目标。
   // 目标只经标签 × 与「清空」减少——发完一条、点空白看结果、追加指令，是最高频的用法，标签一清就会误造一张新屏。
   const [targetIds, setTargetIds] = useState<string[]>([]);
+  // 共享组件（REQ-EDIT-006）：选中与目标各一份，规则与屏完全一致——选中即目标，清空选中不清目标
+  const [selectedComponentIds, setSelectedComponentIds] = useState<string[]>([]);
+  const [targetComponentIds, setTargetComponentIds] = useState<string[]>([]);
+  const [newComponentOpen, setNewComponentOpen] = useState(false);
   // 锚点（REQ-CORE-014）：双击空白放下，是「造 · 此处」；点选任何一屏（改）就让位
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
   const [count, setCount] = useState<ScreenCount>(1);
@@ -168,11 +178,18 @@ export function CanvasPage() {
   // 那次 GET 可能早于排列发出、晚于它落地才回来，这份旧快照整份写进 detail 就把排好的位置顶回去，
   // 而此后没有任何路径再纠正它（PATCH 已经 200）。所以坐标在服务端跟上之前归本地，跟上即出栈。
   const dirtyPos = useRef(new Map<string, { x: number; y: number }>());
+  // 组件卡的坐标同一套竞态、同一套处理（REQ-EDIT-006）
+  const dirtyCompPos = useRef(new Map<string, { x: number; y: number }>());
   const refresh = useCallback(async () => {
     try {
       const d = await api.projects.get(projectId);
       for (const [id, p] of dirtyPos.current) { const s = d.screens.find((x) => x.id === id); if (!s || (s.x === p.x && s.y === p.y)) dirtyPos.current.delete(id); }
-      setDetail(dirtyPos.current.size ? { ...d, screens: d.screens.map((s) => ({ ...s, ...dirtyPos.current.get(s.id) })) } : d);
+      for (const [id, p] of dirtyCompPos.current) { const c = d.components.find((x) => x.id === id); if (!c || (c.x === p.x && c.y === p.y)) dirtyCompPos.current.delete(id); }
+      setDetail({
+        ...d,
+        screens: dirtyPos.current.size ? d.screens.map((s) => ({ ...s, ...dirtyPos.current.get(s.id) })) : d.screens,
+        components: dirtyCompPos.current.size ? d.components.map((c) => ({ ...c, ...dirtyCompPos.current.get(c.id) })) : d.components,
+      });
       const live = new Set(d.activeJobs.map((j) => j.id));
       for (const id of live) seenRef.current.add(id);
       // 只剔除服务端确认过（某次 GET 列出过）的作业：刚建的作业可能还没进这次 GET 的快照，
@@ -230,7 +247,8 @@ export function CanvasPage() {
     const d = (e.data ?? {}) as Record<string, unknown>;
     const setP = (text: string) => setProgress((m) => ({ ...m, [job.id]: text }));
     // 聊天作业的进度是助手每次工具调用的一句话（REQ-CORE-023）
-    if (e.type === 'progress') setP(d.stage === 'chat' && typeof d.step === 'string' ? d.step : d.stage === 'retry' ? `供应商波动，正在重试（第 ${d.attempt} 次）…` : d.stage === 'running' ? (job.kind === 'chat' ? '助手在想…' : job.kind === 'export_prototype' ? '正在打包原型…' : job.kind === 'apply_design_system' ? '正在回刷屏幕…' : job.kind === 'propose_design_system' ? '正在提炼约定…' : job.kind === 'edit_screens' || job.kind === 'regenerate_subtree' ? '正在改屏…' : '正在规划屏幕…') : d.stage === 'exported' ? '打包完成' : '排队中…');
+    // 改组件（REQ-EDIT-006）：模型回来后先确定性回刷用它的屏，再逐屏截图
+    if (e.type === 'progress') setP(d.stage === 'chat' && typeof d.step === 'string' ? d.step : d.stage === 'retry' ? `供应商波动，正在重试（第 ${d.attempt} 次）…` : d.stage === 'component_synced' ? `已同步 ${d.screens ?? 0} 屏，正在截图…` : d.stage === 'running' ? (job.kind === 'chat' ? '助手在想…' : job.kind === 'edit_component' ? '正在改组件…' : job.kind === 'export_prototype' ? '正在打包原型…' : job.kind === 'apply_design_system' ? '正在回刷屏幕…' : job.kind === 'propose_design_system' ? '正在提炼约定…' : job.kind === 'edit_screens' || job.kind === 'regenerate_subtree' ? '正在改屏…' : '正在规划屏幕…') : d.stage === 'exported' ? '打包完成' : '排队中…');
     if (e.type === 'screen_planned') { setP(`正在生成「${d.name}」…`); scheduleRefresh(); }
     if (e.type === 'screen_html_ready') { setP('正在截图…'); scheduleRefresh(); }
     if (e.type === 'screen_screenshot_ready') scheduleRefresh();
@@ -261,6 +279,7 @@ export function CanvasPage() {
   };
   // 选中变化 → 写进目标并清掉锚点（选中即改）；清空选中不动目标
   useEffect(() => { if (selectedIds.length) { setTargetIds(selectedIds); setAnchor(null); } }, [selectedIds]);
+  useEffect(() => { if (selectedComponentIds.length) { setTargetComponentIds(selectedComponentIds); setAnchor(null); } }, [selectedComponentIds]);
   // 屏数档位的默认值（REQ-CORE-003）：空项目默认「自动」（规划器定 4–6 屏主流程），有屏之后默认 1；只在空 ↔ 非空切换时重置
   const empty = !!detail && screens.length === 0;
   useEffect(() => { if (detail) setCount(empty ? 'auto' : 1); }, [detail?.project.id, empty]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -268,8 +287,18 @@ export function CanvasPage() {
   const selectedScreens = useMemo(() => screens.filter((s) => selectedIds.includes(s.id)), [screens, selectedIds]);
   const selected = selectedScreens.length === 1 ? selectedScreens[0] : null;
   const targetScreens = useMemo(() => screens.filter((s) => targetIds.includes(s.id)), [screens, targetIds]);
+  const components = detail?.components ?? [];
+  const selectedComponents = useMemo(() => components.filter((c) => selectedComponentIds.includes(c.id)), [components, selectedComponentIds]);
+  const targetComponents = useMemo(() => components.filter((c) => targetComponentIds.includes(c.id)), [components, targetComponentIds]);
+  // 屏与组件是同一个选区（INT-015 单一状态源）：非加选地点哪一种，另一种就清空；点空白两种都清
   const setSelectedId = useCallback((id: string | null, additive = false) => {
-    setSelectedIds((prev) => (!id ? [] : !additive ? [id] : prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    if (!id) { setSelectedIds([]); setSelectedComponentIds([]); return; }
+    setSelectedIds((prev) => (!additive ? [id] : prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    if (!additive) setSelectedComponentIds([]);
+  }, []);
+  const setSelectedComponentId = useCallback((id: string, additive: boolean) => {
+    setSelectedComponentIds((prev) => (!additive ? [id] : prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    if (!additive) setSelectedIds([]);
   }, []);
   const focused = useMemo(() => screens.find((s) => s.id === focusedId) ?? null, [screens, focusedId]);
   const tokens = detail?.designSystem.tokens as Tokens | undefined;
@@ -287,23 +316,29 @@ export function CanvasPage() {
   // 哪些屏被在跑作业占着；哪个作业占着项目级的造屏名额
   const busyScreens = useMemo(() => {
     const ids = screens.map((s) => s.id);
-    return new Set(guardJobs.flatMap((j) => coveredScreens(j, ids)));
-  }, [guardJobs, screens]);
+    return new Set(guardJobs.flatMap((j) => coveredScreens(j, ids, components)));
+  }, [guardJobs, screens, components]);
   const generating = useMemo(() => guardJobs.find((j) => j.kind === 'generate'), [guardJobs]);
   // 发送前的冲突预判：没有目标 = 造，撞在跑的 generate；有目标 = 改，撞目标屏的占用。其余组合一律放行，后端 409 是最终判据
   // 聊天：一个项目一条会话，只撞在跑的 chat（REQ-CORE-023）
+  // 只有组件没有屏也没有锚点 = 改组件（REQ-EDIT-006）：一次一个，且不撞同一组件在跑的 edit_component
   const blockedReason = useMemo(() => {
     if (mode === 'chat') return guardJobs.some((j) => j.kind === 'chat') ? CHAT_BUSY : null;
     const targets = targetScreens.slice(0, MAX_TARGETS);
+    if (!targets.length && !anchor && targetComponents.length) {
+      if (targetComponents.length > 1) return '一次只能改一个组件，其余先从目标里去掉';
+      const c = targetComponents[0];
+      return guardJobs.some((j) => j.kind === 'edit_component' && (j.input as JobInput).componentId === c.id) ? `「${c.name}」正在改，等这一轮完事` : null;
+    }
     if (!targets.length) return generating ? GENERATE_BUSY : null;
     const hit = targets.filter((s) => busyScreens.has(s.id));
     if (!hit.length) return null;
     return hit.length === 1 ? `「${hit[0].name}」正在改，等这一轮完事` : `选中的 ${hit.length} 屏正在改（含「${hit[0].name}」），等这一轮完事`;
-  }, [targetScreens, busyScreens, generating, mode, guardJobs]);
+  }, [targetScreens, targetComponents, anchor, busyScreens, generating, mode, guardJobs]);
   // 在跑作业按创建时间倒序：最新的在最上（Esc 取消的就是它，必须始终可见、不被折进「+N」）；时间相同取后加入的那个
   const runningJobs = useMemo(() => [...activeJobs].reverse().sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [activeJobs]);
   // 进度兜底收在这里：作业刚建、事件还没来时行与折叠横条都要有话说，不能看起来卡住
-  const running = useMemo(() => runningJobs.map((j) => ({ id: j.id, label: jobLabel(j, screens), progress: progress[j.id] ?? '排队中…' })), [runningJobs, screens, progress]);
+  const running = useMemo(() => runningJobs.map((j) => ({ id: j.id, label: jobLabel(j, screens, components), progress: progress[j.id] ?? '排队中…' })), [runningJobs, screens, components, progress]);
   // 折叠横条上的一行状态：恰好一个作业在跑时显示它的进度，多个只报条数（逐个的详情在输入框上方那一叠行里）
   const jobStatus = running.length > 1 ? `${running.length} 个作业进行中` : running[0] ? `${running[0].label} · ${running[0].progress}` : null;
 
@@ -332,13 +367,15 @@ export function CanvasPage() {
   // 发送（REQ-CORE-006）：有目标 = 改（targetScreenIds），没有 = 造（count / anchor）；版数两边都带。
   // 返回是否发出去了：没发出去时输入框保留草稿与参考图（REQ-CORE-020）
   // 聊天（REQ-CORE-023）：不看目标，选中的屏只作上下文提示随消息带上；通道用收窄后的那条
+  // 共享组件目标（REQ-EDIT-006）：只在造 / 改模式下随消息带上——只有组件没有屏也没有锚点时服务端建的是 edit_component，其余是上下文
   const onSend = async (content: string, attachmentIds: string[] = []): Promise<boolean> => {
     const targets = targetScreens.length ? targetScreens.slice(0, MAX_TARGETS).map((s) => s.id) : undefined;
+    const compTargets = targetComponents.length ? targetComponents.map((c) => c.id) : undefined;
     const chat = mode === 'chat';
     try {
       const r = await api.projects.send(projectId, chat
         ? { content, mode: 'chat', targetScreenIds: targets, runner: chatRunner, attachmentIds: attachmentIds.length ? attachmentIds : undefined }
-        : { content, targetScreenIds: targets, count: targets ? undefined : count, versions, anchor: targets ? undefined : anchor ?? undefined, runner: sendRunner, attachmentIds: attachmentIds.length ? attachmentIds : undefined });
+        : { content, targetScreenIds: targets, targetComponentIds: compTargets, count: targets ? undefined : count, versions, anchor: targets ? undefined : anchor ?? undefined, runner: sendRunner, attachmentIds: attachmentIds.length ? attachmentIds : undefined });
       setMessages((m) => [...m, r.userMessage, r.assistantMessage]);
       if (!targets && !chat) setAnchor(null);
       if (r.job.runner === 'agent') { refresh(); setPanel('agent'); }  // 交给本机 agent：已投递到会话，切到 agent 面板看状态
@@ -352,7 +389,7 @@ export function CanvasPage() {
       // 预判之外真撞上了（别处刚建的作业、多屏改屏的后端缺口）：problem 体不带屏信息，重取项目后用本轮目标 ∩ 覆盖屏集点名
       else if (e instanceof ApiError && e.type === '/errors/screen-busy') {
         const d = await refresh();
-        const ids = new Set((d?.activeJobs ?? []).flatMap((j) => coveredScreens(j, (d?.screens ?? []).map((s) => s.id))));
+        const ids = new Set((d?.activeJobs ?? []).flatMap((j) => coveredScreens(j, (d?.screens ?? []).map((s) => s.id), d?.components ?? [])));
         const hit = targets?.map((id) => (d?.screens ?? []).find((s) => s.id === id)).find((s) => s && ids.has(s.id));
         toast(hit ? `「${hit.name}」正在改，等这一轮完事` : targets ? '目标屏有作业在跑，等它完成再改' : GENERATE_BUSY, 'error');
       }
@@ -394,6 +431,30 @@ export function CanvasPage() {
     dirtyPos.current.set(id, { x, y });
     setDetail((d) => d && { ...d, screens: d.screens.map((s) => (s.id === id ? { ...s, x, y } : s)) });
     try { await api.screens.patch(id, { x, y }); } catch { dirtyPos.current.delete(id); toast('位置保存失败', 'error'); refresh(); }
+  };
+  // 组件卡的位置随项目存（INT-019 文档级几何），同一条 PATCH、同一套本地先行
+  const onMoveComponent = async (id: string, x: number, y: number) => {
+    dirtyCompPos.current.set(id, { x, y });
+    setDetail((d) => d && { ...d, components: d.components.map((c) => (c.id === id ? { ...c, x, y } : c)) });
+    try { await api.components.patch(id, { x, y }); } catch { dirtyCompPos.current.delete(id); toast('位置保存失败', 'error'); refresh(); }
+  };
+  // 新建组件（REQ-EDIT-006）：先起名建一个占位组件，选成唯一目标，接着在输入框里描述它——第一句「改组件」就把它写出来
+  const createComponent = async (name: string) => {
+    const { component } = await api.components.create(projectId, { name, html: NEW_COMPONENT_HTML });
+    setNewComponentOpen(false);
+    await refresh();
+    setSelectedIds([]); setTargetIds([]); setAnchor(null);
+    setSelectedComponentIds([component.id]); setTargetComponentIds([component.id]);
+    showComposer();
+    toast(`已新建组件「${name}」，在下方描述它`);
+  };
+  // 检查器「改组件」：把组件设为唯一目标（屏目标让位——这一句说的是组件，不是屏）
+  const onEditComponent = (name: string) => {
+    const c = components.find((x) => x.name === name);
+    if (!c) { toast('这个组件已不存在', 'error'); return; }
+    setSelectedIds([]); setTargetIds([]); setAnchor(null);
+    setSelectedComponentIds([c.id]); setTargetComponentIds([c.id]);
+    showComposer();
   };
   // 排列条声明了 role=toolbar：整组在 Tab 序里只占一个停靠点，方向键在组内移动焦点（INT-002，与 CanvasToolbar 同一套做法）
   const [arrangeAt, setArrangeAt] = useState(0);
@@ -442,18 +503,27 @@ export function CanvasPage() {
     toast(`位置保存失败：${failed.map((s) => s.name).join('、')} 没排上，再点一次对齐`, 'error');
     refresh();
   };
+  // 删选中的屏与组件（REQ-EDIT-006）：先屏后组件；组件删掉后屏里已展开的那份留着、只是不再跟着改
   const onDelete = async () => {
-    if (selectedScreens.length === 0) return;
+    if (selectedScreens.length === 0 && selectedComponents.length === 0) return;
     setConfirmDelete(false);
     const failed: string[] = [];
     for (const s of selectedScreens) {
       try { await api.screens.remove(s.id); }
       catch (e) { failed.push(e instanceof ApiError && e.type === '/errors/screen-busy' ? `${s.name} 正在生成中` : s.name); }
     }
+    for (const c of selectedComponents) {
+      try { await api.components.remove(c.id); }
+      catch { failed.push(`组件 ${c.name}`); }
+    }
     const gone = new Set(selectedScreens.map((s) => s.id));
-    setSelectedIds([]); setTargetIds((t) => t.filter((id) => !gone.has(id))); refresh();
-    if (failed.length) toast(`${failed.length} 屏未能删除：${failed.join('、')}`, 'error');
-    else toast(selectedScreens.length > 1 ? `已删除 ${selectedScreens.length} 屏` : '已删除');
+    const goneComps = new Set(selectedComponents.map((c) => c.id));
+    setSelectedIds([]); setTargetIds((t) => t.filter((id) => !gone.has(id)));
+    setSelectedComponentIds([]); setTargetComponentIds((t) => t.filter((id) => !goneComps.has(id)));
+    refresh();
+    const total = selectedScreens.length + selectedComponents.length;
+    if (failed.length) toast(`${failed.length} 项未能删除：${failed.join('、')}`, 'error');
+    else toast(total > 1 ? `已删除 ${total} 项` : '已删除');
   };
   // REQ-PROTO-003：懒生成 = 钉死路由的 generate
   const generateMissing = async (fromScreenId: string, route: string) => {
@@ -572,13 +642,14 @@ export function CanvasPage() {
   // 单键只给「一眼看得出、再按一次即撤销」的视图操作；会弹出/收起面板的一律要 Alt。
   // 用 e.code 判键：macOS 下 Alt+字母 的 e.key 会变成 ∂ ˚ 这类符号。
   // 设置弹层也算弹层（DESIGN §画布快捷键：有弹窗先关弹窗）：它开着时画布快捷键全让位，Esc 关它而不是取消在跑作业
-  const blocked = confirmDelete || !!missing || !!proposal || !!settingsSection;
-  const closeModals = () => { setConfirmDelete(false); setMissing(null); setProposal(null); if (settingsSection) setSettings(null); };
+  const blocked = confirmDelete || !!missing || !!proposal || !!settingsSection || newComponentOpen;
+  const closeModals = () => { setConfirmDelete(false); setMissing(null); setProposal(null); setNewComponentOpen(false); if (settingsSection) setSettings(null); };
+  const deletable = (selectedScreens.length > 0 || selectedComponents.length > 0) && !focusedId;
   const plain: Record<string, (() => void) | undefined> = {
     KeyF: () => canvasApi.current?.fitView(),
     KeyL: toggleLinks,
-    Delete: selectedScreens.length && !focusedId ? () => setConfirmDelete(true) : undefined,
-    Backspace: selectedScreens.length && !focusedId ? () => setConfirmDelete(true) : undefined,
+    Delete: deletable ? () => setConfirmDelete(true) : undefined,
+    Backspace: deletable ? () => setConfirmDelete(true) : undefined,
   };
   const alted: Record<string, (() => void) | undefined> = {
     KeyD: openDesign,
@@ -586,6 +657,7 @@ export function CanvasPage() {
     KeyR: selected && !focusedId ? () => setPanel(panel === 'revisions' ? null : 'revisions') : undefined,
     KeyN: toggleAnnotate,
     KeyG: () => canvasApi.current?.createAtCenter(),
+    KeyC: () => setNewComponentOpen(true),
   };
   // busy = 有任何作业在跑（设计系统面板的回刷、导出、接上跳转等仍按这个语义走）
   const busy = activeJobs.length > 0;
@@ -636,6 +708,7 @@ export function CanvasPage() {
     ],
     [
       { id: 'new-screen', label: '新建屏幕', hint: `${ALT}G`, desc: '在可见区中心放一个新屏落点，然后在下方输入框描述它；双击画布空白处也能放。屏数、版数、通道都在输入框里选', icon: <Plus size={ICON} />, testId: 'new-screen', unavailable: generating ? GENERATE_BUSY : false, onSelect: () => canvasApi.current?.createAtCenter() },
+      { id: 'new-component', label: '新建组件', hint: `${ALT}C`, desc: '起个名字建一个共享组件（导航栏、页头这类每屏都一样的块），然后在输入框里描述它；改组件一次，用它的屏全部同步。从屏里现有元素做组件走检查器的「记为共享组件」', icon: <Component size={ICON} />, testId: 'new-component', onSelect: () => setNewComponentOpen(true) },
       { id: 'export', label: '导出原型', desc: '把全部屏打包成一个可离线打开的单文件 HTML 原型', icon: <Download size={ICON} />, unavailable: jobBlocked, onSelect: exportPrototype },
       { id: 'agent', label: '本机 agent', hint: `${ALT}T`, desc: '交给本机 Claude Code 的作业列表：投递到哪个会话、状态、取消。派活入口在输入框的通道下拉与会话下拉', icon: <Bot size={ICON} />, active: panel === 'agent', onSelect: () => setPanel(panel === 'agent' ? null : 'agent') },
     ],
@@ -645,7 +718,11 @@ export function CanvasPage() {
       { id: 'revisions', label: '修订', hint: `${ALT}R`, desc: '这一屏的历史版本与候选，可回溯到任意一版（修订链是单屏概念，只在恰好选中一屏时可用）', icon: <History size={ICON} />, active: panel === 'revisions', onSelect: () => setPanel(panel === 'revisions' ? null : 'revisions') } satisfies Tool,
       { id: 'exemplar', label: detail.project.exemplarScreenId === selected.id ? '样板屏' : '设为样板', desc: '生成和修改时都以样板屏为风格参照（密度、间距、组件用法）', icon: <Star size={ICON} />, testId: 'set-exemplar', active: detail.project.exemplarScreenId === selected.id, unavailable: detail.project.exemplarScreenId === selected.id ? '这一屏已经是样板屏' : !selected.currentRevisionId ? '这一屏还没生成完' : false, onSelect: setExemplar } satisfies Tool,
     ] : []),
-    { id: 'delete', label: selectedScreens.length > 1 ? `删除 ${selectedScreens.length} 屏` : '删除', hint: 'Del', desc: '删掉选中的屏及其修订历史，指向它们的链接会变成断链', icon: <Trash2 size={ICON} />, onSelect: () => setConfirmDelete(true) },
+    { id: 'delete', label: selectedComponents.length ? `删除 ${selectedScreens.length + selectedComponents.length} 项` : selectedScreens.length > 1 ? `删除 ${selectedScreens.length} 屏` : '删除', hint: 'Del', desc: selectedComponents.length ? '删掉选中的屏（连同修订历史）与组件；组件在屏里已展开的那份留着，只是不再跟着改' : '删掉选中的屏及其修订历史，指向它们的链接会变成断链', icon: <Trash2 size={ICON} />, onSelect: () => setConfirmDelete(true) },
+  ]);
+  // 只选了组件（REQ-EDIT-006）：上下文组给「删除组件」；改组件走输入框（它已是目标）
+  if (selectedComponents.length > 0 && selectedScreens.length === 0 && !focusedId) tools.push([
+    { id: 'delete-component', label: selectedComponents.length > 1 ? `删除 ${selectedComponents.length} 个组件` : '删除组件', hint: 'Del', desc: '删掉组件；屏里已经展开的那份留着，只是不再跟着改', icon: <Trash2 size={ICON} />, testId: 'delete-component', onSelect: () => setConfirmDelete(true) },
   ]);
   if (focused) tools.push([
     { id: 'back', label: '后退', hint: 'Alt+←', desc: '退回屏内上一次跳转之前', icon: <ArrowLeft size={ICON} />, unavailable: navStack.length === 0 && '还没有在这一屏里跳转过', onSelect: () => canvasApi.current?.goBack() },
@@ -656,7 +733,7 @@ export function CanvasPage() {
     panel === 'revisions' && selected ? <RevisionPanel screen={selected} onClose={() => setPanel(null)} onRestored={refresh} />
     : panel === 'design' ? <DesignPanel ds={detail.designSystem} project={detail.project} screens={screens} assets={detail.assets} busy={busy} onClose={() => setPanel(null)} onSaved={refresh} onApplyAll={applyDesignSystem} onPropose={(i) => propose(i)} />
     : panel === 'agent' ? <AgentJobsPanel projectId={projectId} screens={screens} runners={runners} onClose={() => setPanel(null)} onChanged={refresh} />
-    : panel === 'inspect' && focused ? <InspectorPanel screen={focused} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyScreens.has(focused.id)} runners={runners} composerRunnerId={runnerId} sessions={sessions} onSessionsOpen={() => void loadSessions()} workingQids={workingSubtrees.filter((w) => w.screenId === focused.id).map((w) => w.qid)} onClose={() => setPanel(null)} onEdited={(qid) => { canvasApi.current?.markDone([qid]); refresh(); }} onRegenerate={regenerateSubtree} />
+    : panel === 'inspect' && focused ? <InspectorPanel screen={focused} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyScreens.has(focused.id)} runners={runners} composerRunnerId={runnerId} sessions={sessions} onSessionsOpen={() => void loadSessions()} workingQids={workingSubtrees.filter((w) => w.screenId === focused.id).map((w) => w.qid)} onClose={() => setPanel(null)} onEdited={(qid) => { canvasApi.current?.markDone([qid]); refresh(); }} onRegenerate={regenerateSubtree} onEditComponent={onEditComponent} />
     : panel === 'annotate' && focused ? <AnnotationPanel screen={focused} sel={elementSel} items={screenAnnotations} busy={busyScreens.has(focused.id)} onClose={() => { setPanel(null); setFocusedId(null); }} onAdd={addAnnotation} onUpdate={updateAnnotation} onRemove={removeAnnotation} onSend={sendAnnotations} />
     : null;
 
@@ -671,10 +748,11 @@ export function CanvasPage() {
             selectedIds={selectedIds} focusedId={focusedId} styleGuideSelected={panel === 'design'} inspectMode={inspectMode} annotateMode={annotateMode} armed={inspectArmed ? 'inspect' : annotateArmed ? 'annotate' : null} showLinks={showLinks}
             anchor={anchor} screenSize={screenSize} exemplarScreenId={detail.project.exemplarScreenId}
             onSelect={(id, additive) => { setSelectedId(id, additive); if (!id && panel === 'revisions') setPanel(null); }}
-            onSelectMany={(ids, additive) => setSelectedIds((prev) => (additive ? [...new Set([...prev, ...ids])] : ids))}
-            onSelectStyleGuide={() => { setSelectedIds([]); setPanel('design'); }}
-            onFocus={(id) => { setFocusedId(id); if (id) setSelectedIds([id]); }}
+            onSelectMany={(ids, compIds, additive) => { setSelectedIds((prev) => (additive ? [...new Set([...prev, ...ids])] : ids)); setSelectedComponentIds((prev) => (additive ? [...new Set([...prev, ...compIds])] : compIds)); }}
+            onSelectStyleGuide={() => { setSelectedIds([]); setSelectedComponentIds([]); setPanel('design'); }}
+            onFocus={(id) => { setFocusedId(id); if (id) { setSelectedIds([id]); setSelectedComponentIds([]); } }}
             onMove={onMove}
+            components={components} selectedComponentIds={selectedComponentIds} onSelectComponent={setSelectedComponentId} onMoveComponent={onMoveComponent}
             onNavigateMissing={(fromScreenId, href) => setMissing({ fromScreenId, hrefs: [href] })}
             onDanglingClick={(screenId, hrefs) => setMissing({ fromScreenId: screenId, hrefs })}
             onDeadLink={() => toast('这个交互还没有设计；想让它跳转，用「选择元素」给它连线')}
@@ -683,6 +761,7 @@ export function CanvasPage() {
             onCandidates={(jobId, screenId) => setCandidates((c) => (c?.screenId === screenId ? null : { jobId, screenId }))}
             candidateStack={candidates && screens.some((s) => s.id === candidates.screenId) ? { screenId: candidates.screenId, node: <CandidateStack jobId={candidates.jobId} screen={screens.find((s) => s.id === candidates.screenId)!} onClose={() => setCandidates(null)} onAdopted={async () => { await refresh(); setCandidates(null); }} /> } : null}
             onElementSelect={(sel) => { setElementSel(sel); canvasApi.current?.highlight(sel?.qid ?? null); }}
+            // sel 里带 component（REQ-EDIT-006）：检查器据此挡直改、批注面板据此挡批注
             selectedQid={elementSel?.qid ?? null}
             workingSubtrees={workingSubtrees}
             annotations={annotations}
@@ -718,17 +797,26 @@ export function CanvasPage() {
       </>}>
         <ProjectSwitcher current={detail.project} onRenamed={(id) => { if (id === projectId) refresh(); }} />
         <span className="shrink-0 whitespace-nowrap rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">{detail.project.deviceType === 'mobile' ? '手机' : '桌面'}</span>
-        {selectedScreens.length > 0 && !focusedId && <span className="ml-1 min-w-0 truncate whitespace-nowrap text-xs text-muted">已选 {selected ? <><b className="text-fg">{selected.name}</b> {selected.route}</> : <b className="text-fg">{selectedScreens.length} 屏</b>}</span>}
+        {(selectedScreens.length > 0 || selectedComponents.length > 0) && !focusedId && (
+          <span className="ml-1 min-w-0 truncate whitespace-nowrap text-xs text-muted" data-testid="selection-stat">
+            已选 {selectedScreens.length === 0
+              ? (selectedComponents.length === 1 ? <>组件 <b className="text-fg">{selectedComponents[0].name}</b></> : <b className="text-fg">{selectedComponents.length} 个组件</b>)
+              : selectedComponents.length > 0 ? <b className="text-fg">{selectedScreens.length} 屏 · {selectedComponents.length} 个组件</b>
+              : selected ? <><b className="text-fg">{selected.name}</b> {selected.route}</> : <b className="text-fg">{selectedScreens.length} 屏</b>}
+          </span>
+        )}
       </TopNav>
       {settingsSection && <SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} returnTo={settingsBtnRef} onCatalog={applyCatalog} />}
       <ChatDock messages={messages} progress={progress} status={jobStatus} collapsed={chatCollapsed} onToggle={toggleChat} onRemember={rememberConvention} busy={busy} />
       <Composer
         handle={composerRef} running={running} blockedReason={blockedReason} targets={targetScreens} totalScreens={screens.length} anchor={anchor} maxTargets={MAX_TARGETS}
+        componentTargets={targetComponents}
+        onRemoveComponentTarget={(id) => { setTargetComponentIds((prev) => prev.filter((x) => x !== id)); setSelectedComponentIds((prev) => prev.filter((x) => x !== id)); }}
         count={count} versions={versions} onCount={setCount} onVersions={setVersions}
         onSend={onSend} onCancelJob={(id) => void cancelJob(id)} onUploadImage={(file) => api.projects.uploadImage(projectId, file)} onError={(m) => toast(m, 'error')}
         onRemoveTarget={(id) => { setTargetIds((prev) => prev.filter((x) => x !== id)); setSelectedIds((prev) => prev.filter((x) => x !== id)); }}
         onRemoveAnchor={() => setAnchor(null)}
-        onClearTargets={() => { setTargetIds([]); setSelectedIds([]); setAnchor(null); }}
+        onClearTargets={() => { setTargetIds([]); setSelectedIds([]); setTargetComponentIds([]); setSelectedComponentIds([]); setAnchor(null); }}
         mode={mode} onMode={onMode}
         runners={mode === 'chat' ? chatRunners : runners} runnerId={mode === 'chat' ? chatRunnerId : runnerId} onRunnerChange={onRunnerChange}
         sessions={sessions} sessionId={sessionId} onSessionChange={onSessionChange} onSessionsOpen={() => void loadSessions()}
@@ -737,11 +825,20 @@ export function CanvasPage() {
       <CanvasToolbar groups={tools} />
       {panelBody && <div key={panel} className="chrome slide-in-right absolute bottom-4 right-[var(--rail-w)] top-16 z-20 flex w-[var(--panel-w)] flex-col overflow-hidden rounded-xl">{panelBody}</div>}
       {proposal && <ProposalDialog proposal={proposal} ds={detail.designSystem} busy={busy} onConfirm={confirmProposal} onClose={() => setProposal(null)} />}
-      {confirmDelete && selectedScreens.length > 0 && (
+      {newComponentOpen && <NewComponentDialog onCreate={createComponent} onClose={() => setNewComponentOpen(false)} />}
+      {confirmDelete && (selectedScreens.length > 0 || selectedComponents.length > 0) && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-[2px]" onMouseDown={(e) => { if (e.target === e.currentTarget) setConfirmDelete(false); }}>
-          <div role="alertdialog" aria-modal="true" aria-labelledby="del-title" className="w-full max-w-xs rounded-lg border border-line bg-panel p-5 shadow-2xl fade-up">
-            <h2 id="del-title" className="text-sm font-semibold">{selected ? `删除「${selected.name}」？` : `删除选中的 ${selectedScreens.length} 屏？`}</h2>
-            <p className="mt-1 text-xs text-muted">修订历史一并删除，指向它的链接会变成断链。</p>
+          <div role="alertdialog" aria-modal="true" aria-labelledby="del-title" className="w-full max-w-xs rounded-lg border border-line bg-panel p-5 shadow-2xl fade-up" data-testid="delete-dialog">
+            <h2 id="del-title" className="text-sm font-semibold">
+              {selectedScreens.length === 0
+                ? (selectedComponents.length === 1 ? `删除组件「${selectedComponents[0].name}」？` : `删除 ${selectedComponents.length} 个组件？`)
+                : selectedComponents.length > 0 ? `删除 ${selectedScreens.length} 屏与 ${selectedComponents.length} 个组件？`
+                : selected ? `删除「${selected.name}」？` : `删除选中的 ${selectedScreens.length} 屏？`}
+            </h2>
+            <p className="mt-1 text-xs text-muted">
+              {selectedScreens.length > 0 ? '屏的修订历史一并删除，指向它的链接会变成断链。' : ''}
+              {selectedComponents.length > 0 ? '组件在屏里已经展开的那份留着，只是不再跟着改。' : ''}
+            </p>
             <div className="mt-4 flex justify-end gap-2"><Button onClick={() => setConfirmDelete(false)} autoFocus>取消</Button><Button variant="danger" onClick={onDelete}>删除</Button></div>
           </div>
         </div>
@@ -766,5 +863,43 @@ export function CanvasPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// 新建组件（REQ-EDIT-006）：只问名字。焦点陷阱 / Esc / 背景 inert 由 useModal 管（A11Y-004 / A11Y-005）；
+// 名字被占用时就地报错、不关框，让用户改一个字再试
+function NewComponentDialog({ onCreate, onClose }: { onCreate: (name: string) => Promise<void>; onClose: () => void }) {
+  const ref = useModal<HTMLFormElement>(onClose);
+  const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const submit = async (e?: FormEvent) => {
+    e?.preventDefault();
+    const n = name.trim();
+    if (!n) { setError('给组件起个名字'); return; }
+    setPending(true);
+    try { await onCreate(n); }
+    catch (err) {
+      if (err instanceof ApiError && err.type === '/errors/component-name-taken') setError('这个名字已被占用');
+      else if (err instanceof ApiError && err.status === 400) setError((err.problem.errors as { message?: string }[] | undefined)?.[0]?.message ?? err.problem.title);
+      else setError(err instanceof ApiError ? err.problem.title : '创建失败');
+    } finally { setPending(false); }
+  };
+  return (
+    <Overlay onClose={onClose}>
+      <form ref={ref} role="dialog" aria-modal="true" aria-labelledby="nc-title" data-testid="new-component-dialog" tabIndex={-1} onSubmit={submit}
+        className="w-full max-w-xs rounded-lg border border-line bg-panel p-5 shadow-2xl fade-up outline-none">
+        <h2 id="nc-title" className="text-sm font-semibold">新建组件</h2>
+        <p className="mt-1 text-xs text-muted">先起个名字；建好后在输入框里描述它。改组件一次，用它的屏全部同步。</p>
+        <label htmlFor="nc-name" className="mt-3 block text-xs font-medium text-muted">组件名</label>
+        <Input id="nc-name" data-testid="new-component-name" value={name} onChange={(e) => { setName(e.target.value); setError(null); }} placeholder="例如 TabBar" autoComplete="off" spellCheck={false} maxLength={40} className="mt-1.5"
+          aria-invalid={!!error} aria-describedby={error ? 'nc-error' : undefined} />
+        {error && <p id="nc-error" role="alert" className="mt-1.5 text-xs text-danger">{error}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button size="sm" onClick={onClose}>取消</Button>
+          <Button size="sm" variant="primary" type="submit" data-testid="new-component-create" pending={pending} disabled={!name.trim()}>创建</Button>
+        </div>
+      </form>
+    </Overlay>
   );
 }

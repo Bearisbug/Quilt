@@ -10,6 +10,8 @@
     "e2e:edit": "tsx e2e/edit.ts",
     "e2e:agent": "tsx e2e/agent.ts",
     "e2e:install": "tsx e2e/install.ts",
+    "e2e:chat": "tsx e2e/chat.ts",
+    "e2e:components": "tsx e2e/components.ts",
     "mcp:call": "tsx e2e/mcp-call.ts"
   },
   "devDependencies": {

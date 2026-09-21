@@ -36,6 +36,7 @@
 | 2026-09-17 | 设计文档 v0.24（本机三条通道传图）：`TC-CORE-027` 第 3、6 步改为条件步骤——当前所有通道 `vision=true`，护栏路径无通道可触发，脚本按清单自动跳过 | @bug |
 | 2026-09-17 | 设计文档 v0.23（参考图输入）：新增 `TC-CORE-027`（附件类型/大小校验、无视觉通道的双重护栏、贴图上限与移除、`attachmentIds` → `imageKeys` 贯通） | @bug |
 | 2026-09-17 | 设计文档 v0.22（风格指南卡改报项目字体）：`TC-CORE-026` 第 5 步由「卡上不出现 Space Grotesk」改为「卡上报出项目自己的字体、且不等于工具外壳字体」，并加一条防止两者取同一字体时断言失去区分力的守卫 | @bug |
+| 2026-09-20 | 设计文档 v0.46（共享组件 `REQ-EDIT-006`）：新增 `TC-EDIT-012`（从屏里提取导航栏为组件并同步到其他屏、`PATCH` 改组件后三屏确定性回刷、版本冲突 409、实例内直改 409 component-locked 与 `detach` 脱离、改名跟随、删组件屏不动、画布组件卡 / 目标标签 / 检查器锁定提示 / 新建组件、真实 `edit_component` 回合）；§3 注明 fixture 的 `<nav>` / `<header>` 是提取靶子 | @bug |
 | 2026-09-20 | 设计文档 v0.45（聊天模式 `REQ-CORE-023`）：新增 `TC-CORE-039`（非 Claude 通道 / 没有 agent-sdk 通道 400、在跑 chat 作业 409、只问不改的回合不动屏、跨轮指代改一屏且修订记在聊天作业名下、段控切聊天后档位隐藏 / 动词行 / 通道只列本机 Claude 订阅 / 在跑作业行与回执 / 刷新记住模式）；脚本 `tests/e2e/chat.ts`；§3 补本机 claude 登录态前置。 | @bug |
 | 2026-09-20 | 设计文档 v0.44（字体来源）：新增 `TC-EDIT-011`（Google 任意族名进 prelude 链接、本机字体不发外链且栈以族名开头带 `-apple-system` 回退、自定义样式表链接原样进 `<link>`、来源为 url 缺链接与带引号族名 400、面板回显 / 就地报错不提交 / 切来源收起链接框）；`tests/e2e/edit.ts` 同步。 | @bug |
 | 2026-09-20 | 设计文档 v0.43（设计契约从闸门改成透镜）：三处断言翻转——`TC-EDIT-002`（直改引入内联样式）、`TC-PROTO-007`（表单去掉 action）、`TC-AGENT-004`（MCP 推违规 HTML）由「422 lint-failed、不落库」改为「照常落修订 / 建屏，偏离进 `lintReport` 并在卡片上报「N 处偏离」」；新增外部库用例（推一张引 Chart.js 的屏，预览域里真的画出来）。 |
@@ -79,7 +80,7 @@
 - 种子数据与重置：
   - `pnpm seed [--empty]`：重置基线——删掉默认用户名下全部项目（级联屏 / 修订 / 作业 / 台账 / 通道）与对象子目录，再建空项目 `Demo Mobile`（mobile）与 `Demo Desktop`（desktop），设计系统 seedColor `#3B5BDB`；`--empty` 不建示例项目（PAGE-FIRST 用例）。
   - LLM 驱动：`.env` 的 `LLM_DRIVER` 取 `agent-sdk`（本机 Claude 订阅）/ `anthropic` / `gemini`（模型 `QUILT_MODEL` 用 `gemini-3.8-flash`；计费路径二选一：AI Studio 需 `GEMINI_API_KEY`，Vertex AI 需 `GEMINI_VERTEX=1` + `GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION=global` + `GOOGLE_APPLICATION_CREDENTIALS` 指向服务账号 JSON）；`GET /v1/health` 的 `llm` / `model` 字段确认生效。真实 LLM 用例（`TC-CORE-005` 等）的耗时与通过率随驱动变化，登记时在明细注明驱动。
-  - `pnpm seed:project --name <名> --device mobile|desktop --screens <N> [--revisions <M>] [--dangling] [--no-shot]`：用内置 fixture HTML 直接落库（不调 LLM），每屏含 `data-qid`、路由 `/s1`…`/sN` 与互链；`--revisions M` 给每屏 M 个修订；`--dangling` 让第一屏多一条 `href=/settings` 断链。输出 projectId 与各 screenId。
+  - `pnpm seed:project --name <名> --device mobile|desktop --screens <N> [--revisions <M>] [--dangling] [--no-shot]`：用内置 fixture HTML 直接落库（不调 LLM），每屏含 `data-qid`、路由 `/s1`…`/sN` 与互链；`--revisions M` 给每屏 M 个修订；`--dangling` 让第一屏多一条 `href=/settings` 断链。输出 projectId 与各 screenId。fixture 每屏 depth-1 有一个 `<header>`（标题 `Screen N vM`）与一个 `<nav>`（tab 数 = min(N, 4)，指向 `/s1`…，各条链接类名完全相同、无 `aria-current`），它们是共享组件用例（`TC-EDIT-012`）的提取靶子——提取这个 `<nav>` 得到的是非导航型组件（`nav=false`）。
   - `pnpm seed:job --project <id> --screen <id> --status running`：构造进行中作业占用某屏；`--status running --tokens 3000 [--screens 400]`：构造已消耗 3000 token（与 400 屏）的运行中作业，台账预写在 `stub` 驱动名下（供取消记账与用量展示用例）；`--input '<json>'` 覆盖作业输入（在途预估用例：`{"prompt":"x","count":4,"versions":2}`）。
   - `pnpm seed:preview-token --screen <id> --expired`：打印一个已过期的预览签名 URL。
   - `pnpm seed:design-system --project <id> --bump`：把设计系统 version 抬升 1（制造版本冲突）。
@@ -903,6 +904,23 @@
 
 后置：无。
 
+#### `TC-EDIT-012` 共享组件 — 对应 `REQ-EDIT-006`（v0.46）· 级别: 核心 · 执行者: AI
+
+前置：`pnpm seed:project --name Comp --device mobile --screens 3 --no-shot`（三屏 `/s1`…`/s3`，每屏 depth-1 一个三 tab 的 `<nav>`；记三屏 `currentRevisionId`，从 `/s1` 当前修订 HTML 里取 `<nav` 的 qid）；步骤 8 要真实 LLM（`LIVE_LLM=0` 时跳过）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | `POST /v1/projects/{id}/components` 带 `{ name:"TabBar", fromScreenId:/s1, qid:<nav qid>, applyToScreens:true }` | `201`；`component.name="TabBar"`、`version=1`、`nav=false`（fixture 四个 tab 类名相同且无 `aria-current`，分不出激活态）、`summary` 以 `nav` 开头且含 `links:`；`applied` 恰含 /s2、/s3，`skipped` 为空；三屏 `currentRevisionId` 都变、新修订 `sourceKind=component`；三屏 HTML 里 `<nav data-component="TabBar"` 各恰好出现一次，nav 里仍是 3 条 `<a href="/s…">`；`GET /v1/projects/{id}` 的 `components[0].usedBy` 含三屏 |
+| 2 | `PATCH /v1/components/{cid}` 带 `html` 为只有 2 个 tab 的 `<nav …>` 与 `expectedVersion:1` | `200`、`component.version=2`、`applied` 为三屏；三屏再出新修订（`sourceKind=component`），nav 里 `<a href="/s…">` 变 2 条；步骤 1 的修订仍在各屏修订列表里 |
+| 3 | 再 `PATCH` 同样的 `html`、`expectedVersion:1` | `409 /errors/version-conflict`；`version` 仍为 2、三屏修订数不变 |
+| 4 | 取 /s1 当前 HTML 里 nav 内第一条 `<a>` 的 qid，`POST /v1/screens/{s1}/elements/{qid}` 改文案 | `409 /errors/component-locked`，体 `component="TabBar"`；随后对同一 qid 发 `ops=[{type:"detach"}]` → `201`，新修订 `sourceKind=manual`，/s1 HTML 里的 `<nav` 不再带 `data-component`（nav 内容不变）；再改文案 → `201`，文案已换 |
+| 5 | `PATCH /v1/components/{cid}` 带 `name:"BottomNav"`、`expectedVersion:2` | `200`、`version=3`、`applied` 恰为 /s2、/s3；两屏 HTML 里实例根变为 `data-component="BottomNav"`，/s1（已脱离）`currentRevisionId` 不变 |
+| 6 | `DELETE /v1/components/{cid}` | `204`；三屏 `currentRevisionId` 都不变，/s2 HTML 里仍有 `data-component="BottomNav"`（已展开的留着）；详情 `components` 为空 |
+| 7 | 重新按步骤 1 提取（名 `TabBar`）；打开 `/p/{id}` | 画布出现 `component-card`（`data-name="TabBar"`），标签含「用于 3 屏」；在空白处框选到它 → 目标区出现 `component-chip`「组件 · TabBar」、动词行含「改组件「TabBar」」且无 `count-group` / `versions-group`；`⌘E` 点 /s1 进选择元素态，点 nav 里一个 tab → 检查器出现 `el-component-lock`（含「共享组件「TabBar」」）与 `el-edit-component`、`el-detach`，无 `#el-text`；点 `el-edit-component` → 目标区只剩「组件 · TabBar」、输入框获得焦点；工具栏 `new-component`（`⌥C`）填名 `Footer` 确认 → `component-card` 数变 2、目标区为「组件 · Footer」 |
+| 8 | （真实 LLM）目标为 `TabBar` 组件，输入框发「把第二个 tab 的文案改成 Search，其他都别动」 | `POST messages` 带 `targetComponentIds=[cid]`，作业 `kind=edit_component`；在跑作业行写「改组件「TabBar」」；作业成功后组件 `version+1`、`summary` 含 `Search`，用它的每一屏各出一条 `sourceKind=component`、`jobId=本作业` 的新修订且 HTML 含 `Search`；助手消息以「已更新组件「TabBar」」开头并写「同步 N 屏」 |
+
+后置：无。
+
 ### AGENT · MCP 与本机 agent
 
 > v0.32 本地单用户版：`TC-AGENT-002`（scope 不足）、`TC-AGENT-005`（长轮询领取）、`TC-AGENT-006`（租约过期）、`TC-AGENT-007`（deeplink）、`TC-AGENT-008`（伴侣进程）随 `REQ-AGENT-001` 的 OAuth 与 `REQ-AGENT-004/005` 推迟，用例正文移除；ID 保留不复用。
@@ -1023,6 +1041,7 @@
 | RUN-089 | 2026-09-19 | 未提交工作树（设计文档 v0.33：输入框可收起 `⌘/` + 聚焦态热更新；运行时 `quilt:swap` 增 `keepScroll` 与 `<head>` 比对重写） | AI(Claude Code) | 局部轮（受影响：TC-CORE-023、032 + 运行时全部消费者 PROTO 全域 11、EDIT 全域 9 + 冒烟级 TC-CORE-003/005/010/012/018、TC-CORE-031、TC-AGENT-001）——prelude 只动 swap 处理器，影响面确定，未升全量轮 | 通过 29/29 · 待人工 1 · 跳过 1（TC-CORE-032 首跑因脚本问题失败，同轮改脚本复跑通过） |
 | RUN-091 | 2026-09-20 | 未提交工作树（设计文档 v0.44：字体来源——族名自由文本 + Google / 本机 / 自定义链接三种来源；迁移 `0012`） | AI(Claude Code) | 局部轮（受影响 `REQ-EDIT-003` → `TC-EDIT-005`、`TC-EDIT-010`、新 `TC-EDIT-011`；`TC-CORE-038` 无脚本未跑） | 通过 3/3（`TC-EDIT-010` 与 `TC-EDIT-011` 各首跑失败 1 次，见失败记录） |
 | RUN-092 | 2026-09-20 | 未提交工作树（设计文档 v0.45：聊天模式——`kind=chat` 作业走 Agent SDK 回路 + Quilt MCP，`quilt.get_outline`，输入框动词段控；迁移 `0013`） | AI(Claude Code) | 局部轮（新 `REQ-CORE-023` → 新 `TC-CORE-039`；本机 Claude 订阅通道真实回合，模型 `claude-sonnet-5`） | 通过 1/1（三轮真实回合首跑即过：只问不改 27.1K/0.4K token、跨轮指代改一屏 68.9K/3.0K、画布发问 27.0K/0.2K；证据 `docs/test-runs/run-092-tc-core-039.png`） |
+| RUN-093 | 2026-09-20 | 未提交工作树（设计文档 v0.46：共享组件——`components` / `component_uses` 表与迁移 `0014`、写入时展开 `expandComponents`、`kind=edit_component` 作业、`API-EDIT-004`、MCP `create_component` / `update_component`、画布组件卡与检查器锁） | AI(Claude Code) | 局部轮（新 `REQ-EDIT-006` → 新 `TC-EDIT-012`；`tests/e2e/components.ts`，真实回合走 Gemini 通道 `gemini-3.7-flash`） | 通过 1/1（第一次跑在步骤 1 失败：脚本按「四 tab」断言而 fixture 三屏只有三 tab，修正用例与脚本口径后重跑通过；真实回合 1.1K/0.4K token、同步 3 屏、回执「已更新组件「TabBar」，同步 3 屏：Screen 1、Screen 2、Screen 3」；证据 `docs/test-runs/run-093-tc-edit-012.png`、`run-093-tc-edit-012-canvas.png`） |
 | RUN-090 | 2026-09-19 | 同 RUN-089 工作树（验收反馈：输入框收起后底部不再留「显示输入框」圆钮，安全区底部占位缩到 1rem） | AI(Claude Code) | 局部轮（TC-CORE-023 第 8b~8c 步改为断言底部无浮层、工具栏同一开关双向切换） | 通过 1/1 |
 | RUN-087 | 2026-09-18 | 同 RUN-086 工作树 + 打包脚本修正（`@material/material-color-utilities` 打进 bundle） | AI(Claude Code) | 复测（RUN-086：TC-CORE-031） | 通过 1/1（包 508 KB；冷启动 2017 ms、二次 1009 ms；PGlite 落库、SPA / 预览域 / MCP 就绪） |
 | RUN-086 | 2026-09-18 | 同 RUN-085 工作树 + 打包脚本修正（workspace 包打进 bundle） | AI(Claude Code) | 复测（RUN-085：TC-CORE-031） | 失败 1/1 |

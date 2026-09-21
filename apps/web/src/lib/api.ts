@@ -1,4 +1,4 @@
-import type { AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, LinkDto, ElementOp, AnnotationDto, RunnerOptionDto, AgentSessionDto, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner } from '@quilt/core';
+import type { AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, LinkDto, ElementOp, AnnotationDto, RunnerOptionDto, AgentSessionDto, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto } from '@quilt/core';
 
 // API 客户端：同源 /v1（开发时 Vite 代理 → API；打包后 API 进程自己托管前端），错误统一为 ApiError（RFC 9457 信封）。
 // v0.32 本地版没有登录：所有请求都是默认用户。
@@ -24,6 +24,9 @@ async function call<T>(path: string, init: RequestInit & { idempotencyKey?: stri
   } finally { clearTimeout(timer); }
 }
 
+/** 组件建 / 改的返回：applied = 被同步（确定性回刷）的屏，skipped = 没找到对应元素或正忙而跳过的屏 */
+export type ComponentSyncResult = { component: ComponentDto; applied: string[]; skipped: { screenId: string; name: string; reason: string }[] };
+
 // 运行时配置（API-CORE-028）：启动时取一次，预览域地址随打包 / 开发环境变
 let configPromise: Promise<ConfigDto> | null = null;
 export const loadConfig = () => (configPromise ??= call<ConfigDto>('/v1/config'));
@@ -37,7 +40,8 @@ export const api = {
     messages: (id: string) => call<{ items: MessageDto[]; nextCursor: string | null }>(`/v1/projects/${id}/messages?limit=100`),
     // 动词由目标决定（API-CORE-010）：有 targetScreenIds 是改，没有是造；count / versions / anchor 是造改共用的档位。
     // mode="chat"（REQ-CORE-023）：交给助手定范围，targetScreenIds 只是上下文提示
-    send: (id: string, body: { content: string; mode?: 'chat'; targetScreenIds?: string[]; count?: ScreenCount; versions?: number; anchor?: { x: number; y: number }; runner?: Runner; attachmentIds?: string[] }) =>
+    // targetComponentIds（REQ-EDIT-006）：只有组件没有屏 = 改这个组件；与屏 / 锚点同发 = 它们的完整 HTML 进上下文
+    send: (id: string, body: { content: string; mode?: 'chat'; targetScreenIds?: string[]; targetComponentIds?: string[]; count?: ScreenCount; versions?: number; anchor?: { x: number; y: number }; runner?: Runner; attachmentIds?: string[] }) =>
       call<{ userMessage: MessageDto; assistantMessage: MessageDto; job: JobDto }>(`/v1/projects/${id}/messages`, { method: 'POST', body: JSON.stringify(body), idempotencyKey: crypto.randomUUID() }),
     // 删项目（API-CORE-031）：行级联 + 对象文件清理；有进行中作业时 409 /errors/project-busy
     remove: (id: string) => call<void>(`/v1/projects/${id}`, { method: 'DELETE' }),
@@ -88,6 +92,14 @@ export const api = {
     remove: (presetId: string) => call<void>(`/v1/design-presets/${presetId}`, { method: 'DELETE' }),
     apply: (projectId: string, input: { presetId: string; expectedVersion: number }) =>
       call<{ designSystem: DesignSystemDto; assetsCopied: number; skipped: number }>(`/v1/projects/${projectId}/design-preset`, { method: 'POST', body: JSON.stringify(input) }),
+  },
+  // 共享组件（API-EDIT-004 / REQ-EDIT-006）：从屏里提取或直接给 HTML；改内容 / 改名带 expectedVersion，只挪位置不带
+  components: {
+    create: (projectId: string, body: { name: string; html: string } | { name: string; fromScreenId: string; qid: string; applyToScreens?: boolean }) =>
+      call<ComponentSyncResult>(`/v1/projects/${projectId}/components`, { method: 'POST', body: JSON.stringify(body) }),
+    patch: (id: string, body: { name?: string; html?: string; x?: number; y?: number; expectedVersion?: number }) =>
+      call<ComponentSyncResult>(`/v1/components/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    remove: (id: string) => call<void>(`/v1/components/${id}`, { method: 'DELETE' }),
   },
   designSystem: {
     update: (projectId: string, patch: { seedColor?: string; fontFamily?: string; fontSource?: 'google' | 'system' | 'url'; fontUrl?: string | null; radiusScale?: 'sharp' | 'default' | 'round'; palette?: Palette | null; colorMode?: ColorMode; designMd?: string; conventions?: string[]; expectedVersion: number }) => call<{ designSystem: DesignSystemDto }>(`/v1/projects/${projectId}/design-system`, { method: 'PUT', body: JSON.stringify(patch) }),

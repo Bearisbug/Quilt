@@ -8,7 +8,8 @@ export type PreviewToParent =
   | { type: 'quilt:dead' }
   | { type: 'quilt:wheel'; deltaY: number; x: number; y: number }
     // rect 为屏文档坐标（含滚动偏移），与 fullPage:false 的截图同一坐标系，供画布层画批注气泡（REQ-EDIT-004 / ADR-003）
-  | { type: 'quilt:select'; qid: string; tag: string; text: string; classes: string; href: string | null; rect: { x: number; y: number; w: number; h: number } }
+    // component：元素所在的共享组件名（自身或祖先带 data-component，REQ-EDIT-006），检查器据此挡住直改、给「改组件 / 脱离共享」
+  | { type: 'quilt:select'; qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number } }
     // 父页在热更新后要求按 qid 重选（quilt:reselect），元素已不在时回这个：检查器清空
   | { type: 'quilt:deselect'; qid: string };
 

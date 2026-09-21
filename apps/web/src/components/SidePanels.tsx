@@ -13,7 +13,7 @@ import { PresetsSection } from './PresetsSection';
 const NO_LINK = '__none__';
 export { EmptyState };
 
-const SOURCE_LABEL: Record<string, string> = { generate: '生成', edit: '对话修改', subtree: '局部重生成', manual: '直改', restore: '回溯', apply_ds: '设计系统回刷', agent_ingest: 'agent 推入' };
+const SOURCE_LABEL: Record<string, string> = { generate: '生成', edit: '对话修改', subtree: '局部重生成', manual: '直改', restore: '回溯', apply_ds: '设计系统回刷', agent_ingest: 'agent 推入', component: '共享组件同步' };
 
 // 修订面板（REQ-CORE-007 v0.31）：修订树——同批候选折成一组（未选用的可随时采用），其余按 seq 倒序并标出派生自哪一版。回溯仍是建新修订。
 export function RevisionPanel({ screen, onClose, onRestored }: { screen: ScreenDto; onClose: () => void; onRestored: () => void }) {
@@ -380,17 +380,26 @@ export function ProposalDialog({ proposal, ds, busy, onConfirm, onClose }: {
   );
 }
 
-// 元素检查器（REQ-EDIT-001 / REQ-EDIT-002）：本地直改零 token；AI 只重生成选中子树
-export type ElementSel = { qid: string; tag: string; text: string; classes: string; href: string | null; rect: { x: number; y: number; w: number; h: number } };
+// 元素检查器（REQ-EDIT-001 / REQ-EDIT-002）：本地直改零 token；AI 只重生成选中子树。
+// component（REQ-EDIT-006）：元素所在的共享组件名——在组件里的元素不直改，给「改组件 / 脱离共享」两个出口
+export type ElementSel = { qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number } };
 const SUBTREE_RUNNER_KEY = 'quilt:runner:subtree';
 const SUBTREE_SESSION_KEY = 'quilt:agent-session:subtree';
-export function InspectorPanel({ screen, sel, routes, busy, runners, composerRunnerId, sessions, onSessionsOpen, workingQids, onClose, onEdited, onRegenerate }: { screen: ScreenDto; sel: ElementSel | null; routes: string[]; busy: boolean; runners: RunnerOptionDto[]; composerRunnerId: string; sessions: AgentSessionDto[] | null; onSessionsOpen: () => void; workingQids: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean> }) {
+// 「记为共享组件」的默认名：按元素标签给个常见叫法，用户可改
+const COMPONENT_NAME_BY_TAG: Record<string, string> = { nav: 'TabBar', header: 'AppBar', aside: 'Sidebar', footer: 'Footer' };
+export function InspectorPanel({ screen, sel, routes, busy, runners, composerRunnerId, sessions, onSessionsOpen, workingQids, onClose, onEdited, onRegenerate, onEditComponent }: { screen: ScreenDto; sel: ElementSel | null; routes: string[]; busy: boolean; runners: RunnerOptionDto[]; composerRunnerId: string; sessions: AgentSessionDto[] | null; onSessionsOpen: () => void; workingQids: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent: (name: string) => void }) {
   const toast = useToast();
   const [text, setText] = useState('');
   const [classes, setClasses] = useState('');
   const [link, setLink] = useState('');
   const [prompt, setPrompt] = useState('');
   const [saving, setSaving] = useState(false);
+  // 记为共享组件（REQ-EDIT-006）：内联表单，名字 + 要不要同步替换其他屏里对应的元素
+  const [making, setMaking] = useState(false);
+  const [compName, setCompName] = useState('');
+  const [compApply, setCompApply] = useState(true);
+  const [compError, setCompError] = useState<string | null>(null);
+  const [compBusy, setCompBusy] = useState(false);
   // 子树重生成的通道（REQ-EDIT-002）：与输入框同一套选择器，但记忆独立——局部改动常只要更快的模型；第一次沿用输入框当前通道（INT-007 / INT-021）
   const [runnerPick, setRunnerPick] = useState(() => { try { return localStorage.getItem(SUBTREE_RUNNER_KEY) ?? ''; } catch { return ''; } });
   const [sessionId, setSessionId] = useState(() => { try { return localStorage.getItem(SUBTREE_SESSION_KEY) ?? ''; } catch { return ''; } });
@@ -410,25 +419,57 @@ export function InspectorPanel({ screen, sel, routes, busy, runners, composerRun
   const working = !!sel && workingQids.includes(sel.qid);
   const canRegenerate = !!sel && !!prompt.trim() && !busy && sessionOk && !working;
   const regenerate = async () => { if (sel && canRegenerate && (await onRegenerate(sel.qid, prompt.trim(), runner))) setPrompt(''); };
-  useEffect(() => { setText(sel?.text ?? ''); setClasses(sel?.classes ?? ''); setLink(sel?.href ?? ''); setPrompt(''); }, [sel?.qid, sel?.text, sel?.classes, sel?.href]);
+  useEffect(() => { setText(sel?.text ?? ''); setClasses(sel?.classes ?? ''); setLink(sel?.href ?? ''); setPrompt(''); setMaking(false); setCompError(null); }, [sel?.qid, sel?.text, sel?.classes, sel?.href]);
   // 当前指向的路由若不在项目里（断链）也要能显示出来
   const linkOptions = link && !routes.includes(link) ? [link, ...routes] : routes;
 
-  const apply = async (ops: Parameters<typeof api.screens.editElement>[2]) => {
+  const apply = async (ops: Parameters<typeof api.screens.editElement>[2], okText = '已更新，截图稍后刷新') => {
     if (!sel || !screen.currentRevisionId) return;
     setSaving(true);
-    try { await api.screens.editElement(screen.id, sel.qid, ops, screen.currentRevisionId); toast('已更新，截图稍后刷新'); onEdited(sel.qid); }
+    try { await api.screens.editElement(screen.id, sel.qid, ops, screen.currentRevisionId); toast(okText); onEdited(sel.qid); }
     catch (e) {
       if (e instanceof ApiError && e.type === '/errors/lint-failed') toast('改动违反设计契约（只能用 token 色与预设类）', 'error');
       else if (e instanceof ApiError && e.type === '/errors/revision-conflict') toast('屏幕已被更新，请重新选择', 'error');
       else if (e instanceof ApiError && e.type === '/errors/screen-busy') toast('该屏正在生成中', 'error');
+      // 选中时还不在组件里、保存时已经在了（别处刚把它记成了组件）：服务端兜底 409
+      else if (e instanceof ApiError && e.type === '/errors/component-locked') toast('这个元素属于共享组件，改组件或先脱离共享', 'error');
       else toast('保存失败', 'error');
     } finally { setSaving(false); }
+  };
+  const makeComponent = async () => {
+    if (!sel) return;
+    const name = compName.trim();
+    if (!name) { setCompError('给组件起个名字'); return; }
+    setCompBusy(true); setCompError(null);
+    try {
+      const r = await api.components.create(screen.projectId, { name, fromScreenId: screen.id, qid: sel.qid, applyToScreens: compApply });
+      toast(`已记为组件「${name}」，同步 ${r.applied.length} 屏${r.skipped.length ? `；${r.skipped.length} 屏没找到对应元素` : ''}`);
+      setMaking(false);
+      onEdited(sel.qid);
+    } catch (e) {
+      if (e instanceof ApiError && e.type === '/errors/component-name-taken') setCompError('这个名字已被占用');
+      else if (e instanceof ApiError && e.type === '/errors/screen-busy') setCompError('该屏正在生成中，等它完成再记');
+      else if (e instanceof ApiError && e.status === 400) setCompError((e.problem.errors as { message?: string }[] | undefined)?.[0]?.message ?? e.problem.title);
+      else setCompError(e instanceof ApiError ? e.problem.title : '记为组件失败');
+    } finally { setCompBusy(false); }
   };
 
   return (
     <Panel title={`检查器 · ${screen.name}`} className="h-full" actions={<Button size="sm" onClick={onClose}>关闭</Button>}>
-      {!sel ? <EmptyState title="在屏幕里点选一个元素" hint="选择模式下移动鼠标会高亮元素，点击即选中；Esc 退出交互。" /> : (
+      {!sel ? <EmptyState title="在屏幕里点选一个元素" hint="选择模式下移动鼠标会高亮元素，点击即选中；Esc 退出交互。" /> : sel.component ? (
+        // 共享组件实例里的元素（REQ-EDIT-006）：直改会在下一次写入时被组件展开顶掉，所以不给字段，只给两个出口
+        <div className="scroll flex-1 space-y-4 p-3">
+          <div className="text-xs text-muted">&lt;{sel.tag}&gt; · {sel.qid}</div>
+          <div className="space-y-2 rounded-md border border-line bg-panel-2 p-3 text-xs" data-testid="el-component-lock" data-component={sel.component}>
+            <p className="leading-cn">这是共享组件「<b className="text-fg">{sel.component}</b>」的一部分——改它会同步到所有用它的屏。</p>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="primary" data-testid="el-edit-component" onClick={() => onEditComponent(sel.component!)}>改组件</Button>
+              <Button size="sm" data-testid="el-detach" pending={saving} disabled={busy} onClick={() => apply([{ type: 'detach' }], '已脱离共享，这一屏的这份归屏自己管')}>脱离共享</Button>
+            </div>
+            <p className="text-muted">脱离后这一屏里的这份不再跟着组件变，可以单独直改。</p>
+          </div>
+        </div>
+      ) : (
         <div className="scroll flex-1 space-y-4 p-3">
           <div className="text-xs text-muted">&lt;{sel.tag}&gt; · {sel.qid}</div>
           <div className="space-y-1.5">
@@ -447,6 +488,31 @@ export function InspectorPanel({ screen, sel, routes, busy, runners, composerRun
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="primary" pending={saving} onClick={() => { const ops: Parameters<typeof apply>[0] = []; if (text !== sel.text) ops.push({ type: 'text', value: text }); if (classes !== sel.classes) ops.push({ type: 'classes', value: classes }); if (link !== (sel.href ?? '')) ops.push({ type: 'link', value: link || null }); if (ops.length) apply(ops); else toast('没有改动'); }}>保存（零 token）</Button>
             <Button size="sm" variant="danger" pending={saving} onClick={() => apply([{ type: 'remove' }])}>删除元素</Button>
+          </div>
+          {/* 记为共享组件（REQ-EDIT-006）：把这个元素存成项目级组件，其他屏里对应的元素（同标签、同层级）可一并换成它 */}
+          <div className="space-y-1.5 border-t border-line pt-3">
+            <div className="text-xs font-medium text-muted">记为共享组件</div>
+            {!making ? (
+              <>
+                <p className="text-[11px] text-muted">存成项目级组件后，别的屏引用它、改一次全部同步。适合导航栏、页头这类每屏都一样的块。</p>
+                <Button size="sm" data-testid="el-make-component" disabled={busy} onClick={() => { setMaking(true); setCompName(COMPONENT_NAME_BY_TAG[sel.tag] ?? 'Component'); setCompError(null); }}>记为共享组件…</Button>
+              </>
+            ) : (
+              <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); void makeComponent(); }}>
+                <label htmlFor="comp-name" className="block text-xs text-muted">组件名</label>
+                <Input id="comp-name" data-testid="comp-name" value={compName} onChange={(e) => { setCompName(e.target.value); setCompError(null); }} placeholder="例如 TabBar" autoFocus autoComplete="off" spellCheck={false} maxLength={40}
+                  aria-invalid={!!compError} aria-describedby={compError ? 'comp-name-error' : undefined} />
+                <label className="flex items-start gap-2 text-xs">
+                  <input type="checkbox" data-testid="comp-apply" checked={compApply} onChange={(e) => setCompApply(e.target.checked)} className="mt-0.5 size-3.5 accent-accent" />
+                  <span className="leading-cn">同时替换其他屏里对应的元素（同标签、同层级）</span>
+                </label>
+                {compError && <p id="comp-name-error" role="alert" className="text-xs text-danger">{compError}</p>}
+                <div className="flex gap-2">
+                  <Button size="sm" variant="primary" type="submit" data-testid="comp-create" pending={compBusy} disabled={!compName.trim() || busy}>记为组件</Button>
+                  <Button size="sm" onClick={() => setMaking(false)}>取消</Button>
+                </div>
+              </form>
+            )}
           </div>
           <div className="space-y-1.5 border-t border-line pt-3">
             <label htmlFor="el-prompt" className="block text-xs font-medium text-muted">用 AI 重生成这块</label>
@@ -482,6 +548,8 @@ export function AnnotationPanel({ screen, sel, items, busy, onClose, onAdd, onUp
   const [pending, setPending] = useState(false);
   useEffect(() => { setDraft(''); }, [sel?.qid]);
   const open = items.filter((a) => a.status === 'open');
+  // 共享组件里的元素不批注（REQ-EDIT-006）：批注发出去是改屏，改屏动不了组件展开的那一块
+  const locked = sel?.component ?? null;
 
   const run = async (fn: () => Promise<void>) => { setPending(true); try { await fn(); } finally { setPending(false); } };
 
@@ -492,13 +560,14 @@ export function AnnotationPanel({ screen, sel, items, busy, onClose, onAdd, onUp
           <label htmlFor="anno-note" className="block text-xs font-medium text-muted" data-testid="anno-target" data-qid={sel?.qid ?? ''}>
             {sel ? <>给 <code className="text-fg">&lt;{sel.tag}&gt;{sel.text ? ` 「${sel.text.slice(0, 20)}」` : ''}</code> 写一条改动说明</> : '在屏幕里点选一个元素，再写改动说明'}
           </label>
-          <textarea id="anno-note" value={draft} onChange={(e) => setDraft(e.target.value)} rows={3} disabled={!sel}
+          {locked && <p className="rounded-md border border-line bg-panel-2 px-2 py-1.5 text-xs leading-cn" data-testid="anno-component-lock">这个元素属于共享组件「<b className="text-fg">{locked}</b>」，批注请改组件本身（选中画布上的组件卡后在输入框里说）。</p>}
+          <textarea id="anno-note" value={draft} onChange={(e) => setDraft(e.target.value)} rows={3} disabled={!sel || !!locked}
             className="w-full resize-none rounded-md border border-line bg-canvas p-2 text-sm text-fg placeholder:text-muted disabled:opacity-50"
-            placeholder={sel ? '例如：这个按钮改成次要样式，文案换成「稍后再说」' : ''} />
+            placeholder={sel && !locked ? '例如：这个按钮改成次要样式，文案换成「稍后再说」' : ''} />
           <div className="flex gap-2">
-            <Button size="sm" disabled={!sel || !draft.trim() || pending} pending={pending}
+            <Button size="sm" disabled={!sel || !!locked || !draft.trim() || pending} pending={pending}
               onClick={() => run(async () => { await onAdd(draft.trim()); setDraft(''); })}>记下（不发送）</Button>
-            <Button size="sm" variant="primary" disabled={!sel || !draft.trim() || pending || busy}
+            <Button size="sm" variant="primary" disabled={!sel || !!locked || !draft.trim() || pending || busy}
               onClick={() => run(async () => { await onAdd(draft.trim()); setDraft(''); await onSend([]); })}>记下并立刻发送</Button>
           </div>
         </div>
