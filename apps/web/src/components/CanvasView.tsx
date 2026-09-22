@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { XYPanZoom, PanOnScrollMode, getViewportForBounds, type PanZoomInstance, type Viewport } from '@xyflow/system';
 import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type AnnotationDto, type ComponentDto } from '@quilt/core';
 import { StyleGuideCard, STYLE_GUIDE_SIZE, styleGuideSize } from './StyleGuideCard';
@@ -28,10 +28,10 @@ export type CanvasProps = {
   components: ComponentDto[];
   selectedComponentIds: string[];
   onSelectComponent: (id: string, additive: boolean) => void;
-  onMoveComponent: (id: string, x: number, y: number) => void;
   onSelectStyleGuide: () => void;
   onFocus: (id: string | null) => void;
-  onMove: (id: string, x: number, y: number) => void;
+  /** 松手落库：拖动集合里的屏与组件一次交回（多选批量移动时是整组） */
+  onMove: (screens: { id: string; x: number; y: number }[], components: { id: string; x: number; y: number }[]) => void;
   onNavigateMissing: (fromScreenId: string, href: string) => void;
   onDanglingClick: (screenId: string, hrefs: string[]) => void;
   onDeadLink: () => void;
@@ -64,6 +64,11 @@ export type CanvasProps = {
   annotations: AnnotationDto[];
   onAnnotationClick: (id: string) => void;
   onStat?: (s: { zoom: number }) => void;
+  /** 视图位置按项目记（quilt:view:<projectId>），刷新回到原处 */
+  projectId: string;
+  /** 正在交互的共享组件卡（REQ-EDIT-006）：与屏的聚焦互斥，但不动镜头 */
+  focusedComponentId?: string | null;
+  onFocusComponent?: (id: string | null) => void;
   /** 未被浮层遮住的那块画布：适配视图与聚焦都以它为准，否则内容会被推到对话面板/工具栏底下 */
   safeAreaRef?: { current: HTMLElement | null };
   registerApi?: (api: { fitView: () => void; goBack: () => void; highlight: (qid: string | null) => void; focus: (id: string) => void; resetToOwn: () => void; createAtCenter: () => void; markDone: (qids: string[]) => void }) => void;
@@ -72,6 +77,16 @@ export type CanvasProps = {
 };
 
 const STYLE_GUIDE_POS = { x: -(STYLE_GUIDE_SIZE.w + 80), y: 0 };
+// 存下来的镜头要按当前数据校验再用（INT-019）：缩放超出 panzoom 的 [0.1, 2] 或存进去的是 NaN / 旧格式，
+// 一律当没存过回默认，别把画布恢复成一片空白或卡在够不着的倍率上。
+function readView(key: string): Viewport | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) ?? 'null') as Viewport | null;
+    if (!v || ![v.x, v.y, v.zoom].every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
+    return v.zoom >= 0.1 && v.zoom <= 2 ? v : null;
+  } catch { return null; }
+}
+const omit = <T,>(m: Record<string, T>, ids: string[]) => { const rest = { ...m }; for (const id of ids) delete rest[id]; return rest; };
 
 // 无限画布（ADR-002 / ADR-006）：截图卡片 + 单聚焦活 iframe；世界层 transform 由 @xyflow/system 驱动。
 export function CanvasView(p: CanvasProps) {
@@ -79,7 +94,17 @@ export function CanvasView(p: CanvasProps) {
   const worldRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const panZoom = useRef<PanZoomInstance | null>(null);
-  const vp = useRef<Viewport>({ x: 80, y: 80, zoom: 0.5 });
+  // 平移缩放是用户手摆出来的视图偏好，按项目存、跨会话留（INT-019）。惰性初值读一次，**首帧就是终值**——
+  // 用 useEffect 补会先画一帧初始位置再跳过去，用户看到的就是「刷新一次镜头自己动一下」（INT-021）。
+  const viewKey = `quilt:view:${p.projectId}`;
+  const viewKeyRef = useRef(viewKey);
+  viewKeyRef.current = viewKey;
+  const [savedView] = useState<Viewport | null>(() => readView(viewKey));
+  const vp = useRef<Viewport>(savedView ?? { x: 80, y: 80, zoom: 0.5 });
+  const [initialWorldStyle] = useState<CSSProperties>(() => ({
+    transform: `translate(${vp.current.x}px, ${vp.current.y}px) scale(${vp.current.zoom})`,
+    ['--zoom' as string]: String(vp.current.zoom),
+  }));
   const spaceDown = useRef(false);
   // 空格按住 = 平移就绪：只有这时指针才是抓手；平时是箭头（空白处按下是框选，不是拖画布）
   const [panReady, setPanReady] = useState(false);
@@ -144,11 +169,30 @@ export function CanvasView(p: CanvasProps) {
     return { d: `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`, mx: (x1 + x2) / 2, my: (y1 + y2) / 2 };
   };
 
+  // 落盘防抖 300 ms：平移缩放每帧都在变，逐帧写存储会把拖拽拖掉帧（INT-021）。无痕模式写不了就算了，
+  // 退化成只本次会话有效，不能让存储异常打断渲染。
+  const saveTimer = useRef<number | null>(null);
   const applyTransform = useCallback((v: Viewport) => {
     vp.current = v;
     if (worldRef.current) { worldRef.current.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`; worldRef.current.style.setProperty('--zoom', String(v.zoom)); }
     propsRef.current.onStat?.({ zoom: v.zoom });
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      try { localStorage.setItem(viewKeyRef.current, JSON.stringify(vp.current)); } catch { /* 无痕模式写不了 */ }
+    }, 300);
   }, []);
+  // 防抖窗口里离开就把这一段丢了：触控板惯性滚动能持续几百毫秒，松手立刻刷新 / 切项目，
+  // 丢的不是最后一点而是整段平移（起点还是上一次落盘的位置）。卸载与 pagehide 都补写一次。
+  const flushView = useCallback(() => {
+    if (!saveTimer.current) return;
+    clearTimeout(saveTimer.current); saveTimer.current = null;
+    try { localStorage.setItem(viewKeyRef.current, JSON.stringify(vp.current)); } catch { /* 无痕模式写不了 */ }
+  }, []);
+  useEffect(() => {
+    // pagehide 而不是 beforeunload：后者在移动端与 bfcache 下不保证触发，前者是 Safari/Chrome 都认的那一个
+    window.addEventListener('pagehide', flushView);
+    return () => { window.removeEventListener('pagehide', flushView); flushView(); };
+  }, [flushView]);
 
   const updatePanZoom = useCallback(() => {
     panZoom.current?.update({
@@ -215,8 +259,10 @@ export function CanvasView(p: CanvasProps) {
   // 两次一次性适配，都延后到下一 tick（挂载同 tick 内的 setViewport 会被 d3-zoom 初始化打断，M0 实证）：
   // ① 挂载即适配，否则空项目的风格指南卡片停在世界坐标负半轴、被挤出视口左缘够不着；
   // ② 首批屏幕到达后再适配一次。
-  useEffect(() => { const t = setTimeout(() => fitViewRef.current(), 0); return () => clearTimeout(t); }, []);
-  useEffect(() => { if (!fitOnce.current && p.screens.length) { fitOnce.current = true; setTimeout(() => fitViewRef.current(), 0); } }, [p.screens.length]);
+  // **这个项目存过镜头就一次都不做**：适配是带 300 ms 动画的，做了就等于当着用户的面把镜头从他离开的位置
+  // 推走再推回来。想重新适配有工具栏的「适配视图」（F）——那是 INT-019 要求的重置入口。
+  useEffect(() => { if (savedView) return; const t = setTimeout(() => fitViewRef.current(), 0); return () => clearTimeout(t); }, [savedView]);
+  useEffect(() => { if (savedView || fitOnce.current || !p.screens.length) return; fitOnce.current = true; setTimeout(() => fitViewRef.current(), 0); }, [p.screens.length, savedView]);
 
   // 聚焦：镜头推到该屏 1:1 居中；清空选区（M0 实证）
   const focusCard = useCallback((id: string) => {
@@ -276,6 +322,25 @@ export function CanvasView(p: CanvasProps) {
 
   // 选择元素模式随 props 与 iframe 就绪同步到运行时
   useEffect(() => { if (iframeReady) postToPreview({ type: 'quilt:mode', mode: p.inspectMode ? 'inspect' : 'interact' }); }, [p.inspectMode, iframeReady, postToPreview]);
+  // 组件卡同理（v0.57）：它跑的是同一套运行时，选择元素模式要单独发给它那个 iframe。
+  // 组件 HTML 落库前已重编 qid（classifyComponentHtml），所以里面的元素定位得到。
+  // **离开时必须显式打回 interact**：屏退出聚焦会把 iframe 卸载、什么都不留，而组件卡的 iframe 是常驻的——
+  // 不发这一条，它就停在选择元素模式，选中框与「tag · qid」标签留在卡片上、指针命中规则也还被解除着。
+  const prevCompFocus = useRef<string | null>(null);
+  useEffect(() => {
+    const now = p.focusedComponentId ?? null;
+    const prev = prevCompFocus.current;
+    prevCompFocus.current = now;
+    const post = (id: string, mode: 'inspect' | 'interact') =>
+      compFrames.current.get(id)?.contentWindow?.postMessage({ type: 'quilt:mode', mode } as ParentToPreview, propsRef.current.previewOrigin);
+    if (prev && prev !== now) post(prev, 'interact');
+    if (!now) return;
+    const mode = p.inspectMode ? 'inspect' : 'interact';
+    post(now, mode);
+    // iframe 可能还没 ready（切模式与聚焦常在同一帧），补发一次
+    const t = setTimeout(() => post(now, mode), 300);
+    return () => clearTimeout(t);
+  }, [p.focusedComponentId, p.inspectMode]);
 
   // 聚焦态热更新（REQ-CORE-005 v0.33）：src 钉住后新修订不会自己进来，由这里显式送——iframe 里正显示的那一屏
   //（导航栈顶，没跳转过就是卡片自己）换了 currentRevisionId，就取新 HTML swap 进同一个文档：不重挂、不丢导航栈，
@@ -346,6 +411,29 @@ export function CanvasView(p: CanvasProps) {
       // 不接这条 Esc 它就是死键；格子的其余消息仍由下面那道守卫拦掉
       if (p.candidateStack && e.origin === p.previewOrigin && e.source !== iframeRef.current?.contentWindow
         && isPreviewMessage(e.data) && e.data.type === 'quilt:key' && e.data.key === 'Escape') { collapseCandidates(); return; }
+      // 交互 / 选择元素态的组件卡（v0.55 / v0.57）：焦点在组件 iframe 内时父页 window 收不到键盘，
+      // Esc 靠运行时转发；选中元素同样由它上报，父页据此开检查器。组件没有路由，navigate / dead
+      // 一类对它没有意义（组件里的链接在运行时侧已做成惰性），所以只接这三条。
+      if (p.focusedComponentId && e.origin === p.previewOrigin && isPreviewMessage(e.data)
+        && compFrames.current.get(p.focusedComponentId)?.contentWindow === e.source) {
+        const m = e.data;
+        // 组件版本一升，previewUrl 的 ?v= 就变、iframe 重新导航，新文档里运行时是初始的 interact——
+        // 而同步模式那个 effect 的依赖（focusedComponentId / inspectMode）都没变，不会重跑。
+        // 所以这里接住新文档的 ready，把当前模式补发一次；不接的话「改完一个元素就得退出重进」。
+        if (m.type === 'quilt:ready') {
+          e.source?.postMessage({ type: 'quilt:mode', mode: p.inspectMode ? 'inspect' : 'interact' } as ParentToPreview, p.previewOrigin);
+          return;
+        }
+        if (m.type === 'quilt:key') {
+          if (m.key === 'Escape') { p.onFocusComponent?.(null); return; }
+          // ⌘E / ⌘/ 同屏一样转发给父页的键位表：不转发的话焦点一落进组件 iframe，按 ⌘E 就是死键——
+          // 模式退不掉，选中框与「tag · qid」标签留在卡片上（组件卡的 iframe 常驻，不像屏那样退出即卸载）
+          if ((m.metaKey || m.ctrlKey) && m.code) { p.onShortcut?.(m.code); return; }
+          return;
+        }
+        if (m.type === 'quilt:select') { p.onElementSelect({ qid: m.qid, tag: m.tag, text: m.text, classes: m.classes, href: m.href ?? null, component: m.component ?? null, rect: m.rect }); return; }
+        if (m.type === 'quilt:deselect') { p.onElementSelect(null); return; }
+      }
       // 只认聚焦 iframe 发来的：候选展开层里的活 iframe（REQ-CORE-015）也跑同一套运行时，它们的 ready / navigate / key 不能动聚焦态
       if (e.origin !== p.previewOrigin || !focused || e.source !== iframeRef.current?.contentWindow || !isPreviewMessage(e.data)) return;
       const msg = e.data;
@@ -382,7 +470,7 @@ export function CanvasView(p: CanvasProps) {
     const down = (e: KeyboardEvent) => {
       const typing = (e.target as HTMLElement)?.closest('input, textarea, [contenteditable]');
       if (e.code === 'Space' && !e.repeat && !typing) { spaceDown.current = true; setPanReady(true); updatePanZoom(); e.preventDefault(); }
-      if (e.key === 'Escape') { p.onFocus(null); }
+      if (e.key === 'Escape') { p.onFocus(null); p.onFocusComponent?.(null); }
       if (e.altKey && e.key === 'ArrowLeft' && !typing) { e.preventDefault(); goBack(); }
     };
     const up = (e: KeyboardEvent) => { if (e.code === 'Space') { spaceDown.current = false; setPanReady(false); updatePanZoom(); } };
@@ -451,14 +539,27 @@ export function CanvasView(p: CanvasProps) {
     propsRef.current.onAnchor({ x: Math.round((e.clientX - nr.left - v.x) / v.zoom), y: Math.round((e.clientY - nr.top - v.y) / v.zoom) });
   };
 
-  // 卡片拖拽（MOTION-017/028）：Pointer capture、10px 迟滞、buttons===0 兜底、松手才持久化（INT-019）
-  const onCardPointerDown = (e: ReactPointerEvent, s: ScreenDto) => {
+  // 卡片拖拽（MOTION-017/028）：Pointer capture、10px 迟滞、buttons===0 兜底、松手才持久化（INT-019）。屏卡片与组件卡同一套手势纪律。
+  // 多选批量移动（v0.47）：拖动集合按「按下的卡片在不在选中集合里」定——在则选中的屏与组件整组一起走，不在只拖它自己。
+  // 所以按在已选中的卡片上不能一按就换选择（那会把整组收成一张、组拖不起来），松手没拖过才收成只选它；Shift / ⌘ 仍是按下即加选 / 去选。
+  const startDrag = (e: ReactPointerEvent, kind: 'screen' | 'component', id: string) => {
     if (e.button !== 0) return;
     e.stopPropagation();
-    p.onSelect(s.id, e.shiftKey || e.metaKey || e.ctrlKey);
+    const cur = propsRef.current;
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    const wasSelected = (kind === 'screen' ? cur.selectedIds : cur.selectedComponentIds).includes(id);
+    const select = (add: boolean) => (kind === 'screen' ? cur.onSelect(id, add) : cur.onSelectComponent(id, add));
+    if (additive || !wasSelected) select(additive);
+    const group = additive ? !wasSelected : wasSelected;   // 按下之后它还在选中集合里 → 带上整组
+    const screenIds = new Set(group ? cur.selectedIds : []);
+    const compIds = new Set(group ? cur.selectedComponentIds : []);
+    (kind === 'screen' ? screenIds : compIds).add(id);
+    const screens = cur.screens.filter((s) => screenIds.has(s.id)).map((s) => ({ id: s.id, ...pos(s) }));
+    const comps = cur.components.filter((c) => compIds.has(c.id)).map((c) => ({ id: c.id, ...compPos(c) }));
     const start = { x: e.clientX, y: e.clientY };
-    const origin = pos(s);
     let moved = false;
+    let offset = { x: 0, y: 0 };   // 整组同一个整数世界位移，相对位置逐像素保持
+    const shifted = (list: { id: string; x: number; y: number }[]) => list.map((o) => ({ id: o.id, x: o.x + offset.x, y: o.y + offset.y }));
     const el = e.currentTarget as HTMLElement;
     el.setPointerCapture(e.pointerId);
     const move = (ev: PointerEvent) => {
@@ -468,50 +569,32 @@ export function CanvasView(p: CanvasProps) {
       if (!moved && Math.hypot(dx, dy) < 10) return;
       moved = true;
       const z = vp.current.zoom;
-      setDragPos((m) => ({ ...m, [s.id]: { x: Math.round(origin.x + dx / z), y: Math.round(origin.y + dy / z) } }));
+      offset = { x: Math.round(dx / z), y: Math.round(dy / z) };
+      setDragPos((m) => ({ ...m, ...Object.fromEntries(shifted(screens).map((o) => [o.id, { x: o.x, y: o.y }])) }));
+      if (comps.length) setCompDrag((m) => ({ ...m, ...Object.fromEntries(shifted(comps).map((o) => [o.id, { x: o.x, y: o.y }])) }));
     };
     const finish = (ev: PointerEvent) => {
       if (ev.pointerId !== e.pointerId) return;
       el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', finish); el.removeEventListener('pointercancel', finish);
       if (moved) {
-        setDragPos((m) => { const q = m[s.id]; if (q) p.onMove(s.id, q.x, q.y); const { [s.id]: _drop, ...rest } = m; void _drop; return rest; });
-      } else if (propsRef.current.armed && !propsRef.current.focusedId) {
-        focusCardRef.current(s.id);  // 模式已开：单击哪一屏就进哪一屏
+        // 先把终点交给父页写进详情，再撤掉本地覆盖：同一个事件里的两次 setState 合成一帧，不会闪回旧位置（MOTION-026）
+        propsRef.current.onMove(shifted(screens), shifted(comps));
+        setDragPos((m) => omit(m, screens.map((o) => o.id)));
+        if (comps.length) setCompDrag((m) => omit(m, comps.map((o) => o.id)));
+      } else if (kind === 'screen' && propsRef.current.armed && !propsRef.current.focusedId) {
+        focusCardRef.current(id);  // 模式已开：单击哪一屏就进哪一屏
+      } else if (!additive && wasSelected) {
+        select(false);  // 按在已选中的卡片上、没拖过：收成只选它
       }
-    };
-    el.addEventListener('pointermove', move); el.addEventListener('pointerup', finish); el.addEventListener('pointercancel', finish);
-  };
-  // 组件卡的拖拽 / 选中：与屏卡片同一套手势纪律；双击不进屏（组件没有交互态）
-  const onCompPointerDown = (e: ReactPointerEvent, c: ComponentDto) => {
-    if (e.button !== 0) return;
-    e.stopPropagation();
-    p.onSelectComponent(c.id, e.shiftKey || e.metaKey || e.ctrlKey);
-    const start = { x: e.clientX, y: e.clientY };
-    const origin = compPos(c);
-    let moved = false;
-    const el = e.currentTarget as HTMLElement;
-    el.setPointerCapture(e.pointerId);
-    const move = (ev: PointerEvent) => {
-      if (ev.pointerId !== e.pointerId) return;
-      if (ev.buttons === 0) { finish(ev); return; }
-      const dx = ev.clientX - start.x; const dy = ev.clientY - start.y;
-      if (!moved && Math.hypot(dx, dy) < 10) return;
-      moved = true;
-      const z = vp.current.zoom;
-      setCompDrag((m) => ({ ...m, [c.id]: { x: Math.round(origin.x + dx / z), y: Math.round(origin.y + dy / z) } }));
-    };
-    const finish = (ev: PointerEvent) => {
-      if (ev.pointerId !== e.pointerId) return;
-      el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', finish); el.removeEventListener('pointercancel', finish);
-      if (!moved) return;
-      setCompDrag((m) => { const q = m[c.id]; if (q) p.onMoveComponent(c.id, q.x, q.y); const { [c.id]: _drop, ...rest } = m; void _drop; return rest; });
     };
     el.addEventListener('pointermove', move); el.addEventListener('pointerup', finish); el.addEventListener('pointercancel', finish);
   };
 
   return (
     <div ref={viewportRef} className={`viewport${panReady ? ' pan-ready' : ''}${dragging ? ' dragging' : ''}${p.armed && !p.focusedId ? ' armed' : ''}`} onPointerDown={onViewportPointerDown} onDoubleClick={onViewportDoubleClick} data-testid="canvas">
-      <div ref={worldRef} className="world">
+      {/* 首帧的 transform 写在这里，不等 panzoom 的 effect：effect 跑在绘制之后，画布会先按未变换的原点画一帧。
+          值取自惰性初值、之后不再变（后续变换由 applyTransform 直接改 style），React 不会回头覆盖它 */}
+      <div ref={worldRef} className="world" style={initialWorldStyle}>
         {p.showLinks && edges.length > 0 && (
           <svg className="edges" width={1} height={1} aria-hidden="true" data-testid="link-edges">
             <defs><marker id="edge-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker></defs>
@@ -569,7 +652,7 @@ export function CanvasView(p: CanvasProps) {
               )}
               {/* 同一张卡同时有未结清候选时错开一行：两者右上同位、同底色同尺寸，叠在一起会把角标整块盖住 */}
               {!isFocused && working && <span className={`working${s.pendingCandidates ? ' below' : ''}`} data-testid="card-working">局部修改中…</span>}
-              {!isFocused && <div className="gesture nopan" onPointerDown={(ev) => onCardPointerDown(ev, s)} onDoubleClick={(ev) => { ev.stopPropagation(); focusCard(s.id); }} />}
+              {!isFocused && <div className="gesture nopan" onPointerDown={(ev) => startDrag(ev, 'screen', s.id)} onDoubleClick={(ev) => { ev.stopPropagation(); focusCard(s.id); }} />}
               {isFocused && <div className="badge">{!iframeReady ? '加载中' : p.annotateMode ? '批注中' : p.inspectMode ? '选择元素中' : '交互中'} · {p.navStack.length ? p.navStack[p.navStack.length - 1] : s.route}{iframeReady ? (p.inspectMode ? ' · 点屏里的元素' : ` · 选元素按 ${INSPECT_KEY}`) : ''}</div>}
               {annoByScreen.get(s.id)?.map((a, i) => {
                 const clamped = a.rect.y + a.rect.h / 2 > s.height - 12;
@@ -607,15 +690,22 @@ export function CanvasView(p: CanvasProps) {
             iframe 与聚焦屏同样带 allow-same-origin：尺寸上报要按 origin 认，纯 allow-scripts 的沙箱 origin 是 "null" 对不上 */}
         {p.components.map((c) => {
           const q = compPos(c); const box = compBox(c);
+          const compFocused = p.focusedComponentId;
           const selected = marquee ? compHitSet.has(c.id) || (marquee.additive && selectedCompSet.has(c.id)) : selectedCompSet.has(c.id);
           return (
-            <div key={c.id} data-testid="component-card" data-name={c.name} className={`comp${selected ? ' selected' : ''}${compDrag[c.id] ? ' dragging' : ''}`} style={{ width: box.w, height: box.h, transform: `translate(${q.x}px, ${q.y}px)` }}>
+            <div key={c.id} data-testid="component-card" data-name={c.name} className={`comp${selected ? ' selected' : ''}${compFocused === c.id ? ' focused' : ''}${compDrag[c.id] ? ' dragging' : ''}`} style={{ width: box.w, height: box.h, transform: `translate(${q.x}px, ${q.y}px)` }}>
               <div className="label"><b>{c.name}</b> · 用于 {c.usedBy.length} 屏</div>
               <iframe
                 ref={(el) => { if (el) compFrames.current.set(c.id, el); else compFrames.current.delete(c.id); }}
                 className="nowheel nopan" src={c.previewUrl} title={c.name} sandbox="allow-scripts allow-same-origin"
               />
-              <div className="gesture nopan" onPointerDown={(ev) => onCompPointerDown(ev, c)} onDoubleClick={(ev) => ev.stopPropagation()} />
+              {/* 交互态（与屏一致：双击进、Esc 出）。这层手势罩摘掉，指针才落得到 iframe 上；
+                  **镜头不动**——组件卡是按自身内容尺寸渲染的、本来就是 1:1，没有屏那种「推到 1:1 居中」的理由，
+                  为看一眼组件把整块画布推走反而丢了上下文（屏那条见 REQ-CORE-005） */}
+              {compFocused !== c.id && <div className="gesture nopan" onPointerDown={(ev) => startDrag(ev, 'component', c.id)} onDoubleClick={(ev) => { ev.stopPropagation(); p.onFocusComponent?.(c.id); }} />}
+              {/* 交互态只用一个呼吸绿点：组件名已经写在卡片标签上，角标再重复一遍就是拿走卡片右上一整条。
+                  不是纯靠颜色表态——名字给了读屏，卡片本身还有强调色外框（A11Y-001） */}
+              {compFocused === c.id && <span className="live-dot" role="status" aria-label="交互中" title="交互中" />}
             </div>
           );
         })}

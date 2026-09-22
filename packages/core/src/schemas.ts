@@ -184,6 +184,16 @@ export const elementOpSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('detach') }),
 ]);
 export const applyElementEditSchema = z.object({ ops: z.array(elementOpSchema).min(1).max(10), expectedRevisionId: z.uuid() });
+// 组件里的元素直改（v0.57 `REQ-EDIT-006`）：组件不是屏，没有修订，乐观并发用组件版本号。
+// detach 不收——「脱离共享」说的是把某一屏里的实例摘出来，对组件本体不成立。
+export const componentElementOpSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('text'), value: z.string().max(4000) }),
+  z.object({ type: z.literal('classes'), value: z.string().max(2000) }),
+  z.object({ type: z.literal('style'), value: z.string().max(2000) }),
+  z.object({ type: z.literal('link'), value: z.string().max(200).nullable() }),
+  z.object({ type: z.literal('remove') }),
+]);
+export const applyComponentElementEditSchema = z.object({ ops: z.array(componentElementOpSchema).min(1).max(10), expectedVersion: z.number().int().positive() });
 
 // 字体候选（v0.44 起只是面板的候选提示，不再是白名单）：来源为 google 时任意 Google Fonts 族名都收
 export const FONT_FAMILIES = ['Inter', 'Manrope', 'DM Sans', 'Roboto', 'Nunito', 'Space Grotesk', 'Archivo'] as const;

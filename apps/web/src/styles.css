@@ -113,7 +113,10 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
      不要写成「在两个浮层之间的空白里居中」——那样折叠一次对话面板就把用户正在打字的框
      横向搬走 134 px（1440 视口实测）。clamp 的三个参数正好是「左浮层内边界 / 视口居中 / 右浮层内边界」，
      宽视口下中间那项获胜，于是开合面板时它一动不动。 */
-  --composer-w: min(680px, calc(100% - var(--chrome-left) - var(--chrome-right)));
+  /* 宽度 = 工具条排成一行需要多宽（`--composer-need`，由 Composer 量出来写进内联样式），下限 30rem 免得
+     控件少的时候缩成一条细缝，上限是让开左右浮层之后的可用宽。工具条内容变了（换通道、选中一屏少一组档位）
+     宽度跟着变，走下面那条 width 过渡滑过去，不跳。量到之前用 30rem 顶着——首帧就有值，看不到回退宽。 */
+  --composer-w: min(max(30rem, var(--composer-need, 30rem)), calc(100% - var(--chrome-left) - var(--chrome-right)));
   width: var(--composer-w);
   left: clamp(
     var(--chrome-left),
@@ -123,7 +126,14 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
   right: auto;
   background: var(--color-panel); border: 2px solid var(--color-line); border-radius: 1.75rem;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
-  transition: left var(--duration-base) var(--ease-out), width var(--duration-base) var(--ease-out),
+  /* 宽度变化期间把溢出裁掉：工具条此时按终态的一行宽度摆着（见 .composer-bar 的 nowrap），比正在收缩的
+     外壳宽，不裁就会糊在框外。裁掉之后这一段读起来是「档位从圆角边缘滑进 / 滑出」，而不是错位。
+     下拉是 Select.Portal 出去的，不受这层裁剪影响；按钮提示气泡在框内，也不会被切。 */
+  /* clip 而不是 hidden，且留 2rem 余量：要裁的是过渡中途横向溢出的那一大截（几十到几百 px），
+     而按钮提示气泡只探出边界十几 px——hidden 会把「取消造 3 屏 [Esc]」这类气泡切掉一半 */
+  overflow: clip;
+  overflow-clip-margin: 2rem;
+  transition: width var(--duration-base) var(--ease-out), left var(--duration-base) var(--ease-out),
     border-color var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out);
 }
 /* 收起（⌘/ / 聚焦某屏时自动）：不卸载，草稿留着；作者样式会压过 UA 的 [hidden]，这里显式兜底（COMP-008） */
@@ -135,6 +145,15 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 .composer textarea { max-height: 224px; } /* 8 行 × 28px 行高，到顶后内部滚动 */
 /* 工具条空闲时略退后，聚焦、有内容或生成中回到全亮 */
 .composer-bar { opacity: 0.78; transition: opacity var(--duration-base) var(--ease-out); }
+/* 工具条默认不折行：宽度是按它一行排满量出来的，终态必然装得下。动画中途外壳比终态窄，nowrap 让它
+   保持一行、多出来的部分被外壳裁掉——折行会让工具条在动画里先变两行再弹回一行，高度来回跳（那就是「抖」）。
+   只有可用宽度真的装不下终态时（窄视口），Composer 量完打上 data-bar="wrap"，这时才允许折行。 */
+/* 装不下时两组都允许内部折行：390px 视口只分到 206px，光左组（动词段控 + 通道 + 参考图）就要 299px，
+   只让外层与右组折行的话左组照样溢出去被裁掉，参考图按钮整颗在框外、点下去命中的是画布 */
+.composer[data-bar="wrap"] .composer-bar,
+.composer[data-bar="wrap"] .composer-bar > * { flex-wrap: wrap; }
+/* 首帧不做过渡：宽度要等量完工具条才知道，量出来之前那一帧的宽度是回退值，让它过渡等于每次开页面都先长一下 */
+.composer:not([data-measured]) { transition: none; }
 .composer:focus-within .composer-bar, .composer[data-has-text] .composer-bar, .composer[data-busy] .composer-bar { opacity: 1; }
 /* 占位文案换词：新词从下方浮现，过渡期带一点模糊把两态糊成一次变形（MOTION-016） */
 @keyframes phrase-in { from { opacity: 0; transform: translateY(6px); filter: blur(4px); } to { opacity: 1; transform: none; filter: blur(0); } }
@@ -220,7 +239,7 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 .world .edges text { fill: var(--color-on-accent); font-size: 13px; font-weight: 600; font-family: var(--font-sans); }
 .card .gesture { position: absolute; inset: 0; cursor: default; }
 .card.dragging .gesture { cursor: grabbing; }
-.card .badge { position: absolute; right: 8px; top: 8px; background: var(--color-accent); color: var(--color-on-accent); font-size: 11px; padding: 2px 8px; border-radius: 999px; pointer-events: none; }
+.card .badge, .comp .badge { position: absolute; right: 8px; top: 8px; background: var(--color-accent); color: var(--color-on-accent); font-size: 11px; padding: 2px 8px; border-radius: 999px; pointer-events: none; }
 /* 素材瓦片的底色（REQ-CORE-019）：品牌素材有白色版也有深墨版，固定一种底色必然有一半看不见，
    所以按图的平均亮度选底（lib/assetTone.ts）。这三种底都是恒定色而非主题色——它们衬的是用户的品牌资产，
    不是 Quilt 的外壳（VIS-010 的「确需恒定色」情形）。读不出亮度时用棋盘格，那是透明通道的通用指示。 */
@@ -266,6 +285,13 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 .comp .label { position: absolute; left: 0; top: -28px; color: var(--color-muted); font-size: 12px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .comp .label b { color: var(--color-fg); }
 .comp iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; pointer-events: none; }
+/* 交互态（REQ-EDIT-006）：手势罩已摘，指针交给 iframe；与屏聚焦同一套外框语言，但镜头不动 */
+.comp.focused { outline-color: var(--color-accent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 18%, transparent), 0 6px 22px rgba(0, 0, 0, 0.4); }
+.comp.focused iframe { pointer-events: auto; }
+/* 交互中：一个呼吸绿点，复用骨架那条 sk-pulse（MOTION-029 同一效果只有一处定义）。1.2 s 一循环，
+   避开 0.2 Hz 那档前庭不适区；reduced-motion 下只留常亮的点（下面统一关动画） */
+.comp .live-dot { position: absolute; right: 8px; top: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 22%, transparent); animation: sk-pulse 1.2s ease-in-out infinite; }
+
 .comp .gesture { position: absolute; inset: 0; cursor: default; }
 .comp.dragging .gesture { cursor: grabbing; }
 .viewport.pan-ready .comp .gesture { cursor: grab; }
@@ -283,7 +309,7 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 @keyframes fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .fade-up { animation: fade-up var(--duration-base) var(--ease-out); }
 @media (prefers-reduced-motion: reduce) {
-  .card, .comp, .fade-up, .card .skeleton, .card .skeleton .sk-sweep, .card .skeleton .sk-dot { transition: none; animation: none; }
+  .card, .comp, .comp .live-dot, .fade-up, .card .skeleton, .card .skeleton .sk-sweep, .card .skeleton .sk-dot { transition: none; animation: none; }
   .composer { transition: none; }
   .slide-in-right { animation: fade-up var(--duration-fast) var(--ease-out); }
   /* 少而柔：换词与菜单只保留淡入，去掉位移、缩放与模糊 */

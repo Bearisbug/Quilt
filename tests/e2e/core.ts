@@ -158,6 +158,9 @@ results.pop(); record('TC-CORE-020', 'manual', '对标 Stitch 盲评，AI 按纪
 
 await step('TC-CORE-007', async () => {
   const { projectId, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Layout', '--device', 'mobile', '--screens', '3');
+  // 第 4～6 步（v0.47 多选批量移动）要一张组件卡：放在第 3 屏右侧同一行——放在屏上方会在适配视图后落进排列条那条横带里，点不到
+  const comp = (await apiJson<{ component: { id: string } }>(`/v1/projects/${projectId}/components`, { method: 'POST', body: JSON.stringify({ name: 'Footer', html: '<footer class="p-4 text-sm">Footer</footer>' }) })).body.component;
+  await apiJson(`/v1/components/${comp.id}`, { method: 'PATCH', body: JSON.stringify({ x: 1410, y: 0 }) });
   await page.goto(`${WEB}/p/${projectId}`);
   await page.locator('[data-testid="screen-card"]').first().waitFor();
   await page.getByRole('button', { name: '适配视图' }).click();
@@ -193,8 +196,51 @@ await step('TC-CORE-007', async () => {
   expect(moved.x !== 0 || moved.y !== 0, `位置未持久化 (${moved.x},${moved.y})`);
   const persisted = await page.locator('[data-testid="screen-card"]').first().evaluate((el) => (el as HTMLElement).style.transform);
   expect(persisted.includes(`${moved.x}px`), '刷新后位置与 API 不一致');
+  // 4 多选批量移动（v0.47）：点第 1 屏，Shift 加选第 2 屏与组件卡，按住第 2 屏拖 → 三者同位移、第 3 屏不动、逐张落库。
+  // 第 1 步把第 1 屏拖到了第 2、3 屏身上（后者在 DOM 里更靠后、盖住它的中心点不可点），先经 API 把它摆到一行之下再重载
+  await apiJson(`/v1/screens/${screens[0].id}`, { method: 'PATCH', body: JSON.stringify({ x: 0, y: 1400 }) });
+  await page.reload();
+  await page.locator('[data-testid="screen-card"]').first().waitFor();
+  await page.getByRole('button', { name: '适配视图' }).click();
+  await page.waitForTimeout(500);
+  const cards = page.locator('[data-testid="screen-card"]');
+  const compCard = page.locator('[data-testid="component-card"][data-name="Footer"]');
+  const selectedOf = (el: Element) => el.classList.contains('selected');
+  const posOf = async () => {
+    const b = (await apiJson<{ screens: { id: string; x: number; y: number }[]; components: { id: string; x: number; y: number }[] }>(`/v1/projects/${projectId}`)).body;
+    return Object.fromEntries([...b.screens, ...b.components].map((o) => [o.id, { x: o.x, y: o.y }]));
+  };
+  const pos0 = await posOf();
+  await cards.nth(0).locator('.gesture').click();
+  await cards.nth(1).locator('.gesture').click({ modifiers: ['Shift'] });
+  await compCard.locator('.gesture').click({ modifiers: ['Shift'] });
+  await page.waitForTimeout(200);
+  expect((await page.locator('[data-testid="screen-card"].selected').count()) === 2 && (await compCard.evaluate(selectedOf)), '加选后应选中 2 屏 + 组件');
+  const g2 = (await cards.nth(1).locator('.gesture').boundingBox())!;
+  await page.mouse.move(g2.x + g2.width / 2, g2.y + g2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(g2.x + g2.width / 2 + 240, g2.y + g2.height / 2 + 90, { steps: 10 });
+  expect((await page.locator('[data-testid="screen-card"].dragging').count()) === 2 && (await compCard.evaluate((el) => el.classList.contains('dragging'))), '拖动中整组卡片都该标 dragging');
+  await page.mouse.up();
+  await page.waitForTimeout(800);
+  const pos1 = await posOf();
+  const delta = (id: string) => ({ x: pos1[id].x - pos0[id].x, y: pos1[id].y - pos0[id].y });
+  const d = delta(screens[1].id);
+  expect(d.x > 0 && d.y > 0, `第 2 屏没动 (${d.x},${d.y})`);
+  expect([screens[0].id, comp.id].every((id) => delta(id).x === d.x && delta(id).y === d.y), `第 1 屏 / 组件的位移与第 2 屏不等：${JSON.stringify([delta(screens[0].id), delta(comp.id)])} vs ${JSON.stringify(d)}`);
+  expect(delta(screens[2].id).x === 0 && delta(screens[2].id).y === 0, '未选中的第 3 屏不该动');
+  // 5 按在已选中的卡片上、没拖过：收成只选它
+  await cards.nth(1).locator('.gesture').click();
+  await page.waitForTimeout(200);
+  expect((await page.locator('[data-testid="screen-card"].selected').count()) === 1 && (await cards.nth(1).evaluate(selectedOf)) && !(await compCard.evaluate(selectedOf)), '按在已选卡片上没拖过应收成只选它');
+  // 6 ⌘Z 整组还原
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.getByText('已撤销移动').waitFor({ timeout: 3000 });
+  await page.waitForTimeout(800);
+  const undone = await posOf();
+  expect([screens[0].id, screens[1].id, comp.id].every((id) => undone[id].x === pos0[id].x && undone[id].y === pos0[id].y), `⌘Z 后位置没有整组还原：${JSON.stringify(undone)}`);
   await shot(page, 'CORE-007');
-  return `x=${moved.x} y=${moved.y}`;
+  return `x=${moved.x} y=${moved.y}；整组位移 (${d.x},${d.y})，第 3 屏不动，⌘Z 整组还原`;
 });
 
 await step('TC-CORE-008', async () => {
@@ -1507,7 +1553,7 @@ await step('TC-CORE-034', async () => {
   expect((await bar.count()) === 0, '只选一屏不该出现排列条');
   await page.keyboard.press('ControlOrMeta+a');
   await bar.waitFor({ timeout: 3000 });
-  expect((await bar.innerText()).includes('3 屏') && (await bar.getByRole('button').count()) === 8, `排列条应有「3 屏」与 8 个按钮：${await bar.innerText()}`);
+  expect((await bar.innerText()).includes('3 屏') && (await bar.getByRole('button').count()) === 10, `排列条应有「3 屏」与 10 个按钮：${await bar.innerText()}`);
   // 3 去选一屏剩 2 屏：等距不可用并说明原因（放在对齐之前——对齐后三张卡叠在同一位置，点不到底下那张）
   await page.locator('[data-testid="screen-card"]').first().locator('.gesture').click({ modifiers: ['Shift'] });
   await page.waitForTimeout(300);
@@ -1529,8 +1575,21 @@ await step('TC-CORE-034', async () => {
   await bar.getByTestId('arrange-right').click(); await page.waitForTimeout(600);
   p = await pos();
   expect(screens.every((s) => p[s.id].x === 1900), `右对齐后 x：${screens.map((s) => p[s.id].x)}`);
+  // 8b-8d 排成一列 / 排成一行（v0.52）：固定 80 px 间距，顺序取当前位置（三屏完全重合 → 按选中集合次序），起点取外接框左上角；⌘Z 回到上一步并 toast「已撤销排列」
+  const at = (s: { id: string }) => `${p[s.id].x},${p[s.id].y}`;
+  await bar.getByTestId('arrange-vcol').click(); await page.waitForTimeout(600);
+  p = await pos();
+  expect(screens.every((s) => p[s.id].x === 1900) && p[s1.id].y === -80 && p[s2.id].y === 844 && p[s3.id].y === 1768, `排成一列后：${screens.map(at).join(' ')}`);
+  await bar.getByTestId('arrange-hrow').click(); await page.waitForTimeout(600);
+  p = await pos();
+  expect(screens.every((s) => p[s.id].y === -80) && p[s1.id].x === 1900 && p[s2.id].x === 2370 && p[s3.id].x === 2840, `排成一行后：${screens.map(at).join(' ')}`);
   await shot(page, 'CORE-034');
-  return '单选无排列条；⌘A 后 3 屏 + 8 键；2 屏时等距不可用；横向 / 纵向等距首尾不动中间均分；上 / 右对齐落库';
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.getByText('已撤销排列').first().waitFor({ timeout: 3000 });
+  await page.waitForTimeout(600);
+  p = await pos();
+  expect(screens.every((s) => p[s.id].x === 1900) && p[s2.id].y === 844 && p[s3.id].y === 1768, `撤销排列后应回到一列：${screens.map(at).join(' ')}`);
+  return '单选无排列条；⌘A 后 3 屏 + 10 键；2 屏时等距不可用；横向 / 纵向等距首尾不动中间均分；上 / 右对齐落库；排成一列 (844+80) / 排成一行 (390+80) / ⌘Z 回到一列';
 });
 
 await step('TC-CORE-035', async () => {

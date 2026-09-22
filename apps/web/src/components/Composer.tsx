@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type Ref } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type FormEvent, type KeyboardEvent, type Ref } from 'react';
 import { useNavigate } from 'react-router';
 import { Select } from 'radix-ui';
 import { ArrowUp, Check, ChevronDown, ChevronUp, ImagePlus, MapPin, Settings2, Square, X } from 'lucide-react';
@@ -54,6 +54,8 @@ export type ComposerProps = {
   hidden: boolean;
   /** 实际高度（px）：外壳用它算画布安全区的底部占位与对话记录的落点——输入框随内容增高、窄视口下工具条折行，写死一个数会压住别的浮层 */
   onResize?: (heightPx: number) => void;
+  /** 可用区探针（画布那一个）：让开四周浮层之后还剩多少——工具条要不要折行按它判 */
+  safeAreaRef?: { current: HTMLElement | null };
   handle?: Ref<ComposerHandle>;
 };
 
@@ -120,6 +122,47 @@ export function Composer(p: ComposerProps) {
   const compNames = comps.map((c) => c.name).join('、');
   const compOnly = !chat && comps.length > 0 && creating && !p.anchor;
   const compSuffix = comps.length && !compOnly ? ` · ${creating ? '用' : '带'}组件 ${compNames}` : '';
+
+  // 宽度跟着工具条走：这一行是输入框里最宽的东西，其余（动词行、占位、草稿）都比它短。
+  // 量法是把工具条临时设成 max-content 读一次——那是它排成一行的真实宽度，与外壳当前多宽无关，
+  // 所以「量到的值 → 改外壳宽 → 再量」不会来回振荡。读完当帧还原，不落到画面上。
+  // 放 useLayoutEffect 里是为了首帧就是终值：改成 useEffect 会先按回退宽度画一帧再跳（INT-021）。
+  const barRef = useRef<HTMLDivElement>(null);
+  const safeArea = p.safeAreaRef;
+  const [bar, setBar] = useState<{ need: number; wrap: boolean }>({ need: 0, wrap: false });
+  const measureBar = useCallback(() => {
+    const el = barRef.current; const form = formRef.current;
+    if (!el || !form || p.hidden) return;
+    const prev = el.style.width;
+    el.style.width = 'max-content';
+    const need = el.getBoundingClientRect().width;
+    el.style.width = prev;
+    // 外壳自己的内边距与边框；工具条量的是内容宽，两者相加才是外壳该有的宽
+    const chrome = form.offsetWidth - el.offsetWidth;
+    // 让开左右浮层之后还剩多少：读画布的可用区探针，不要去 parse --chrome-left——自定义属性取回来是没求值的
+    // calc(...)，parseFloat 得 NaN，判断会静默恒假、窄视口下工具条被裁掉够不到。也不能拿正在过渡的
+    // form.offsetWidth 判，那是中间值。
+    const avail = safeArea?.current?.getBoundingClientRect().width ?? Infinity;
+    const next = { need: Math.ceil(need + chrome), wrap: need + chrome > avail + 1 };
+    setBar((v) => (Math.abs(v.need - next.need) < 1 && v.wrap === next.wrap ? v : next));
+  }, [p.hidden, safeArea]);
+  useLayoutEffect(measureBar);
+  // 字体晚于首帧到达时控件会变宽，补量一次
+  useEffect(() => { document.fonts?.ready.then(measureBar).catch(() => {}); }, [measureBar]);
+  // 可用宽度变了要重量：改窗口大小、开合侧边面板都不经过 React 渲染，只靠上面那个 useLayoutEffect
+  // 量不到——工具条会停在缩窄前算出的 nowrap 上，被外壳裁掉的那截（屏数 / 版数 / 发送）点都点不到。
+  // 画布的可用区探针正是「让开四周浮层之后还剩多少」，拿它当信号；探针不在时退回窗口 resize。
+  useEffect(() => {
+    const el = safeArea?.current;
+    if (!el) {
+      const onResize = () => measureBar();
+      window.addEventListener('resize', onResize);
+      return () => window.removeEventListener('resize', onResize);
+    }
+    const ro = new ResizeObserver(() => measureBar());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [safeArea, measureBar]);
 
   // 随内容增高；上限只有一个来源——styles.css 里 .composer textarea 的 max-height，到顶后内部滚动（INT-010）
   // 收起期间 display:none 量不到高度，叫回时要重量一次
@@ -218,6 +261,8 @@ export function Composer(p: ComposerProps) {
   return (
     <form
       ref={formRef} className="composer absolute bottom-4 z-20 p-3.5" onSubmit={submit} hidden={p.hidden}
+      style={bar.need ? ({ '--composer-need': `${bar.need}px` } as CSSProperties) : undefined}
+      data-measured={bar.need ? '' : undefined} data-bar={bar.wrap ? 'wrap' : undefined}
       data-has-text={text ? '' : undefined} data-busy={busy ? '' : undefined} data-dropping={dropping ? '' : undefined} data-verb={chat ? 'chat' : compOnly ? 'component' : creating ? 'create' : 'edit'}
       onPaste={onPaste} onDrop={onDrop}
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
@@ -313,8 +358,10 @@ export function Composer(p: ComposerProps) {
       {/* 冲突理由就地写在发送键上方：发送键只是 aria-disabled，输入照旧可改——换个目标或等这一轮完事就能发（A11Y-007 / IA-009） */}
       {p.blockedReason && <p data-testid="send-blocked-reason" role="status" className="mt-2 px-1 text-right text-xs text-warn">{p.blockedReason}</p>}
       {/* 工具条允许换行：390px 视口放不下「通道 + 参考图 + 屏数 + 版数 + 发送」一整行，右侧档位组折到下一行而不是撑破外框 */}
-      <div className="composer-bar mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+      <div ref={barRef} className="composer-bar mt-3 flex items-center justify-between gap-2 border-t border-line pt-3">
+        {/* 左组不能写 min-w-0：里面的控件都是 shrink-0，盒子缩了内容不缩，只会溢出去压在右边的档位上，
+            而「放不下就换行」也因为左组总能缩到放得下而永远不触发（RESP-004） */}
+        <div className="flex flex-1 items-center gap-2">
           {/* 动词段控（REQ-CORE-023）：造 / 改（动词由目标决定）与聊天（范围由助手定）并列；选择是个人偏好，父组件跨会话记忆 */}
           <Segmented label="动词：造 / 改，或聊天" testId="mode" value={p.mode} options={[{ value: 'design', label: '造 / 改' }, { value: 'chat', label: '聊天' }]} onChange={p.onMode} />
           {/* 通道选择（REQ-CORE-011）。清单来自服务端，只含标识与显示名；聊天模式只列 agent-sdk 通道，一条都没有就就地写明去哪加（INT-013） */}
@@ -339,7 +386,7 @@ export function Composer(p: ComposerProps) {
         </div>
         {/* 档位（REQ-CORE-003 / REQ-CORE-006）：屏数只在造时出现（几张不同的屏）；版数造改都有（同一屏的几种画法）；两者以分隔线隔开，不做同形并排 */}
         {/* 档位组自身也能换行：≤ 48rem 视口里输入框只有约 240px 宽，屏数 + 版数 + 发送一行放不下时各自折行、靠右 */}
-        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+        <div className="ml-auto flex items-center justify-end gap-2">
           {/* 本机 agent 通道没有档位（固定 1 版、屏数由会话自定），腾出的位置给会话下拉；聊天由助手定范围，同样没有档位；改组件一次一个也没有档位 */}
           {!chat && creating && !agentRunner && !compOnly && (
             <Segmented label="屏数（几张不同的屏）" testId="count" value={p.count} options={SCREEN_COUNT_OPTIONS.map((o) => ({ value: o, label: o === 'auto' ? '自动' : String(o) }))} onChange={p.onCount} />

@@ -8,5 +8,12 @@ AI 原生的无限画布设计工具：自然语言生成 APP 多屏 HTML 设计
 ## 前端实现纪律
 本项目任何前端改动——新建页面/组件、调样式、修 UI 缺陷、按截图还原、逐条体验优化——动码前必须加载 `ui-constraints` 技能，按其 `references/00-catalog.md` 命中的规则卡执行，交付前按其 `flow-verification` 做真实浏览器验证。适用范围看**改到哪个文件**、不看措辞：碰 `.tsx/.jsx/.vue/.svelte/.css/.scss/.html` 或任何组件、样式文件即适用，「就改一行」「随手调一下」同样适用，拿不准时按适用处理。长会话中每进入一次新的前端改动都要重新按 catalog 查一遍，不要凭上一轮的记忆推进；把前端工作派给 subagent 时，任务提示里必须显式要求它加载本技能（subagent 不继承）。技能不可用时停下告知用户，不要凭记忆拼一套前端约束。
 
+## 开发库不是跑测试的地方（硬性）
+`:3100` 上那套 API 背后是开发库 `quilt`，里面是用户的真实项目。**任何会写库的自动化——e2e 套件、MCP 写工具、批量脚本——一律对测试库 `quilt_test` 跑**，要么把 API 指过去，要么另起一套（`DATABASE_URL=…/quilt_test API_PORT=3200 PREVIEW_PORT=3201 pnpm --filter @quilt/api dev` + `QUILT_E2E_API=http://localhost:3200`）。`tests/e2e/lib.ts` 的 `assertTestApi()` 会在套件动手前问 `GET /v1/health` 的 `database` 字段，不是测试库就当场停；别去绕它，要故意对开发库跑就显式 `ALLOW_E2E_DEV=1` 并想清楚。
+起因不是假设：2026-09-21 有并行会话把 e2e 打到 3100 上，逐屏写删绕过了 `pnpm seed` 那道守卫，开发库里四个项目的屏被清空（项目壳还在，因为 seed 被拦住了）。**多个会话同时开工时先确认各自的库与端口**，别共用 3100。
+
+## 浏览器验证纪律
+本项目的浏览器自动化（Playwright 驱动本机 Edge）一律**无头后台跑**：`chromium.launch({ channel: 'msedge', headless: true })`。不要弹出前台窗口——它会抢走焦点，而这类验证动辄跑几十秒到几分钟，中间人没法用电脑。确实只有有头才能复现的现象（已知一例：macOS 接鼠标时的经典常驻滚动条，无头默认 overlay、槽宽恒 0 量不出来），先在回复里说明为什么必须有头、征得同意再开，不要默认开。
+
 ## 密钥纪律
 运行时密钥只进 `.env`(已 gitignore),仓内只放 `.env.example` 登记「键名 + 用途 + 获取方式」;跨项目共享密钥集中存于 Bitwarden(item 名 = 键名),读取用 `bw get password <键名>` 管道直写、任何输出不回显值;主密码与解锁只由人执行,Agent 不询问主密码、不打印任何密钥值;发现仓内明文密钥立即停下提示轮换(git 历史同样已泄漏)。

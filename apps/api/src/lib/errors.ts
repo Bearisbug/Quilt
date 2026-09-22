@@ -17,6 +17,8 @@ export const problems = {
   elementNotFound: () => new Problem(404, '/errors/element-not-found', '元素在当前修订中不存在'),
   routeTaken: () => new Problem(409, '/errors/route-taken', '路由在项目内已占用'),
   screenBusy: () => new Problem(409, '/errors/screen-busy', '目标屏有进行中的作业'),
+  // 组件被 edit_component 作业占着（v0.57 `API-EDIT-005`）：直改中途顶版会让那个作业收尾时匹配不到行而整轮失败
+  componentBusy: (name: string) => new Problem(409, '/errors/component-busy', `组件「${name}」正在改，等这一轮完事`),
   projectBusy: () => new Problem(409, '/errors/project-busy', '项目有进行中的作业，先取消或等它完成'),
   revisionConflict: () => new Problem(409, '/errors/revision-conflict', '修订已被更新'),
   // 共享组件（REQ-EDIT-006）：实例里的元素不能直改，改组件或先脱离共享；名字项目内唯一

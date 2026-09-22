@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { parseHTML } from 'linkedom';
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
@@ -8,7 +8,7 @@ import { signPreview, stableExpiry } from '../lib/signing.ts';
 import { emitProjectEvent } from '../lib/events.ts';
 import {
   assembleDocument, buildPrelude, extractBody, lintScreenBody, expandComponents, extractComponent, findComponentMatch, replaceWithPlaceholder,
-  componentSummary, componentSlots, componentPlacement, componentOf, validateComponentHtml, classifyComponentHtml, MAX_COMPONENTS_PER_PROJECT,
+  componentSummary, componentSlots, componentPlacement, componentOf, validateComponentHtml, classifyComponentHtml, applyElementOps, injectQids, MAX_COMPONENTS_PER_PROJECT,
   type ComponentDto, type SharedComponent, type SharedComponentCard, type Tokens, type ElementOp,
 } from '@quilt/core';
 import { ownedProject, type ProjectRow, type ScreenRow } from './projects.ts';
@@ -190,9 +190,14 @@ export async function createComponent(ownerId: string, projectId: string, input:
   const live = existing.map((r) => r.name);
   const ext = extractComponent(source.body, input.qid, source.screen.route, live);
   if ('error' in ext) throw ext.error.includes('不存在') ? problems.elementNotFound() : problems.validation([{ path: 'qid', message: ext.error }]);
-  const v = validateComponentHtml(ext.html);
+  // 提取时把屏里那套 qid 整套剥掉了（extractComponent），这里要给组件补上自己的一套——
+  // 组件里的元素直改（API-EDIT-005）按 qid 定位，不补的话这条路径建出来的组件永远选不中元素，
+  // 而且要等下次重启被 backfillComponentQids 补上才突然能用，同一个组件重启前后行为不同。
+  // 不走 classifyComponentHtml：它重算 navClasses 时没有 route 上下文，会把提取时按屏算出的激活态丢掉。
+  const html = injectQids(ext.html);
+  const v = validateComponentHtml(html);
   if (!v.ok) throw problems.validation([{ path: 'qid', message: v.error }]);
-  const row = await insert({ name: input.name, html: ext.html, activeClass: ext.activeClass, inactiveClass: ext.inactiveClass });
+  const row = await insert({ name: input.name, html, activeClass: ext.activeClass, inactiveClass: ext.inactiveClass });
   const shared = [...existing.map(toShared), toShared(row)];
   const routes = items.map((x) => x.screen.route);
   const applied: Applied[] = []; const skipped: Skipped[] = [];
@@ -217,6 +222,29 @@ export async function createComponent(ownerId: string, projectId: string, input:
 }
 
 // API-EDIT-004：改组件——html / name 带乐观锁并回刷；只挪 x / y 不升版不回刷
+/**
+ * 组件里的元素直改（v0.57 `REQ-EDIT-006` / `API-EDIT-005`）：与屏的 `API-EDIT-001` 同一套 op，
+ * 只是落在组件自己的 HTML 上。改完走 updateComponent 那条路——升版 + 确定性回刷所有用它的屏，
+ * 所以这里不需要自己碰任何屏。乐观并发用组件版本号（组件没有修订这个概念）。
+ */
+export async function applyComponentElementEdit(ownerId: string, componentId: string, qid: string, ops: ElementOp[], expectedVersion: number): Promise<ComponentResult> {
+  const { component, project } = await ownedComponent(ownerId, componentId);
+  // 这个组件正被 edit_component 作业改着时不收直改：作业收尾时按 `where version = N` 条件更新，
+  // 中途被顶掉一版它就匹配不到行、整个作业失败，花掉的 token 全白费（屏那条路由 hasActiveJob 守着同一件事）
+  const running = await db.select({ id: schema.generationJobs.id }).from(schema.generationJobs)
+    .where(and(eq(schema.generationJobs.projectId, project.id), eq(schema.generationJobs.kind, 'edit_component'),
+      inArray(schema.generationJobs.status, ['queued', 'running']),
+      sql`${schema.generationJobs.input} ->> 'componentId' = ${componentId}`));
+  if (running.length) throw problems.componentBusy(component.name);
+  if (component.version !== expectedVersion) throw problems.versionConflict();
+  const next = applyElementOps(component.html, qid, ops);
+  if (next === null) throw problems.elementNotFound();
+  const v = validateComponentHtml(next);
+  // 删掉根元素就没有组件了；其余结构性错误同样退回去，不落库
+  if (!v.ok) throw problems.validation([{ path: 'ops', message: v.error }]);
+  return updateComponent(ownerId, componentId, { html: next, expectedVersion });
+}
+
 export async function updateComponent(ownerId: string, componentId: string, patch: { name?: string; html?: string; x?: number; y?: number; expectedVersion?: number }): Promise<ComponentResult> {
   const { component, project } = await ownedComponent(ownerId, componentId);
   const contentChange = patch.html !== undefined || patch.name !== undefined;
@@ -230,7 +258,13 @@ export async function updateComponent(ownerId: string, componentId: string, patc
     const v = validateComponentHtml(patch.html);
     if (!v.ok) throw problems.validation([{ path: 'html', message: v.error }]);
     const c = classifyComponentHtml(patch.html);
-    values = { ...values, html: c.html, summary: componentSummary(c.html), activeClass: c.activeClass, inactiveClass: c.inactiveClass };
+    // 激活态那对类描述的是「选中长什么样」，不是「哪一条选中」——哪条亮由屏的路由在展开时算（applyActiveState）。
+    // navClasses 认的是 aria-current，改动一旦删掉或改掉当前标着 aria-current 的那条链接，它就返回一对 null，
+    // 展开时整段激活态逻辑被跳过、所有屏的导航一起变成清一色未激活。这种情况下留着上一版的那对类。
+    const nav = c.activeClass === null && c.inactiveClass === null && (component.activeClass !== null || component.inactiveClass !== null)
+      ? { activeClass: component.activeClass, inactiveClass: component.inactiveClass }
+      : { activeClass: c.activeClass, inactiveClass: c.inactiveClass };
+    values = { ...values, html: c.html, summary: componentSummary(c.html), ...nav };
   }
   if (patch.name !== undefined) values.name = patch.name;
   let updated: Row;
@@ -259,5 +293,7 @@ export function componentPreviewDocument(row: Row, prelude: string): string {
   root?.setAttribute('data-component', row.name);
   const body = root?.outerHTML ?? row.html;
   const measure = `<script>window.addEventListener('load',function(){var r=document.querySelector('[data-component]');if(!r)return;var b=r.getBoundingClientRect();parent.postMessage({type:'quilt:component-size',componentId:${JSON.stringify(row.id)},w:Math.ceil(b.width),h:Math.ceil(b.height)},'*');});</script>`;
-  return `<!doctype html>\n<html lang="en">\n<head>\n${prelude}\n<title>${row.name}</title>\n</head>\n<body>\n<div class="flex flex-col">${body}</div>\n${measure}\n</body>\n</html>\n`;
+  // 告诉预览运行时「这是组件不是屏」：组件里的链接一律惰性，不劫持、不上报（v0.55）
+  const isComponent = '<script>window.__quiltComponent = true;</script>';
+  return `<!doctype html>\n<html lang="en">\n<head>\n${prelude}\n${isComponent}\n<title>${row.name}</title>\n</head>\n<body>\n<div class="flex flex-col">${body}</div>\n${measure}\n</body>\n</html>\n`;
 }

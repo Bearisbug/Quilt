@@ -202,9 +202,26 @@ OUTPUT RULES
 - Output ONLY the component's single root element HTML. No markdown fences, no explanation, no <html>/<head>/<body>, no <script>, no <style>, and never a whole screen around it.
 - Keep the root element's tag unless the instruction requires otherwise. Keep every data-slot="…" element that exists (screens fill them in per screen); you may add a data-slot where per-screen content belongs (a screen title, for example).
 - Tailwind utility classes with this project's token colours: bg-X / text-X / border-X where X is one of ${COLOR_CLASS_NAMES.join(', ')}. Radius: rounded-sm/md/lg/full. Icons: <i data-lucide="icon-name" class="w-5 h-5"></i>.
-- Navigation links are <a href="/route"> with routes from ALLOWED ROUTES only; keep the existing hrefs unless told to change them. For navigation components mark exactly ONE link with aria-current="page" and give it the active styling — Quilt derives which link is active on each screen from that pair of styles.
 - Device: ${args.device}, viewport ${size.w}×${size.h}. Stay self-contained: the component must look right on any screen of this app.
 - Content: realistic and specific; English UI copy.
+
+TWO KINDS OF "SELECTED" — DO NOT MIX THEM
+- Items that go to ANOTHER SCREEN (bottom tab bar, sidebar): <a href="/route"> with routes from ALLOWED ROUTES only; keep existing hrefs unless told otherwise. Mark exactly ONE link with aria-current="page" and give it the active styling — Quilt derives which link is active on each screen from that pair of styles. The component itself holds no state here.
+- Items that switch content WITHIN the same screen (channel tabs, segmented controls, filter chips, toggles, accordions): this is the component's own state and it MUST actually switch when clicked. Build it CSS-only, per the next section.
+
+INTERACTIVE STATE IS CSS-ONLY (no JavaScript — the component HTML is copied into every screen that uses it, so a <script> would be duplicated N times and is rejected)
+- Pattern: each item is a <label> (the WHOLE item is the hit area, not just the text) whose FIRST child is a hidden native control — <input type="radio" class="peer sr-only" name="<component-name>-<group>"> for "pick one of N", <input type="checkbox" class="peer sr-only"> for on/off. Every sibling AFTER it styles the state with peer-checked: variants (weight, colour, indicator opacity/transform).
+- The default selection is the \`checked\` attribute on that input. NEVER hardcode the selected look into one item's classes — if the active styling only exists on one item, the component cannot switch and is wrong.
+- The radio \`name\` must be prefixed with the component name so two components on one screen don't fight over the same group.
+- Keep the semantics: aria-label on each input, role="radiogroup"/aria-label on the root, aria-hidden="true" on pure decoration (indicator bars). Native radios are keyboard-operable for free (Tab into the group, arrows to move) — but the input is sr-only, so draw the focus ring on a sibling with peer-focus-visible: (e.g. peer-focus-visible:ring-2 peer-focus-visible:ring-primary), otherwise keyboard users cannot see where they are.
+- Never signal the selected item by colour alone: pair it with weight, an indicator bar, or an icon.
+- Selecting must not shift the layout: if the active item is bolder/larger, reserve that space in EVERY item (fixed row height, or size the row for the active style) so the component's height and the neighbours' positions do not move when the selection changes.
+- If the items can overflow horizontally, let the row scroll (overflow-x-auto) and hide the scrollbar visually (scrollbar-width:none plus ::-webkit-scrollbar{display:none} — Tailwind: [scrollbar-width:none]), never overflow-hidden, which would lock items out of reach.
+- CSS-only cannot express drag, async or cross-component coordination — don't attempt those here; a component only owns the visible state of its own block.
+
+STRUCTURE MUST BE EXTENSIBLE
+- Items are a repeated block. Never style a specific item via nth-child, never hardcode the number of items, never position items with absolute coordinates — adding or removing one item must not require touching any other item.
+- Tag every item with data-slot="<name>" (screens fill per-screen content by slot) and data-part="<role>" (tab / label / indicator / …) so tests and the inspector can address the pieces.
 
 DESIGN SYSTEM
 ${args.designMd.trim()}

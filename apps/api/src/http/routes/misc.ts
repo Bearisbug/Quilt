@@ -11,7 +11,11 @@ import type { ConfigDto } from '@quilt/core';
 
 export const miscRoutes = new Hono<Env>();
 
-miscRoutes.get('/v1/health', (c) => c.json({ status: 'ok', llm: config.llmDriver, model: config.model, storage: config.storageDriver }));
+// `database` 只回库名、不回连接串（里面有口令）。它存在的唯一理由是让 e2e 能在动手之前认出
+// 「我要打的这个实例，背后是不是测试库」——2026-09-21 有并行会话把 e2e 打到了 3100 的开发实例上，
+// 逐屏写删绕过了 pnpm seed 那道守卫，开发库里四个项目的屏被清空。守卫见 tests/e2e/lib.ts。
+const dbName = /\/([^/?]+)(\?|$)/.exec(config.databaseUrl)?.[1] ?? (config.databaseUrl ? 'unknown' : 'pglite');
+miscRoutes.get('/v1/health', (c) => c.json({ status: 'ok', llm: config.llmDriver, model: config.model, storage: config.storageDriver, database: dbName }));
 
 // API-CORE-028：运行时配置（前端启动时取一次；预览域地址随打包 / 开发环境变）
 miscRoutes.get('/v1/config', (c) => c.json({ previewOrigin: config.previewOrigin, version: config.version, local: true, home: config.dataDir } satisfies ConfigDto));

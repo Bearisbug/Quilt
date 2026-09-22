@@ -1,4 +1,5 @@
 import { parseHTML } from 'linkedom';
+import { injectQids } from './inject.ts';
 
 // 共享组件（REQ-EDIT-006 / ADR-019）：项目级的一段 HTML，屏里只放一个占位根元素（data-component="Name"），
 // 每次写入屏时由这里确定性地展开成组件的正式 HTML——改组件一次，所有屏零 LLM 同步。
@@ -148,7 +149,9 @@ export function navClasses(root: Element, route?: string): { activeClass: string
 }
 /** 独立组件 HTML（已校验单根）的导航型判定，改组件 / MCP 写入时用 */
 export function classifyComponentHtml(html: string): { html: string; activeClass: string | null; inactiveClass: string | null } {
-  const document = parse(html);
+  // 落库前重编 qid（v0.57）：组件自己也要有可寻址的元素，否则画布上选中它里面的元素无从定位。
+  // 这是组件 HTML 里的编号，与屏里的互不相干——展开进屏时 expandComponents 会整套剥掉、按那一屏重发。
+  const document = parse(injectQids(html));
   const root = document.body.firstElementChild;
   if (!root) return { html, activeClass: null, inactiveClass: null };
   const r = navClasses(root);

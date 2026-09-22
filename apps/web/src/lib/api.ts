@@ -100,6 +100,9 @@ export const api = {
     patch: (id: string, body: { name?: string; html?: string; x?: number; y?: number; expectedVersion?: number }) =>
       call<ComponentSyncResult>(`/v1/components/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     remove: (id: string) => call<void>(`/v1/components/${id}`, { method: 'DELETE' }),
+    // 组件里的元素直改（API-EDIT-005）：与屏的 editElement 同一套 op，乐观并发用组件版本号
+    editElement: (id: string, qid: string, ops: ElementOp[], expectedVersion: number) =>
+      call<ComponentSyncResult>(`/v1/components/${id}/elements/${qid}`, { method: 'POST', body: JSON.stringify({ ops, expectedVersion }) }),
   },
   designSystem: {
     update: (projectId: string, patch: { seedColor?: string; fontFamily?: string; fontSource?: 'google' | 'system' | 'url'; fontUrl?: string | null; radiusScale?: 'sharp' | 'default' | 'round'; palette?: Palette | null; colorMode?: ColorMode; designMd?: string; conventions?: string[]; expectedVersion: number }) => call<{ designSystem: DesignSystemDto }>(`/v1/projects/${projectId}/design-system`, { method: 'PUT', body: JSON.stringify(patch) }),

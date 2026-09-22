@@ -1,7 +1,13 @@
 // 预览运行时：内联进每版修订的 prelude（ADR-003）。职责：链接劫持 → 父页；接收 swap 在同文档内换 DOM；
-// 跨屏保留表单状态；把画布级快捷键转发给父页；上报 ready/swapped。消息协议见 protocol.ts。
+// 跨屏保留表单状态；把画布级快捷键转发给父页；隐藏桌面浏览器的滚动条；上报 ready/swapped。消息协议见 protocol.ts。
 export const RUNTIME_JS = String.raw`(function () {
   var state = (window.__quiltState = window.__quiltState || {});
+  // 卡片里是一台设备，桌面浏览器却会在它右缘画一条常驻滚动条——真机上没有这东西，它会被读成设计的一部分。
+  // 只隐藏滚动条像素，滚动能力全留（屏内 overflow-y:auto 的区域同理，所以用 *）。
+  var bars = document.createElement('style');
+  bars.setAttribute('data-quilt-ui', '');
+  bars.textContent = '*{scrollbar-width:none}*::-webkit-scrollbar{display:none}';
+  document.head.appendChild(bars);
   function snapshotForms() {
     document.querySelectorAll('input[name],textarea[name],select[name]').forEach(function (el) {
       state[el.name] = el.type === 'checkbox' ? el.checked : el.value;
@@ -21,6 +27,9 @@ export const RUNTIME_JS = String.raw`(function () {
   document.addEventListener('click', function (e) {
     var a = e.target && e.target.closest && e.target.closest('a[href],[data-href]');
     if (!a) return;
+    // 组件预览（REQ-EDIT-006）：组件不是屏，没有路由也没有去处——链接一律惰性，点了什么都不发生，
+    // 也不报「去处还没设计」。组件卡的交互态是拿来试组件自己的状态的（tab 切换、开关），不是试跳转。
+    if (window.__quiltComponent) { e.preventDefault(); return; }
     var href = a.hasAttribute('href') ? (a.getAttribute('href') || '') : (a.getAttribute('data-href') || '');
     if (href.charAt(0) === '/') { e.preventDefault(); snapshotForms(); send({ type: 'quilt:navigate', href: href }); }
     else if (href === '#') { e.preventDefault(); send({ type: 'quilt:dead' }); }
@@ -33,6 +42,7 @@ export const RUNTIME_JS = String.raw`(function () {
   }, { passive: false });
   document.addEventListener('submit', function (e) {
     e.preventDefault();
+    if (window.__quiltComponent) return;
     var action = e.target && e.target.getAttribute ? (e.target.getAttribute('action') || '') : '';
     if (action.charAt(0) === '/') { snapshotForms(); send({ type: 'quilt:navigate', href: action }); }
   }, true);
@@ -48,6 +58,22 @@ export const RUNTIME_JS = String.raw`(function () {
   // 「tag · qid」标签，和检查器标题对得上），随滚动 / 缩放重算，换 body 后由父页 quilt:reselect 接回。点击上报 qid 与几何，父页画检查器。
   var mode = 'interact';
   var box = null;
+  // 选择元素模式下让每个元素都可命中（v0.57）：设计里常给装饰层或被 <label> 包着的文字写 pointer-events:none，
+  // 点击于是永远落在外层容器上，里面的文字元素根本选不中。选择态是检查器的取景器，不该受设计自己的命中规则限制；
+  // 退出选择态时整条规则撤掉，交互态照旧按设计的命中规则走。
+  var pierce = null;
+  function setPierce(on) {
+    if (on && !pierce) {
+      pierce = document.createElement('style');
+      pierce.setAttribute('data-quilt-ui', '');
+      // 必须排除运行时自己画的那几层：选中框为了和检查器对号也带 data-qid（setSelection），
+      // 它是 fixed、z-index 顶格、罩住选中元素外扩 4px 的一块板子。被这条规则强制成可命中之后，
+      // 它盖住的一切都点不动了——targetOf 遇到 data-quilt-ui 返回 null，于是 hover 不亮、点击不上报；
+      // 选中的要是根元素，整屏都选不动。带 !important 的作者样式压得过它行内那句普通的 pointer-events:none。
+      pierce.textContent = '[data-qid]:not([data-quilt-ui]){pointer-events:auto !important}';
+      document.head.appendChild(pierce);
+    } else if (!on && pierce) { pierce.remove(); pierce = null; }
+  }
   function ensureBox() {
     if (box) return box;
     box = document.createElement('div');
@@ -150,7 +176,7 @@ export const RUNTIME_JS = String.raw`(function () {
   }
   function onMessage(e) {
     var msg = e.data || {};
-    if (msg.type === 'quilt:mode') { mode = msg.mode === 'inspect' ? 'inspect' : 'interact'; if (mode !== 'inspect') { highlight(null); setSelection(null); } document.body.style.cursor = mode === 'inspect' ? 'crosshair' : ''; return; }
+    if (msg.type === 'quilt:mode') { mode = msg.mode === 'inspect' ? 'inspect' : 'interact'; if (mode !== 'inspect') { highlight(null); setSelection(null); } setPierce(mode === 'inspect'); document.body.style.cursor = mode === 'inspect' ? 'crosshair' : ''; return; }
     // 父页的选中状态是事实源：选中 / 清空都同步到常驻框
     if (msg.type === 'quilt:highlight') { setSelection(msg.qid ? document.querySelector('[data-qid="' + msg.qid + '"]') : null); return; }
     // 热更新后重选：同一 qid 还在就回一份新值（检查器字段跟着刷）并把常驻框接回去，不在了让父页清空

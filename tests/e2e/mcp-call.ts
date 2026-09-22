@@ -1,5 +1,9 @@
 import { connectMcp, callTool } from './mcp-client.ts';
 
+// 这是手工调用工具的开发脚本，本来就是冲着开发实例用的（`pnpm mcp:call quilt.list_projects '{}'`），
+// 所以放行认库闸；自动化套件不要学这一句（见 lib.ts 的 assertTestApi）。
+process.env.ALLOW_E2E_DEV ??= '1';
+
 // pnpm mcp:call <tool> '<json args>'   |   pnpm mcp:call --resource <uri>   |   pnpm mcp:call --list
 const argv = process.argv.slice(2);
 if (!argv.length) { console.error('usage: mcp-call <tool> [json] | --resource <uri> | --list'); process.exit(2); }

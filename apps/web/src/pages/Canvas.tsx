@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useParams, useSearchParams } from 'react-router';
-import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, ArrowLeft, Bot, Component, Crosshair, Download, History, Link2, Maximize2, MessageSquarePlus, Palette, Plus, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, ArrowLeft, Bot, Component, Crosshair, Download, GalleryHorizontal, GalleryVertical, History, Link2, Maximize2, MessageSquarePlus, Palette, Plus, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
 import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, type ProjectDetailDto, type MessageDto, type JobDto, type JobEventDto, type ScreenDto, type ComponentDto, type Tokens, type RunnerOptionDto, type AgentSessionDto, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core';
 import { api, ApiError, loadConfig, subscribeProjectEvents } from '../lib/api';
 import { useToast } from '../lib/toast';
@@ -32,10 +32,13 @@ const CHAT_BUSY = '上一句还在回答，等它说完';
 const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 const ALT = MAC ? '⌥' : 'Alt+';
 const CMD = MAC ? '⌘' : 'Ctrl+';
-// 排列条的按钮（REQ-CORE-018）：六个对齐 + 两个等距，数组顺序就是方向键在工具条里移动的顺序
+// 排列条的按钮（REQ-CORE-018）：六个对齐 + 两个等距 + 两个排列（v0.52），数组顺序就是方向键在工具条里移动的顺序
 const ALIGN_BTNS = [['left', '左对齐', AlignStartVertical], ['hcenter', '水平居中', AlignCenterVertical], ['right', '右对齐', AlignEndVertical], ['top', '上对齐', AlignStartHorizontal], ['vcenter', '垂直居中', AlignCenterHorizontal], ['bottom', '下对齐', AlignEndHorizontal]] as const;
 const SPACE_BTNS = [['hspace', '横向等距', AlignHorizontalDistributeCenter], ['vspace', '纵向等距', AlignVerticalDistributeCenter]] as const;
-const ARRANGE_N = ALIGN_BTNS.length + SPACE_BTNS.length;
+const LAYOUT_BTNS = [['hrow', '排成一行', GalleryHorizontal], ['vcol', '排成一列', GalleryVertical]] as const;
+const ARRANGE_N = ALIGN_BTNS.length + SPACE_BTNS.length + LAYOUT_BTNS.length;
+// 排成一行 / 一列的固定间距：与造屏落位（worker 的 layoutNewScreens）同一个数，一键摆出来的和生成出来的一样宽松
+const LAYOUT_GAP = 80;
 
 type JobInput = { count?: ScreenCount; versions?: number; screenIds?: string[] | 'all'; screenId?: string; fromScreenId?: string; prompt?: string; componentId?: string; componentIds?: string[] };
 // 一个在跑作业会改到哪些屏（REQ-CORE-020）。JobDto 不带 targetScreenId，只能按 kind 从 input 反推；
@@ -81,6 +84,8 @@ function jobLabel(job: JobDto, screens: ScreenDto[], components: ComponentDto[])
 }
 // 新建组件时的占位内容（REQ-EDIT-006）：建完立刻在输入框里描述它，第一句「改组件」就把它写出来
 const NEW_COMPONENT_HTML = '<div class="p-4 text-sm text-on-surface-variant">New component</div>';
+// 画布上一张卡（屏或组件）的位置，位置写回与撤销栈都用它
+type PosEntry = { id: string; x: number; y: number };
 
 // PAGE-CANVAS：画布 + 对话 + 修订/设计系统/检查器面板（面板状态进 URL，INT-020）
 export function CanvasPage() {
@@ -108,6 +113,8 @@ export function CanvasPage() {
   const [count, setCount] = useState<ScreenCount>(1);
   const [versions, setVersions] = useState(1);
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  // 组件卡的交互态（REQ-EDIT-006）：与屏的聚焦互斥——两边都是「活 iframe 吃掉指针」，同时开会分不清点的是谁
+  const [focusedComponentId, setFocusedComponentId] = useState<string | null>(null);
   const [navStack, setNavStack] = useState<string[]>([]);
   const [zoom, setZoom] = useState(0.5);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -161,7 +168,8 @@ export function CanvasPage() {
   const inspectArmed = panel === 'inspect';
   const annotateArmed = panel === 'annotate';
   const annotateMode = annotateArmed && !!focusedId;
-  const inspectMode = (inspectArmed || annotateArmed) && !!focusedId;
+  // 组件卡也能选元素（v0.57）：它跑同一套运行时，qid 落在组件自己的 HTML 上
+  const inspectMode = (inspectArmed || annotateArmed) && (!!focusedId || !!focusedComponentId);
 
   const refreshMessages = useCallback(() => api.projects.messages(projectId).then((r) => setMessages(r.items)).catch(() => {}), [projectId]);
   // 进行中作业的终态由 SSE 事件宣告；refresh 负责与后端对账：先剔除已经结束的（事件流与刷新之间的竞态会丢终态），
@@ -318,6 +326,9 @@ export function CanvasPage() {
     const ids = screens.map((s) => s.id);
     return new Set(guardJobs.flatMap((j) => coveredScreens(j, ids, components)));
   }, [guardJobs, screens, components]);
+  // 正在被 edit_component 作业改的组件：改它的元素会撞版本，检查器先挡住（与屏的 busyScreens 同义）
+  const busyComponents = useMemo(() => new Set(guardJobs.filter((j) => j.kind === 'edit_component').map((j) => (j.input as { componentId?: string } | null)?.componentId).filter(Boolean) as string[]), [guardJobs]);
+  const focusedComponent = useMemo(() => components.find((c) => c.id === focusedComponentId) ?? null, [components, focusedComponentId]);
   const generating = useMemo(() => guardJobs.find((j) => j.kind === 'generate'), [guardJobs]);
   // 发送前的冲突预判：没有目标 = 造，撞在跑的 generate；有目标 = 改，撞目标屏的占用。其余组合一律放行，后端 409 是最终判据
   // 聊天：一个项目一条会话，只撞在跑的 chat（REQ-CORE-023）
@@ -408,35 +419,41 @@ export function CanvasPage() {
     }
   };
   const cancelNewest = () => { const j = runningJobs[0]; if (j) void cancelJob(j.id); };
-  // 位置撤销栈（v0.41）：拖动与对齐都是一步把屏挪走的动作，错了没有退路——每次动之前把「这几屏原来在哪」压栈，⌘Z 逐步还原。
-  // 只管位置：屏内容的历史在修订树里，删屏有确认框，都不进这个栈
-  const posUndo = useRef<{ label: string; entries: { id: string; x: number; y: number }[] }[]>([]);
-  const pushUndo = (label: string, ids: string[]) => {
-    const entries = screensRef.current.filter((s) => ids.includes(s.id)).map((s) => ({ id: s.id, x: s.x, y: s.y }));
-    if (entries.length) posUndo.current = [...posUndo.current.slice(-19), { label, entries }];
+  // 位置撤销栈（v0.41）：拖动与对齐都是一步把屏挪走的动作，错了没有退路——每次动之前把「这几张原来在哪」压栈，⌘Z 逐步还原。
+  // 只管位置：屏内容的历史在修订树里，删屏有确认框，都不进这个栈。一步同时记屏与组件（v0.47 整组一起拖、整组一起还原）
+  const posUndo = useRef<{ label: string; screens: PosEntry[]; components: PosEntry[] }[]>([]);
+  const pushUndo = (label: string, screenIds: string[], componentIds: string[] = []) => {
+    const pick = (list: PosEntry[], ids: string[]) => list.filter((x) => ids.includes(x.id)).map(({ id, x, y }) => ({ id, x, y }));
+    const entry = { label, screens: pick(screensRef.current, screenIds), components: pick(components, componentIds) };
+    if (entry.screens.length || entry.components.length) posUndo.current = [...posUndo.current.slice(-19), entry];
+  };
+  // 位置写回（INT-019 文档级几何）：本地先行 + 在途坐标，屏与组件各走自己的 PATCH；等全部有结果再决定，
+  // 失败的坐标交还服务端、成功的不回滚（口径同排列）。返回没写上的那几张的名字
+  const writePositions = async (moved: PosEntry[], movedComps: PosEntry[]) => {
+    for (const e of moved) dirtyPos.current.set(e.id, { x: e.x, y: e.y });
+    for (const e of movedComps) dirtyCompPos.current.set(e.id, { x: e.x, y: e.y });
+    const apply = <T extends PosEntry>(list: T[], entries: PosEntry[]) => (entries.length ? list.map((x) => { const e = entries.find((q) => q.id === x.id); return e ? { ...x, x: e.x, y: e.y } : x; }) : list);
+    setDetail((d) => d && { ...d, screens: apply(d.screens, moved), components: apply(d.components, movedComps) });
+    const done = await Promise.allSettled([...moved.map((e) => api.screens.patch(e.id, { x: e.x, y: e.y })), ...movedComps.map((e) => api.components.patch(e.id, { x: e.x, y: e.y }))]);
+    const failed: string[] = [];
+    moved.forEach((e, i) => { if (done[i].status === 'rejected') { dirtyPos.current.delete(e.id); failed.push(screensRef.current.find((s) => s.id === e.id)?.name ?? e.id); } });
+    movedComps.forEach((e, i) => { if (done[moved.length + i].status === 'rejected') { dirtyCompPos.current.delete(e.id); failed.push(components.find((c) => c.id === e.id)?.name ?? e.id); } });
+    return failed;
   };
   const undoPos = async () => {
     const last = posUndo.current.pop();
     if (!last) { toast('没有可撤销的移动'); return; }
-    for (const e of last.entries) dirtyPos.current.set(e.id, { x: e.x, y: e.y });
-    setDetail((d) => d && { ...d, screens: d.screens.map((s) => { const e = last.entries.find((x) => x.id === s.id); return e ? { ...s, x: e.x, y: e.y } : s; }) });
-    const done = await Promise.allSettled(last.entries.map((e) => api.screens.patch(e.id, { x: e.x, y: e.y })));
-    const failed = last.entries.filter((_, i) => done[i].status === 'rejected');
-    if (failed.length) { for (const e of failed) dirtyPos.current.delete(e.id); toast('撤销没能全部写回，已重取', 'error'); refresh(); return; }
+    const failed = await writePositions(last.screens, last.components);
+    if (failed.length) { toast('撤销没能全部写回，已重取', 'error'); refresh(); return; }
     toast(`已撤销${last.label}`);
   };
-
-  const onMove = async (id: string, x: number, y: number) => {
-    pushUndo('移动', [id]);
-    dirtyPos.current.set(id, { x, y });
-    setDetail((d) => d && { ...d, screens: d.screens.map((s) => (s.id === id ? { ...s, x, y } : s)) });
-    try { await api.screens.patch(id, { x, y }); } catch { dirtyPos.current.delete(id); toast('位置保存失败', 'error'); refresh(); }
-  };
-  // 组件卡的位置随项目存（INT-019 文档级几何），同一条 PATCH、同一套本地先行
-  const onMoveComponent = async (id: string, x: number, y: number) => {
-    dirtyCompPos.current.set(id, { x, y });
-    setDetail((d) => d && { ...d, components: d.components.map((c) => (c.id === id ? { ...c, x, y } : c)) });
-    try { await api.components.patch(id, { x, y }); } catch { dirtyCompPos.current.delete(id); toast('位置保存失败', 'error'); refresh(); }
+  // 松手落库：单张与整组同一条路（v0.47 多选批量移动）
+  const onMove = async (moved: PosEntry[], movedComps: PosEntry[]) => {
+    pushUndo('移动', moved.map((e) => e.id), movedComps.map((e) => e.id));
+    const failed = await writePositions(moved, movedComps);
+    if (!failed.length) return;
+    toast(moved.length + movedComps.length > 1 ? `位置保存失败：${failed.join('、')} 没挪过去，再拖一次` : '位置保存失败', 'error');
+    refresh();
   };
   // 新建组件（REQ-EDIT-006）：先起名建一个占位组件，选成唯一目标，接着在输入框里描述它——第一句「改组件」就把它写出来
   const createComponent = async (name: string) => {
@@ -469,13 +486,20 @@ export function CanvasPage() {
     arrangeRefs.current[at]?.focus();
   };
   // 多选排列（REQ-CORE-018）：对齐按选中集合的外接框算，等距保住首尾、中间按间隙均分；只动位置变了的屏，落库走同一条 PATCH
-  const arrange = async (kind: 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom' | 'hspace' | 'vspace') => {
+  const arrange = async (kind: 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom' | 'hspace' | 'vspace' | 'hrow' | 'vcol') => {
     const sel = selectedScreens;
     if (sel.length < 2 || (kind.endsWith('space') && sel.length < 3)) return;
     const minX = Math.min(...sel.map((s) => s.x)); const maxR = Math.max(...sel.map((s) => s.x + s.width));
     const minY = Math.min(...sel.map((s) => s.y)); const maxB = Math.max(...sel.map((s) => s.y + s.height));
     const next = new Map<string, { x: number; y: number }>();
-    if (kind === 'hspace' || kind === 'vspace') {
+    const layout = kind === 'hrow' || kind === 'vcol';
+    if (layout) {
+      // 排成一行 / 一列（v0.52）：顺序取当前位置（行按 x、列按 y，相同再按另一轴），起点取外接框左上角，间距固定
+      const h = kind === 'hrow';
+      const sorted = [...sel].sort((a, b) => (h ? a.x - b.x || a.y - b.y : a.y - b.y || a.x - b.x));
+      let cursor = h ? minX : minY;
+      for (const s of sorted) { next.set(s.id, h ? { x: cursor, y: minY } : { x: minX, y: cursor }); cursor += (h ? s.width : s.height) + LAYOUT_GAP; }
+    } else if (kind === 'hspace' || kind === 'vspace') {
       const h = kind === 'hspace';
       const sorted = [...sel].sort((a, b) => (h ? a.x - b.x : a.y - b.y));
       const span = h ? maxR - minX : maxB - minY;
@@ -491,7 +515,7 @@ export function CanvasPage() {
     }
     const moved = sel.filter((s) => { const n = next.get(s.id)!; return n.x !== s.x || n.y !== s.y; });
     if (!moved.length) return;
-    pushUndo(kind.endsWith('space') ? '等距' : '对齐', moved.map((s) => s.id));
+    pushUndo(layout ? '排列' : kind.endsWith('space') ? '等距' : '对齐', moved.map((s) => s.id));
     for (const s of moved) dirtyPos.current.set(s.id, next.get(s.id)!);
     setDetail((d) => d && { ...d, screens: d.screens.map((s) => (next.has(s.id) ? { ...s, ...next.get(s.id)! } : s)) });
     // 等每条 PATCH 都有结果再重取：先回来的旧快照会盖掉后落地的那几条写入。
@@ -632,7 +656,8 @@ export function CanvasPage() {
   // 从交互态切进来时若已在屏内跳转过，先把 iframe 拉回这张卡片自己的那一屏——
   // 否则选中的元素属于别的屏，与卡片截图对不上（批注的锚点也会错）。
   const toggleInspect = () => {
-    if (inspectArmed) { setPanel(null); setFocusedId(null); return; }   // 退出模式：连同聚焦一起退回静态卡片
+    if (inspectArmed) { setPanel(null); setFocusedId(null); setFocusedComponentId(null); return; }   // 退出模式：连同聚焦一起退回静态卡片
+    if (focusedComponentId) { setPanel('inspect'); return; }            // 组件卡已在交互态：就地转成选择元素
     if (focusedId) { if (navStack.length) canvasApi.current?.resetToOwn(); setPanel('inspect'); return; }
     if (selected) { canvasApi.current?.focus(selected.id); setPanel('inspect'); return; }
     setPanel('inspect');                                                // 没选中屏也能开：点哪一屏就进哪一屏
@@ -690,9 +715,12 @@ export function CanvasPage() {
   }, []);
   // 选中元素随聚焦走：退出聚焦、换屏才清空。屏换了修订不清——热更新后由运行时按 qid 重选（quilt:reselect），
   // 检查器字段刷成新值；元素真没了（被删 / 子树重生成换了 qid）运行时回 deselect 才清
-  useEffect(() => { setElementSel(null); }, [focusedId]);
+  useEffect(() => { setElementSel(null); }, [focusedId, focusedComponentId]);
 
-  if (!detail || !tokens || !previewOrigin) return <div className="relative h-full"><TopNav floating /><Spinner label="加载项目…" /></div>;
+  // detail.project.id !== projectId：切项目是客户端导航，CanvasPage 不卸载、detail 还是上一个项目的数据。
+  // 拿它渲染画布的后果不只是闪一下别人的卡片——CanvasView 的一次性适配会按上一个项目的屏算镜头，
+  // 还把这个算错的镜头存进新项目的 quilt:view 键，此后每次打开都开在那儿（存过就不再适配）。
+  if (!detail || detail.project.id !== projectId || !tokens || !previewOrigin) return <div className="relative h-full"><TopNav floating /><Spinner label="加载项目…" /></div>;
   const jobBlocked = busy ? '有作业进行中，等它完成' : screens.length === 0 ? '还没有屏幕' : false;
   const screenSize = DEVICE_SIZE[detail.project.deviceType];
 
@@ -726,13 +754,14 @@ export function CanvasPage() {
   ]);
   if (focused) tools.push([
     { id: 'back', label: '后退', hint: 'Alt+←', desc: '退回屏内上一次跳转之前', icon: <ArrowLeft size={ICON} />, unavailable: navStack.length === 0 && '还没有在这一屏里跳转过', onSelect: () => canvasApi.current?.goBack() },
-    { id: 'exit', label: '退出交互', hint: 'Esc', desc: '结束屏内交互，回到画布', icon: <X size={ICON} />, onSelect: () => setFocusedId(null) },
+    { id: 'exit', label: '退出交互', hint: 'Esc', desc: '结束屏内交互，回到画布', icon: <X size={ICON} />, onSelect: () => { setFocusedId(null); setFocusedComponentId(null); } },
   ]);
 
   const panelBody =
     panel === 'revisions' && selected ? <RevisionPanel screen={selected} onClose={() => setPanel(null)} onRestored={refresh} />
     : panel === 'design' ? <DesignPanel ds={detail.designSystem} project={detail.project} screens={screens} assets={detail.assets} busy={busy} onClose={() => setPanel(null)} onSaved={refresh} onApplyAll={applyDesignSystem} onPropose={(i) => propose(i)} />
     : panel === 'agent' ? <AgentJobsPanel projectId={projectId} screens={screens} runners={runners} onClose={() => setPanel(null)} onChanged={refresh} />
+    : panel === 'inspect' && focusedComponent ? <InspectorPanel component={focusedComponent} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyComponents.has(focusedComponent.id)} onClose={() => setPanel(null)} onEdited={() => { setElementSel(null); refresh(); }} />
     : panel === 'inspect' && focused ? <InspectorPanel screen={focused} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyScreens.has(focused.id)} runners={runners} composerRunnerId={runnerId} sessions={sessions} onSessionsOpen={() => void loadSessions()} workingQids={workingSubtrees.filter((w) => w.screenId === focused.id).map((w) => w.qid)} onClose={() => setPanel(null)} onEdited={(qid) => { canvasApi.current?.markDone([qid]); refresh(); }} onRegenerate={regenerateSubtree} onEditComponent={onEditComponent} />
     : panel === 'annotate' && focused ? <AnnotationPanel screen={focused} sel={elementSel} items={screenAnnotations} busy={busyScreens.has(focused.id)} onClose={() => { setPanel(null); setFocusedId(null); }} onAdd={addAnnotation} onUpdate={updateAnnotation} onRemove={removeAnnotation} onSend={sendAnnotations} />
     : null;
@@ -743,16 +772,20 @@ export function CanvasPage() {
       <div ref={safeAreaRef} aria-hidden="true" data-testid="safe-area" className="pointer-events-none absolute bottom-[var(--chrome-bottom)] left-[var(--chrome-left)] right-[var(--chrome-right)] top-[var(--chrome-top)]" />
       <div className="absolute inset-0">
           <CanvasView
-            safeAreaRef={safeAreaRef}
+            // 换项目就换一张画布：视图位置是按项目记的（quilt:view:<id>），不重挂会把上一个项目的镜头带过来
+            key={projectId}
+            projectId={projectId} safeAreaRef={safeAreaRef}
             projectName={detail.project.name} tokens={tokens} palette={detail.designSystem.palette} colorMode={detail.designSystem.colorMode} assets={detail.assets} screens={screens} links={detail.links} previewOrigin={previewOrigin}
             selectedIds={selectedIds} focusedId={focusedId} styleGuideSelected={panel === 'design'} inspectMode={inspectMode} annotateMode={annotateMode} armed={inspectArmed ? 'inspect' : annotateArmed ? 'annotate' : null} showLinks={showLinks}
             anchor={anchor} screenSize={screenSize} exemplarScreenId={detail.project.exemplarScreenId}
             onSelect={(id, additive) => { setSelectedId(id, additive); if (!id && panel === 'revisions') setPanel(null); }}
             onSelectMany={(ids, compIds, additive) => { setSelectedIds((prev) => (additive ? [...new Set([...prev, ...ids])] : ids)); setSelectedComponentIds((prev) => (additive ? [...new Set([...prev, ...compIds])] : compIds)); }}
             onSelectStyleGuide={() => { setSelectedIds([]); setSelectedComponentIds([]); setPanel('design'); }}
-            onFocus={(id) => { setFocusedId(id); if (id) { setSelectedIds([id]); setSelectedComponentIds([]); } }}
+            onFocus={(id) => { setFocusedId(id); if (id) { setFocusedComponentId(null); setSelectedIds([id]); setSelectedComponentIds([]); } }}
+            focusedComponentId={focusedComponentId}
+            onFocusComponent={(id) => { setFocusedComponentId(id); if (id) { setFocusedId(null); setSelectedComponentIds([id]); setSelectedIds([]); } }}
             onMove={onMove}
-            components={components} selectedComponentIds={selectedComponentIds} onSelectComponent={setSelectedComponentId} onMoveComponent={onMoveComponent}
+            components={components} selectedComponentIds={selectedComponentIds} onSelectComponent={setSelectedComponentId}
             onNavigateMissing={(fromScreenId, href) => setMissing({ fromScreenId, hrefs: [href] })}
             onDanglingClick={(screenId, hrefs) => setMissing({ fromScreenId: screenId, hrefs })}
             onDeadLink={() => toast('这个交互还没有设计；想让它跳转，用「选择元素」给它连线')}
@@ -788,6 +821,11 @@ export function CanvasPage() {
             const at = ALIGN_BTNS.length + i;
             return <IconButton key={k} ref={(el) => { arrangeRefs.current[at] = el; }} tabIndex={at === arrangeAt ? 0 : -1} size="xs" tip="bottom" label={label} desc="保住最左 / 最上和最右 / 最下两屏，中间按间隙均分" unavailable={selectedScreens.length < 3 ? '至少选 3 屏' : false} data-testid={`arrange-${k}`} onFocus={() => setArrangeAt(at)} onClick={() => { setArrangeAt(at); arrange(k); }}><Icon size={16} aria-hidden="true" /></IconButton>;
           })}
+          <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
+          {LAYOUT_BTNS.map(([k, label, Icon], i) => {
+            const at = ALIGN_BTNS.length + SPACE_BTNS.length + i;
+            return <IconButton key={k} ref={(el) => { arrangeRefs.current[at] = el; }} tabIndex={at === arrangeAt ? 0 : -1} size="xs" tip="bottom" label={label} desc={k === 'hrow' ? `按当前左右顺序排成一行，间距 ${LAYOUT_GAP}` : `按当前上下顺序排成一列，间距 ${LAYOUT_GAP}`} data-testid={`arrange-${k}`} onFocus={() => setArrangeAt(at)} onClick={() => { setArrangeAt(at); arrange(k); }}><Icon size={16} aria-hidden="true" /></IconButton>;
+          })}
         </div>
       )}
       <TopNav floating right={<>
@@ -809,7 +847,7 @@ export function CanvasPage() {
       {settingsSection && <SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} returnTo={settingsBtnRef} onCatalog={applyCatalog} />}
       <ChatDock messages={messages} progress={progress} status={jobStatus} collapsed={chatCollapsed} onToggle={toggleChat} onRemember={rememberConvention} busy={busy} />
       <Composer
-        handle={composerRef} running={running} blockedReason={blockedReason} targets={targetScreens} totalScreens={screens.length} anchor={anchor} maxTargets={MAX_TARGETS}
+        handle={composerRef} safeAreaRef={safeAreaRef} running={running} blockedReason={blockedReason} targets={targetScreens} totalScreens={screens.length} anchor={anchor} maxTargets={MAX_TARGETS}
         componentTargets={targetComponents}
         onRemoveComponentTarget={(id) => { setTargetComponentIds((prev) => prev.filter((x) => x !== id)); setSelectedComponentIds((prev) => prev.filter((x) => x !== id)); }}
         count={count} versions={versions} onCount={setCount} onVersions={setVersions}

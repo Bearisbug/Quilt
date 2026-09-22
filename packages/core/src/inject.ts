@@ -63,12 +63,36 @@ export function applyElementOps(bodyHtml: string, qid: string, ops: ElementOp[])
     if (op.type === 'link') { if (op.value) el.setAttribute(navAttrOf(el), op.value); else if (el.tagName === 'A') el.setAttribute('href', '#'); else el.removeAttribute(navAttrOf(el)); }
     if (op.type === 'text') {
       const textNode = Array.from(el.childNodes).find((n) => n.nodeType === 3 && (n.textContent ?? '').trim());
+      const before = (textNode?.textContent ?? (el.children.length === 0 ? el.textContent : '') ?? '').trim();
       if (textNode) textNode.textContent = op.value;
       else if (el.children.length === 0) el.textContent = op.value;
       else el.appendChild(document.createTextNode(op.value));
+      syncAccessibleName(el, before, op.value.trim());
     }
   }
   return document.body.innerHTML;
+}
+
+/**
+ * 改可见文案时把跟着它走的无障碍名一起改（v0.59）：`aria-label` / `title` 存在的理由就是替这段文字说话，
+ * 只改可见的那一处，读屏念出来的与看到的就不是一回事了（实测把一条 tab 从「附近」改成「同城」后，
+ * 同一条上的 `aria-label="附近"` 还是旧的）。
+ *
+ * **只在两者原本一致时联动**：`aria-label` 与旧文案逐字符相等才改。不相等说明作者刻意让它们不同
+ * （图标按钮 `aria-label="关闭对话框"` 配可见的「×」是最常见的一种），这时一个字都不动。
+ *
+ * 找的范围是被改元素本身、加上最近的那层可交互 / 带语义的祖先及其子树——HeaderTabs 那种
+ * `<label><input aria-label="附近"><span>附近</span></label>` 结构里，名字挂在兄弟节点上，
+ * 只看自己会漏掉。范围到 label / a / button / [role] 就停，不会漫到整屏去改别人的。
+ */
+function syncAccessibleName(el: Element, before: string, after: string): void {
+  if (!before || before === after) return;
+  const scope = el.closest('label, a, button, [role]') ?? el;
+  for (const node of [scope, ...Array.from(scope.querySelectorAll('*'))]) {
+    for (const attr of ['aria-label', 'title']) {
+      if ((node.getAttribute(attr) ?? '').trim() === before) node.setAttribute(attr, after);
+    }
+  }
 }
 
 export function describeElement(bodyHtml: string, qid: string): { tag: string; text: string; classes: string; href: string | null } | null {

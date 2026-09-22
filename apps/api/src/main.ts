@@ -4,7 +4,7 @@ import './lib/http-agent.ts';
 import { spawn } from 'node:child_process';
 import { config } from './config.ts';
 import { runMigrations } from './db/migrate.ts';
-import { backfillSemanticColors } from './db/backfill.ts';
+import { backfillSemanticColors, backfillComponentQids } from './db/backfill.ts';
 import { localUser } from './services/user.ts';
 import { startHttp } from './http/server.ts';
 import { startWorker } from './worker/index.ts';
@@ -13,6 +13,8 @@ await runMigrations();
 // 回填不是启动条件：数据库里有一行算不出来也要让人能打开画布，缺的键下一次写设计系统仍会补上
 const backfilled = await backfillSemanticColors().catch((e) => { console.error('[quilt] 语义色回填失败', e); return 0; });
 if (backfilled) console.log(`[quilt] 语义色回填 ${backfilled} 个项目`);
+const qidded = await backfillComponentQids().catch((e) => { console.error('[quilt] 组件 qid 回填失败', e); return 0; });
+if (qidded) console.log(`[quilt] 组件 qid 回填 ${qidded} 个组件`);
 await localUser();
 startHttp();
 await startWorker();
