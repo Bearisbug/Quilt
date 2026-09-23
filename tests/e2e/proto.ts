@@ -1,6 +1,7 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { launch, openApp, seed, seedJson, apiJson, EVIDENCE, WEB } from './lib.ts';
+import { launch, openApp, seed, seedJson, apiJson, EVIDENCE, WEB, API, eventually } from './lib.ts';
+import { connectMcp, callTool } from './mcp-client.ts';
 
 // docs/TEST.md PROTO 域（TC-PROTO-001~006）AI 执行脚本。用法同 core.ts（RUN= / ONLY= / LIVE_LLM=0）。
 const RUN = process.env.RUN ?? '005';
@@ -58,18 +59,18 @@ await step('TC-PROTO-001', async () => {
   await page.waitForTimeout(400);
   await fl.locator('a[href="/s2"]', { hasText: 'Go to' }).click();
   await page.locator('.card.focused .badge', { hasText: '/s2' }).waitFor({ timeout: 10000 });
-  await page.waitForTimeout(500);
-  expect((await fl.locator('h1').innerText()).startsWith('Screen 2'), 'iframe 内容未切到 Screen 2');
+
+  await eventually(async () => expect((await fl.locator('h1').innerText()).startsWith('Screen 2'), 'iframe 内容未切到 Screen 2'));
   expect((await page.locator('.card.focused iframe').count()) === 1, 'iframe 被重建');
   await page.keyboard.press('Alt+ArrowLeft');
   await page.locator('.card.focused .badge', { hasText: '/s1' }).waitFor({ timeout: 10000 });
-  await page.waitForTimeout(400);
-  expect((await fl.locator('h1').innerText()).startsWith('Screen 1'), '后退未回到 Screen 1');
+
+  await eventually(async () => expect((await fl.locator('h1').innerText()).startsWith('Screen 1'), '后退未回到 Screen 1'));
   expect((await fl.locator('input[name="address"]').inputValue()) === '上海市', '输入未保留');
   expect((await page.evaluate('history.length') as number) === histBefore, '主站历史被污染');
   await page.keyboard.press('Escape');
-  await page.waitForTimeout(300);
-  expect((await page.locator('.card.focused iframe').count()) === 0, 'Esc 未退出');
+
+  await eventually(async () => expect((await page.locator('.card.focused iframe').count()) === 0, 'Esc 未退出'));
 });
 
 let mapProject = '';
@@ -151,6 +152,7 @@ await step('TC-PROTO-005', async () => {
   for (let i = 0; i < 6; i++) {
     const href = await p2.locator('#quilt-root a[href^="/"]').first().getAttribute('href');
     await p2.locator('#quilt-root a[href^="/"]').first().click();
+    // 固定等待而非轮询：下一轮要读新页面上的链接，得等 view transition 把 DOM 换完，不只是 hash 变了
     await p2.waitForTimeout(400);
     expect(p2.url().endsWith(`#${href}`), `hash 未变为 #${href}`);
     visited.add(href!);
@@ -181,17 +183,17 @@ await step('TC-PROTO-007', async () => {
   await fl.locator('input[name="email"]').fill('a@b.co');
   await fl.locator('button[type="submit"]', { hasText: 'Sign in' }).click();
   await page.locator('.card.focused .badge', { hasText: '/s2' }).waitFor({ timeout: 10000 });
-  await page.waitForTimeout(400);
-  expect((await fl.locator('h1').innerText()).startsWith('Screen 2'), '表单提交未换到 Screen 2');
+
+  await eventually(async () => expect((await fl.locator('h1').innerText()).startsWith('Screen 2'), '表单提交未换到 Screen 2'));
   expect((await page.locator('.card.focused iframe').count()) === 1, 'iframe 被重建');
   await page.keyboard.press('Alt+ArrowLeft');
   await page.locator('.card.focused .badge', { hasText: '/s1' }).waitFor({ timeout: 10000 });
-  await page.waitForTimeout(400);
-  expect((await fl.locator('input[name="email"]').inputValue()) === 'a@b.co', '表单输入未保留');
+
+  await eventually(async () => expect((await fl.locator('input[name="email"]').inputValue()) === 'a@b.co', '表单输入未保留'));
   await fl.locator('button[data-href="/s3"]').click();
   await page.locator('.card.focused .badge', { hasText: '/s3' }).waitFor({ timeout: 10000 });
-  await page.waitForTimeout(400);
-  expect((await fl.locator('h1').innerText()).startsWith('Screen 3'), 'data-href 按钮未换到 Screen 3');
+
+  await eventually(async () => expect((await fl.locator('h1').innerText()).startsWith('Screen 3'), 'data-href 按钮未换到 Screen 3'));
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
 });
@@ -204,8 +206,8 @@ await step('TC-PROTO-008', async () => {
   expect(counts.length >= 4, `连线条数 ${counts.length}，应 ≥ 4（s1→s2、s1→s3、s2→s3、s3→s1）`);
   expect(Math.max(...counts) >= 3, `合并计数最大 ${Math.max(...counts)}，应 ≥ 3`);
   await page.getByTestId('toggle-links').click();
-  await page.waitForTimeout(200);
-  expect((await page.locator('[data-testid="link-edges"]').count()) === 0, '关闭后连线仍显示');
+
+  await eventually(async () => expect((await page.locator('[data-testid="link-edges"]').count()) === 0, '关闭后连线仍显示'));
   expect((await page.locator('[data-testid="screen-card"][data-route="/s1"] .warn').count()) === 1, '关闭连线后断链标记消失');
   await page.getByTestId('toggle-links').click();
   await page.locator('[data-testid="link-edges"]').waitFor({ timeout: 5000 });
@@ -266,6 +268,87 @@ await step('TC-PROTO-011', async () => {
   expect(z2 < z1, `捏合缩小后缩放未回落（${z1}% → ${z2}%）`);
   await page.keyboard.press('Escape');
   return `${z0}% → ${z1}% → ${z2}%`;
+});
+
+// TC-PROTO-012 叠层屏（REQ-PROTO-005 v0.63）：设为叠层 → 播放时压层 → 后退只关层 → 从叠层跳 push 屏清层；预览域注入透明背景；导出带 data-presentation
+await step('TC-PROTO-012', async () => {
+  const { projectId, screens } = seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', 'Overlay', '--device', 'mobile', '--screens', '3');
+  const s2 = screens[1];
+  await page.goto(`${WEB}/p/${projectId}`);
+  await page.locator('[data-testid="screen-card"] img').first().waitFor({ timeout: 15000 });
+  // 1 选中 /s2 → 工具栏「设为叠层」→ 卡片带 overlay 类与「叠层」片；PATCH 落库；预览域下发注入透明背景
+  await page.locator('[data-testid="screen-card"][data-route="/s2"] .gesture').click();
+  const tp = page.getByTestId('toggle-presentation');
+  expect((await tp.getAttribute('aria-label') ?? await tp.innerText()).includes('设为叠层') || (await tp.getAttribute('aria-pressed')) === 'false', '默认应是「设为叠层」');
+  await tp.click();
+  await page.getByText('已设为叠层屏').waitFor({ timeout: 5000 });
+  await page.locator('.card.overlay[data-route="/s2"] .label .chip', { hasText: '叠层' }).waitFor({ timeout: 5000 });
+  const d = (await apiJson<{ screens: { id: string; presentation: string; previewUrl: string }[] }>(`/v1/projects/${projectId}`)).body;
+  const s2d = d.screens.find((s) => s.id === s2.id)!;
+  expect(s2d.presentation === 'overlay', 'presentation 未落库');
+  const doc = await (await fetch(s2d.previewUrl.replace('preview.localhost', '127.0.0.1'))).text();
+  expect(doc.includes('<style data-quilt-overlay>'), '预览域下发的叠层屏应注入透明背景');
+  await page.keyboard.press('Escape');
+  // 2 聚焦 /s1 → 点「Go to /s2」→ 叠层压在 /s1 上：/s1 的 h1 还在、层里有 /s2 的 h1；角标 /s2
+  const fl = await focus('/s1');
+  await fl.locator('a[href="/s2"]', { hasText: 'Go to' }).click();
+  await page.locator('.card.focused .badge', { hasText: '/s2' }).waitFor({ timeout: 10000 });
+  await page.waitForTimeout(500);
+  const layer = fl.locator('[data-quilt-overlay-layer="/s2"]');
+  expect((await layer.count()) === 1, '应压出一层 /s2');
+  expect((await fl.locator('body > h1, body > div > h1').first().innerText().catch(() => '')).startsWith('Screen 1') || (await fl.locator('h1').first().innerText()).startsWith('Screen 1'), '底下的 /s1 应原样留着');
+  expect((await layer.locator('h1').first().innerText()).startsWith('Screen 2'), '层里应是 /s2 的内容');
+  expect((await page.locator('.card.focused iframe').count()) === 1, 'iframe 不该重建');
+  // 3 Alt+← 只关这一层；角标回 /s1
+  await page.keyboard.press('Alt+ArrowLeft');
+  await page.locator('.card.focused .badge', { hasText: '/s1' }).waitFor({ timeout: 10000 });
+
+  await eventually(async () => expect((await layer.count()) === 0, '后退后叠层应消失'));
+  // 4 再打开叠层，在层里点「Go to /s3」（push）→ 层清空、DOM 换成 /s3
+  await fl.locator('a[href="/s2"]', { hasText: 'Go to' }).click();
+  await page.locator('.card.focused .badge', { hasText: '/s2' }).waitFor({ timeout: 10000 });
+  await page.waitForTimeout(400);
+  await layer.locator('a[href="/s3"]', { hasText: 'Go to' }).click();
+  await page.locator('.card.focused .badge', { hasText: '/s3' }).waitFor({ timeout: 10000 });
+
+  await eventually(async () => expect((await fl.locator('[data-quilt-overlay-layer]').count()) === 0 && (await fl.locator('h1').first().innerText()).startsWith('Screen 3'), '跳到 push 屏应清掉叠层并换 DOM'));
+  // 5 点遮罩关层：先回到 /s1 开一层，再点层的空白处
+  // 5 从 /s3 后退回到叠层：底下必须是来处 /s1，层里是 /s2（v0.65 按栈重摆；此前会把 /s2 当整页换进来）
+  await page.keyboard.press('Alt+ArrowLeft'); await page.locator('.card.focused .badge', { hasText: '/s2' }).waitFor({ timeout: 10000 });
+
+  await eventually(async () => expect((await layer.count()) === 1 && (await fl.locator('#quilt-root, body').first().locator('h1').first().innerText()).startsWith('Screen 1'), '后退到叠层时底下应是 /s1、上面压一层 /s2'));
+  // 5b 叠层里指回底下那一屏的链接是关闭：层消失、角标回 /s1、再后退没有东西可退
+  await layer.locator('a[href="/s1"]').first().click();
+  await page.locator('.card.focused .badge', { hasText: '/s1' }).waitFor({ timeout: 10000 });
+
+  await eventually(async () => expect((await layer.count()) === 0 && (await fl.locator('h1').first().innerText()).startsWith('Screen 1'), '叠层的关闭链接应关层而不是再跳一次'));
+  // 5c 屏里自带的 <script> 在热更新换 DOM 之后也要跑（v0.65；此前换进来的脚本是惰性的）
+  const mcp = await connectMcp();
+  const cur = (await apiJson<{ screens: { id: string; route: string; currentRevisionId: string }[] }>(`/v1/projects/${projectId}`)).body.screens.find((s) => s.route === '/s1')!;
+  const patched = await callTool(mcp, 'quilt.patch_screen', { screenId: cur.id, expectedRevisionId: cur.currentRevisionId, edits: [{ find: '</header>', replace: '</header><p id="ran">no</p><script>document.getElementById("ran").textContent = "yes"</script>' }] });
+  expect(!patched.isError, `patch_screen 出错：${patched.text.slice(0, 160)}`);
+  await fl.locator('#ran', { hasText: 'yes' }).waitFor({ timeout: 15000 });
+  await mcp.close();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+  // 6 导出：/s2 的模板带 data-presentation="overlay"
+  const { body: job } = await apiJson<{ job: { id: string } }>(`/v1/projects/${projectId}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': `e2e-ov-${Date.now()}` }, body: JSON.stringify({ kind: 'export_prototype', input: {} }) });
+  await waitJob(job.job.id, 90);
+  const html = await (await fetch(`${API}/v1/jobs/${job.job.id}/export`)).text();
+  expect(html.includes('data-route="/s2" data-name="Screen 2" data-presentation="overlay"') && html.includes('data-quilt-overlay-layer'), '导出应标出 /s2 是叠层且运行时带压层逻辑');
+  // 6b 导出原型里的叠层栈（v0.65）：/s1 → /s2(叠层) → /s3 → 后退 → 后退，层数 0 / 1 / 0 / 1 / 0，底下始终是来处
+  const file = path.join(EVIDENCE, `run-${RUN}-tc-proto-012-export.html`);
+  await writeFile(file, html);
+  const ex = await ctx.newPage();
+  await ex.goto(`file://${file}`);
+  const state = () => ex.evaluate(() => ({ layers: document.querySelectorAll('[data-quilt-overlay-layer]').length, root: document.querySelector('#quilt-root h1')?.textContent ?? '' }));
+  const seq: string[] = [];
+  const at = async (hash: string | null) => { if (hash === null) await ex.evaluate(() => history.back()); else await ex.evaluate((h) => { location.hash = h; }, hash); await ex.waitForTimeout(400); const s = await state(); seq.push(`${s.layers}:${s.root.trim().split(' ').slice(0, 2).join(' ')}`); };
+  await at('#/s1'); await at('#/s2'); await at('#/s3'); await at(null); await at(null);
+  expect(seq.join(' | ') === '0:Screen 1 | 1:Screen 1 | 0:Screen 3 | 1:Screen 1 | 0:Screen 1', `导出叠层栈不对：${seq.join(' | ')}`);
+  await ex.close();
+  await rm(file, { force: true });
+  return '设为叠层落库 + 预览注入透明底；播放压层、后退只关层、从层跳 push 屏清层、后退回叠层按栈重摆、关闭链接关层、热更新后脚本执行；导出模板带 presentation、导出叠层栈 0/1/0/1/0';
 });
 
 await browser.close();

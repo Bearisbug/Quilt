@@ -1,10 +1,10 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider, redirect } from 'react-router';
-import { api } from './lib/api';
-import { ToastProvider } from './lib/toast';
-import { FirstProjectPage } from './pages/Projects';
-import { CanvasPage } from './pages/Canvas';
+import { api } from '@/lib/api';
+import { ToastProvider } from '@/lib/toast';
+import { FirstProjectPage } from '@/pages/Projects';
+import { CanvasPage } from '@/pages/Canvas';
 import './styles.css';
 
 // 画布即主界面（§13 导航 v0.28 / v0.32 本地版无登录）：直接进最近更新的项目；一个项目都没有才落到 PAGE-FIRST

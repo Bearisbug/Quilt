@@ -6,6 +6,8 @@ export type PreviewToParent =
     // 焦点在预览文档里时画布快捷键收不到，由运行时转发：Esc / Alt+← / ⌘E / ⌘/（code 用物理键，与父页的键位表一致）
   | { type: 'quilt:key'; key: string; code?: string; altKey: boolean; metaKey?: boolean; ctrlKey?: boolean }
   | { type: 'quilt:dead' }
+    // 叠层屏（v0.63 REQ-PROTO-005）：点了遮罩要关最上一层——由父页决定（它管导航栈），运行时只报
+  | { type: 'quilt:overlay-dismiss' }
   | { type: 'quilt:wheel'; deltaY: number; x: number; y: number }
     // rect 为屏文档坐标（含滚动偏移），与 fullPage:false 的截图同一坐标系，供画布层画批注气泡（REQ-EDIT-004 / ADR-003）
     // component：元素所在的共享组件名（自身或祖先带 data-component，REQ-EDIT-006），检查器据此挡住直改、给「改组件 / 脱离共享」
@@ -17,6 +19,9 @@ export type ParentToPreview =
     // keepScroll：同一屏换新修订（聚焦态热更新）时保留滚动位置；跳转不传，回到顶部
   | { type: 'quilt:swap'; html: string; route: string; keepScroll?: boolean }
   | { type: 'quilt:mode'; mode: 'interact' | 'inspect' }
+    // 叠层屏（v0.63）：把 html 的根元素压在当前文档上（45% 暗遮罩 + 根元素），不换 DOM；swap 会先清掉全部叠层
+  | { type: 'quilt:overlay'; html: string; route: string }
+  | { type: 'quilt:overlay-close' }
   | { type: 'quilt:highlight'; qid: string | null }
     // 热更新换了修订后按 qid 重新选中同一元素（回 quilt:select 带新值；元素没了回 quilt:deselect）
   | { type: 'quilt:reselect'; qid: string }

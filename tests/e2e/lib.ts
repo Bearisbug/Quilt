@@ -8,6 +8,8 @@ export const WEB = process.env.QUILT_E2E_WEB ?? 'http://localhost:5173';
 // 可指到另一套 API（e2e:mcp 在独立端口 + 测试库上跑，不占用 3100 的开发实例）
 export const API = process.env.QUILT_E2E_API ?? 'http://localhost:3100';
 export const EVIDENCE = path.join(ROOT, 'docs/test-runs');
+// 预览域的 host（含端口）：从被测 API 的 /v1/config 取，隔离栈（3200 / 3201）上跑也对得上；取不到时回落到开发默认 3101
+export const previewHost = async (): Promise<string> => { try { const c = (await (await fetch(`${API}/v1/config`)).json()) as { previewOrigin?: string }; return c.previewOrigin ? new URL(c.previewOrigin).host : 'preview.localhost:3101'; } catch { return 'preview.localhost:3101'; } };
 
 // 种子脚本：走 apps/api 的 pnpm scripts，返回最后一行输出
 export function seed(script: string, ...args: string[]): string {
@@ -49,6 +51,17 @@ async function checkTestApi(): Promise<void> {
       `  QUILT_E2E_API=http://localhost:3200 pnpm e2e:<套件>\n` +
       `确实要对开发库跑，显式设 ALLOW_E2E_DEV=1。`,
     );
+  }
+}
+
+// 轮询到断言成立：替代「固定睡一段再断言」——负载高或 SSE 刷新晚到时固定睡眠会在落库之前就断言，快的时候又白等。
+// 只用于「等某件事发生」；要确认某件事「没有发生」时仍用固定等待，否则轮询会在事情发生之前就判通过
+export async function eventually(check: () => unknown, timeoutMs = 5000, intervalMs = 100): Promise<void> {
+  const end = Date.now() + timeoutMs;
+  for (;;) {
+    try { await check(); return; }
+    catch (e) { if (Date.now() >= end) throw e; }
+    await new Promise((r) => setTimeout(r, intervalMs));
   }
 }
 

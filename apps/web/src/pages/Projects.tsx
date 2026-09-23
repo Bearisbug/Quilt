@@ -1,7 +1,7 @@
-import { EmptyState } from '../components/ui';
-import { TopNav } from '../components/TopNav';
-import { BrandSymbol } from '../components/BrandMark';
-import { CreateProjectDialog } from '../components/CreateProjectDialog';
+import { EmptyState } from '@/ui/ui';
+import { TopNav } from '@/project/TopNav';
+import { BrandSymbol } from '@/ui/BrandMark';
+import { CreateProjectDialog } from '@/project/CreateProjectDialog';
 
 // PAGE-FIRST（§13）：还没有任何项目时 `/` 落到这里——只有新建弹窗，没有别处可去，所以弹窗不可关闭；
 // 有项目时 `/` 的 loader 直接跳最近更新的项目，画布顶栏的项目切换器承担原项目列表的职责。

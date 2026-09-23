@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { launch, openApp, seed, seedJson, apiJson, EVIDENCE, WEB } from './lib.ts';
+import { launch, openApp, seed, seedJson, apiJson, EVIDENCE, WEB, eventually } from './lib.ts';
 
 // docs/TEST.md TC-EDIT-012（共享组件，REQ-EDIT-006）AI 执行脚本。步骤 8 要真实 LLM；LIVE_LLM=0 只跑 1～7。
 const RUN = process.env.RUN ?? '093';
@@ -140,8 +140,8 @@ await step('TC-EDIT-012', async () => {
   await lock.waitFor({ timeout: 5000 });
   expect((await lock.innerText()).includes('共享组件「TabBar」') && (await page.getByTestId('el-edit-component').count()) === 1 && (await page.getByTestId('el-detach').count()) === 1 && (await page.locator('#el-text').count()) === 0, '检查器锁定提示不对');
   await page.getByTestId('el-edit-component').click();
-  await page.waitForTimeout(300);
-  expect((await page.getByTestId('component-chip').count()) === 1 && (await page.getByTestId('target-chip').count()) === 0, '点「改组件」后目标区应只剩组件');
+
+  await eventually(async () => expect((await page.getByTestId('component-chip').count()) === 1 && (await page.getByTestId('target-chip').count()) === 0, '点「改组件」后目标区应只剩组件'));
   expect(await page.evaluate(() => document.activeElement?.id === 'chat-input'), '点「改组件」后输入框没获得焦点');
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
@@ -151,14 +151,14 @@ await step('TC-EDIT-012', async () => {
   await page.getByTestId('new-component-name').fill('Footer');
   await page.getByTestId('new-component-create').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="component-card"]').length === 2, null, { timeout: 10000 });
-  await page.waitForTimeout(300);
-  expect((await page.getByTestId('component-chip').innerText()).includes('Footer'), `新建后目标区应为 Footer：${await page.getByTestId('component-chip').innerText()}`);
+
+  await eventually(async () => expect((await page.getByTestId('component-chip').innerText()).includes('Footer'), `新建后目标区应为 Footer：${await page.getByTestId('component-chip').innerText()}`));
   if (!LIVE_LLM) return '提取 / 同步 / 回刷 / 版本冲突 / 锁与脱离 / 改名 / 删除 / 画布通过；真实回合跳过（LIVE_LLM=0）';
 
   // 8 真实 LLM：目标 TabBar，改第二个 tab 文案
   await page.locator('[data-testid="component-card"][data-name="TabBar"]').click();
-  await page.waitForTimeout(300);
-  expect((await page.getByTestId('component-chip').innerText()).includes('TabBar'), '点 TabBar 卡片后目标应是 TabBar');
+
+  await eventually(async () => expect((await page.getByTestId('component-chip').innerText()).includes('TabBar'), '点 TabBar 卡片后目标应是 TabBar'));
   const versionBefore = (await detail(pid)).components.find((c) => c.id === cid)!.version;
   await page.locator('#chat-input').fill('把第二个 tab 的文案改成 Search，其他都别动。');
   const req = page.waitForRequest((x) => x.url().includes('/messages') && x.method() === 'POST');

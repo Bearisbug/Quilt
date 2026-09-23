@@ -316,3 +316,21 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
   .phrase-in, .menu[data-state="open"] { animation: tip-in var(--duration-fast) var(--ease-out); }
   .menu[data-state="closed"] { animation: none; }
 }
+
+/* 叠层屏（REQ-PROTO-005 v0.63）：截图带 alpha，卡片铺暗底，像它在播放时压在别的屏上那样 */
+.card.overlay { background: #1c1c21; }
+.card.overlay img { background: transparent; }
+.card .label .chip { display: inline-block; margin-right: 6px; padding: 0 6px; border: 1px solid var(--color-line); border-radius: 999px; font-size: 10px; line-height: 16px; color: var(--color-muted); vertical-align: 1px; }
+
+/* 状态变体胶囊（REQ-CORE-025 v0.62）：聚焦卡内顶部中央一排（左上是断链角标、右上是交互角标），压在 iframe 之上 */
+.variant-chips { position: absolute; left: 50%; top: 8px; z-index: 3; display: flex; gap: 4px; transform: translateX(-50%); pointer-events: auto; }
+.variant-chip { pointer-events: auto; border: 1px solid var(--color-line); border-radius: 999px; background: var(--color-panel); color: var(--color-muted); font-size: 11px; font-weight: 600; padding: 3px 10px; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }
+.variant-chip[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); border-color: transparent; }
+.variant-chip:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+/* 小地图（REQ-CORE-024 v0.61）：顶栏下方左侧；矩形按类型着色，视口框用强调色 */
+.minimap { position: absolute; left: 1rem; top: 4rem; z-index: 20; border-radius: 0.75rem; cursor: crosshair; touch-action: none; }
+.minimap .mm-screen { fill: color-mix(in srgb, var(--color-fg) 55%, transparent); }
+.minimap .mm-component { fill: transparent; stroke: color-mix(in srgb, var(--color-fg) 55%, transparent); stroke-width: 1; }
+.minimap .mm-guide { fill: transparent; stroke: color-mix(in srgb, var(--color-fg) 35%, transparent); stroke-width: 1; stroke-dasharray: 2 2; }
+.minimap .mm-view { fill: color-mix(in srgb, var(--color-accent) 12%, transparent); stroke: var(--color-accent); stroke-width: 1.5; }

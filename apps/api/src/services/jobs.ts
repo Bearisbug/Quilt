@@ -12,6 +12,7 @@ import { hasActiveJob } from './screens.ts';
 import { estimateJob, type CreateJobInput, type JobRunner } from '@quilt/core';
 import type { UserRow } from './user.ts';
 import type { JobRow } from './projects.ts';
+import { settleByJob } from './annotations.ts';
 
 // 进程内队列（ADR-010 v0.32）：job.run 跑 worker 作业，screenshot.render 按 revisionId 去重
 export const jobQueue = new InProcessQueue<{ jobId: string }>('job.run', config.workerConcurrency);
@@ -24,6 +25,8 @@ export async function enqueueScreenshot(revisionId: string): Promise<void> {
 type AgentHooks = { run: (jobId: string) => void; cancel: (jobId: string) => void };
 let agentHooks: AgentHooks | null = null;
 export const registerAgentHooks = (h: AgentHooks) => { agentHooks = h; };
+// 在跑的模型作业各自的中止器：worker 起跑时登记、结束时摘除；取消时由这里中止，未发出的 LLM 调用不再发、已写到一半的产出不再落库
+export const modelAborts = new Map<string, AbortController>();
 
 // §15 限流：作业创建 ≤ 10 次/分钟（进程内滑动窗口；本地版保留，挡住 agent 失控循环）
 const windows = new Map<string, number[]>();
@@ -83,6 +86,8 @@ export async function createJob(args: { user: UserRow; projectId: string; input:
     const a = toolAvailable(r?.tool);
     if (!a.ok) throw problems.validation([{ path: 'runner', message: a.hint }]);
     if (!r?.sessionId || !(await findSession(r.sessionId))) throw problems.validation([{ path: 'runner.sessionId', message: '会话已关闭或不存在，重新选一个' }]);
+    // 本机会话拿到的是一段文字指令，钉死路由的懒生成、造变体、叠层屏这三种它没有对应的写法，与其静默当普通造屏做，不如当场拒
+    if (input.kind === 'generate' && (input.input.route || input.input.variantOf || input.input.presentation)) throw problems.validation([{ path: 'runner', message: '懒生成、出变体、叠层屏请换一个模型通道，本机会话不接这类作业' }]);
   }
   if (input.kind === 'regenerate_subtree') await assertSubtreeTarget(input.input);
   const targetScreenId = targetScreenOf(input);
@@ -141,6 +146,9 @@ export async function cancelJob(job: JobRow): Promise<JobRow> {
   if (!updated) throw problems.jobFinished();
   await db.update(schema.messages).set({ content: '已取消' }).where(and(eq(schema.messages.jobId, job.id), eq(schema.messages.role, 'assistant'), eq(schema.messages.content, '')));
   if (job.runner === 'agent') agentHooks?.cancel(job.id);
+  else modelAborts.get(job.id)?.abort(new Error('cancelled'));
+  // 批注发出去的作业被取消：批注回到「未处理」，不然图钉永远闪「发送中」
+  await settleByJob(job.id, false);
   await emitJobEvent(job.id, 'cancelled', {});
   return updated;
 }

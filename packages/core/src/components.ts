@@ -131,6 +131,25 @@ export function expandComponents(html: string, components: SharedComponent[], ro
 }
 
 /**
+ * 写入时哪些共享组件实例的内容会被组件正式 HTML 盖掉（v0.65）：实例里除了 data-slot 之外还写了东西、且与展开结果不同。
+ * 屏里的实例每次写入都会被组件重新展开，agent 改了副本不会报错、改动却静默消失——把名字报回去，让它改组件本身。
+ * 只放了占位（或只填了槽位）、或原样抄回 get_screen 给的展开结果的实例不算。
+ */
+export function overwrittenInstances(bodyHtml: string, components: SharedComponent[], route: string): string[] {
+  const byName = new Map(components.map((c) => [c.name, c]));
+  const norm = (s: string) => s.replace(/\sdata-qid="[^"]*"/g, '').replace(/>\s+</g, '><').replace(/\s+/g, ' ').trim();
+  const out = new Set<string>();
+  for (const inst of Array.from(parse(bodyHtml).body.querySelectorAll('[data-component]'))) {
+    const name = inst.getAttribute('data-component') ?? '';
+    if (!byName.has(name) || !inst.isConnected) continue;
+    const onlySlots = Array.from(inst.children).every((c) => c.hasAttribute('data-slot')) && !Array.from(inst.childNodes).some((n) => n.nodeType === 3 && (n.textContent ?? '').trim());
+    if (onlySlots) continue;
+    if (norm(expandComponents(inst.outerHTML, [byName.get(name)!], route).html) !== norm(inst.outerHTML)) out.add(name);
+  }
+  return [...out];
+}
+
+/**
  * 导航型组件的激活 / 未激活两套类：激活 = 带 aria-current 的链接（没有时按 route 找 href 相等的那条）；
  * 它独有的类是 activeClass、其余链接共有而它没有的是 inactiveClass；两边都空 = 认不出差异，按非导航型处理。
  * 顺手把激活项标上 aria-current，正式 HTML 里恒有一条。

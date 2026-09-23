@@ -8,6 +8,23 @@ export function injectQids(bodyHtml: string): string {
   return document.body.innerHTML;
 }
 
+// 写入时对齐 qid（v0.65）：保留合法（q + 数字）且在文档里唯一的已有 qid，其余元素从现有最大号之后续编。
+// agent 读屏 → 改几处 → 回写，没动的元素 qid 不变：连着几次 patch_screen 的锚点还对得上，挂在元素上的批注不会漂到别的元素。
+// 重复出现的 qid（复制了一块带 qid 的结构）只有第一个保留。
+export function reconcileQids(bodyHtml: string): string {
+  const { document } = parseHTML(`<!doctype html><html><body>${bodyHtml}</body></html>`);
+  const els = Array.from(document.body.querySelectorAll('*'));
+  const seen = new Set<string>();
+  let max = 0;
+  for (const el of els) {
+    const q = el.getAttribute('data-qid');
+    if (q && /^q\d+$/.test(q) && !seen.has(q)) { seen.add(q); max = Math.max(max, Number(q.slice(1))); }
+    else el.removeAttribute('data-qid');
+  }
+  for (const el of els) if (!el.hasAttribute('data-qid')) { max += 1; el.setAttribute('data-qid', `q${max}`); }
+  return document.body.innerHTML;
+}
+
 // body 两侧去空白：extractBody 取回的 innerHTML 自带上一次拼装时的换行，不去掉的话每回刷一次 body 就长两个空行
 export function assembleDocument(bodyWithQids: string, prelude: string, title: string): string {
   return `<!doctype html>\n<html lang="en">\n<head>\n${prelude}\n<title>${escapeHtml(title)}</title>\n</head>\n<body>\n${bodyWithQids.trim()}\n</body>\n</html>\n`;

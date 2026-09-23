@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
-import { chatSystemPrompt, chatUserPrompt, type ChatScreen, type DeviceType } from '@quilt/core';
+import { chatSystemPrompt, chatUserPrompt, type ChatScreen, type DeviceType, type Presentation } from '@quilt/core';
 import type { ProjectRow, JobRow } from '../services/projects.ts';
 
 // 聊天回合（REQ-CORE-023 / ADR-018）：借 Claude Agent SDK 的回路——循环、会话记忆（resume）、上下文压缩都是它的；
@@ -34,6 +34,8 @@ function stepLabel(tool: string, input: unknown, names: Map<string, string>): st
     case 'get_screen': return `正在读${screen(i.screenId) || '一屏'}`;
     case 'get_screenshot': return `正在看${screen(i.screenId) || '截图'}`;
     case 'update_screen': return `正在改${named || screen(i.screenId) || '一屏'}`;
+    case 'patch_screen': return `正在改${screen(i.screenId) || '一屏'}`;
+    case 'append_upload': return '正在写入一屏';
     case 'create_screen': return `正在造${named || '新屏'}`;
     case 'update_design_system': return '正在改设计系统';
     case 'update_project': return '正在改项目简介';
@@ -52,7 +54,7 @@ export async function runChatTurn(a: ChatTurnArgs): Promise<ChatTurnResult> {
   const { query } = await import('@anthropic-ai/claude-agent-sdk');
   const input = a.job.input as { prompt: string; screenIds?: string[] };
   const rows = await db.select().from(schema.screens).where(eq(schema.screens.projectId, a.project.id)).orderBy(schema.screens.createdAt);
-  const screens: ChatScreen[] = rows.map((s) => ({ id: s.id, name: s.name, route: s.route, purpose: s.purpose || undefined, currentRevisionId: s.currentRevisionId }));
+  const screens: ChatScreen[] = rows.map((s) => ({ id: s.id, name: s.name, route: s.route, purpose: s.purpose || undefined, currentRevisionId: s.currentRevisionId, presentation: s.presentation as Presentation }));
   const names = new Map(rows.map((s) => [s.id, s.name]));
   const { componentCards } = await import('../services/components.ts');
   const system = chatSystemPrompt({

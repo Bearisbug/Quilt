@@ -6,7 +6,7 @@ import { db, schema } from '../../db/client.ts';
 import { problems, isUniqueViolation } from '../../lib/errors.ts';
 import { storage } from '../../lib/storage.ts';
 import { parseBody, requireUser, type Env } from '../app.ts';
-import { ownedScreen, hasActiveJob, createRevision, deriveLinks, listRevisions, getRevision, revisionDto, adoptCandidate, clearExemplarIfDeleted } from '../../services/screens.ts';
+import { ownedScreen, hasActiveJob, createRevision, deriveLinks, listRevisions, getRevision, revisionDto, adoptCandidate, deleteScreen } from '../../services/screens.ts';
 import { screenDtos } from '../../services/projects.ts';
 import { enqueueScreenshot } from '../../services/jobs.ts';
 import { jobDto } from '../../services/projects.ts';
@@ -19,10 +19,17 @@ screenRoutes.patch('/v1/screens/:screenId', async (c) => {
   const user = requireUser(c);
   const { screen, project } = await ownedScreen(user.id, c.req.param('screenId'));
   const patch = await parseBody(c, updateScreenSchema);
+  // 变体（v0.62）：路由属于默认屏，变体改不了；变体名只对变体有意义。呈现方式（v0.63）是元数据，直接落列
+  if (patch.route !== undefined && screen.variantOf) throw problems.unprocessable([{ path: 'route', message: '变体与默认屏同路由，改路由请改默认屏' }]);
+  if (patch.variantName !== undefined && !screen.variantOf) throw problems.unprocessable([{ path: 'variantName', message: '只有变体才有状态名' }]);
   try {
     await db.transaction(async (tx) => {
       await tx.update(schema.screens).set({ ...patch, updatedAt: new Date() }).where(eq(schema.screens.id, screen.id));
-      if (patch.route && patch.route !== screen.route) await deriveLinks(tx, project.id);
+      if (patch.route && patch.route !== screen.route) {
+        // 变体与默认屏同路由：默认屏改路由，变体跟着改
+        await tx.update(schema.screens).set({ route: patch.route }).where(eq(schema.screens.variantOf, screen.id));
+        await deriveLinks(tx, project.id);
+      }
     });
   } catch (e) {
     if (isUniqueViolation(e)) throw problems.routeTaken();
@@ -36,12 +43,7 @@ screenRoutes.patch('/v1/screens/:screenId', async (c) => {
 screenRoutes.delete('/v1/screens/:screenId', async (c) => {
   const user = requireUser(c);
   const { screen, project } = await ownedScreen(user.id, c.req.param('screenId'));
-  await db.transaction(async (tx) => {
-    if (await hasActiveJob(tx, project.id, screen.id)) throw problems.screenBusy();
-    await tx.delete(schema.screens).where(eq(schema.screens.id, screen.id));
-    await clearExemplarIfDeleted(tx, project.id, screen.id);
-    await deriveLinks(tx, project.id);
-  });
+  await deleteScreen(project.id, screen.id);
   return c.body(null, 204);
 });
 

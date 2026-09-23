@@ -6,7 +6,7 @@ import { storage } from '../lib/storage.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
 import { assetsOf } from './assets.ts';
 import { copyPresetAssets, presetSeed } from './presets.ts';
-import { tokensFromSeed, defaultDesignMd, DEFAULT_COMPONENTS, DEVICE_SIZE, type DeviceType, type ProjectDto, type ProjectDetailDto, type DesignSystemDto, type ScreenDto, type LinkDto, type JobDto, type JobRunner, RADIUS_SCALES, type Palette, type ColorMode, type FontSource } from '@quilt/core';
+import { tokensFromSeed, defaultDesignMd, DEFAULT_COMPONENTS, DEVICE_SIZE, type DeviceType, type ProjectDto, type ProjectDetailDto, type DesignSystemDto, type ScreenDto, type LinkDto, type JobDto, type JobRunner, RADIUS_SCALES, type Palette, type ColorMode, type FontSource, type Presentation } from '@quilt/core';
 
 export type ProjectRow = typeof schema.projects.$inferSelect;
 export type ScreenRow = typeof schema.screens.$inferSelect;
@@ -104,6 +104,7 @@ export async function screenDtos(project: ProjectRow, rows: ScreenRow[]): Promis
       // 偏离条数（v0.43）：契约是透镜不是闸门，画布只报「偏离了几处」，取舍由设计师做
       deviations: rev ? ((rev.lintReport as { violations?: unknown[] }).violations ?? []).length : 0,
       pendingCandidates: n >= 2 && rev?.jobId ? { jobId: rev.jobId, count: n } : null,
+      variantOf: s.variantOf ?? null, variantName: s.variantName ?? null, presentation: s.presentation as Presentation,
       updatedAt: s.updatedAt.toISOString(),
     };
   }));

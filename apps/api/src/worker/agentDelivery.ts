@@ -21,10 +21,10 @@ async function buildPrompt(job: JobRow): Promise<string> {
   const ids = input.screenIds?.length ? input.screenIds : input.screenId ? [input.screenId] : [];
   const screens = ids.length ? await db.select().from(schema.screens).where(inArray(schema.screens.id, ids)) : [];
   const targets = screens.length
-    ? screens.map((s) => `- ${s.name} (${s.route}) screenId=${s.id} expectedRevisionId=${s.currentRevisionId ?? 'none'}`).join('\n')
+    ? screens.map((s) => `- ${s.name} (${s.route}) screenId=${s.id} expectedRevisionId=${s.currentRevisionId ?? 'none'}${s.presentation === 'overlay' ? ' — an OVERLAY screen: keep its root transparent (bg-transparent) and its close action linking back' : ''}`).join('\n')
     : '- none: create new screen(s) with quilt.create_screen (pick routes that do not collide with the app map)';
   const scope = job.kind === 'regenerate_subtree' && input.qid
-    ? `Scope: rewrite ONLY the element with data-qid="${input.qid}" (and its subtree) on the target screen. Keep every other element identical — same data-qid values, text and classes — and push the whole screen back with quilt.update_screen.`
+    ? `Scope: rewrite ONLY the element with data-qid="${input.qid}" (and its subtree) on the target screen. Keep every other element identical: change it with quilt.patch_screen (find = that element's current HTML from quilt.get_screen, replace = the new HTML) instead of resending the whole screen.`
     : '';
   return [
     `[Quilt] The Quilt canvas delivered a job to this session (job ${job.id}).`,
@@ -34,7 +34,7 @@ async function buildPrompt(job: JobRow): Promise<string> {
     scope,
     `Target screens:\n${targets}`,
     `Rules: pass jobId="${job.id}" on EVERY quilt.update_screen / quilt.create_screen call; for update_screen pass the expectedRevisionId listed above. If you get 409 revision-conflict, call quilt.get_screen and redo the change on the current version.`,
-    'Steps: quilt.get_design_contract → read each target screen with quilt.get_screen → write the revised HTML following the contract (token classes only, recipes verbatim, routes from the app map) → quilt.validate_screen until it reports no violations → quilt.update_screen (or create_screen). Do not modify any files on disk; all output goes through the MCP tools.',
+    'Steps: quilt.get_design_contract → read each target screen with quilt.get_screen (the body with data-qid) → make the change → write it back: quilt.patch_screen for a partial change (find/replace, only the changed text), quilt.update_screen for a rewrite, quilt.create_screen for a new screen. The contract\'s tokens and recipes are the shared vocabulary, not a gate: quilt.validate_screen reports deviations as advice — fix dangling routes and anything you did not intend, keep deliberate choices such as a chart library or a colour the tokens cannot express. Keep each call\'s HTML under ~8 KB: a larger screen goes through quilt.create_upload_url + quilt.append_upload chunks and uploadId. Do not modify any files on disk; all output goes through the MCP tools.',
     `When you are done, call quilt.finish_job with jobId="${job.id}" and a one-line summary (status "failed" with the reason if you could not do it). Quilt keeps the job open until this call.`,
   ].filter(Boolean).join('\n\n');
 }

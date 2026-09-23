@@ -17,18 +17,18 @@ export function lintScreenBody(bodyHtml: string, allowedRoutes: string[], firstT
   const body = document.body;
   const roots = Array.from(body.children).filter((el) => el.tagName !== 'SCRIPT');
   if (roots.length !== 1) violations.push({ rule: 'single-root', message: `body 顶层元素数为 ${roots.length}，应为 1` });
-  if (body.querySelector('script')) violations.push({ rule: 'no-script', message: '屏幕内容不得包含 <script>' });
-  if (body.querySelector('style')) violations.push({ rule: 'no-style', message: '屏幕内容不得包含 <style>' });
+  if (body.querySelector('script')) violations.push({ rule: 'no-script', message: '含 <script>：可以用（图表库等），但离线或 CDN 失效时这块会退化' });
+  if (body.querySelector('style')) violations.push({ rule: 'no-style', message: '含 <style>：可以用，但里面的颜色与尺寸不随设计系统变' });
 
   for (const el of Array.from(body.querySelectorAll('*'))) {
     const qid = el.getAttribute('data-qid') ?? undefined;
     const cls = el.getAttribute('class') ?? '';
     const style = el.getAttribute('style') ?? '';
-    if (HEX.test(cls) || HEX.test(style)) violations.push({ rule: 'no-raw-hex', message: '禁止裸色值', qid, sample: (cls + ' ' + style).trim().slice(0, 120) });
-    if (ARBITRARY.test(cls)) violations.push({ rule: 'no-arbitrary', message: '禁止 Tailwind arbitrary value', qid, sample: cls.slice(0, 120) });
+    if (HEX.test(cls) || HEX.test(style)) violations.push({ rule: 'no-raw-hex', message: '裸色值：换主题时这处颜色不会跟着变', qid, sample: (cls + ' ' + style).trim().slice(0, 120) });
+    if (ARBITRARY.test(cls)) violations.push({ rule: 'no-arbitrary', message: 'Tailwind 任意值：不在设计系统的尺寸 / 颜色刻度里，换主题不跟着变', qid, sample: cls.slice(0, 120) });
     const m = cls.match(TW_PALETTE);
-    if (m) violations.push({ rule: 'token-colors-only', message: `禁止默认调色板类，只能用 ${COLOR_CLASS_NAMES.join('/')}`, qid, sample: m[0].trim() });
-    if (style) violations.push({ rule: 'no-inline-style', message: '禁止内联 style', qid, sample: style.slice(0, 120) });
+    if (m) violations.push({ rule: 'token-colors-only', message: `默认调色板类：换主题不跟着变；设计系统的颜色类是 ${COLOR_CLASS_NAMES.join('/')}`, qid, sample: m[0].trim() });
+    if (style) violations.push({ rule: 'no-inline-style', message: '内联 style：不随设计系统变', qid, sample: style.slice(0, 120) });
   }
 
   // 导航源三种（REQ-PROTO-001）：href / data-href / form action 同规；表单必须带应用路由 action（form-action）

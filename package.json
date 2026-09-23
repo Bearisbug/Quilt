@@ -12,7 +12,8 @@
     "seed:job": "pnpm --filter @quilt/api seed:job",
     "seed:preview-token": "pnpm --filter @quilt/api seed:preview-token",
     "seed:design-system": "pnpm --filter @quilt/api seed:design-system",
-    "mcp:call": "pnpm --filter @quilt/tests mcp:call"
+    "mcp:call": "pnpm --filter @quilt/tests mcp:call",
+    "test": "pnpm --filter @quilt/tests test"
   },
   "devDependencies": {
     "esbuild": "^0.25.12",

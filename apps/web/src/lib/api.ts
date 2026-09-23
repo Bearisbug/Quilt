@@ -1,4 +1,4 @@
-import type { AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, LinkDto, ElementOp, AnnotationDto, RunnerOptionDto, AgentSessionDto, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto } from '@quilt/core';
+import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, LinkDto, ElementOp, AnnotationDto, RunnerOptionDto, AgentSessionDto, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto } from '@quilt/core';
 
 // API 客户端：同源 /v1（开发时 Vite 代理 → API；打包后 API 进程自己托管前端），错误统一为 ApiError（RFC 9457 信封）。
 // v0.32 本地版没有登录：所有请求都是默认用户。
@@ -67,7 +67,7 @@ export const api = {
     adoptGroup: (id: string, index: number) => call<{ adopted: string[]; skipped: string[] }>(`/v1/jobs/${id}/candidates/adopt`, { method: 'POST', body: JSON.stringify({ index }) }),
   },
   screens: {
-    patch: (id: string, patch: { x?: number; y?: number; name?: string; route?: string }) => call<{ screen: ScreenDto }>(`/v1/screens/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    patch: (id: string, patch: { x?: number; y?: number; name?: string; route?: string; variantName?: string; presentation?: Presentation }) => call<{ screen: ScreenDto }>(`/v1/screens/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     remove: (id: string) => call<void>(`/v1/screens/${id}`, { method: 'DELETE' }),
     revisions: (id: string) => call<{ items: RevisionDto[] }>(`/v1/screens/${id}/revisions`),
     restore: (id: string, revisionId: string, expectedRevisionId: string) => call<{ revision: RevisionDto }>(`/v1/screens/${id}/revisions/${revisionId}/restore`, { method: 'POST', body: JSON.stringify({ expectedRevisionId }) }),

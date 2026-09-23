@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { launch, openApp, seed, seedJson, apiJson, EVIDENCE, WEB, pickOption, selectedValue } from './lib.ts';
+import { launch, openApp, seed, seedJson, apiJson, EVIDENCE, WEB, pickOption, selectedValue, eventually } from './lib.ts';
 
 // docs/TEST.md EDIT 域（TC-EDIT-001~006）AI 执行脚本。
 const RUN = process.env.RUN ?? '006';
@@ -286,8 +286,8 @@ await step('TC-EDIT-007', async () => {
   expect(usageAfter.tokensIn === usageBefore.tokensIn && usageAfter.tokensOut === usageBefore.tokensOut, '连线消耗了 token');
   // 选择元素态与交互态互斥：退出选择元素会回到静态卡片，要验跳转得重新双击进交互
   await page.getByRole('button', { name: '选择元素中' }).click();
-  await page.waitForTimeout(500);
-  expect((await page.locator('.card.focused').count()) === 0, '退出选择元素后卡片未回到静态');
+
+  await eventually(async () => expect((await page.locator('.card.focused').count()) === 0, '退出选择元素后卡片未回到静态'));
   const fl2 = await focus('/s1');
   await fl2.locator('#toggle').click();
   await page.locator('.card.focused .badge', { hasText: '/s2' }).waitFor({ timeout: 10000 });
@@ -385,8 +385,8 @@ await step('TC-EDIT-008', async () => {
   expect(resolved.every((a) => a.status === 'resolved'), `作业成功后批注未置为 resolved：${resolved.map((a) => a.status).join(',')}`);
   await page.reload();
   await page.locator('[data-testid="screen-card"]').first().waitFor();
-  await page.waitForTimeout(800);
-  expect((await page.locator('[data-testid="anno-pin"]').count()) === 0, '已处理的批注仍在画布上留着气泡');
+
+  await eventually(async () => expect((await page.locator('[data-testid="anno-pin"]').count()) === 0, '已处理的批注仍在画布上留着气泡'));
   return '2 条批注合成 1 个作业；成功后收口为已处理、气泡收起';
 });
 

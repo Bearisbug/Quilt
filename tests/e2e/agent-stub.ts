@@ -28,9 +28,8 @@ export async function startFakeSession(opts: { dir: string; name: string; nameSo
       if (/FAIL/.test(prompt)) { await callTool(mcp, 'quilt.finish_job', { jobId, status: 'failed', summary: 'simulated failure' }); log('reported failure'); return; }
       const [, screenId, expected] = target;
       const screen = await callTool(mcp, 'quilt.get_screen', { screenId });
-      // get_screen 给的是完整文档；回写只要 body 内容，去掉 qid 与脚本，改一处文案当标记
-      const inner = screen.text.match(/<body[^>]*>([\s\S]*?)<\/body>/)?.[1] ?? screen.text;
-      const body = inner.replace(/<script[\s\S]*?<\/script>/g, '').replace(/\sdata-qid="q\d+"/g, '').replace('Screen 1', 'Screen 1 (by fake session)').trim();
+      // get_screen 给的是 body（v0.64）；去掉 qid 与脚本，改一处文案当标记
+      const body = screen.text.replace(/<script[\s\S]*?<\/script>/g, '').replace(/\sdata-qid="q\d+"/g, '').replace('Screen 1', 'Screen 1 (by fake session)').trim();
       const stale = /STALE/.test(prompt);
       const r = await callTool(mcp, 'quilt.update_screen', { projectId, screenId, name: 'Screen 1', route: '/s1', html: body, jobId, expectedRevisionId: stale ? '00000000-0000-4000-8000-000000000000' : expected === 'none' ? undefined : expected });
       if (r.isError) { await callTool(mcp, 'quilt.finish_job', { jobId, status: 'failed', summary: `update_screen error: ${r.text.slice(0, 160)}` }); log('update_screen failed → reported'); return; }

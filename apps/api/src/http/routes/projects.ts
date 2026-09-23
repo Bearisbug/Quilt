@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { and, eq, desc, asc, lt, inArray } from 'drizzle-orm';
+import { and, eq, desc, asc, lt, inArray, isNull } from 'drizzle-orm';
 import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, createProjectSchema, createJobSchema, createMessageSchema, createAttachmentSchema, updateProjectSchema, cursorQuerySchema, listJobsQuerySchema, type MessageDto, type LinkDto, type CreateJobInput, type JobKind, type ProjectEventDto, type Runner, createPresetSchema, applyPresetSchema } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
 import { parseBody, parseQuery, requireUser, type Env } from '../app.ts';
@@ -64,7 +64,7 @@ projectRoutes.patch('/v1/projects/:projectId', async (c) => {
 // API-CORE-006。非对话发起的作业也写进对话记录，让回刷/导出/局部重生成/懒生成在面板里有可见反馈。
 function describeJob(input: CreateJobInput): string | null {
   switch (input.kind) {
-    case 'generate': return input.input.route ? `生成缺失的页面 ${input.input.route}` : `新建${input.input.count === 'auto' ? '一组屏' : input.input.count > 1 ? ` ${input.input.count} 屏` : '一屏'}${input.input.versions > 1 ? `（${input.input.versions} 版候选）` : ''}：${input.input.prompt}`;
+    case 'generate': return input.input.variantOf ? `出「${input.input.variantName}」状态变体：${input.input.prompt}` : input.input.route ? `生成缺失的页面 ${input.input.route}` : `新建${input.input.count === 'auto' ? '一组屏' : input.input.count > 1 ? ` ${input.input.count} 屏` : '一屏'}${input.input.versions > 1 ? `（${input.input.versions} 版候选）` : ''}：${input.input.prompt}`;
     case 'regenerate_subtree': return `重生成选中区域：${input.input.prompt}`;
     case 'apply_design_system': return input.input.screenIds === 'all' ? '把最新设计系统回刷到所有屏' : `把最新设计系统回刷到 ${input.input.screenIds.length} 屏`;
     case 'propose_design_system': return `提炼设计系统约定：${input.input.instruction}`;
@@ -265,7 +265,8 @@ projectRoutes.get('/v1/projects/:projectId/messages', async (c) => {
 projectRoutes.get('/v1/projects/:projectId/app-map', async (c) => {
   const user = requireUser(c);
   const project = await ownedProject(user.id, c.req.param('projectId'));
-  const screens = await db.select({ id: schema.screens.id, route: schema.screens.route }).from(schema.screens).where(eq(schema.screens.projectId, project.id));
+  // 地图节点只有默认屏（v0.62）：变体与默认屏同路由，边的目标也只解析到默认屏
+  const screens = await db.select({ id: schema.screens.id, route: schema.screens.route }).from(schema.screens).where(and(eq(schema.screens.projectId, project.id), isNull(schema.screens.variantOf)));
   const links = await db.select().from(schema.links).where(eq(schema.links.projectId, project.id));
   const edges: LinkDto[] = links.map((l) => ({ fromScreenId: l.fromScreenId, qid: l.elementQid, href: l.href, toScreenId: l.toScreenId }));
   c.header('Cache-Control', 'no-store');

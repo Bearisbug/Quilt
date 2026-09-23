@@ -1,4 +1,4 @@
-import { and, eq, desc, sql, inArray, isNull, isNotNull } from 'drizzle-orm';
+import { and, eq, desc, sql, inArray, isNull, isNotNull, or } from 'drizzle-orm';
 import { db, schema, type Db } from '../db/client.ts';
 import { problems } from '../lib/errors.ts';
 import { storage, objectKeys } from '../lib/storage.ts';
@@ -47,11 +47,12 @@ export async function createRevision(tx: Tx, args: {
 }
 
 // 候选批落完后把 current 指向序号最小的那一版（REQ-CORE-015：current 默认第 1 版，不选也不阻塞连线 / 导出）
-export async function pointCurrentToFirstCandidate(tx: Tx, screenId: string, jobId: string): Promise<void> {
+// onlyIfCurrent：改屏候选只在 current 仍是这批的基线时才接管，用户在这之后自己写过就不顶掉
+export async function pointCurrentToFirstCandidate(tx: Tx, screenId: string, jobId: string, onlyIfCurrent?: string): Promise<void> {
   const [first] = await tx.select({ id: schema.screenRevisions.id }).from(schema.screenRevisions)
     .where(and(eq(schema.screenRevisions.screenId, screenId), eq(schema.screenRevisions.jobId, jobId), isNotNull(schema.screenRevisions.candidateIndex)))
     .orderBy(schema.screenRevisions.candidateIndex).limit(1);
-  if (first) await tx.update(schema.screens).set({ currentRevisionId: first.id, updatedAt: new Date() }).where(eq(schema.screens.id, screenId));
+  if (first) await tx.update(schema.screens).set({ currentRevisionId: first.id, updatedAt: new Date() }).where(onlyIfCurrent ? and(eq(schema.screens.id, screenId), eq(schema.screens.currentRevisionId, onlyIfCurrent)) : eq(schema.screens.id, screenId));
 }
 
 // 采用候选（API-CORE-025）：只改 current 指针、结清同批；current 已不属同批（用户在某版上继续改了）则拒绝，不顶掉他的改动
@@ -89,7 +90,8 @@ export async function listCandidates(project: ProjectRow, jobId: string): Promis
 // 顺手重算哪些屏放着哪个共享组件（REQ-EDIT-006 component_uses）：同一趟读 HTML，不另跑一遍
 export async function deriveLinks(tx: Tx, projectId: string): Promise<void> {
   const screens = await tx.select().from(schema.screens).where(eq(schema.screens.projectId, projectId));
-  const byRoute = new Map(screens.map((s) => [s.route, s.id]));
+  // 路由只解析到默认屏（v0.62 REQ-CORE-025）：变体与默认屏同路由，播放与地图都指向默认屏；变体自己发出的链接照常入图
+  const byRoute = new Map(screens.filter((s) => !s.variantOf).map((s) => [s.route, s.id]));
   const revIds = screens.map((s) => s.currentRevisionId).filter((x): x is string => !!x);
   const revs = revIds.length ? await tx.select().from(schema.screenRevisions).where(inArray(schema.screenRevisions.id, revIds)) : [];
   const rows: (typeof schema.links.$inferInsert)[] = [];
@@ -151,10 +153,11 @@ export async function exemplarBody(project: ProjectRow): Promise<{ screenId: str
       if (rev) return { screenId: s.id, body: extractBody((await storage.get(rev.htmlKey)).toString('utf8')) };
     }
   }
+  // 没钦定时取最早建的那张整屏（默认屏、非叠层）的当前版：偏离只是透镜（v0.43），用了图表库或越出 token 的屏同样可以当风格参照
   const [row] = await db.select({ htmlKey: schema.screenRevisions.htmlKey, screenId: schema.screenRevisions.screenId })
-    .from(schema.screenRevisions).innerJoin(schema.screens, eq(schema.screens.id, schema.screenRevisions.screenId))
-    .where(and(eq(schema.screens.projectId, project.id), sql`(${schema.screenRevisions.lintReport}->>'passed')::boolean = true`))
-    .orderBy(schema.screenRevisions.createdAt).limit(1);
+    .from(schema.screens).innerJoin(schema.screenRevisions, eq(schema.screenRevisions.id, schema.screens.currentRevisionId))
+    .where(and(eq(schema.screens.projectId, project.id), isNull(schema.screens.variantOf), eq(schema.screens.presentation, 'push')))
+    .orderBy(schema.screens.createdAt).limit(1);
   if (!row) return null;
   return { screenId: row.screenId, body: extractBody((await storage.get(row.htmlKey)).toString('utf8')) };
 }
@@ -170,12 +173,29 @@ export async function currentBody(screenId: string): Promise<string | null> {
 export async function projectOutline(ownerId: string, projectId: string, screenIds?: string[]) {
   const project = await ownedProject(ownerId, projectId);
   const rows = (await db.select().from(schema.screens).where(eq(schema.screens.projectId, project.id)).orderBy(schema.screens.createdAt)).filter((s) => !screenIds || screenIds.includes(s.id));
-  const screens = [];
-  for (const s of rows) {
-    const body = s.currentRevisionId ? await currentBody(s.id) : null;
-    screens.push({ screenId: s.id, name: s.name, route: s.route, purpose: s.purpose, currentRevisionId: s.currentRevisionId, outline: body ? outlineBody(body) : '(no revision yet)' });
-  }
+  // 一次取齐全部 current 修订、并行读 HTML：聊天助手每轮都先看大纲，100 屏的项目逐屏串行查两次库再读一次文件要好几秒
+  const revIds = rows.map((s) => s.currentRevisionId).filter((x): x is string => !!x);
+  const revs = revIds.length ? await db.select({ id: schema.screenRevisions.id, htmlKey: schema.screenRevisions.htmlKey }).from(schema.screenRevisions).where(inArray(schema.screenRevisions.id, revIds)) : [];
+  const keyOf = new Map(revs.map((r) => [r.id, r.htmlKey]));
+  const screens = await Promise.all(rows.map(async (s) => {
+    const key = s.currentRevisionId ? keyOf.get(s.currentRevisionId) : undefined;
+    const body = key ? extractBody((await storage.get(key)).toString('utf8')) : null;
+    return { screenId: s.id, name: s.name, route: s.route, purpose: s.purpose, variantOf: s.variantOf, variantName: s.variantName, presentation: s.presentation, currentRevisionId: s.currentRevisionId, outline: body ? outlineBody(body) : '(no revision yet)' };
+  }));
   return { projectId: project.id, screens };
+}
+
+// 删屏（API-CORE-018 / quilt.delete_screen 共用）：默认屏连同它的变体一起删（外键级联），所以在跑作业要按整个家族查，
+// 样板屏指针对每一张都清；库里删完再删对象存储里这些屏的修订 HTML 与截图——不删的话它们一直留到整个项目被删
+export async function deleteScreen(projectId: string, screenId: string): Promise<void> {
+  const family = (await db.select({ id: schema.screens.id }).from(schema.screens).where(or(eq(schema.screens.id, screenId), eq(schema.screens.variantOf, screenId)))).map((r) => r.id);
+  await db.transaction(async (tx) => {
+    for (const id of family) if (await hasActiveJob(tx, projectId, id)) throw problems.screenBusy();
+    await tx.delete(schema.screens).where(eq(schema.screens.id, screenId));
+    for (const id of family) await clearExemplarIfDeleted(tx, projectId, id);
+    await deriveLinks(tx, projectId);
+  });
+  for (const id of family) await storage.deletePrefix(`projects/${projectId}/screens/${id}/`).catch((e) => console.warn(`[delete screen] ${id}: ${(e as Error).message}`));
 }
 
 // 删屏时样板屏指针要跟着清（不建外键）

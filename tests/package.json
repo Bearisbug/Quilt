@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --import tsx --test \"unit/**/*.test.ts\"",
     "e2e:smoke": "tsx e2e/smoke.ts",
     "e2e:core": "tsx e2e/core.ts",
     "e2e:proto": "tsx e2e/proto.ts",
@@ -16,6 +17,7 @@
     "mcp:call": "tsx e2e/mcp-call.ts"
   },
   "devDependencies": {
+    "@quilt/core": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "playwright": "^1.63.0",
     "tsx": "^4.23.13",

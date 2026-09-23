@@ -32,7 +32,7 @@ type Detail = { project: { exemplarScreenId: string | null }; screens: Screen[];
 seed('seed');
 await writeFile(PNG_PATH, PNG);
 const mcp = await connectMcp();
-const NEW_TOOLS = ['delete_screen', 'delete_component', 'delete_project', 'get_revision', 'restore_revision', 'list_candidates', 'adopt_candidate', 'adopt_candidates', 'move_screens', 'edit_element', 'regenerate_subtree', 'edit_component', 'propose_design_system', 'export_prototype', 'get_export', 'list_runners', 'create_attachment_upload_url', 'list_jobs', 'cancel_job', 'get_job_events', 'list_assets', 'create_asset', 'delete_asset', 'list_design_presets', 'create_design_preset', 'apply_design_preset', 'delete_design_preset', 'list_annotations', 'update_annotation', 'delete_annotation', 'send_annotations', 'list_messages'].map((t) => `quilt.${t}`);
+const NEW_TOOLS = ['delete_screen', 'delete_component', 'delete_project', 'get_revision', 'restore_revision', 'list_candidates', 'adopt_candidate', 'move_screens', 'edit_element', 'regenerate_subtree', 'edit_component', 'propose_design_system', 'export_prototype', 'get_export', 'list_runners', 'create_upload_url', 'list_jobs', 'cancel_job', 'get_job_events', 'list_assets', 'create_asset', 'delete_asset', 'list_design_presets', 'create_design_preset', 'apply_design_preset', 'delete_design_preset', 'list_annotations', 'update_annotation', 'delete_annotation', 'send_annotations', 'list_messages', 'patch_screen', 'append_upload'].map((t) => `quilt.${t}`);
 // 工具调用助手：成功要 JSON、失败要错误类型
 const call = async <T = Record<string, unknown>>(name: string, args: Record<string, unknown>, what = name): Promise<T> => { const r = await callTool(mcp, name, args); expect(!r.isError, `${what} 出错：${r.text.slice(0, 300)}`); return r.json as T; };
 const fail = async (name: string, args: Record<string, unknown>, type: string, what = name) => { const r = await callTool(mcp, name, args); expect(r.isError, `${what} 应失败（${type}），实际成功：${r.text.slice(0, 200)}`); const t = (r.json as { type?: string }).type; expect(t === type, `${what} 应 ${type}，实际 ${t}：${r.text.slice(0, 200)}`); };
@@ -46,7 +46,7 @@ await step('TC-AGENT-011', async () => {
   const pid = r.projectId; const [s1, s2, s3] = r.screens.map((s) => s.id);
   const footer = (await apiJson<{ component: { id: string; version: number } }>(`/v1/projects/${pid}/components`, { method: 'POST', body: JSON.stringify({ name: 'Footer', html: '<footer class="p-4 text-sm">Footer</footer>' }) })).body.component;
 
-  // 1 工具面：54 个工具、7 类资源；list_runners 不含密钥
+  // 1 工具面：54 个工具（v0.60 合并两对、v0.64 增 patch_screen / append_upload）、7 类资源；list_runners 不含密钥
   const tools = (await mcp.listTools()).tools.map((t) => t.name);
   const missing = NEW_TOOLS.filter((t) => !tools.includes(t));
   expect(missing.length === 0, `缺工具：${missing.join(',')}`);
@@ -63,7 +63,8 @@ await step('TC-AGENT-011', async () => {
   const created = await call<{ screenId: string; revisionId: string }>('quilt.create_screen', { projectId: pid, name: 'Agent 屏', route: '/agent', html: OK_HTML });
   const agent = created.screenId; const rev1 = created.revisionId;
   const html1 = await callTool(mcp, 'quilt.get_screen', { screenId: agent });
-  expect(html1.text.includes('data-qid="q1"') && html1.text.includes('--color-primary'), '未注入 qid / prelude');
+  // v0.64：只给 body（带 qid），不带 prelude 与运行时
+  expect(html1.text.includes('data-qid="q1"') && !html1.text.includes('--color-primary') && !html1.text.includes('data-quilt-runtime') && !html1.text.includes('<head>') && !html1.text.includes('<!doctype'), `get_screen 应只给带 qid 的 body：${html1.text.trim().slice(0, 120)}`);
   let shot = false;
   for (let i = 0; i < 20 && !shot; i++) { await sleep(1000); shot = !!(await callTool(mcp, 'quilt.get_screenshot', { screenId: agent })).image; }
   expect(shot, '20 s 内截图未就绪');
@@ -85,18 +86,21 @@ await step('TC-AGENT-011', async () => {
   await fail('quilt.restore_revision', { screenId: agent, revisionId: rev1, expectedRevisionId: rev1 }, '/errors/revision-conflict', '旧基线回溯');
   notes.push('修订取 / 回溯 / 旧基线 409');
 
-  // 4 候选：edit_screens × 2 版 → list_candidates → adopt_candidate 第 2 版 → adopt_candidates 不存在的 index 全部 skipped
+  // 4 候选：edit_screens × 2 版 → list_candidates → adopt_candidate 带 screenId 采用第 2 版 → 不带 screenId、不存在的 index 全部 skipped（v0.60 单屏与整批合并为一个工具）
   const cand = await call<Job>('quilt.edit_screens', { projectId: pid, screenIds: [agent], prompt: 'make it blue', versions: 2 });
   expect(cand.kind === 'edit_screens' && (cand.input.versions as number) === 2, `edit_screens 作业不对：${JSON.stringify(cand.input)}`);
   expect((await waitJob(cand.id)).status === 'succeeded', 'edit_screens × 2 版未成功');
   const cands = await call<{ screens: { screenId: string; currentRevisionId: string; settled: boolean; revisions: { id: string; index: number }[] }[] }>('quilt.list_candidates', { jobId: cand.id });
   expect(cands.screens.length === 1 && cands.screens[0].revisions.length === 2 && !cands.screens[0].settled, `候选应 1 屏 × 2 版未结清：${JSON.stringify(cands).slice(0, 200)}`);
   const second = cands.screens[0].revisions.find((x) => x.index === 1)!;
-  const adopted = await call<{ screen: Screen }>('quilt.adopt_candidate', { screenId: agent, revisionId: second.id });
-  expect(adopted.screen.currentRevisionId === second.id, '采用后 current 应指向第 2 版');
-  expect((await call<{ screens: { settled: boolean }[] }>('quilt.list_candidates', { jobId: cand.id })).screens[0].settled, '采用后该批应结清');
-  const group = await call<{ adopted: string[]; skipped: string[] }>('quilt.adopt_candidates', { jobId: cand.id, index: 3 });
-  expect(group.adopted.length === 0 && group.skipped[0] === agent, `不存在的 index 应全部 skipped：${JSON.stringify(group)}`);
+  type Adopt = { adopted: string[]; skipped: { screenId: string; error: string }[] };
+  const adopted = await call<Adopt>('quilt.adopt_candidate', { jobId: cand.id, index: 1, screenId: agent });
+  expect(adopted.adopted[0] === agent && adopted.skipped.length === 0, `单屏采用应成功：${JSON.stringify(adopted)}`);
+  const after = (await call<{ screens: { currentRevisionId: string; settled: boolean }[] }>('quilt.list_candidates', { jobId: cand.id })).screens[0];
+  expect(after.currentRevisionId === second.id && after.settled, '采用后 current 应指向第 2 版且该批结清');
+  const group = await call<Adopt>('quilt.adopt_candidate', { jobId: cand.id, index: 3 });
+  expect(group.adopted.length === 0 && group.skipped[0]?.screenId === agent && group.skipped[0].error === '/errors/not-found', `不存在的 index 应全部 skipped：${JSON.stringify(group)}`);
+  await fail('quilt.adopt_candidate', { jobId: cand.id, index: 0, screenId: pid }, '/errors/not-found', '作业没给这屏出过候选');
   notes.push('候选列 / 采用 / 整组跳过');
 
   // 5 摆放：2 屏 + 1 组件一次摆好，假 id 逐张报错不拖累其余；组件只挪位置不升版
@@ -116,8 +120,12 @@ await step('TC-AGENT-011', async () => {
   await fail('quilt.edit_element', { screenId: agent, qid: 'q1', ops: [{ type: 'text', value: 'again' }], expectedRevisionId: cur6 }, '/errors/revision-conflict', '旧基线直改');
   notes.push('直改');
 
-  // 7 参考图直传 + 素材：签名 PUT 落对象；create_asset 读本机文件；预览域可取；相对路径 400、不存在 404；删素材
-  const upl = await call<{ attachmentId: string; putUrl: string }>('quilt.create_attachment_upload_url', { projectId: pid, mediaType: 'image/png', bytes: PNG.length });
+  // 7 直传 + 素材：create_upload_url 按 mediaType 分流（v0.60 合并了 HTML 与参考图两个工具）——缺省 text/html 给 uploadId，image/* 给 attachmentId 且 bytes 必填；
+  //   签名 PUT 落对象；create_asset 读本机文件；预览域可取；相对路径 400、不存在 404；删素材
+  const htmlUpl = await call<{ mediaType: string; uploadId: string; putUrl: string }>('quilt.create_upload_url', { projectId: pid });
+  expect(htmlUpl.mediaType === 'text/html' && !!htmlUpl.uploadId && htmlUpl.putUrl.includes(`/v1/uploads/${htmlUpl.uploadId}`), `HTML 直传地址不对：${JSON.stringify(htmlUpl)}`);
+  await fail('quilt.create_upload_url', { projectId: pid, mediaType: 'image/png' }, '/errors/validation', '参考图直传缺 bytes');
+  const upl = await call<{ attachmentId: string; putUrl: string }>('quilt.create_upload_url', { projectId: pid, mediaType: 'image/png', bytes: PNG.length });
   expect(upl.putUrl.startsWith(API), `putUrl 应是绝对地址：${upl.putUrl}`);
   const put = await fetch(upl.putUrl, { method: 'PUT', body: PNG });
   expect(put.status === 204, `参考图直传应 204，实际 ${put.status}`);
@@ -133,6 +141,58 @@ await step('TC-AGENT-011', async () => {
   expect(!(await call<{ items: { id: string }[] }>('quilt.list_assets', { projectId: pid })).items.some((a) => a.id === asset.id), '删素材后仍在列表');
   notes.push('参考图直传 / 素材建取删');
 
+  // 7b 小步写屏（v0.64）：patch_screen 按锚点只改一处；找不到 / 多处匹配整批 422 不落库；all 全换；append_upload 分块建屏
+  const cur7 = (await detail(pid)).screens.find((s) => s.id === agent)!.currentRevisionId!;
+  const patched = await call<{ revisionId: string }>('quilt.patch_screen', { screenId: agent, expectedRevisionId: cur7, edits: [{ find: 'Edited by MCP', replace: 'Patched by MCP' }] });
+  const body7 = (await callTool(mcp, 'quilt.get_screen', { screenId: agent })).text;
+  expect(body7.includes('Patched by MCP') && !body7.includes('Edited by MCP') && (await detail(pid)).screens.find((s) => s.id === agent)!.currentRevisionId === patched.revisionId, 'patch_screen 应改掉锚点并推进 current');
+  const miss = await callTool(mcp, 'quilt.patch_screen', { screenId: agent, expectedRevisionId: patched.revisionId, edits: [{ find: 'Patched by MCP', replace: 'x' }, { find: 'no-such-text', replace: 'y' }] });
+  const missP = miss.json as { type?: string; errors?: { path: string }[] };
+  expect(miss.isError && missP.type === '/errors/validation' && missP.errors?.[0]?.path === 'edits.1.find', `锚点找不到应 422 并点名 edits.1：${miss.text.slice(0, 200)}`);
+  const amb = await callTool(mcp, 'quilt.patch_screen', { screenId: agent, expectedRevisionId: patched.revisionId, edits: [{ find: 'px-4', replace: 'px-5' }] });
+  expect(amb.isError && (amb.json as { errors?: { matches: number }[] }).errors?.[0]?.matches! > 1, `多处匹配未给 all 应 422：${amb.text.slice(0, 200)}`);
+  expect((await detail(pid)).screens.find((s) => s.id === agent)!.currentRevisionId === patched.revisionId && (await callTool(mcp, 'quilt.get_screen', { screenId: agent })).text.includes('Patched by MCP'), '失败的 patch 不该落库');
+  const allP = await call<{ revisionId: string }>('quilt.patch_screen', { screenId: agent, expectedRevisionId: patched.revisionId, edits: [{ find: 'px-4', replace: 'px-5', all: true }] });
+  const body7b = (await callTool(mcp, 'quilt.get_screen', { screenId: agent })).text;
+  expect(!body7b.includes('px-4') && body7b.includes('px-5') && !!allP.revisionId, 'all=true 应替换全部匹配');
+  await fail('quilt.patch_screen', { screenId: agent, expectedRevisionId: cur7, edits: [{ find: 'Patched by MCP', replace: 'z' }] }, '/errors/revision-conflict', '旧基线 patch');
+  const slot = await call<{ uploadId: string }>('quilt.create_upload_url', { projectId: pid });
+  const parts = [OK_HTML.slice(0, 200), OK_HTML.slice(200, 500), OK_HTML.slice(500)];
+  let chars = 0;
+  for (const chunk of parts) chars = (await call<{ chars: number }>('quilt.append_upload', { uploadId: slot.uploadId, offset: chars, chunk })).chars;
+  expect(chars === OK_HTML.length, `分块累计字符数应为 ${OK_HTML.length}，实际 ${chars}`);
+  const chunked = await call<{ screenId: string }>('quilt.create_screen', { projectId: pid, name: '分块屏', route: '/chunked', uploadId: slot.uploadId });
+  expect((await callTool(mcp, 'quilt.get_screen', { screenId: chunked.screenId })).text.includes('Agent screen'), '分块上传建出的屏内容不对');
+  await call('quilt.delete_screen', { screenId: chunked.screenId });
+  const badId = await callTool(mcp, 'quilt.append_upload', { uploadId: '../etc', offset: 0, chunk: 'x' });
+  expect(badId.isError, '非法 uploadId 应被拒');
+  notes.push('patch_screen 改一处 / 缺锚点与多处匹配 422 不落库 / all 全换 / 旧基线 409；append_upload 三段建屏');
+
+  // 7c 写入口收口（v0.65）：qid 对齐（插入元素后旧号不动）、重发同一段 409、超过单屏上限 422、上传位用后即清、组件副本被盖回要报出来、详情是紧凑投影
+  const before7c = (await callTool(mcp, 'quilt.get_screen', { screenId: agent })).text;
+  const lastQ = Math.max(...[...before7c.matchAll(/data-qid="q(\d+)"/g)].map((m) => Number(m[1])));
+  const lastTag = before7c.match(new RegExp(`<[a-z0-9]+[^>]*data-qid="q${lastQ}"[^>]*>`))![0];
+  const cur7c = (await detail(pid)).screens.find((s) => s.id === agent)!.currentRevisionId!;
+  const ins = await call<{ revisionId: string }>('quilt.patch_screen', { screenId: agent, expectedRevisionId: cur7c, edits: [{ find: 'Patched by MCP', replace: 'Patched by MCP<span>inserted</span>' }] });
+  const after7c = (await callTool(mcp, 'quilt.get_screen', { screenId: agent })).text;
+  expect(after7c.includes(lastTag) && after7c.includes(`data-qid="q${lastQ + 1}">inserted`), `插入元素后旧 qid 应不动、新元素接着编号：${lastTag}`);
+  await call('quilt.patch_screen', { screenId: agent, expectedRevisionId: ins.revisionId, edits: [{ find: lastTag, replace: lastTag.replace(/>$/, ' title="kept">') }] });
+  const slot2 = await call<{ uploadId: string }>('quilt.create_upload_url', { projectId: pid });
+  const c1 = await call<{ chars: number }>('quilt.append_upload', { uploadId: slot2.uploadId, offset: 0, chunk: OK_HTML.slice(0, 100) });
+  const again = await callTool(mcp, 'quilt.append_upload', { uploadId: slot2.uploadId, offset: 0, chunk: OK_HTML.slice(0, 100) });
+  expect(again.isError && (again.json as { type?: string; chars?: number }).type === '/errors/upload-offset' && (again.json as { chars?: number }).chars === c1.chars, `重发同一段应 409 并报当前长度：${again.text.slice(0, 160)}`);
+  await call('quilt.append_upload', { uploadId: slot2.uploadId, offset: c1.chars, chunk: OK_HTML.slice(100) });
+  const viaUpload = await call<{ screenId: string }>('quilt.create_screen', { projectId: pid, name: '上传位', route: '/slot', uploadId: slot2.uploadId });
+  await fail('quilt.create_screen', { projectId: pid, name: '再用', route: '/slot-again', uploadId: slot2.uploadId }, '/errors/validation', '上传位用过即清');
+  await call('quilt.delete_screen', { screenId: viaUpload.screenId });
+  await fail('quilt.create_screen', { projectId: pid, name: '太大', route: '/huge', html: `<div>${'x'.repeat(300 * 1024)}</div>` }, '/errors/validation', '超过单屏上限');
+  const hacked = await call<{ screenId: string; componentsOverwritten?: string[] }>('quilt.create_screen', { projectId: pid, name: '改副本', route: '/hacked', html: OK_HTML.replace('</main>', '</main><footer data-component="Footer"><p>hand edited</p></footer>') });
+  expect(hacked.componentsOverwritten?.includes('Footer'), `改了组件副本应在 componentsOverwritten 里报出：${JSON.stringify(hacked).slice(0, 200)}`);
+  await call('quilt.delete_screen', { screenId: hacked.screenId });
+  const compact = await callTool(mcp, 'quilt.get_project', { projectId: pid });
+  expect(!compact.text.includes('previewUrl') && !compact.text.includes('screenshotUrl') && !compact.text.includes('"links"') && !compact.text.includes('\n'), `get_project 应是紧凑投影：${compact.text.slice(0, 160)}`);
+  notes.push(`qid 对齐 / offset 409 / 上传位清 / 超限 422 / 组件副本报出 / 详情紧凑 ${compact.text.length} 字符`);
+
   // 8 作业：造（anchor + 参考图 + 组件上下文）、懒生成、子树重生成、提炼、AI 改组件、导出 + 下载、列表 / 事件 / 取消、通道校验
   const gen = await call<Job>('quilt.generate_screens', { projectId: pid, prompt: 'Onboarding flow', count: 2, anchor: { x: 5000, y: 0 }, attachmentIds: [upl.attachmentId], componentIds: [footer.id] });
   expect(gen.kind === 'generate' && (gen.input.anchor as { x: number }).x === 5000 && (gen.input.imageKeys as string[]).length === 1 && (gen.input.componentIds as string[])[0] === footer.id, `generate 作业输入不对：${JSON.stringify(gen.input)}`);
@@ -144,6 +204,21 @@ await step('TC-AGENT-011', async () => {
   expect(lazy.input.route === '/settings' && lazy.input.fromScreenId === s1, `懒生成作业输入不对：${JSON.stringify(lazy.input)}`);
   expect((await waitJob(lazy.id, 120)).status === 'succeeded', '懒生成未成功');
   expect((await detail(pid)).screens.some((s) => s.route === '/settings' && s.name === 'Settings'), '懒生成的 /settings 屏不在');
+  // 8a 变体（v0.65 收口）：link_screens 不能改变体的路由（422）；默认屏改路由变体跟着改；变体上有在跑作业时删默认屏 409
+  const vJob = await call<Job>('quilt.generate_screens', { projectId: pid, prompt: 'empty state', variantOf: s1, variantName: '空态' });
+  expect((await waitJob(vJob.id, 120)).status === 'succeeded', '造变体未成功');
+  const variant = (await detail(pid)).screens.find((s) => (s as { variantOf?: string }).variantOf === s1)!;
+  expect(!!variant, '变体没造出来');
+  await fail('quilt.link_screens', { screenId: variant.id, route: '/elsewhere' }, '/errors/validation', 'link_screens 改变体路由');
+  const s1Route = (await detail(pid)).screens.find((s) => s.id === s1)!.route;
+  await call('quilt.link_screens', { screenId: s1, route: '/s1-moved' });
+  expect((await detail(pid)).screens.find((s) => s.id === variant.id)!.route === '/s1-moved', '默认屏改路由后变体应跟着改');
+  await call('quilt.link_screens', { screenId: s1, route: s1Route });
+  const vBusy = seedJson<{ jobId: string }>('seed:job', '--project', pid, '--screen', variant.id, '--status', 'running');
+  await fail('quilt.delete_screen', { screenId: s1 }, '/errors/screen-busy', '变体上有在跑作业时删默认屏');
+  await call('quilt.cancel_job', { jobId: vBusy.jobId });
+  await call('quilt.delete_screen', { screenId: variant.id });
+  notes.push('变体：link 422 / 路由跟随 / 删默认屏查变体作业');
   const cur8 = (await detail(pid)).screens.find((s) => s.id === s1)!.currentRevisionId!;
   const sub = await call<Job>('quilt.regenerate_subtree', { screenId: s1, qid: 'q1', prompt: 'make the header bigger', expectedRevisionId: cur8 });
   expect(sub.kind === 'regenerate_subtree' && sub.input.qid === 'q1', `子树作业不对：${JSON.stringify(sub.input)}`);
@@ -172,6 +247,7 @@ await step('TC-AGENT-011', async () => {
   const running = seedJson<{ jobId: string }>('seed:job', '--project', pid, '--status', 'running');
   expect((await call<{ job: Job }>('quilt.cancel_job', { jobId: running.jobId })).job.status === 'cancelled', '取消后应 cancelled');
   await fail('quilt.cancel_job', { jobId: running.jobId }, '/errors/job-finished', '重复取消');
+  await fail('quilt.create_screen', { projectId: pid, name: '迟到', route: '/late', html: OK_HTML, jobId: running.jobId }, '/errors/job-finished', '已取消作业的 jobId 再写屏');
   await fail('quilt.edit_screens', { projectId: pid, screenIds: [s1], prompt: 'x', runner: { kind: 'channel', channelId: FAKE } }, '/errors/not-found', '不属于自己的通道');
   notes.push(`作业：造(anchor) / 懒生成 / 子树 / 提炼→${propDone.status} / 改组件→${ecDone.status} / 导出 ${dl.bytes} B / 取消`);
 

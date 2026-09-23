@@ -84,7 +84,7 @@ await step('TC-AGENT-003', async () => {
   expect(!created.isError, `create_screen 出错 ${created.text.slice(0, 200)}`);
   const { screenId, revisionId } = created.json as { screenId: string; revisionId: string };
   const html = await callTool(mcp, 'quilt.get_screen', { screenId });
-  expect(html.text.includes('data-qid="q1"') && html.text.includes('--color-primary'), '未注入 qid/prelude');
+  expect(html.text.includes('data-qid="q1"') && !html.text.includes('<head>'), 'get_screen 应给注入过 qid 的 body（v0.64 起不带 prelude）');
   let shot: Awaited<ReturnType<typeof callTool>> | null = null;
   for (let i = 0; i < 20; i++) { await sleep(1000); const s = await callTool(mcp, 'quilt.get_screenshot', { screenId }); if (s.image) { shot = s; break; } }
   expect(shot?.image, '20 s 内截图未就绪');
@@ -100,9 +100,10 @@ await step('TC-AGENT-004', async () => {
   const bad = await callTool(mcp, 'quilt.create_screen', { projectId: ingestProject, name: 'Bad', route: '/bad', html: OK_HTML.replace('bg-primary', 'bg-[#123456]') });
   // v0.43：契约是透镜不是闸门——推什么都写得进去，偏离只进 lintReport
   expect(!bad.isError && ((bad.json as { lintReport?: { violations: unknown[] } }).lintReport?.violations.length ?? 0) > 0, '违规 HTML 应照常写入并带偏离报告');
-  expect(Array.isArray((bad.json as { violations: unknown[] }).violations) && (bad.json as { violations: unknown[] }).violations.length > 0, '缺 violations');
-  const after = (await apiJson<{ screens: unknown[] }>(`/v1/projects/${ingestProject}`)).body.screens.length;
-  expect(after === before, '违规仍创建了屏');
+  const n = (bad.json as { lintReport: { violations: unknown[] } }).lintReport.violations.length;
+  const d = (await apiJson<{ screens: { id: string; deviations: number }[] }>(`/v1/projects/${ingestProject}`)).body.screens;
+  expect(d.length === before + 1, '违规 HTML 应照常建屏（v0.43）');
+  expect(d.find((s) => s.id === (bad.json as { screenId: string }).screenId)?.deviations === n, `卡片上的偏离数应等于 lintReport 条数 ${n}`);
   await mcp.close();
 });
 

@@ -210,6 +210,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(zod@4.5.4)
+      '@quilt/core':
+        specifier: workspace:*
+        version: link:../packages/core
       playwright:
         specifier: ^1.63.0
         version: 1.63.0

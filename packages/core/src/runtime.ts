@@ -20,7 +20,40 @@ export const RUNTIME_JS = String.raw`(function () {
     });
   }
   function icons() { if (window.lucide && window.lucide.createIcons) window.lucide.createIcons(); }
+  // 换进来的 DOM 里的 <script> 不会执行（DOMParser 解析出的脚本是惰性的）：屏里的图表库、自写脚本（v0.43 允许）都要按原顺序重建一遍，
+  // 带 src 的等它加载完再跑下一个。不做的话图表屏只有首次打开能画出来，跳转、热更新、切变体、叠层打开后都是空白
+  function runScripts(root) {
+    var list = Array.prototype.slice.call(root.querySelectorAll('script'));
+    (function next(i) {
+      if (i >= list.length) return;
+      var old = list[i]; var s = document.createElement('script');
+      for (var k = 0; k < old.attributes.length; k++) s.setAttribute(old.attributes[k].name, old.attributes[k].value);
+      if (old.src) { s.onload = s.onerror = function () { next(i + 1); }; old.replaceWith(s); }
+      else { s.textContent = old.textContent; old.replaceWith(s); next(i + 1); }
+    })(0);
+  }
   function send(msg) { parent.postMessage(msg, '*'); }
+  // 叠层屏（v0.63 REQ-PROTO-005）：把另一屏的根元素压在当前文档上——固定层 + 45% 暗遮罩，不换 DOM，底下那一屏与它的
+  // 滚动位置都留着。层带 data-quilt-ui：选元素态的穿透规则不会把遮罩当成可命中元素。点遮罩（或叠层根元素本身
+  // 露出来的透明区域）只上报 dismiss，关不关由父页定——导航栈在父页。
+  var overlays = [];
+  // 换整屏还没落地时（view transition 的回调是异步的、整份重写要等新文档加载）收到的压层请求先排队，换完再压——
+  // 否则叠层挂在即将被换掉的旧 body 上，跟着一起消失（父页后退穿过叠层时就是先发 swap 再发 overlay）
+  var swapping = false; var queued = state.__overlayQueue || []; delete state.__overlayQueue;
+  function flushOverlays() { swapping = false; var q = queued; queued = []; q.forEach(function (o) { openOverlay(o.html, o.route); }); }
+  function clearOverlays() { overlays.forEach(function (l) { l.remove(); }); overlays = []; }
+  function closeOverlay() { var l = overlays.pop(); if (l) l.remove(); }
+  function openOverlay(html, route) {
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    var root = doc.body.firstElementChild; if (!root) return;
+    var layer = document.createElement('div');
+    layer.setAttribute('data-quilt-ui', ''); layer.setAttribute('data-quilt-overlay-layer', route);
+    layer.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,0.45);overflow:auto;';
+    root = document.adoptNode(root);
+    layer.addEventListener('click', function (e) { if (mode === 'inspect') return; if (e.target === layer || e.target === root) { e.preventDefault(); send({ type: 'quilt:overlay-dismiss' }); } });
+    layer.appendChild(root);
+    document.body.appendChild(layer); overlays.push(layer); runScripts(layer); icons(); restoreForms();
+  }
 
   document.addEventListener('input', snapshotForms, true);
   // 导航源三种（REQ-PROTO-001）：链接 / data-href 点击、表单提交，统一发 navigate；表单一律不真提交
@@ -186,7 +219,10 @@ export const RUNTIME_JS = String.raw`(function () {
       return;
     }
     if (msg.type === 'quilt:mark') { applyMarks(msg); return; }
+    if (msg.type === 'quilt:overlay') { if (swapping) queued.push({ html: msg.html, route: msg.route }); else openOverlay(msg.html, msg.route); return; }
+    if (msg.type === 'quilt:overlay-close') { closeOverlay(); return; }
     if (msg.type !== 'quilt:swap') return;
+    clearOverlays(); queued = []; swapping = true;
     var doc = new DOMParser().parseFromString(msg.html, 'text/html');
     // 跳转回到顶部；同一屏换新修订（热更新）留在原处
     var y = msg.keepScroll ? window.scrollY : 0;
@@ -195,14 +231,18 @@ export const RUNTIME_JS = String.raw`(function () {
       // document.open 不换 window——__quiltState 与要恢复的滚动位置都留得住；先摘掉本份监听，否则重写后的新运行时与这一份会各收一次消息
       window.removeEventListener('message', onMessage);
       state.__scrollY = y;
+      // 整份重写：本份运行时随之作废，排队的压层交给新文档里的运行时（__quiltState 跨 document.open 保留）
+      state.__overlayQueue = queued;
       document.open(); document.write(msg.html); document.close();
       return;
     }
     var apply = function () {
       document.title = doc.title;
       document.body.replaceWith(doc.body);
+      runScripts(document.body);
       box = null; selBox = null; selTag = null; selEl = null; marks = {}; if (mode === 'inspect') document.body.style.cursor = 'crosshair';
       restoreForms(); icons(); window.scrollTo(0, y);
+      flushOverlays();
     };
     var done = function () { send({ type: 'quilt:swapped', route: msg.route, title: document.title }); };
     if (document.startViewTransition) document.startViewTransition(apply).finished.then(done, done);
@@ -213,5 +253,6 @@ export const RUNTIME_JS = String.raw`(function () {
     icons(); restoreForms();
     if (state.__scrollY) { window.scrollTo(0, state.__scrollY); delete state.__scrollY; }
     send({ type: 'quilt:ready', title: document.title });
+    flushOverlays();
   });
 })();`;

@@ -1,4 +1,5 @@
 import { chromium, type Browser } from 'playwright';
+import { withOverlayStyle } from '@quilt/core';
 import { config } from '../config.ts';
 
 // 服务端截图（ADR-002）：单浏览器实例复用，按屏开 page。
@@ -38,15 +39,17 @@ async function settle(page: import('playwright').Page, timeoutMs: number) {
   await page.waitForTimeout(120);
 }
 
-export async function screenshotHtml(html: string, size: { w: number; h: number }, timeoutMs = 15_000): Promise<Buffer> {
+// overlay（v0.63 REQ-PROTO-005）：叠层屏拍成带 alpha 的 PNG——注入透明背景、omitBackground，卡片再铺暗底
+export async function screenshotHtml(html: string, size: { w: number; h: number }, opts: { timeoutMs?: number; overlay?: boolean } = {}): Promise<Buffer> {
+  const timeoutMs = opts.timeoutMs ?? 15_000;
   const b = await getBrowser();
   const context = await b.newContext({ viewport: { width: size.w, height: size.h }, deviceScaleFactor: 2 });
   try {
     const page = await context.newPage();
     // 预览域外链（Tailwind CDN / 字体 / 图片）需要网络；等 networkidle 但不超过超时
-    await page.setContent(html, { waitUntil: 'networkidle', timeout: timeoutMs }).catch(() => {});
+    await page.setContent(opts.overlay ? withOverlayStyle(html) : html, { waitUntil: 'networkidle', timeout: timeoutMs }).catch(() => {});
     await settle(page, timeoutMs);
-    return await page.screenshot({ type: 'png', fullPage: false });
+    return await page.screenshot({ type: 'png', fullPage: false, omitBackground: !!opts.overlay });
   } finally {
     await context.close();
   }

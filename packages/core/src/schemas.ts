@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DEVICE_TYPES } from './device.ts';
+import { DEVICE_TYPES, PRESENTATIONS, type Presentation } from './device.ts';
 import { TOKEN_COLOR_KEYS } from './tokens.ts';
 import { COMPONENT_NAME_RE, MAX_COMPONENT_HTML_BYTES } from './components.ts';
 
@@ -63,6 +63,7 @@ const versionsSchema = z.number().int().min(1).max(MAX_VERSIONS);
 export const MAX_COMPONENT_TARGETS = 10;
 const componentIdsSchema = z.array(z.uuid()).max(MAX_COMPONENT_TARGETS).optional();
 
+export const variantNameSchema = z.string().trim().min(1).max(20);
 export const jobInputSchemas = {
   // 造（REQ-CORE-003 / REQ-CORE-014 / REQ-PROTO-003）：count 是屏数档位（1 单屏规划、2–4 与 auto 整组规划）；
   // versions 是每张新屏的候选版数；anchor 是画布世界坐标；route 钉死即懒生成（跳过规划器，fromScreenId 作来源屏参考）
@@ -77,7 +78,11 @@ export const jobInputSchemas = {
     runner: runnerSchema.optional(),
     imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
     componentIds: componentIdsSchema,
-  }),
+    // 造变体（v0.62 REQ-CORE-025）：二者同给 = 钉死默认屏的路由、跳过规划器；呈现方式（v0.63）只在懒生成 / 造变体时生效，整组规划由规划器逐屏给
+    variantOf: z.uuid().optional(),
+    variantName: variantNameSchema.optional(),
+    presentation: z.enum(PRESENTATIONS).optional(),
+  }).refine((v) => !!v.variantOf === !!v.variantName, { path: ['variantName'], message: 'variantOf 与 variantName 要一起给' }),
   edit_screens: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).min(1).max(20), versions: versionsSchema.default(1), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), componentIds: componentIdsSchema }),
   // 改共享组件（REQ-EDIT-006）：一次一个；成功后所有用到它的屏确定性回刷（零 LLM）
   edit_component: z.object({ componentId: z.uuid(), prompt: z.string().trim().min(1).max(8000), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional() }),
@@ -110,9 +115,10 @@ export type CreateJobInput = z.infer<typeof createJobSchema>;
 export function estimateJob(input: CreateJobInput, allScreens: number): { calls: number; screens: number } {
   switch (input.kind) {
     case 'generate': {
-      const n = input.input.route ? 1 : input.input.count === 'auto' ? 5 : input.input.count;
+      const pinned = !!input.input.route || !!input.input.variantOf;
+      const n = pinned ? 1 : input.input.count === 'auto' ? 5 : input.input.count;
       const screens = n * input.input.versions;
-      return { calls: screens * 2 + (input.input.route ? 0 : 1), screens };
+      return { calls: screens * 2 + (pinned ? 0 : 1), screens };
     }
     case 'edit_screens': { const screens = input.input.screenIds.length * input.input.versions; return { calls: screens * 2, screens }; }
     case 'regenerate_subtree': return { calls: 2, screens: 1 };
@@ -170,6 +176,9 @@ export const updateScreenSchema = z.object({
   y: z.number().int().min(-1_000_000).max(1_000_000).optional(),
   name: z.string().trim().min(1).max(80).optional(),
   route: routeSchema.optional(),
+  // 变体名只对变体有效、route 只对默认屏有效（v0.62）；呈现方式是元数据、改了不重烤修订（v0.63）——三条规则在路由层判
+  variantName: variantNameSchema.optional(),
+  presentation: z.enum(PRESENTATIONS).optional(),
 }).refine((v) => Object.keys(v).length > 0, 'empty patch');
 
 export const restoreRevisionSchema = z.object({ expectedRevisionId: z.uuid() });
@@ -285,15 +294,6 @@ export type ComponentDto = {
 export const cursorQuerySchema = z.object({ cursor: z.string().optional(), limit: z.coerce.number().int().min(1).max(100).default(50) });
 
 // ---------- AGENT 域（v0.32：本地版无 OAuth、无派活任务；本机 agent 是被投递的 Claude Code 会话）----------
-export const ingestScreenSchema = z.object({
-  name: z.string().trim().min(1).max(80),
-  route: routeSchema,
-  html: z.string().min(1).max(262144).optional(),
-  uploadId: z.string().optional(),
-  screenId: z.uuid().optional(),
-  expectedRevisionId: z.uuid().optional(),
-  jobId: z.uuid().optional(),
-}).refine((v) => v.html || v.uploadId, 'html or uploadId required');
 export const listJobsQuerySchema = z.object({ runner: z.enum(JOB_RUNNERS).optional(), limit: z.coerce.number().int().min(1).max(100).default(50) });
 /** 运行时配置（API-CORE-028）：前端启动时取一次 */
 export type ConfigDto = { previewOrigin: string; version: string; local: true; home: string };
@@ -311,6 +311,10 @@ export type ScreenDto = {
   currentRevisionId: string | null; currentRevisionSeq: number | null; screenshotUrl: string | null; previewUrl: string | null; lintPassed: boolean | null; deviations: number;
   /** 待采用的候选批（REQ-CORE-015）：current 所属批次未结清且有 ≥ 2 版 */
   pendingCandidates: { jobId: string; count: number } | null;
+  /** 状态变体（v0.62）：variantOf 指向默认屏、variantName 是状态名；默认屏两者皆空 */
+  variantOf: string | null; variantName: string | null;
+  /** 呈现方式（v0.63）：overlay 屏播放时压在当前屏上 */
+  presentation: Presentation;
   updatedAt: string;
 };
 export type LinkDto = { fromScreenId: string; qid: string; href: string; toScreenId: string | null };

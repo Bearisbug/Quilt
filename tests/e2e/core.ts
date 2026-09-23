@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { launch, openApp, seed, seedJson, apiJson, EVIDENCE, ROOT, WEB, API } from './lib.ts';
+import { launch, openApp, seed, seedJson, apiJson, previewHost, EVIDENCE, ROOT, WEB, API, eventually } from './lib.ts';
 import { startOpenAiStub } from './openai-stub.ts';
 import { pickOption } from './lib.ts';
 
@@ -176,8 +176,8 @@ await step('TC-CORE-007', async () => {
   await page.mouse.move(g.x + g.width / 2 + 300, g.y + g.height / 2 + 120, { steps: 10 });
   expect((await cursorOf('[data-testid="screen-card"] .gesture')) === 'grabbing', '拖动卡片时指针不是握拳');
   await page.mouse.up();
-  await page.waitForTimeout(600);
-  expect((await cursorOf('[data-testid="screen-card"] .gesture')) === 'default', '松开后卡片指针未回到箭头');
+
+  await eventually(async () => expect((await cursorOf('[data-testid="screen-card"] .gesture')) === 'default', '松开后卡片指针未回到箭头'));
   const after = await card.evaluate((el) => (el as HTMLElement).style.transform);
   expect(before !== after, '卡片未移动');
   const box = (await page.locator('[data-testid="canvas"]').boundingBox())!;
@@ -214,8 +214,8 @@ await step('TC-CORE-007', async () => {
   await cards.nth(0).locator('.gesture').click();
   await cards.nth(1).locator('.gesture').click({ modifiers: ['Shift'] });
   await compCard.locator('.gesture').click({ modifiers: ['Shift'] });
-  await page.waitForTimeout(200);
-  expect((await page.locator('[data-testid="screen-card"].selected').count()) === 2 && (await compCard.evaluate(selectedOf)), '加选后应选中 2 屏 + 组件');
+
+  await eventually(async () => expect((await page.locator('[data-testid="screen-card"].selected').count()) === 2 && (await compCard.evaluate(selectedOf)), '加选后应选中 2 屏 + 组件'));
   const g2 = (await cards.nth(1).locator('.gesture').boundingBox())!;
   await page.mouse.move(g2.x + g2.width / 2, g2.y + g2.height / 2);
   await page.mouse.down();
@@ -231,8 +231,8 @@ await step('TC-CORE-007', async () => {
   expect(delta(screens[2].id).x === 0 && delta(screens[2].id).y === 0, '未选中的第 3 屏不该动');
   // 5 按在已选中的卡片上、没拖过：收成只选它
   await cards.nth(1).locator('.gesture').click();
-  await page.waitForTimeout(200);
-  expect((await page.locator('[data-testid="screen-card"].selected').count()) === 1 && (await cards.nth(1).evaluate(selectedOf)) && !(await compCard.evaluate(selectedOf)), '按在已选卡片上没拖过应收成只选它');
+
+  await eventually(async () => expect((await page.locator('[data-testid="screen-card"].selected').count()) === 1 && (await cards.nth(1).evaluate(selectedOf)) && !(await compCard.evaluate(selectedOf)), '按在已选卡片上没拖过应收成只选它'));
   // 6 ⌘Z 整组还原
   await page.keyboard.press('ControlOrMeta+z');
   await page.getByText('已撤销移动').waitFor({ timeout: 3000 });
@@ -317,24 +317,24 @@ await step('TC-CORE-023', async () => {
 
   // 5 快捷键分档：单键只给可撤销的视图操作，开面板的必须带 Alt（防误触）
   const lp0 = await page.locator('[data-testid="toggle-links"]').getAttribute('aria-pressed');
-  await page.keyboard.press('l'); await page.waitForTimeout(200);
-  expect((await page.locator('[data-testid="toggle-links"]').getAttribute('aria-pressed')) !== lp0, 'L 未切换连线');
+  await page.keyboard.press('l');
+  await eventually(async () => expect((await page.locator('[data-testid="toggle-links"]').getAttribute('aria-pressed')) !== lp0, 'L 未切换连线'));
   await page.keyboard.press('l'); await page.waitForTimeout(200);
   await page.keyboard.press('f'); await page.waitForTimeout(500);
   await page.keyboard.press('d'); await page.keyboard.press('t'); await page.keyboard.press('r'); await page.waitForTimeout(400);
   expect(!page.url().includes('panel='), '单键 d/t/r 不该开面板（防误触）');
-  await page.keyboard.press('Alt+d'); await page.waitForTimeout(400);
-  expect(page.url().includes('panel=design'), '⌥D 未打开设计系统面板');
+  await page.keyboard.press('Alt+d');
+  await eventually(async () => expect(page.url().includes('panel=design'), '⌥D 未打开设计系统面板'));
   await page.keyboard.press('Alt+d'); await page.waitForTimeout(300);
-  await page.keyboard.press('Alt+t'); await page.waitForTimeout(400);
-  expect(page.url().includes('panel=agent'), '⌥T 未打开本机 agent 面板');
+  await page.keyboard.press('Alt+t');
+  await eventually(async () => expect(page.url().includes('panel=agent'), '⌥T 未打开本机 agent 面板'));
   await page.keyboard.press('Alt+t'); await page.waitForTimeout(300);
   // ⌘E 开启选择元素模式：不必先选中任何屏
-  await page.keyboard.press('ControlOrMeta+e'); await page.waitForTimeout(400);
-  expect(page.url().includes('panel=inspect'), '⌘E 未开启选择元素模式');
+  await page.keyboard.press('ControlOrMeta+e');
+  await eventually(async () => expect(page.url().includes('panel=inspect'), '⌘E 未开启选择元素模式'));
   expect(await page.getByTestId('armed-hint').isVisible(), '模式已开但画布上没有「点任意一屏开始」的提示');
-  await page.keyboard.press('ControlOrMeta+e'); await page.waitForTimeout(300);
-  expect(!page.url().includes('panel='), '⌘E 再按一次未退出选择元素模式');
+  await page.keyboard.press('ControlOrMeta+e');
+  await eventually(async () => expect(!page.url().includes('panel='), '⌘E 再按一次未退出选择元素模式'));
 
   // 5 输入框内单键只输入字符
   await page.locator('#chat-input').click();
@@ -356,49 +356,51 @@ await step('TC-CORE-023', async () => {
   const sb0 = await safeBottom();
   await page.fill('#chat-input', '草稿');
   await page.keyboard.press('ControlOrMeta+Slash');
-  await page.waitForTimeout(200);
-  expect(!(await composerShown()), '⌘/ 未收起输入框（焦点在输入框内）');
+
+  await eventually(async () => expect(!(await composerShown()), '⌘/ 未收起输入框（焦点在输入框内）'));
   expect(await page.evaluate(() => document.elementFromPoint(window.innerWidth / 2, window.innerHeight - 20)?.closest('[data-testid="canvas"]') !== null), '收起后底部还留着浮层');
   expect((await safeBottom()) - sb0 > 100, `收起后安全区底部未放开：${sb0} → ${await safeBottom()}`);
   await page.keyboard.press('ControlOrMeta+Slash');
-  await page.waitForTimeout(200);
-  expect(await composerShown(), '⌘/ 未叫回输入框');
+
+  await eventually(async () => expect(await composerShown(), '⌘/ 未叫回输入框'));
   expect((await page.locator('#chat-input').inputValue()) === '草稿', '叫回后草稿丢了');
   expect(await page.evaluate(() => document.activeElement?.id === 'chat-input'), '叫回后光标没落回输入区');
   expect(Math.abs((await safeBottom()) - sb0) < 1, '叫回后安全区底部没复原');
   // 6c 工具栏「输入框」与 ⌘/ 是同一开关，aria-pressed 跟着显隐翻转
-  await page.getByTestId('toggle-composer').click(); await page.waitForTimeout(200);
-  expect(!(await composerShown()) && (await page.getByTestId('toggle-composer').getAttribute('aria-pressed')) === 'false', '工具栏「收起输入框」未收起或 aria-pressed 未翻转');
-  await page.getByTestId('toggle-composer').click(); await page.waitForTimeout(200);
-  expect((await composerShown()) && (await page.locator('#chat-input').inputValue()) === '草稿', '工具栏「显示输入框」未叫回或草稿丢了');
+  await page.getByTestId('toggle-composer').click();
+  await eventually(async () => expect(!(await composerShown()) && (await page.getByTestId('toggle-composer').getAttribute('aria-pressed')) === 'false', '工具栏「收起输入框」未收起或 aria-pressed 未翻转'));
+  await page.getByTestId('toggle-composer').click();
+  await eventually(async () => expect((await composerShown()) && (await page.locator('#chat-input').inputValue()) === '草稿', '工具栏「显示输入框」未叫回或草稿丢了'));
   await page.fill('#chat-input', '');
   // 6d 聚焦某屏自动收起；聚焦期间 ⌘/ 可临时叫出、再按收回；退出后回到进入前的状态
   await page.locator('[data-testid="screen-card"]').first().locator('.gesture').dblclick();
   await page.locator('.card.focused').waitFor({ timeout: 10000 });
-  await page.waitForTimeout(300);
-  expect(!(await composerShown()), '进入交互后输入框未自动收起');
-  await page.keyboard.press('ControlOrMeta+Slash'); await page.waitForTimeout(200);
-  expect(await composerShown(), '聚焦期间 ⌘/ 未能临时叫出输入框');
-  await page.keyboard.press('ControlOrMeta+Slash'); await page.waitForTimeout(200);
-  expect(!(await composerShown()), '聚焦期间 ⌘/ 未能收回输入框');
+
+  await eventually(async () => expect(!(await composerShown()), '进入交互后输入框未自动收起'));
+  await page.keyboard.press('ControlOrMeta+Slash');
+  await eventually(async () => expect(await composerShown(), '聚焦期间 ⌘/ 未能临时叫出输入框'));
+  await page.keyboard.press('ControlOrMeta+Slash');
+  await eventually(async () => expect(!(await composerShown()), '聚焦期间 ⌘/ 未能收回输入框'));
   await page.keyboard.press('Escape');
-  await page.waitForTimeout(300);
-  expect((await page.locator('.card.focused').count()) === 0, 'Esc 未退出聚焦');
+
+  await eventually(async () => expect((await page.locator('.card.focused').count()) === 0, 'Esc 未退出聚焦'));
   expect(await composerShown(), '退出聚焦后输入框没回来');
 
   // 7 折叠对话记录并刷新保持；输入框的横向落点不得被侧边浮层的开合搬走
   const composerBox = async () => (await page.locator('form.composer').boundingBox())!;
   const cx = (await composerBox()).x;
   await page.getByRole('button', { name: '折叠对话记录' }).click();
-  await page.waitForTimeout(500);
-  expect((await page.locator('[data-testid="chat-dock"][data-state="collapsed"]').count()) === 1 && (await page.locator('aside[aria-label="对话记录"] [role="log"]').count()) === 0, '对话记录未折叠（应只剩左下角横条）');
+
+  await eventually(async () => expect((await page.locator('[data-testid="chat-dock"][data-state="collapsed"]').count()) === 1 && (await page.locator('aside[aria-label="对话记录"] [role="log"]').count()) === 0, '对话记录未折叠（应只剩左下角横条）'));
   expect(Math.abs((await composerBox()).x - cx) < 1, `折叠对话记录把输入框搬走了 ${((await composerBox()).x - cx).toFixed(1)}px`);
   await page.reload();
   await page.locator('[data-testid="screen-card"]').first().waitFor();
-  expect(await page.evaluate(() => document.querySelector('[data-testid="chat-dock"]')?.getAttribute('data-state') === 'collapsed'), '刷新后折叠态丢失');
+  // 与开头同样等 800 ms：输入框宽度按工具条量（v0.50），通道名要等通道目录取回才定，刚加载完那几百毫秒里它还在变宽、x 还没落定
+
+  await eventually(async () => expect(await page.evaluate(() => document.querySelector('[data-testid="chat-dock"]')?.getAttribute('data-state') === 'collapsed'), '刷新后折叠态丢失'));
   await page.getByRole('button', { name: '展开对话记录' }).click();
-  await page.waitForTimeout(500);
-  expect(await page.locator('aside[aria-label="对话记录"] [role="log"]').isVisible(), '无法重新展开');
+
+  await eventually(async () => expect(await page.locator('aside[aria-label="对话记录"] [role="log"]').isVisible(), '无法重新展开'));
   // 左下角、底部对齐：横条与展开面板的底边都贴在输入框同一水平线附近，不再从顶栏下方垂下来
   const dockBox = (await page.getByTestId('chat-dock').boundingBox())!;
   expect(dockBox.y > 300 && dockBox.x < 40, `对话记录不在左下角：${JSON.stringify(dockBox)}`);
@@ -406,8 +408,8 @@ await step('TC-CORE-023', async () => {
   // 右侧面板滑出时允许让位，但只让到刚好不被压住为止，不多挪一像素
   const before = await composerBox();
   await page.keyboard.press('Alt+d');
-  await page.waitForTimeout(500);
-  expect(page.url().includes('panel=design'), '⌥D 未打开设计系统面板');
+
+  await eventually(async () => expect(page.url().includes('panel=design'), '⌥D 未打开设计系统面板'));
   const panelBox = (await page.locator('.slide-in-right').boundingBox())!;
   const after = await composerBox();
   expect(after.x + after.width <= panelBox.x + 1, `输入框被右侧面板压住：右缘 ${after.x + after.width} > 面板左缘 ${panelBox.x}`);
@@ -415,8 +417,8 @@ await step('TC-CORE-023', async () => {
   const gap = panelBox.x - (after.x + after.width);
   expect(gap >= 0 && gap <= 24, `让位过度：输入框右缘与面板之间空出 ${gap.toFixed(1)}px`);
   await page.keyboard.press('Alt+d');
-  await page.waitForTimeout(500);
-  expect(Math.abs((await composerBox()).x - cx) < 1, '关掉右侧面板后输入框没回到原位');
+
+  await eventually(async () => expect(Math.abs((await composerBox()).x - cx) < 1, '关掉右侧面板后输入框没回到原位'));
   // 视口居中：左右两侧留白应当相等
   const vw = page.viewportSize()!.width;
   const b = await composerBox();
@@ -463,16 +465,16 @@ await step('TC-CORE-024', async () => {
   // 1 Shift 加选
   await card('/s1').locator('.gesture').click();
   await card('/s3').locator('.gesture').click({ modifiers: ['Shift'] });
-  await page.waitForTimeout(200);
-  expect((await page.locator('[data-testid="screen-card"].selected').count()) === 2, ' Shift 加选后不是 2 屏');
+
+  await eventually(async () => expect((await page.locator('[data-testid="screen-card"].selected').count()) === 2, ' Shift 加选后不是 2 屏'));
   const chips = page.getByTestId('target-chip');
   expect((await chips.count()) === 2, '输入框未列出 2 个目标标签');
   expect((await verbLine(page)).includes('改 2 屏'), `动词行不是「改 2 屏」：${await verbLine(page)}`);
 
   // 2 移除其中一个目标
   await chips.first().getByRole('button').click();
-  await page.waitForTimeout(200);
-  expect((await page.locator('[data-testid="screen-card"].selected').count()) === 1, '移除目标后不是 1 屏');
+
+  await eventually(async () => expect((await page.locator('[data-testid="screen-card"].selected').count()) === 1, '移除目标后不是 1 屏'));
   expect((await chips.count()) === 1 && (await verbLine(page)).includes('改 1 屏'), `单选后动词行不是「改 1 屏」：${await verbLine(page)}`);
 
   // 3 空白处拖拽框选全部 4 屏
@@ -488,18 +490,18 @@ await step('TC-CORE-024', async () => {
   // 还没松手就应当已经高亮命中的屏
   expect((await page.locator('[data-testid="screen-card"].selected').count()) === 4, '框选过程中未实时高亮命中的屏');
   await page.mouse.up();
-  await page.waitForTimeout(300);
-  expect((await page.locator('[data-testid="screen-card"].selected').count()) === 4, '框选后不是 4 屏');
+
+  await eventually(async () => expect((await page.locator('[data-testid="screen-card"].selected').count()) === 4, '框选后不是 4 屏'));
 
   // 4 ⌘A 全选
   await card('/s1').locator('.gesture').click();
   await page.waitForTimeout(150);
   await page.keyboard.press('ControlOrMeta+a');
-  await page.waitForTimeout(250);
-  expect((await page.locator('[data-testid="screen-card"].selected').count()) === 4, '⌘A 未全选');
+
+  await eventually(async () => expect((await page.locator('[data-testid="screen-card"].selected').count()) === 4, '⌘A 未全选'));
 
   // 5 发送时把 4 屏一起作为 targetScreenIds；动词行写「改全部 4 屏」
-  expect((await verbLine(page)).includes('改全部 4 屏'), `动词行不是「改全部 4 屏」：${await verbLine(page)}`);
+  await eventually(async () => expect((await verbLine(page)).includes('改全部 4 屏'), `动词行不是「改全部 4 屏」：${await verbLine(page)}`));
   const req = page.waitForRequest((r) => r.url().includes('/messages') && r.method() === 'POST');
   const res = page.waitForResponse((r) => r.url().includes('/messages') && r.request().method() === 'POST');
   await page.fill('#chat-input', '统一把顶部导航改成标签栏');
@@ -512,13 +514,13 @@ await step('TC-CORE-024', async () => {
   const spot = await blankSpot(page);
   expect(!!spot, '找不到画布空白点');
   await page.mouse.click(spot!.x, spot!.y);
-  await page.waitForTimeout(300);
-  expect((await page.locator('[data-testid="screen-card"].selected').count()) === 0, '点空白没有清掉画布高亮');
+
+  await eventually(async () => expect((await page.locator('[data-testid="screen-card"].selected').count()) === 0, '点空白没有清掉画布高亮'));
   expect((await page.getByTestId('target-chip').count()) === 4, `点空白后目标标签少了：${await page.getByTestId('target-chip').count()}`);
   expect((await verbLine(page)).includes('改全部 4 屏'), `点空白后动词行变了：${await verbLine(page)}`);
   await page.getByTestId('clear-targets').click();
-  await page.waitForTimeout(200);
-  expect((await page.getByTestId('target-chip').count()) === 0 && (await verbLine(page)).startsWith('造'), `清空后动词行不是「造」：${await verbLine(page)}`);
+
+  await eventually(async () => expect((await page.getByTestId('target-chip').count()) === 0 && (await verbLine(page)).startsWith('造'), `清空后动词行不是「造」：${await verbLine(page)}`));
   await apiJson(`/v1/jobs/${sentJob.job.id}/cancel`, { method: 'POST' }).catch(() => {});
 
   // 6 多选时只出删除、不出修订
@@ -529,8 +531,8 @@ await step('TC-CORE-024', async () => {
   await page.waitForTimeout(200);
   expect((await page.getByRole('button', { name: '修订' }).count()) === 0, '多选时仍出现「修订」');
   await page.getByRole('button', { name: '删除 2 屏' }).click();
-  await page.waitForTimeout(200);
-  expect((await page.locator('[role="alertdialog"]').innerText()).includes('删除选中的 2 屏'), '确认框未点明屏数');
+
+  await eventually(async () => expect((await page.locator('[role="alertdialog"]').innerText()).includes('删除选中的 2 屏'), '确认框未点明屏数'));
   await page.keyboard.press('Escape');
   await shot(page, 'CORE-024');
   return 'Shift 加选 / 框选 / ⌘A 全选 / targetScreenIds 传 4 屏 / 点空白不清目标标签、清空回到造 / 多选只出删除';
@@ -575,8 +577,8 @@ await step('TC-CORE-025', async () => {
 
   // Esc 只关下拉：焦点回到触发器，画布选中不受影响，也不触发别的快捷键
   await page.keyboard.press('Escape');
-  await page.waitForTimeout(300);
-  expect((await listbox.count()) === 0, 'Esc 未关闭下拉');
+
+  await eventually(async () => expect((await listbox.count()) === 0, 'Esc 未关闭下拉'));
   expect(await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'runner-select'), '关闭后焦点未回到触发器');
   await page.locator('[data-testid="screen-card"]').first().locator('.gesture').click();
   await sel.click();
@@ -591,8 +593,8 @@ await step('TC-CORE-025', async () => {
     await sel.click();
     await listbox.waitFor({ timeout: 3000 });
     await listbox.getByRole('option').filter({ hasText: other.label }).first().click();
-    await page.waitForTimeout(200);
-    expect((await sel.getAttribute('data-value')) === other.id, `选择后触发器值未更新：${await sel.getAttribute('data-value')}`);
+
+    await eventually(async () => expect((await sel.getAttribute('data-value')) === other.id, `选择后触发器值未更新：${await sel.getAttribute('data-value')}`));
     await page.reload();
     await sel.waitFor({ timeout: 10000 });
     await page.waitForFunction((id) => document.querySelector('[data-testid="runner-select"]')?.getAttribute('data-value') === id, other.id, { timeout: 10000 });
@@ -737,11 +739,11 @@ await step('TC-CORE-027', async () => {
   await page.waitForFunction(`!document.querySelector('ul[aria-label="本次参考图"] span')`, null, { timeout: 15000 });
   expect((await thumbs.count()) === 1, '贴图后没有缩略图');
   await page.setInputFiles('input[type=file]', [ref, ref, ref, ref]);
-  await page.waitForTimeout(2500);
-  expect((await thumbs.count()) === 4, `超过上限未截断，实际 ${await thumbs.count()} 张`);
+
+  await eventually(async () => expect((await thumbs.count()) === 4, `超过上限未截断，实际 ${await thumbs.count()} 张`));
   await page.locator('ul[aria-label="本次参考图"] button').first().click();
-  await page.waitForTimeout(300);
-  expect((await thumbs.count()) === 3, '移除参考图无效');
+
+  await eventually(async () => expect((await thumbs.count()) === 3, '移除参考图无效'));
 
   // 5 发送：请求带 attachmentIds，作业输入带 imageKeys，对话里能看到发过的图
   const req = page.waitForRequest((r) => r.url().includes('/messages') && r.method() === 'POST');
@@ -751,8 +753,8 @@ await step('TC-CORE-027', async () => {
   const sent = JSON.parse((await req).postData() ?? '{}') as { attachmentIds?: string[] };
   expect(sent.attachmentIds?.length === 3, `请求未带 3 个 attachmentIds：${JSON.stringify(sent.attachmentIds)}`);
   const created = await (await res).json() as { job: { id: string } | null };
-  await page.waitForTimeout(2000);
-  expect((await page.getByTestId('message-attachment').count()) === 3, '对话记录里看不到发过的参考图');
+
+  await eventually(async () => expect((await page.getByTestId('message-attachment').count()) === 3, '对话记录里看不到发过的参考图'));
   const job = (await apiJson<{ job: { input: { imageKeys?: string[] } } }>(`/v1/jobs/${created.job!.id}`)).body.job;
   expect(job.input.imageKeys?.length === 3, `作业输入未带 imageKeys：${JSON.stringify(job.input)}`);
   // 图已经进作业了，别真跑生成——这条用例验通道，不验模型
@@ -856,8 +858,8 @@ await step('TC-CORE-028', async () => {
       expect(await page.evaluate(() => !!document.activeElement?.closest('[data-testid="channel-dialog"]')), `Tab ${i + 1} 次后焦点逃出了面板`);
     }
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(200);
-    expect((await dlg.count()) === 0, 'Esc 未关闭面板');
+
+    await eventually(async () => expect((await dlg.count()) === 0, 'Esc 未关闭面板'));
     // 弹层叠弹层：内层关掉后外层设置弹层还在、背景仍隔离，焦点回到外层的「添加通道」（inert 引用计数）
     expect(await modal.isVisible(), '关掉「添加通道」后设置弹层跟着没了');
     expect(await page.evaluate(() => document.getElementById('root')?.hasAttribute('inert')), '内层关闭后背景 inert 被一起摘掉了');
@@ -941,12 +943,12 @@ await step('TC-CORE-029', async () => {
     expect(!!spot, '找不到画布空白点');
     await page.mouse.dblclick(spot!.x, spot!.y);
     await page.getByTestId('anchor').waitFor({ timeout: 3000 });
-    expect(await page.evaluate(() => document.activeElement?.id === 'chat-input'), '放锚点后焦点不在输入框');
+    await eventually(async () => expect(await page.evaluate(() => document.activeElement?.id === 'chat-input'), `放锚点后焦点不在输入框：${await page.evaluate(() => document.activeElement?.tagName + '#' + (document.activeElement?.id ?? ''))}`));
     await page.getByTestId('anchor-chip').waitFor({ timeout: 3000 });
     expect((await verbLine(page)).includes('造 1 屏 · 此处'), `动词行应为「造 1 屏 · 此处」：${await verbLine(page)}`);
     await page.getByTestId('anchor-chip').getByRole('button').click();
-    await page.waitForTimeout(200);
-    expect((await page.getByTestId('anchor').count()) === 0, '× 未撤掉锚点');
+
+    await eventually(async () => expect((await page.getByTestId('anchor').count()) === 0, '× 未撤掉锚点'));
     // 2 ⌥G / 工具栏「新建屏幕」也放锚点（可见区中心）；先点空白让焦点离开输入框（输入框内的按键不触发画布快捷键）
     await page.mouse.click(spot!.x, spot!.y);
     await page.waitForTimeout(150);
@@ -1123,8 +1125,8 @@ await step('TC-CORE-030', async () => {
     // 3 展开期间排列条让位：胶囊与排列条争同一条横带（排列条 y 64~106、胶囊 y 74~106）且排列条压在上面，
     //   不让位就会把「收起」点成「右对齐」并把新位置落库
     await page.keyboard.press('ControlOrMeta+a');
-    await page.waitForTimeout(300);
-    expect((await page.getByTestId('arrange-bar').count()) === 0, '候选就地展开时排列条没让位（它会挡住每格上方的动作胶囊）');
+
+    await eventually(async () => expect((await page.getByTestId('arrange-bar').count()) === 0, '候选就地展开时排列条没让位（它会挡住每格上方的动作胶囊）'));
     expect(((await overlay.getByTestId('adopt-group-1').getAttribute('aria-label')) ?? '').includes('3 屏'), '「采用这一组」没写明屏数');
     // 3b 服务端把每一屏都跳过时：说明跳过、不结清、展开层留着等重试（此前一律报成功并自动收起）
     for (const s of screens) seededBusy.push(seedJson<{ jobId: string }>('seed:job', '--project', projectId, '--screen', s.id).jobId);
@@ -1185,7 +1187,7 @@ await step('TC-CORE-010', async () => {
   const iframe = page.locator('.card.focused iframe');
   await iframe.waitFor();
   const src = new URL((await iframe.getAttribute('src'))!);
-  expect(src.host === 'preview.localhost:3101' && src.searchParams.get('t'), `iframe src ${src.href}`);
+  expect(src.host === (await previewHost()) && src.searchParams.get('t'), `iframe src ${src.href}`);
   const fl = page.frameLocator('.card.focused iframe');
   await fl.locator('#toggle').waitFor({ timeout: 15000 });
   await page.waitForTimeout(600);
@@ -1200,8 +1202,8 @@ await step('TC-CORE-010', async () => {
   expect((await page.locator('[data-testid="screen-card"][data-route="/s2"] img').count()) === 1, '第 2 屏未保持截图态');
   await shot(page, 'CORE-010');
   await page.keyboard.press('Escape');
-  await page.waitForTimeout(300);
-  expect((await page.locator('.card.focused iframe').count()) === 0, 'Esc 后 iframe 未卸载');
+
+  await eventually(async () => expect((await page.locator('.card.focused iframe').count()) === 0, 'Esc 后 iframe 未卸载'));
   // 5b v0.34：焦点在 iframe 里时 ⌘E 由运行时转发——点过屏内元素后按 ⌘E 仍能切到选择元素态，再按退出
   await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').dblclick();
   await fl.locator('#toggle').waitFor({ timeout: 15000 });
@@ -1210,13 +1212,13 @@ await step('TC-CORE-010', async () => {
   await page.keyboard.press('ControlOrMeta+e');
   await page.locator('.card.focused .badge', { hasText: '选择元素中' }).waitFor({ timeout: 5000 });
   await page.keyboard.press('ControlOrMeta+e');
-  await page.waitForTimeout(400);
-  expect((await page.locator('.card.focused').count()) === 0, '在 iframe 里再按 ⌘E 未退出选择元素态');
+
+  await eventually(async () => expect((await page.locator('.card.focused').count()) === 0, '在 iframe 里再按 ⌘E 未退出选择元素态'));
 });
 
 await step('TC-CORE-011', async () => {
   const expired = seed('seed:preview-token', '--screen', focusScreens[0].id, '--expired');
-  const r = await fetch(expired.replace('preview.localhost', '127.0.0.1'), { headers: { Host: 'preview.localhost:3101' } });
+  const r = await fetch(expired.replace('preview.localhost', '127.0.0.1'), { headers: { Host: await previewHost() } });
   expect(r.status === 403, `过期签名返回 ${r.status}`);
   expect((await r.json()).type === '/errors/preview-token-invalid', 'type');
   await page.goto(`${WEB}/p/${focusProject}`);
@@ -1297,8 +1299,8 @@ await step('TC-CORE-032', async () => {
     expect(bg1 === rgb, `/s1 后退后主按钮色 ${bg1} ≠ ${primary}`);
     await shot(page, 'CORE-032');
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
-    expect((await page.locator('.card.focused').count()) === 0, 'Esc 未退出交互');
+
+    await eventually(async () => expect((await page.locator('.card.focused').count()) === 0, 'Esc 未退出交互'));
     return `改屏后 ${ms} ms 内热更新（src 不变、scrollY ${y0} 保持）；回刷后 /s2 原地换色、/s1 后退也是新色`;
   } finally { await stub.close(); if (cid) await apiJson(`/v1/channels/${cid}`, { method: 'DELETE' }).catch(() => {}); }
 });
@@ -1534,8 +1536,8 @@ await step('TC-CORE-033', async () => {
   await page.getByRole('alertdialog').getByRole('button', { name: '删除' }).click();
   await page.waitForURL((u) => !u.pathname.includes(a.projectId), { timeout: 10000 });
   expect((await apiJson(`/v1/projects/${a.projectId}`)).status === 404, '当前项目删除后仍在');
-  await page.waitForTimeout(500);
-  expect(!(await page.title()).startsWith('DelA'), `离开项目后标题未复位：${await page.title()}`);
+
+  await eventually(async () => expect(!(await page.title()).startsWith('DelA'), `离开项目后标题未复位：${await page.title()}`));
   return '标题带项目名；hover 垃圾桶 / Delete 键 → 确认 → 级联清干净；有作业 409；删当前项目回首页';
 });
 
@@ -1556,8 +1558,8 @@ await step('TC-CORE-034', async () => {
   expect((await bar.innerText()).includes('3 屏') && (await bar.getByRole('button').count()) === 10, `排列条应有「3 屏」与 10 个按钮：${await bar.innerText()}`);
   // 3 去选一屏剩 2 屏：等距不可用并说明原因（放在对齐之前——对齐后三张卡叠在同一位置，点不到底下那张）
   await page.locator('[data-testid="screen-card"]').first().locator('.gesture').click({ modifiers: ['Shift'] });
-  await page.waitForTimeout(300);
-  expect((await bar.innerText()).includes('2 屏') && (await bar.getByTestId('arrange-hspace').getAttribute('aria-disabled')) === 'true' && (await bar.innerText()).includes('至少选 3 屏'), '2 屏时等距应不可用并写明原因');
+
+  await eventually(async () => expect((await bar.innerText()).includes('2 屏') && (await bar.getByTestId('arrange-hspace').getAttribute('aria-disabled')) === 'true' && (await bar.innerText()).includes('至少选 3 屏'), '2 屏时等距应不可用并写明原因'));
   await page.keyboard.press('ControlOrMeta+a');
   await page.waitForTimeout(300);
   // 4 横向等距：首尾不动，中间落到间隙均分处
@@ -1766,8 +1768,8 @@ await step('TC-CORE-036', async () => {
     expect((await jobOf(genJob)).status === 'cancelled', '点行上的取消键没取消那个作业');
     await page.getByTestId('clear-targets').click();
     await page.fill('#chat-input', '再造一屏设置页');
-    await page.waitForTimeout(300);
-    expect((await reason.count()) === 0, '造屏作业已取消，拦截理由还在');
+
+    await eventually(async () => expect((await reason.count()) === 0, '造屏作业已取消，拦截理由还在'));
     expect((await sendBtn.getAttribute('aria-disabled')) === null, '造屏作业已取消，发送键仍不可点');
     await shot(page, 'CORE-036');
     // 10 一个标签页只开一条 SSE（v0.37）：作业进度改走项目事件流的 job_changed 投影，不随在跑作业数增长
@@ -1806,8 +1808,8 @@ await step('TC-CORE-037', async () => {
   await page.keyboard.press('Enter');
   await page.getByText('已改名为').waitFor({ timeout: 10000 });
   expect((await name()) === '改好的名字', `回车后库里仍是 ${await name()}`);
-  await page.waitForTimeout(400);
-  expect((await page.title()).startsWith('改好的名字'), `标签页标题未跟着改：${await page.title()}`);
+
+  await eventually(async () => expect((await page.title()).startsWith('改好的名字'), `标签页标题未跟着改：${await page.title()}`));
   // 5 Esc 放弃
   row = await openRow();
   await row.getByTestId('rename-project').click();
@@ -1826,6 +1828,156 @@ await step('TC-CORE-037', async () => {
   return 'hover 露出重命名键；就地编辑自动聚焦、打字不被下拉吃掉；回车存并同步标题；Esc 与空名都当放弃';
 });
 
+
+// TC-CORE-040 找屏与总览（REQ-CORE-024 v0.61）：⌘K 跳屏、屏列表筛选、小地图
+await step('TC-CORE-040', async () => {
+  const { projectId, screens } = seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', 'Finder', '--device', 'mobile', '--screens', '4', '--dangling', '--no-shot');
+  const [s1, , s3] = screens;
+  await page.goto(`${WEB}/p/${projectId}`);
+  await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 10000 });
+  await page.waitForTimeout(600);
+  // 1 ⌘K → 输入「s3」→ Enter：面板关、/s3 单选、镜头把它摆到可用区中央、缩放 ≤ 1
+  await page.keyboard.press('ControlOrMeta+k');
+  const finder = page.getByTestId('screen-finder');
+  await finder.waitFor({ timeout: 3000 });
+  expect(await page.getByTestId('finder-input').evaluate((el) => el === document.activeElement), '打开后焦点应落在搜索框');
+  await page.getByTestId('finder-input').fill('s3');
+  await page.waitForTimeout(150);
+  const rows = page.getByTestId('finder-row');
+  expect((await rows.count()) === 1 && (await rows.first().getAttribute('data-id')) === s3.id, `输入 s3 应只剩 /s3 一行，实际 ${await rows.count()}`);
+  await page.keyboard.press('Enter');
+  await finder.waitFor({ state: 'detached', timeout: 3000 });
+  await page.locator('.card.selected[data-route="/s3"]').waitFor({ timeout: 3000 });
+  await page.waitForTimeout(500);
+  const centered = await page.evaluate(() => {
+    const c = document.querySelector('.card.selected')!.getBoundingClientRect(); const a = document.querySelector('[data-testid="safe-area"]')!.getBoundingClientRect();
+    return { dx: Math.abs(c.left + c.width / 2 - (a.left + a.width / 2)), dy: Math.abs(c.top + c.height / 2 - (a.top + a.height / 2)) };
+  });
+  expect(centered.dx <= 8 && centered.dy <= 8, `跳屏后卡片应在可用区中央（偏差 ${Math.round(centered.dx)}, ${Math.round(centered.dy)}）`);
+  const zoomPct = Number(((await page.getByTestId('stat').innerText()).match(/(\d+)%/) ?? [])[1]);
+  expect(zoomPct <= 100, `跳屏缩放不该超过 1:1，实际 ${zoomPct}%`);
+  // 2 ⌥S 屏列表：4 行；筛「断链」剩 /s1 一行且片上计数 1；点行 → /s1 单选
+  await page.keyboard.press('Alt+s');
+  await page.getByTestId('screens-list').waitFor({ timeout: 3000 });
+  expect((await page.getByTestId('screens-row').count()) === 4, '屏列表应列 4 屏');
+  await page.getByTestId('screens-filter-dangling').click();
+
+  await eventually(async () => expect((await page.getByTestId('screens-row').count()) === 1 && (await page.getByTestId('screens-filter-dangling').getAttribute('aria-pressed')) === 'true' && (await page.getByTestId('screens-filter-dangling').innerText()).includes('1'), '筛断链应只剩 /s1 且片上计数 1'));
+  expect((await page.getByTestId('screens-row').first().getAttribute('data-id')) === s1.id, '断链行应是 /s1');
+  await page.getByTestId('screens-row').first().click();
+  await page.locator('.card.selected[data-route="/s1"]').waitFor({ timeout: 3000 });
+  await page.keyboard.press('Alt+s');
+  await page.waitForTimeout(300);
+  // 3 小地图：4 个屏矩形 + 视口框；点最左侧空白 → 视口框左移、画布镜头随之平移；工具栏可关可开
+  const mm = page.getByTestId('minimap');
+  await mm.waitFor({ timeout: 3000 });
+  expect((await page.getByTestId('minimap-screen').count()) === 4 && (await page.getByTestId('minimap-view').count()) === 1, '小地图应有 4 个屏矩形与 1 个视口框');
+  // 小地图按「全部卡片 + 视口」的外接框缩放：视口往左出去后，屏矩形在小地图里整体右移、世界层 transform 的 x 变大
+  const screensX = () => page.getByTestId('minimap-screen').evaluateAll((els) => Math.min(...els.map((e) => Number(e.getAttribute('x')))));
+  const worldX = () => page.evaluate(() => new DOMMatrix(getComputedStyle(document.querySelector('.world')!).transform).e);
+  const [vx0, wx0] = [await screensX(), await worldX()];
+  const box = (await mm.boundingBox())!;
+  await page.mouse.click(box.x + 10, box.y + box.height / 2);
+  await page.waitForTimeout(500);
+  const [vx1, wx1] = [await screensX(), await worldX()];
+  expect(vx1 > vx0 && wx1 > wx0, `点小地图左侧后屏矩形应右移（${vx0.toFixed(1)} → ${vx1.toFixed(1)}）、世界层右移（${wx0.toFixed(0)} → ${wx1.toFixed(0)}）`);
+  await page.getByTestId('toggle-minimap').click();
+  await mm.waitFor({ state: 'detached', timeout: 2000 });
+  // 空格在按钮上是激活（v0.65；此前全局空格被画布平移吃掉）
+  await page.getByTestId('toggle-minimap').focus();
+  await page.keyboard.press('Space');
+  await mm.waitFor({ timeout: 2000 });
+  await shot(page, 'CORE-040');
+  return '⌘K 搜到 /s3、Enter 居中选中且 ≤ 1:1；⌥S 列表 4 行、断链筛剩 /s1 并可跳；小地图 4 矩形 + 视口框、点击平移、可开关';
+});
+
+// TC-CORE-041 状态变体（REQ-CORE-025 v0.62）：出变体 → 落位 / 地图 / 注册表 / 导出 → 播放切状态 → 路由不可改 → 删默认屏级联
+await step('TC-CORE-041', async () => {
+  const { projectId, screens } = seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', 'Variants', '--device', 'mobile', '--screens', '3');
+  const [s1] = screens;
+  type S = { id: string; name: string; route: string; x: number; y: number; variantOf: string | null; variantName: string | null; previewUrl: string | null; currentRevisionId: string | null };
+  const detail = async () => (await apiJson<{ screens: S[]; links: { href: string; toScreenId: string | null }[] }>(`/v1/projects/${projectId}`)).body;
+  await page.goto(`${WEB}/p/${projectId}`);
+  await page.locator('[data-testid="screen-card"] img').first().waitFor({ timeout: 15000 });
+  // 1 选中 /s1 → 工具栏「出变体」→ 起名「空态」→ 作业跑完
+  await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
+  await page.getByTestId('new-variant').click();
+  await page.getByTestId('variant-dialog').waitFor({ timeout: 3000 });
+  await page.getByTestId('variant-name').fill('空态');
+  await page.getByTestId('variant-create').click();
+  await page.getByText('正在出「Screen 1」的「空态」变体').waitFor({ timeout: 5000 });
+  let v: S | undefined;
+  for (let i = 0; i < 40 && !v?.previewUrl; i++) { await page.waitForTimeout(1500); v = (await detail()).screens.find((s) => s.variantOf === s1.id); }
+  expect(!!v?.previewUrl, '变体 60 s 内没造出来');
+  const d = await detail();
+  const base = d.screens.find((s) => s.id === s1.id)!;
+  expect(v!.route === '/s1' && v!.variantName === '空态' && v!.name === 'Screen 1 · 空态', `变体元数据不对：${JSON.stringify({ route: v!.route, variantName: v!.variantName, name: v!.name })}`);
+  expect(v!.y === base.y && v!.x === base.x + 390 + 80, `变体应落在默认屏右侧同一行，实际 (${v!.x}, ${v!.y}) vs 默认 (${base.x}, ${base.y})`);
+  // 2 应用地图只指默认屏；注册表（设计契约 routes）不列变体
+  expect(d.links.filter((l) => l.href === '/s1').every((l) => l.toScreenId === s1.id), '指向 /s1 的链接目标应是默认屏');
+  const map = (await apiJson<{ nodes: { id: string }[] }>(`/v1/projects/${projectId}/app-map`)).body;
+  expect(map.nodes.length === 3 && !map.nodes.some((n) => n.id === v!.id), `应用地图节点应只有 3 个默认屏，实际 ${map.nodes.length}`);
+  // 3 画布：变体卡标「变体」，默认屏卡标「1 个变体」
+  await page.waitForTimeout(800);
+  await page.locator('.card[data-variant="true"] .label .chip', { hasText: '变体' }).waitFor({ timeout: 5000 });
+  expect((await page.locator('.card[data-route="/s1"]:not([data-variant]) .label').innerText()).includes('1 个变体'), '默认屏卡应标「1 个变体」');
+  // 4 聚焦默认屏 → 状态胶囊两颗 → 点「空态」→ 同 iframe 换内容、镜头不动、导航栈为空
+  await page.locator('.card[data-route="/s1"]:not([data-variant]) .gesture').dblclick();
+  await page.locator('.card.focused .badge', { hasText: '交互中' }).waitFor({ timeout: 20000 });
+  const chips = page.getByTestId('variant-chip');
+  await chips.first().waitFor({ timeout: 5000 });
+  expect((await chips.count()) === 2 && (await chips.first().getAttribute('aria-pressed')) === 'true', '应有「默认 / 空态」两颗胶囊且默认被按下');
+  const fl = page.frameLocator('.card.focused iframe');
+  const before = await fl.locator('body').innerHTML();
+  const worldBefore = await page.evaluate(() => getComputedStyle(document.querySelector('.world')!).transform);
+  await page.locator('[data-testid="variant-chip"][data-id="' + v!.id + '"]').click();
+
+  await eventually(async () => expect((await page.locator('[data-testid="variant-chip"][data-id="' + v!.id + '"]').getAttribute('aria-pressed')) === 'true', '点过的胶囊应为按下态'));
+  expect((await fl.locator('body').innerHTML()) !== before, 'iframe 内容应换成变体');
+  expect((await page.evaluate(() => getComputedStyle(document.querySelector('.world')!).transform)) === worldBefore, '切状态不该动镜头');
+  expect((await page.locator('.card.focused .badge').innerText()).includes('/s1') && (await page.locator('.card.focused iframe').count()) === 1, '角标仍是 /s1、iframe 未重建');
+  // 4b 切到变体后选元素直改，改动落在变体上、默认屏不动（v0.65；此前写到默认屏，同号 qid 改错元素）
+  const baseRev0 = (await detail()).screens.find((s) => s.id === s1.id)!;
+  await page.keyboard.press('ControlOrMeta+e');
+  await page.locator('.card.focused .badge', { hasText: '选择元素中' }).waitFor({ timeout: 5000 });
+  await fl.locator('h1').first().click();
+  await page.locator('#el-text').waitFor({ timeout: 5000 });
+  await page.locator('#el-text').fill('Variant edited');
+  // Esc 在检查器输入框里只失焦，不退出聚焦、面板与草稿都在（v0.65）
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  expect((await page.locator('.card.focused').count()) === 1 && (await page.locator('#el-text').inputValue()) === 'Variant edited', '输入框里按 Esc 不该退出聚焦或丢草稿');
+  await page.getByRole('button', { name: '保存（零 token）' }).click();
+  await page.getByText('已更新').first().waitFor({ timeout: 5000 });
+  await page.waitForTimeout(800);
+  const after4b = (await detail()).screens;
+  const vAfter = (await apiJson<{ items: { sourceKind: string }[] }>(`/v1/screens/${v!.id}/revisions`)).body.items[0];
+  expect(after4b.find((s) => s.id === s1.id)!.currentRevisionId === baseRev0.currentRevisionId && vAfter.sourceKind === 'manual', '直改应落在变体上、默认屏修订不变');
+  await page.keyboard.press('ControlOrMeta+e');
+  await page.waitForTimeout(300);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+  // 5 变体改 route → 422；默认屏给 variantName → 422
+  expect((await apiJson(`/v1/screens/${v!.id}`, { method: 'PATCH', body: JSON.stringify({ route: '/elsewhere' }) })).status === 422, '变体改路由应 422');
+  expect((await apiJson(`/v1/screens/${s1.id}`, { method: 'PATCH', body: JSON.stringify({ variantName: 'x' }) })).status === 422, '默认屏给变体名应 422');
+  // 6 导出只带默认屏
+  const { body: job } = await apiJson<{ job: { id: string } }>(`/v1/projects/${projectId}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': `e2e-var-${Date.now()}` }, body: JSON.stringify({ kind: 'export_prototype', input: {} }) });
+  await waitJob(job.job.id, 90);
+  const html = await (await fetch(`${API}/v1/jobs/${job.job.id}/export`)).text();
+  expect((html.match(/<template data-route=/g) ?? []).length === 3, `导出应只有 3 个默认屏模板，实际 ${(html.match(/<template data-route=/g) ?? []).length}`);
+  // 7 删默认屏：确认框写明变体一起删，确认后剩 2 屏
+  await page.locator('.card[data-route="/s1"]:not([data-variant]) .gesture').click();
+  await page.keyboard.press('Delete');
+  const dlg = page.getByTestId('delete-dialog');
+  await dlg.waitFor({ timeout: 3000 });
+  expect((await dlg.innerText()).includes('1 个变体一起删除'), '删除确认应写明变体一起删除');
+  await dlg.getByRole('button', { name: '删除' }).click();
+  await page.getByText('已删除').first().waitFor({ timeout: 5000 });
+
+  await eventually(async () => expect((await detail()).screens.length === 2, '删默认屏后变体应级联删除'));
+  await shot(page, 'CORE-041');
+  return '出变体落在默认屏右侧、地图 / 注册表 / 导出只认默认屏、卡片标签、聚焦切状态不动镜头、路由不可改 422、删默认屏级联';
+});
 
 await browser.close();
 console.log('\n=== RUN-' + RUN + ' ===');

@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, or, sql, isNull, inArray } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
 import { settleByJob } from '../services/annotations.ts';
@@ -12,14 +12,14 @@ import { screenshotHtml, extractTailwindCss } from '../lib/screenshot.ts';
 import { recordUsage } from '../services/usage.ts';
 import { createRevision, deriveLinks, pointCurrentToFirstCandidate, priorInstructions, exemplarBody, currentBody } from '../services/screens.ts';
 import { screenDtos } from '../services/projects.ts';
-import { timeoutFor } from '../services/jobs.ts';
+import { timeoutFor, modelAborts } from '../services/jobs.ts';
 import { runChatTurn, ChatFailure } from './chat.ts';
 import { sharedComponentsOf, componentCards, reflowComponent } from '../services/components.ts';
 import {
   buildPrelude, lintScreenBody, injectQids, assembleDocument, extractBody, stripFences, buildPrototypeDocument, replaceSubtree, extractLinks,
   expandComponents, validateComponentHtml, classifyComponentHtml, componentSummary, componentSystemPrompt, componentUserPrompt,
   type ProjectAsset, type SharedComponent,
-  screenSystemPrompt, planSystemPrompt, planUserPrompt, planOneScreenSystemPrompt, planOneScreenUserPrompt, screenUserPrompt, editUserPrompt, subtreeUserPrompt, linkRepairPrompt,
+  OVERLAY_SCREEN_NOTE, screenSystemPrompt, planSystemPrompt, planUserPrompt, planOneScreenSystemPrompt, planOneScreenUserPrompt, screenUserPrompt, editUserPrompt, subtreeUserPrompt, linkRepairPrompt,
   proposeDesignSystemSystemPrompt, proposeDesignSystemUserPrompt, parseConventions, REFERENCE_IMAGE_NOTE, FONT_FAMILIES, RADIUS_SCALES, MAX_CONVENTIONS,
   DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput,
 } from '@quilt/core';
@@ -36,11 +36,13 @@ async function lucideJs(): Promise<string> {
 // REQ-PROTO-004：导出单文件原型（确定性，不调 LLM）
 async function runExportPrototype(ctx: Ctx): Promise<string> {
   const screens = await db.select().from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id)).orderBy(schema.screens.createdAt);
-  const exportScreens: { route: string; name: string; body: string }[] = [];
+  const exportScreens: { route: string; name: string; body: string; presentation: 'push' | 'overlay' }[] = [];
   for (const s of screens) {
     if (!s.currentRevisionId) continue;
     const [rev] = await db.select().from(schema.screenRevisions).where(eq(schema.screenRevisions.id, s.currentRevisionId));
-    exportScreens.push({ route: s.route, name: s.name, body: extractBody((await storage.get(rev.htmlKey)).toString('utf8')) });
+    // 变体不导出（v0.62）：与默认屏同路由，hash 路由容不下两份
+    if (s.variantOf) continue;
+    exportScreens.push({ route: s.route, name: s.name, body: extractBody((await storage.get(rev.htmlKey)).toString('utf8')), presentation: s.presentation as 'push' | 'overlay' });
   }
   if (!exportScreens.length) throw new JobFailure('validation', 'project has no screens to export');
   const [tailwindCss, lucide] = await Promise.all([extractTailwindCss(ctx.prelude, exportScreens.map((s) => s.body)), lucideJs()]);
@@ -95,12 +97,13 @@ function parsePlan(text: string): Plan {
 function parseOne(text: string): PlannedScreen & { entryFrom?: string | null } {
   const o = parseJsonObject<Partial<PlannedScreen> & { entryFrom?: string | null }>(text);
   if (!o.route || !o.name) throw new Error('plan missing name/route');
-  return { name: o.name, route: o.route.startsWith('/') ? o.route : `/${o.route}`, purpose: o.purpose ?? '', links: Array.isArray(o.links) ? o.links : [], sections: Array.isArray(o.sections) && o.sections.length ? o.sections : ['header', 'main content', 'primary action'], entryFrom: o.entryFrom ?? null };
+  return { presentation: o.presentation === 'overlay' ? 'overlay' as const : 'push' as const, name: o.name, route: o.route.startsWith('/') ? o.route : `/${o.route}`, purpose: o.purpose ?? '', links: Array.isArray(o.links) ? o.links : [], sections: Array.isArray(o.sections) && o.sections.length ? o.sections : ['header', 'main content', 'primary action'], entryFrom: o.entryFrom ?? null };
 }
 
 // ---- 上下文（ADR-012 v0.31）：稳定前缀里的屏注册表 + 情境层的参考屏 ----
 async function registry(ctx: Ctx): Promise<RegistryEntry[]> {
-  const rows = await db.select({ route: schema.screens.route, name: schema.screens.name, purpose: schema.screens.purpose }).from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id)).orderBy(schema.screens.createdAt);
+  // 变体不进注册表（v0.62）：路由已由默认屏占着，列两份只会让规划器与 ALLOWED ROUTES 重复
+  const rows = await db.select({ route: schema.screens.route, name: schema.screens.name, purpose: schema.screens.purpose }).from(schema.screens).where(and(eq(schema.screens.projectId, ctx.project.id), isNull(schema.screens.variantOf))).orderBy(schema.screens.createdAt);
   return rows.map((r) => ({ route: r.route, name: r.name, purpose: r.purpose || undefined }));
 }
 // 参考屏合计 ≤ 40 KB（≈ 10K token 预算里给参考屏的份额），超了先丢来源屏
@@ -132,6 +135,8 @@ async function produceScreen(ctx: Ctx, args: { screenId: string; system: string;
   report = lintScreenBody(withQids, routes, report.firstTry); // 违规带上 qid
   const html = assembleDocument(withQids, ctx.prelude, `${ctx.project.name} · ${screen.name}`);
   if (Buffer.byteLength(html) > config.maxScreenHtmlBytes) throw new JobFailure('validation', `screen html too large (${Buffer.byteLength(html)} bytes)`);
+  // 取消或超时之后回来的模型产出不落库：屏锁此刻已释放，用户可能已在这屏上继续改了
+  if (ctx.signal.aborted) throw new JobFailure('timeout', 'job aborted before the revision was written');
   const rev = await db.transaction((tx) => createRevision(tx, { projectId: ctx.project.id, screenId: args.screenId, html, sourceKind: args.sourceKind, jobId: ctx.job.id, lintReport: report, expectedRevisionId: args.expectedRevisionId, parentRevisionId: args.parentRevisionId, candidateIndex: args.candidateIndex, advanceCurrent: args.advanceCurrent }));
   if (!rev) throw new JobFailure('validation', 'revision conflict');
   ctx.usage.screens += 1;
@@ -143,7 +148,8 @@ async function produceScreen(ctx: Ctx, args: { screenId: string; system: string;
 
 async function screenshotRevision(ctx: Ctx, screenId: string, revisionId: string, html: string) {
   try {
-    const png = await screenshotHtml(html, DEVICE_SIZE[ctx.device]);
+    const [row] = await db.select({ presentation: schema.screens.presentation }).from(schema.screens).where(eq(schema.screens.id, screenId));
+    const png = await screenshotHtml(html, DEVICE_SIZE[ctx.device], { overlay: row?.presentation === 'overlay' });
     const key = objectKeys.revisionShot(ctx.project.id, screenId, revisionId);
     await storage.put(key, png, 'image/png');
     await db.update(schema.screenRevisions).set({ screenshotKey: key }).where(eq(schema.screenRevisions.id, revisionId));
@@ -153,9 +159,13 @@ async function screenshotRevision(ctx: Ctx, screenId: string, revisionId: string
   }
 }
 
+// 一个任务失败就不再领新任务，但要等已在跑的都结束再抛第一个错：直接 Promise.all 会让作业先判失败、其余任务在它身后继续落修订
 async function pool<T>(items: T[], n: number, fn: (t: T) => Promise<void>) {
-  let i = 0;
-  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) await fn(items[i++]); }));
+  let i = 0; let first: unknown = null;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (i < items.length && first === null) { try { await fn(items[i++]); } catch (e) { first ??= e; } }
+  }));
+  if (first !== null) throw first;
 }
 
 async function uniqueRoute(projectId: string, route: string): Promise<string> {
@@ -170,20 +180,26 @@ async function uniqueRoute(projectId: string, route: string): Promise<string> {
 // 每张新屏 × versions 版并行出屏；versions>1 时落为候选、current 指向第 1 版。
 // 规划器声明了入口屏（entryFrom）就对它跑一次补链——反向连线。
 async function runGenerate(ctx: Ctx) {
-  const input = ctx.job.input as { prompt: string; count: number | 'auto'; versions: number; anchor?: { x: number; y: number }; route?: string; name?: string; fromScreenId?: string; imageKeys?: string[]; componentIds?: string[] };
+  const input = ctx.job.input as { prompt: string; count: number | 'auto'; versions: number; anchor?: { x: number; y: number }; route?: string; name?: string; fromScreenId?: string; imageKeys?: string[]; componentIds?: string[]; variantOf?: string; variantName?: string; presentation?: 'push' | 'overlay' };
   const versions = Math.max(1, input.versions ?? 1);
   const existingRows = await db.select().from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id)).orderBy(schema.screens.createdAt);
-  const existing: RegistryEntry[] = existingRows.map((s) => ({ route: s.route, name: s.name, purpose: s.purpose || undefined }));
+  const existing: RegistryEntry[] = existingRows.filter((s) => !s.variantOf).map((s) => ({ route: s.route, name: s.name, purpose: s.purpose || undefined }));
   const existingRoutes = new Set(existing.map((r) => r.route));
   const empty = existingRows.length === 0;
   const a = app(ctx, input.prompt);
   let planned: PlannedScreen[];
   let entryFrom: string | null = null;
-  if (input.route) {
+  // 造变体（v0.62 REQ-CORE-025）：钉死默认屏的路由、跳过规划器、默认屏作参考屏；变体只有一层
+  const base = input.variantOf ? existingRows.find((s) => s.id === input.variantOf) : undefined;
+  if (input.variantOf && (!base || base.variantOf)) throw new JobFailure('validation', 'variantOf must be a default screen of this project');
+  if (base && input.variantName) {
+    const baseLinks = (await db.select({ href: schema.links.href }).from(schema.links).where(eq(schema.links.fromScreenId, base.id))).map((l) => l.href);
+    planned = [{ name: `${base.name} · ${input.variantName}`, route: base.route, purpose: `The "${input.variantName}" state of "${base.name}"${base.purpose ? ` (${base.purpose})` : ''}`, links: Array.from(new Set(baseLinks.filter((h) => existingRoutes.has(h)))), sections: [], presentation: base.presentation as 'push' | 'overlay' }];
+  } else if (input.route) {
     if (existingRoutes.has(input.route)) throw new JobFailure('validation', 'route already exists');
     const from = existingRows.find((s) => s.id === input.fromScreenId);
     const name = input.name ?? (input.route.split('/').filter(Boolean).map((p) => p.replace(/-/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())).join(' ') || 'Screen');
-    planned = [{ name, route: input.route, purpose: `Screen reached from "${from?.name ?? 'another screen'}" via link ${input.route}`, links: from ? [from.route] : [], sections: ['header with back arrow', 'main content matching the route name', 'primary action'] }];
+    planned = [{ name, route: input.route, purpose: `Screen reached from "${from?.name ?? 'another screen'}" via link ${input.route}`, links: from ? [from.route] : [], sections: ['header with back arrow', 'main content matching the route name', 'primary action'], presentation: input.presentation ?? 'push' }];
     entryFrom = from?.route ?? null;
   } else if (input.count === 1) {
     const planPrompt = planOneScreenUserPrompt(a, input.prompt, existing);
@@ -213,28 +229,34 @@ async function runGenerate(ctx: Ctx) {
 
   const created: { screenId: string; s: PlannedScreen }[] = [];
   for (const s of planned) {
-    const route = await uniqueRoute(ctx.project.id, s.route);
-    const [screen] = await db.insert(schema.screens).values({ projectId: ctx.project.id, name: s.name, route, purpose: s.purpose ?? '', x: 0, y: 0 }).returning();
+    const route = base ? s.route : await uniqueRoute(ctx.project.id, s.route);
+    const [screen] = await db.insert(schema.screens).values({ projectId: ctx.project.id, name: s.name, route, purpose: s.purpose ?? '', x: 0, y: 0, presentation: s.presentation ?? 'push', variantOf: base?.id ?? null, variantName: base ? input.variantName ?? null : null }).returning();
     created.push({ screenId: screen.id, s: { ...s, route } });
     await emitJobEvent(ctx.job.id, 'screen_planned', { screenId: screen.id, name: s.name, route, purpose: s.purpose });
   }
-  await layoutNewScreens(ctx, created.map((c) => c.screenId), input.anchor);
+  if (base) await layoutVariant(ctx, created[0].screenId, base.id); else await layoutNewScreens(ctx, created.map((c) => c.screenId), input.anchor);
 
   const all = created.map((c) => c.s);
   const reg = await registry(ctx);
-  const sourceId = input.fromScreenId ?? existingRows.find((s) => s.route === entryFrom)?.id ?? null;
+  const sourceId = base?.id ?? input.fromScreenId ?? existingRows.find((s) => s.route === entryFrom)?.id ?? null;
   // 共享组件卡（REQ-EDIT-006）：每个组件一张卡，框选的那些附完整 HTML
   const system = screenSystemPrompt(a, ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], reg, await references(ctx, { sourceScreenId: sourceId }), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds }));
   const tasks = created.flatMap((c) => Array.from({ length: versions }, (_, i) => ({ c, i })));
-  await pool(tasks, config.screenConcurrency, async ({ c, i }) => {
-    if (ctx.signal.aborted) return;
-    await produceScreen(ctx, {
-      screenId: c.screenId, system, prompt: screenUserPrompt(c.s, all), sourceKind: 'generate', model: empty ? config.modelInitial : undefined,
-      expectedRevisionId: versions === 1 ? null : undefined, parentRevisionId: null,
-      candidateIndex: versions > 1 ? i : null, advanceCurrent: versions === 1,
+  try {
+    await pool(tasks, config.screenConcurrency, async ({ c, i }) => {
+      if (ctx.signal.aborted) return;
+      await produceScreen(ctx, {
+        screenId: c.screenId, system, prompt: screenUserPrompt(c.s, all, base ? { variant: { ofName: base.name, name: input.variantName! } } : {}), sourceKind: 'generate', model: empty ? config.modelInitial : undefined,
+        expectedRevisionId: versions === 1 ? null : undefined, parentRevisionId: null,
+        candidateIndex: versions > 1 ? i : null, advanceCurrent: versions === 1,
+      });
     });
-  });
-  if (versions > 1) for (const c of created) await db.transaction((tx) => pointCurrentToFirstCandidate(tx, c.screenId, ctx.job.id));
+  } finally {
+    // 失败或取消也要收尾：已出的候选让 current 指过去；一版都没出的新屏删掉，不让空屏占着路由（它还会让指向该路由的链接不显示为断链）
+    if (versions > 1) for (const c of created) await db.transaction((tx) => pointCurrentToFirstCandidate(tx, c.screenId, ctx.job.id));
+    const blank = (await db.select({ id: schema.screens.id }).from(schema.screens).where(and(inArray(schema.screens.id, created.map((c) => c.screenId)), isNull(schema.screens.currentRevisionId)))).map((r) => r.id);
+    if (blank.length) await db.delete(schema.screens).where(inArray(schema.screens.id, blank));
+  }
   // 新屏一落地就派生应用地图：懒生成补的那张屏此刻已能解析断链，不必等后面的反向连线跑完
   if (ctx.produced.length) await db.transaction((tx) => deriveLinks(tx, ctx.project.id));
   // 样板屏（REQ-CORE-016）：没钦定过就以本次第 1 屏为默认
@@ -269,7 +291,9 @@ async function runEditScreens(ctx: Ctx) {
     const [rev] = await db.select().from(schema.screenRevisions).where(eq(schema.screenRevisions.id, screen.currentRevisionId!));
     const body = extractBody((await storage.get(rev.htmlKey)).toString('utf8'));
     const prior = await priorInstructions(screen.id, screen.currentRevisionId);
-    return { screen, base: screen.currentRevisionId!, prompt: editUserPrompt(screen.name, screen.route, body, input.prompt, prior) };
+    // 叠层屏（v0.63）：改屏时也提醒它是压在别的屏上的弹层，否则模型会把它改回整页
+    const instruction = screen.presentation === 'overlay' ? `${input.prompt}\n${OVERLAY_SCREEN_NOTE}` : input.prompt;
+    return { screen, base: screen.currentRevisionId!, prompt: editUserPrompt(screen.name, screen.route, body, instruction, prior) };
   }));
   const tasks = prepared.flatMap((p) => Array.from({ length: versions }, (_, i) => ({ p, i })));
   await pool(tasks, config.screenConcurrency, async ({ p, i }) => {
@@ -280,7 +304,7 @@ async function runEditScreens(ctx: Ctx) {
       candidateIndex: versions > 1 ? i : null, advanceCurrent: versions === 1,
     });
   });
-  if (versions > 1) for (const p of prepared) await db.transaction((tx) => pointCurrentToFirstCandidate(tx, p.screen.id, ctx.job.id));
+  if (versions > 1 && !ctx.signal.aborted) for (const p of prepared) await db.transaction((tx) => pointCurrentToFirstCandidate(tx, p.screen.id, ctx.job.id, p.base));
 }
 
 // 设计系统提炼（REQ-EDIT-003）：只产出提案，写入由用户在预览里确认
@@ -405,6 +429,15 @@ async function runChat(ctx: Ctx): Promise<{ reply: string }> {
   return { reply: r.reply };
 }
 
+// 变体落位（v0.62）：默认屏同一行、它最右一个变体的右侧；只看这一家族，不避让别的屏（要整齐用排列条）
+async function layoutVariant(ctx: Ctx, id: string, baseId: string) {
+  const size = DEVICE_SIZE[ctx.device];
+  const family = await db.select({ id: schema.screens.id, x: schema.screens.x, y: schema.screens.y }).from(schema.screens).where(or(eq(schema.screens.id, baseId), eq(schema.screens.variantOf, baseId)));
+  const b = family.find((s) => s.id === baseId)!;
+  const x = family.filter((s) => s.id !== id).reduce((m, s) => Math.max(m, s.x + size.w + 80), b.x + size.w + 80);
+  await db.update(schema.screens).set({ x, y: b.y }).where(eq(schema.screens.id, id));
+}
+
 // 新屏摆放（REQ-CORE-014）：有锚点则一组屏自锚点向右排成一行（与既有屏相交整行下移）；无锚点接在最右一屏右侧
 async function layoutNewScreens(ctx: Ctx, ids: string[], anchor?: { x: number; y: number }) {
   const size = DEVICE_SIZE[ctx.device];
@@ -435,6 +468,7 @@ export async function runJob(jobId: string): Promise<void> {
   const abort = new AbortController();
   const timeoutMs = timeoutFor({ kind: job.kind, input: job.input } as CreateJobInput);
   const timer = setTimeout(() => abort.abort(new Error('timeout')), timeoutMs);
+  modelAborts.set(jobId, abort);
   // 作业输入里带的通道（REQ-CORE-011）；kind=agent 的作业不会走到 worker（runner=agent 不入队）
   const jobRunner = (claimed.input as { runner?: { kind: string; driver?: LlmDriver; model?: string; channelId?: string } }).runner;
   let runner: Ctx['runner'] = {};
@@ -471,7 +505,7 @@ export async function runJob(jobId: string): Promise<void> {
     else if (e instanceof JobFailure) failure = { errorClass: e.errorClass, message: e.message };
     else if (e instanceof ProviderError) failure = { errorClass: 'provider', message: e.message };
     else { failure = { errorClass: 'system', message: (e as Error).message }; console.error(`[job ${jobId}]`, e); }
-  } finally { clearTimeout(timer); }
+  } finally { clearTimeout(timer); modelAborts.delete(jobId); }
 
   // 落库前复核取消（§16 竞态：worker vs cancel）
   const [fresh] = await db.select({ status: schema.generationJobs.status }).from(schema.generationJobs).where(eq(schema.generationJobs.id, jobId));

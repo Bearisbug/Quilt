@@ -1,10 +1,10 @@
 import { COLOR_CLASS_NAMES, type Tokens } from './tokens.ts';
-import { DEVICE_SIZE, type DeviceType } from './device.ts';
+import { DEVICE_SIZE, type DeviceType, type Presentation } from './device.ts';
 import { componentPlacement, sharedComponentsSection, type SharedComponentCard } from './components.ts';
 
 // 设计契约（ADR-005 / ADR-012）：每次生成都带，体积与屏幕数无关。组件配方来自设计系统 components。
 export type ComponentRecipe = { name: string; html: string; note?: string };
-export type PlannedScreen = { name: string; route: string; purpose: string; links: string[]; sections: string[] };
+export type PlannedScreen = { name: string; route: string; purpose: string; links: string[]; sections: string[]; presentation?: Presentation };
 // 整组规划（REQ-CORE-003）：brief 只在空项目首轮扩写；entryFrom 是既有哪一屏进入新组（反向连线的靶子）
 export type Plan = { screens: PlannedScreen[]; brief?: string; entryFrom?: string | null };
 export type AppContext = { name: string; description: string; brief?: string };
@@ -87,8 +87,8 @@ export function planSystemPrompt(opts: { count: number | 'auto'; empty: boolean 
     ? `"brief" is 3–5 sentences describing the app for future generations: what it is, who uses it, the tone and the main flows (written from the description, do not invent features the description rules out).`
     : `"entryFrom" is the route of the EXISTING screen that should link into this new group (the natural entry point), or null if none is obvious.`;
   return `You are Quilt's app planner. Given an app description${opts.empty ? '' : ' and the screens that already exist'}, output a JSON object (no markdown fences, no prose) with this exact shape:
-{${opts.empty ? '"brief":"…",' : '"entryFrom":"/existing-route",'}"screens":[{"name":"Home","route":"/home","purpose":"one sentence","links":["/other-route"],"sections":["section 1","section 2"]}]}
-Rules: ${countRule}; routes are lowercase kebab-case starting with "/" and MUST NOT collide with EXISTING ROUTES; every screen links to at least one other screen and all links use routes from this plan or from EXISTING ROUTES; sections are 3–5 short phrases describing what the screen contains, top to bottom; ${extra} Strictly valid JSON: double quotes, no trailing commas, no comments.`;
+{${opts.empty ? '"brief":"…",' : '"entryFrom":"/existing-route",'}"screens":[{"name":"Home","route":"/home","purpose":"one sentence","links":["/other-route"],"sections":["section 1","section 2"],"presentation":"push"}]}
+Rules: ${countRule}; ${PRESENTATION_RULE} routes are lowercase kebab-case starting with "/" and MUST NOT collide with EXISTING ROUTES; every screen links to at least one other screen and all links use routes from this plan or from EXISTING ROUTES; sections are 3–5 short phrases describing what the screen contains, top to bottom; ${extra} Strictly valid JSON: double quotes, no trailing commas, no comments.`;
 }
 export function planUserPrompt(app: AppContext, description: string, existing: RegistryEntry[]): string {
   const list = existing.map((r) => `${r.route} (${r.name}${r.purpose ? `: ${r.purpose}` : ''})`).join(', ') || '(none)';
@@ -103,19 +103,31 @@ export const REFERENCE_IMAGE_NOTE = `The user attached reference image(s) with t
 // 再走同一条出屏路径。路由不许撞现有的；链接只许指向现有的、且可以为空——交互还没想好时先把屏设计出来，不强迫它连到谁。
 export function planOneScreenSystemPrompt(): string {
   return `You are Quilt's screen planner. The user wants ONE additional screen for an existing app. Output a JSON object (no markdown fences, no prose) with this exact shape:
-{"name":"Profile Detail","route":"/profile-detail","purpose":"one sentence","links":["/existing-route"],"sections":["section 1","section 2","section 3"],"entryFrom":"/existing-route"}
-Rules: route is lowercase kebab-case starting with "/" and MUST NOT be one of the EXISTING ROUTES; links is a subset of EXISTING ROUTES — only include a route when this screen obviously navigates there, and leave it an empty array when the flow is not decided yet (empty is the normal case, do not force links); entryFrom is the EXISTING route that would naturally link INTO this screen, or null when none is obvious; sections are 3–5 short phrases describing what the screen contains, top to bottom; name is 1–3 words in the same language as the existing screen names. Strictly valid JSON: double quotes, no trailing commas, no comments.`;
+{"name":"Profile Detail","route":"/profile-detail","purpose":"one sentence","links":["/existing-route"],"sections":["section 1","section 2","section 3"],"entryFrom":"/existing-route","presentation":"push"}
+Rules: ${PRESENTATION_RULE} route is lowercase kebab-case starting with "/" and MUST NOT be one of the EXISTING ROUTES; links is a subset of EXISTING ROUTES — only include a route when this screen obviously navigates there, and leave it an empty array when the flow is not decided yet (empty is the normal case, do not force links); entryFrom is the EXISTING route that would naturally link INTO this screen, or null when none is obvious; sections are 3–5 short phrases describing what the screen contains, top to bottom; name is 1–3 words in the same language as the existing screen names. Strictly valid JSON: double quotes, no trailing commas, no comments.`;
 }
 export function planOneScreenUserPrompt(app: AppContext, description: string, existing: RegistryEntry[]): string {
   const list = existing.map((r) => `${r.route} (${r.name}${r.purpose ? `: ${r.purpose}` : ''})`).join(', ') || '(none)';
   return `App: ${app.name}${app.brief ? ` — ${app.brief}` : ` — ${app.description}`}\nEXISTING ROUTES: ${list}\nRequested screen: ${description}`;
 }
 
-export function screenUserPrompt(s: PlannedScreen, all: PlannedScreen[]): string {
+export function screenUserPrompt(s: PlannedScreen, all: PlannedScreen[], opts: { variant?: { ofName: string; name: string } } = {}): string {
   const links = s.links.map((r) => `${r} (${all.find((x) => x.route === r)?.name ?? r})`).join(', ');
   // 没规划出链接的屏（凭空生成常见）：明说它暂不需要跳转，免得模型硬编去向；表单的 action 仍受 lint 约束（form-action）
   const nav = links ? `It must link to: ${links}.` : 'It does not need to navigate to any other screen yet: use href="#" for actions whose destination is undecided; forms still need action="/route" (a plausible new route is fine).';
-  return `Generate the screen "${s.name}" at route ${s.route}.\nPurpose: ${s.purpose}\nSections, top to bottom: ${s.sections.join('; ')}\n${nav}\nReturn only the root element HTML.`;
+  const sections = s.sections.length ? `\nSections, top to bottom: ${s.sections.join('; ')}` : '';
+  const variant = opts.variant ? `\n${variantNote(opts.variant.ofName, opts.variant.name)}` : '';
+  const overlay = s.presentation === 'overlay' ? `\n${OVERLAY_SCREEN_NOTE}` : '';
+  return `Generate the screen "${s.name}" at route ${s.route}.\nPurpose: ${s.purpose}${sections}\n${nav}${variant}${overlay}\nReturn only the root element HTML.`;
+}
+
+// 规划器给每屏定呈现方式（v0.63 REQ-PROTO-005）：弹层类才是 overlay，其余一律 push
+const PRESENTATION_RULE = '"presentation" is "overlay" ONLY for a screen that is presented on top of another one (bottom sheet, dialog, action sheet, picker, confirmation) and "push" for every full screen;';
+// 叠层屏的出屏说明（v0.63）：只写弹层本身，根透明，遮罩由播放器画；关闭动作指回来处
+export const OVERLAY_SCREEN_NOTE = 'This screen is an OVERLAY presented on top of another screen (a bottom sheet, dialog or action sheet). Output only the overlay surface: the root element must have a transparent background (class "bg-transparent", never bg-background) and position the surface — a bottom sheet is a min-h-dvh flex flex-col justify-end root with the sheet panel (bg-surface, rounded-t-lg) at the bottom; a dialog is a min-h-dvh flex items-center justify-center root with a centered panel (bg-surface, rounded-lg, mx-6). Do NOT draw a dim scrim yourself — the player dims the screen underneath. Include an explicit close/cancel action that navigates back to the screen it opened from (<a href="/that-route">).';
+// 状态变体的出屏说明（v0.62 REQ-CORE-025）：同一屏的另一个状态——布局、导航、视觉不变，只改状态所指的那部分
+export function variantNote(ofName: string, name: string): string {
+  return `This is the "${name}" state VARIANT of the existing screen "${ofName}" (same route, same app bar, same navigation, same visual language — the reference screen shows exactly how it looks). Keep everything that does not depend on the state identical to the reference; change only what the "${name}" state implies (for example an empty state replaces the list with an illustration, a one-line explanation and the primary action; an error state shows what went wrong and a retry; a loading state shows skeleton placeholders; a logged-out state shows the sign-in prompt where the personal content would be).`;
 }
 
 // 「补链」修复轮（REQ-PROTO-002）：作为 edit_screens 的固定指令，把未连上路由的导航动作连好，其余不动
@@ -144,11 +156,11 @@ export function editUserPrompt(screenName: string, route: string, currentBody: s
 
 // 聊天（REQ-CORE-023 / ADR-018）：住在 Quilt 进程里的助手的稳定前缀——每轮重发、随项目更新。
 // 不带任何整屏 HTML：屏的结构靠 quilt.get_outline 看目录，整屏只在助手用 get_screen 读时进上下文；对话记忆在 SDK 会话里。
-export type ChatScreen = { id: string; name: string; route: string; purpose?: string; currentRevisionId: string | null };
+export type ChatScreen = { id: string; name: string; route: string; purpose?: string; currentRevisionId: string | null; presentation?: Presentation };
 export function chatSystemPrompt(args: { app: AppContext; device: DeviceType; designMd: string; screens: ChatScreen[]; projectId: string; jobId: string; designVersion: number; components?: SharedComponentCard[] }): string {
   const size = DEVICE_SIZE[args.device];
   const registry = args.screens.length
-    ? args.screens.map((s) => `  - ${s.name} (${s.route}) screenId=${s.id} revision=${s.currentRevisionId ?? 'none'}${s.purpose ? ` — ${s.purpose}` : ''}`).join('\n')
+    ? args.screens.map((s) => `  - ${s.name} (${s.route}) screenId=${s.id} revision=${s.currentRevisionId ?? 'none'}${s.presentation === 'overlay' ? ' [overlay]' : ''}${s.purpose ? ` — ${s.purpose}` : ''}`).join('\n')
     : '  (no screens yet)';
   // 共享组件（REQ-EDIT-006）：助手改导航这类东西要走组件，而不是逐屏手改它的副本
   const shared = args.components?.length
@@ -159,13 +171,13 @@ export function chatSystemPrompt(args: { app: AppContext; device: DeviceType; de
 HOW TO SEE THE PROJECT
 - SCREENS below is the registry: name, route, screenId, current revision id, purpose.
 - quilt.get_outline { projectId, screenIds? } gives every screen's structure (landmarks, headings, links, buttons, inputs, images — each with its data-qid and text). Call it first whenever the message concerns existing screens; it is cheap and usually enough to decide what to do.
-- quilt.get_screen { screenId } returns the full HTML of ONE screen. Read only the screens you are going to change or must inspect in detail.
+- quilt.get_screen { screenId } returns ONE screen's body HTML (with data-qid). Read only the screens you are going to change or must inspect in detail.
 - quilt.get_screenshot { screenId } shows how a screen renders. Use it when the question is visual (spacing, hierarchy, colour, "does this look right").
 - quilt.get_design_contract { projectId } is the design system in machine form: tokens, colour classes, component recipes, DESIGN.md, assets, rules. Read it once before writing any HTML in this conversation, and again after you change the design system.
 
 HOW TO CHANGE THINGS
-- Write a screen back with quilt.update_screen { projectId, screenId, name, route, html, expectedRevisionId, jobId }. ALWAYS pass jobId="${args.jobId}" and the screen's current revision id (from SCREENS or quilt.get_outline). On 409 revision-conflict re-read the screen and redo the change on the current version; on 409 screen-busy another job is editing that screen — say so in your reply instead of retrying.
-- html is the screen's single root element (<div class="min-h-dvh flex flex-col bg-background text-on-background">…</div>) with everything inside it; no <html>, <head> or <body>. Keep every part the message did not ask you to change identical (text, classes, links, data-qid attributes). Stay inside the design system's token classes and recipes unless the design genuinely needs something they cannot express — Quilt records such deviations per screen and they will not follow a later theme change.
+- Change part of a screen with quilt.patch_screen { screenId, expectedRevisionId, edits:[{ find, replace }], jobId } — find is the exact current text from quilt.get_screen; this keeps each call short. Rewrite a whole screen with quilt.update_screen { projectId, screenId, html, expectedRevisionId, jobId }; over ~8 KB of HTML write it as quilt.create_upload_url + quilt.append_upload chunks and pass uploadId. On both ALWAYS pass jobId="${args.jobId}" and the screen's current revision id (from SCREENS or quilt.get_outline). On 409 revision-conflict re-read the screen and redo the change on the current version; on 409 screen-busy another job is editing that screen — say so in your reply instead of retrying.
+- html is the screen's single root element (<div class="min-h-dvh flex flex-col bg-background text-on-background">…</div>) with everything inside it; no <html>, <head> or <body>. Keep every part the message did not ask you to change identical (text, classes, links, data-qid attributes). Stay inside the design system's token classes and recipes unless the design genuinely needs something they cannot express — Quilt records such deviations per screen and they will not follow a later theme change. A screen marked [overlay] is a sheet or dialog shown on top of another screen: its root stays transparent (bg-transparent), never bg-background.
 - New screen: quilt.create_screen { projectId, name, route, html, jobId } with a route that is not in SCREENS; link it from the screen it belongs to when that is obvious.
 - Theme-wide changes (colour, font, radius, palette, DESIGN.md text): quilt.update_design_system with expectedVersion=${args.designVersion} and applyToScreens=true so every screen is re-baked — never hand-edit every screen for something a token change expresses.
 - Project name or brief: quilt.update_project.

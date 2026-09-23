@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, uuid, text, integer, bigserial, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, bigserial, jsonb, timestamp, uniqueIndex, index, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 // 数据模型（设计文档 §7/§9），并发约束（§16）。字段口径以 §9 数据字典为准。
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -52,9 +52,18 @@ export const screens = pgTable('screens', {
   y: integer('y').notNull().default(0),
   // 指向 screen_revisions.id；不建外键以避免循环依赖，由服务层保证
   currentRevisionId: uuid('current_revision_id'),
+  // 状态变体（v0.62 REQ-CORE-025）：同路由下的具名兄弟屏——variant_of 指向默认屏（级联删除），variant_name 是状态名；只有一层
+  variantOf: uuid('variant_of').references((): AnyPgColumn => screens.id, { onDelete: 'cascade' }),
+  variantName: text('variant_name'),
+  // 呈现方式（v0.63 REQ-PROTO-005）：push 整屏换 / overlay 压在当前屏上；元数据，不进修订
+  presentation: text('presentation').notNull().default('push'),
   createdAt: ts('created_at').notNull().default(now()),
   updatedAt: ts('updated_at').notNull().default(now()),
-}, (t) => [uniqueIndex('screens_project_route_uq').on(t.projectId, t.route)]);
+}, (t) => [
+  // 路由唯一只对默认屏生效：变体与默认屏共用 route
+  uniqueIndex('screens_project_route_uq').on(t.projectId, t.route).where(sql`variant_of is null`),
+  index('screens_variant_of_idx').on(t.variantOf),
+]);
 
 export const screenRevisions = pgTable('screen_revisions', {
   id: uuid('id').primaryKey().defaultRandom(),

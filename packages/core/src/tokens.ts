@@ -21,6 +21,12 @@ export type Tokens = {
   typography: { fontFamily: string; fontSource?: FontSource; fontUrl?: string | null; scale: string[] };
 };
 
+// token 色的 RGB 三元组（v0.65）：Tailwind 的透明度修饰符（bg-primary/40）要靠 rgb(var(--x-rgb) / <alpha-value>) 才生效，
+// 只给 var(--color-x) 时它会静默丢掉整个类
+export const rgbTriplet = (hex: string): string => { const n = parseInt(hex.replace('#', '').slice(0, 6), 16); return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`; };
+/** :root 里的颜色变量：--color-x（原值）与 --color-x-rgb（三元组），prelude 与导出共用 */
+export const colorVarsCss = (colors: Record<string, string>): string => Object.entries(colors).map(([k, v]) => `--color-${kebab(k)}:${v};--color-${kebab(k)}-rgb:${rgbTriplet(v)}`).join(';');
+
 export const kebab = (s: string): string => s.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
 export const COLOR_CLASS_NAMES: string[] = TOKEN_COLOR_KEYS.map(kebab);
 

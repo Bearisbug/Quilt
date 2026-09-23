@@ -8,16 +8,17 @@ import { screenshotHtml } from '../lib/screenshot.ts';
 import { DEVICE_SIZE, type DeviceType } from '@quilt/core';
 import { runJob } from './pipeline.ts';
 import { startAgentDelivery } from './agentDelivery.ts';
+import { settleByJob } from '../services/annotations.ts';
 
 export async function renderRevisionScreenshot(revisionId: string): Promise<boolean> {
-  const [r] = await db.select({ id: schema.screenRevisions.id, htmlKey: schema.screenRevisions.htmlKey, screenshotKey: schema.screenRevisions.screenshotKey, screenId: schema.screens.id, projectId: schema.projects.id, deviceType: schema.projects.deviceType })
+  const [r] = await db.select({ id: schema.screenRevisions.id, htmlKey: schema.screenRevisions.htmlKey, screenshotKey: schema.screenRevisions.screenshotKey, screenId: schema.screens.id, presentation: schema.screens.presentation, projectId: schema.projects.id, deviceType: schema.projects.deviceType })
     .from(schema.screenRevisions)
     .innerJoin(schema.screens, eq(schema.screens.id, schema.screenRevisions.screenId))
     .innerJoin(schema.projects, eq(schema.projects.id, schema.screens.projectId))
     .where(eq(schema.screenRevisions.id, revisionId));
   if (!r || r.screenshotKey) return false;
   const html = (await storage.get(r.htmlKey)).toString('utf8');
-  const png = await screenshotHtml(html, DEVICE_SIZE[r.deviceType as DeviceType]);
+  const png = await screenshotHtml(html, DEVICE_SIZE[r.deviceType as DeviceType], { overlay: r.presentation === 'overlay' });
   const key = objectKeys.revisionShot(r.projectId, r.screenId, r.id);
   await storage.put(key, png, 'image/png');
   await db.update(schema.screenRevisions).set({ screenshotKey: key }).where(eq(schema.screenRevisions.id, r.id));
@@ -32,7 +33,7 @@ export async function retryScreenshots(): Promise<number> {
   if (retrying) return 0;
   retrying = true;
   try {
-    const rows = await db.select({ id: schema.screenRevisions.id, htmlKey: schema.screenRevisions.htmlKey, screenId: schema.screens.id, projectId: schema.projects.id, deviceType: schema.projects.deviceType })
+    const rows = await db.select({ id: schema.screenRevisions.id, htmlKey: schema.screenRevisions.htmlKey, screenId: schema.screens.id, presentation: schema.screens.presentation, projectId: schema.projects.id, deviceType: schema.projects.deviceType })
       .from(schema.screenRevisions)
       .innerJoin(schema.screens, eq(schema.screens.id, schema.screenRevisions.screenId))
       .innerJoin(schema.projects, eq(schema.projects.id, schema.screens.projectId))
@@ -42,7 +43,7 @@ export async function retryScreenshots(): Promise<number> {
     for (const r of rows) {
       try {
         const html = (await storage.get(r.htmlKey)).toString('utf8');
-        const png = await screenshotHtml(html, DEVICE_SIZE[r.deviceType as DeviceType]);
+        const png = await screenshotHtml(html, DEVICE_SIZE[r.deviceType as DeviceType], { overlay: r.presentation === 'overlay' });
         const key = objectKeys.revisionShot(r.projectId, r.screenId, r.id);
         await storage.put(key, png, 'image/png');
         await db.update(schema.screenRevisions).set({ screenshotKey: key }).where(eq(schema.screenRevisions.id, r.id));
@@ -63,6 +64,7 @@ async function recoverJobs() {
   for (const r of stale) {
     await db.update(schema.messages).set({ content: '生成失败（system）：Quilt 重启时作业未完成' }).where(and(eq(schema.messages.jobId, r.id), eq(schema.messages.role, 'assistant'), eq(schema.messages.content, '')));
     await emitJobEvent(r.id, 'failed', { errorClass: 'system', message: 'Quilt 重启时作业未完成' }).catch(() => {});
+    await settleByJob(r.id, false);
   }
   const queued = await db.select({ id: schema.generationJobs.id, runner: schema.generationJobs.runner }).from(schema.generationJobs).where(inArray(schema.generationJobs.status, ['queued']));
   for (const j of queued) if (j.runner === 'model') jobQueue.push({ jobId: j.id });
@@ -82,7 +84,7 @@ export async function startWorker() {
       const rows = await db.update(schema.generationJobs)
         .set({ status: 'failed', finishedAt: new Date(), output: sql`coalesce(${schema.generationJobs.output}, '{}'::jsonb) || '{"errorClass":"timeout","message":"swept by job.timeout"}'::jsonb` })
         .where(and(eq(schema.generationJobs.status, 'running'), eq(schema.generationJobs.runner, 'model'), lt(schema.generationJobs.startedAt, limit))).returning({ id: schema.generationJobs.id });
-      for (const r of rows) await emitJobEvent(r.id, 'failed', { errorClass: 'timeout', message: 'swept by job.timeout' });
+      for (const r of rows) { await emitJobEvent(r.id, 'failed', { errorClass: 'timeout', message: 'swept by job.timeout' }); await settleByJob(r.id, false); }
     } catch (e) { console.error('[job.timeout]', e); }
   }, 60_000).unref();
   setTimeout(() => retryScreenshots().catch(() => {}), 3_000);
