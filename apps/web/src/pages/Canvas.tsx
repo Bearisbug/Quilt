@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Bot, Component, Crosshair, Download, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MessageSquarePlus, Palette, Plus, Search, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
 import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, type ProjectDetailDto, type MessageDto, type JobDto, type JobEventDto, type ScreenDto, type ComponentDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core';
@@ -45,6 +45,20 @@ const CMD = MAC ? '⌘' : 'Ctrl+';
 const NEW_COMPONENT_HTML = '<div class="p-4 text-sm text-on-surface-variant">New component</div>';
 
 // PAGE-CANVAS：画布 + 对话 + 修订/设计系统/检查器面板（面板状态进 URL，INT-020）
+// 顶栏的缩放百分比：缩放每帧都在变，放进页面 state 的话每一帧整页连同全部卡片重渲染一遍（100 屏时捏合缩放掉帧）。
+// 值放在页面外的小仓库里，只有这个百分比订阅它，且只在取整后的数字变了时才重画
+function zoomStore() {
+  let pct = 50; const subs = new Set<() => void>();
+  return {
+    set: (zoom: number) => { const next = Math.round(zoom * 100); if (next === pct) return; pct = next; subs.forEach((f) => f()); },
+    subscribe: (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; },
+    get: () => pct,
+  };
+}
+function ZoomPct({ store }: { store: ReturnType<typeof zoomStore> }) {
+  return <>{useSyncExternalStore(store.subscribe, store.get)}</>;
+}
+
 export function CanvasPage() {
   const { projectId = '' } = useParams();
   const [params, setParams] = useSearchParams();
@@ -78,7 +92,7 @@ export function CanvasPage() {
   // 组件卡的交互态（REQ-EDIT-006）：与屏的聚焦互斥——两边都是「活 iframe 吃掉指针」，同时开会分不清点的是谁
   const [focusedComponentId, setFocusedComponentId] = useState<string | null>(null);
   const [navStack, setNavStack] = useState<string[]>([]);
-  const [zoom, setZoom] = useState(0.5);
+  const zoomStat = useMemo(() => zoomStore(), []);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [missing, setMissing] = useState<{ fromScreenId: string; hrefs: string[] } | null>(null);
   // 候选就地展开（REQ-CORE-015）：一次只展开一屏；展开层不是弹窗，不拦画布快捷键，只吃 Esc
@@ -534,7 +548,7 @@ export function CanvasPage() {
     KeyG: () => canvasApi.current?.createAtCenter(),
     KeyC: () => setNewComponentOpen(true),
     KeyS: () => setPanel(panel === 'screens' ? null : 'screens'),
-    KeyV: selected && !selected.variantOf && !focusedId ? () => setVariantFor(selected) : undefined,
+    KeyV: selected && !selected.variantOf && !focusedId ? () => { if (generating) toast(GENERATE_BUSY, 'error'); else setVariantFor(selected); } : undefined,
   };
   // busy = 有任何作业在跑（设计系统面板的回刷、导出、接上跳转等仍按这个语义走）
   const busy = activeJobs.length > 0;
@@ -601,7 +615,7 @@ export function CanvasPage() {
   if (selectedScreens.length > 0 && !focusedId) tools.push([
     ...(selected ? [
       { id: 'revisions', label: '修订', hint: `${ALT}R`, desc: '这一屏的历史版本与候选，可回溯到任意一版（修订链是单屏概念，只在恰好选中一屏时可用）', icon: <History size={ICON} />, active: panel === 'revisions', onSelect: () => setPanel(panel === 'revisions' ? null : 'revisions') } satisfies Tool,
-      { id: 'variant', label: '出变体', hint: `${ALT}V`, desc: '给这一屏出一个状态变体（空态、出错、未登录…）：同路由同布局，只改状态那部分；播放时可切换', icon: <SquareStack size={ICON} />, testId: 'new-variant', unavailable: selected.variantOf ? '选它的默认屏再出变体' : false, onSelect: () => setVariantFor(selected) } satisfies Tool,
+      { id: 'variant', label: '出变体', hint: `${ALT}V`, desc: '给这一屏出一个状态变体（空态、出错、未登录…）：同路由同布局，只改状态那部分；播放时可切换', icon: <SquareStack size={ICON} />, testId: 'new-variant', unavailable: selected.variantOf ? '选它的默认屏再出变体' : generating ? GENERATE_BUSY : false, onSelect: () => setVariantFor(selected) } satisfies Tool,
       { id: 'presentation', label: selected.presentation === 'overlay' ? '设为整屏' : '设为叠层', desc: selected.presentation === 'overlay' ? '现在是叠层屏：播放时压在来处那一屏上。改回整屏后跳转时换掉整个画面' : '把它当弹层 / 底部抽屉：播放时压在来处那一屏上，点遮罩或后退关掉。只改呈现方式，不重生成', icon: <Layers size={ICON} />, testId: 'toggle-presentation', active: selected.presentation === 'overlay', onSelect: () => void togglePresentation() } satisfies Tool,
       { id: 'exemplar', label: detail.project.exemplarScreenId === selected.id ? '样板屏' : '设为样板', desc: '生成和修改时都以样板屏为风格参照（密度、间距、组件用法）', icon: <Star size={ICON} />, testId: 'set-exemplar', active: detail.project.exemplarScreenId === selected.id, unavailable: detail.project.exemplarScreenId === selected.id ? '这一屏已经是样板屏' : !selected.currentRevisionId ? '这一屏还没生成完' : false, onSelect: setExemplar } satisfies Tool,
     ] : []),
@@ -627,7 +641,7 @@ export function CanvasPage() {
     : null;
 
   return (
-    <div className="canvas-shell relative h-full" style={shellStyle} data-chat={chatCollapsed ? 'collapsed' : 'open'} data-panel={panelBody ? 'open' : 'closed'} data-composer={composerVisible ? 'open' : 'hidden'}>
+    <div className="canvas-shell relative h-full" style={shellStyle} data-chat={chatCollapsed ? 'collapsed' : 'open'} data-panel={panelBody ? 'open' : 'closed'} data-composer={composerVisible ? 'open' : 'hidden'} data-minimap={minimapOn && !focusedId && !focusedComponentId ? 'on' : 'off'}>
       {/* 可用区探针：四边跟着浮层占位的 CSS 变量走，画布只负责测量它，避免两处各写一套数 */}
       <div ref={safeAreaRef} aria-hidden="true" data-testid="safe-area" className="pointer-events-none absolute bottom-[var(--chrome-bottom)] left-[var(--chrome-left)] right-[var(--chrome-right)] top-[var(--chrome-top)]" />
       <div className="absolute inset-0">
@@ -649,7 +663,7 @@ export function CanvasPage() {
             onNavigateMissing={(fromScreenId, href) => setMissing({ fromScreenId, hrefs: [href] })}
             onDanglingClick={(screenId, hrefs) => setMissing({ fromScreenId: screenId, hrefs })}
             onDeadLink={() => toast('这个交互还没有设计；想让它跳转，用「选择元素」给它连线')}
-            onShortcut={(code) => { if (blocked) return; if (code === 'KeyE') toggleInspect(); else if (code === 'Slash') toggleComposer(); }}
+            onShortcut={(code) => { if (blocked) return; if (code === 'KeyE') toggleInspect(); else if (code === 'Slash') toggleComposer(); else if (code === 'KeyK') setFinderOpen(true); }}
             onAnchor={placeAnchor}
             onCandidates={(jobId, screenId) => setCandidates((c) => (c?.screenId === screenId ? null : { jobId, screenId }))}
             candidateStack={candidates && screens.some((s) => s.id === candidates.screenId) ? { screenId: candidates.screenId, node: <CandidateStack jobId={candidates.jobId} screen={screens.find((s) => s.id === candidates.screenId)!} onClose={() => setCandidates(null)} onAdopted={async () => { await refresh(); setCandidates(null); }} /> } : null}
@@ -659,7 +673,7 @@ export function CanvasPage() {
             workingSubtrees={workingSubtrees}
             annotations={annotations}
             onAnnotationClick={(id) => { const a = annotations.find((x) => x.id === id); if (a) { canvasApi.current?.focus(a.screenId); setPanel('annotate'); } }}
-            onStat={(s) => setZoom(s.zoom)}
+            onStat={(s) => zoomStat.set(s.zoom)}
             registerApi={(a) => { canvasApi.current = a; }}
             minimap={minimapOn}
             onShown={setShownScreenId}
@@ -669,7 +683,7 @@ export function CanvasPage() {
       {/* 多选排列条（REQ-CORE-018）：选中 ≥ 2 屏且没聚焦时出现在画布顶部中央；候选就地展开时让位。排版与键盘在 ArrangeBar，算位在 arrange.ts，落库在 positions.ts */}
       {selectedScreens.length >= 2 && !focusedId && !inspectArmed && !annotateArmed && !candidates && <ArrangeBar count={selectedScreens.length} yieldToPanel={!!panelBody} onArrange={(k) => void arrange(k, selectedScreens)} />}
       <TopNav floating right={<>
-        <span className="shrink-0 whitespace-nowrap text-xs text-muted tabular-nums" data-testid="stat">{screens.length} 屏 · {Math.round(zoom * 100)}%</span>
+        <span className="shrink-0 whitespace-nowrap text-xs text-muted tabular-nums" data-testid="stat">{screens.length} 屏 · <ZoomPct store={zoomStat} />%</span>
         <button ref={settingsBtnRef} type="button" data-testid="open-settings" aria-haspopup="dialog" aria-expanded={!!settingsSection} onClick={() => setSettings('usage')}
           className="shrink-0 whitespace-nowrap rounded-md px-1.5 py-1 text-xs text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">设置</button>
       </>}>

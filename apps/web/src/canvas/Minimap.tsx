@@ -1,52 +1,105 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 
 // 小地图（REQ-CORE-024 v0.61）：按全部卡片的外接框等比缩放，画屏（实心）、组件（描边）、风格指南卡（虚线）与当前视口框。
 // 视图变换每帧都在变，所以不经父组件 props 走：自己订阅 CanvasView 的视图流、rAF 合帧后只重画这一块。
+// 画在 <canvas> 上而不是 SVG：SVG 每帧改一次，Chrome 就要把整页（上百张卡片）重新分层，100 屏时平移掉帧；canvas 内容更新不牵动分层。
 export type MiniRect = { id: string; kind: 'screen' | 'component' | 'guide'; x: number; y: number; w: number; h: number };
 export type ViewInfo = { x: number; y: number; zoom: number; w: number; h: number };
 
 const W = 176; const H = 112; const PAD = 8;
 
-export function Minimap({ rects, onView, onPanTo }: { rects: MiniRect[]; onView: (cb: (v: ViewInfo) => void) => () => void; onPanTo: (x: number, y: number) => void }) {
-  const [view, setView] = useState<ViewInfo | null>(null);
+type Box = { x0: number; y0: number; scale: number; ox: number; oy: number };
+type Rect = { x: number; y: number; w: number; h: number };
+
+// 视口在世界坐标里的框：世界层 transform 是 translate(x, y) scale(zoom)，屏幕点 (0,0) 对应世界 (−x/zoom, −y/zoom)
+const worldView = (v: ViewInfo): Rect => ({ x: -v.x / v.zoom, y: -v.y / v.zoom, w: v.w / v.zoom, h: v.h / v.zoom });
+function boxOf(rects: Rect[]): Box {
+  if (!rects.length) return { x0: 0, y0: 0, scale: 1, ox: 0, oy: 0 };
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const r of rects) { x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y); x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h); }
+  const scale = Math.min((W - 2 * PAD) / Math.max(1, x1 - x0), (H - 2 * PAD) / Math.max(1, y1 - y0));
+  // 短边居中
+  return { x0, y0, scale, ox: (W - 2 * PAD - (x1 - x0) * scale) / 2, oy: (H - 2 * PAD - (y1 - y0) * scale) / 2 };
+}
+const toMini = (b: Box, x: number, y: number) => [PAD + b.ox + (x - b.x0) * b.scale, PAD + b.oy + (y - b.y0) * b.scale] as const;
+
+export function Minimap({ rects, onView, onPanTo, onMoveView }: {
+  rects: MiniRect[]; onView: (cb: (v: ViewInfo) => void) => () => void;
+  onPanTo: (x: number, y: number) => void; onMoveView: (x: number, y: number) => void;
+}) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const view = useRef<ViewInfo | null>(null);
+  const rectsRef = useRef(rects);
+  rectsRef.current = rects;
+  // 拖视口框期间外接框冻结：它把视口框也算在内，视口一移出内容区外接框就跟着变大、比例跟着变，
+  // 按实时外接框换算的话同一个指针位置对应的世界坐标一直在漂，镜头会自己越跑越远
+  const drag = useRef<{ box: Box; mx: number; my: number; vx: number; vy: number; zoom: number } | null>(null);
+  const box = useCallback(() => drag.current?.box ?? boxOf(view.current ? [...rectsRef.current, worldView(view.current)] : rectsRef.current), []);
+
+  const draw = useCallback(() => {
+    const el = ref.current; const ctx = el?.getContext('2d');
+    if (!el || !ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    if (el.width !== W * dpr) { el.width = W * dpr; el.height = H * dpr; }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const css = getComputedStyle(el);
+    const fg = css.getPropertyValue('--color-fg').trim(); const accent = css.getPropertyValue('--color-accent').trim();
+    const b = box();
+    ctx.lineWidth = 1;
+    for (const r of rectsRef.current) {
+      const [x, y] = toMini(b, r.x, r.y); const w = Math.max(2, r.w * b.scale); const h = Math.max(2, r.h * b.scale);
+      if (r.kind === 'screen') { ctx.globalAlpha = 0.55; ctx.fillStyle = fg; ctx.fillRect(x, y, w, h); }
+      else { ctx.globalAlpha = r.kind === 'guide' ? 0.35 : 0.55; ctx.strokeStyle = fg; ctx.setLineDash(r.kind === 'guide' ? [2, 2] : []); ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); }
+    }
+    ctx.setLineDash([]);
+    const v = view.current;
+    if (v) {
+      const wv = worldView(v); const [x, y] = toMini(b, wv.x, wv.y); const w = Math.max(4, wv.w * b.scale); const h = Math.max(4, wv.h * b.scale);
+      ctx.globalAlpha = 0.12; ctx.fillStyle = accent; ctx.fillRect(x, y, w, h);
+      ctx.globalAlpha = 1; ctx.lineWidth = 1.5; ctx.strokeStyle = accent; ctx.strokeRect(x, y, w, h);
+      // 给 e2e 读视口框位置（小地图坐标）：canvas 里的图形没有 DOM 可查
+      el.dataset.view = [x, y, w, h].map((n) => n.toFixed(1)).join(' ');
+    }
+    ctx.globalAlpha = 1;
+  }, [box]);
+
   useEffect(() => {
-    let raf = 0; let last: ViewInfo | null = null;
-    const off = onView((v) => { last = v; if (!raf) raf = requestAnimationFrame(() => { raf = 0; setView(last); }); });
+    let raf = 0;
+    const off = onView((v) => { view.current = v; if (!raf) raf = requestAnimationFrame(() => { raf = 0; draw(); }); });
     return () => { off(); if (raf) cancelAnimationFrame(raf); };
-  }, [onView]);
-  // 视口在世界坐标里的框：世界层 transform 是 translate(x, y) scale(zoom)，屏幕点 (0,0) 对应世界 (−x/zoom, −y/zoom)
-  const vw = view ? { x: -view.x / view.zoom, y: -view.y / view.zoom, w: view.w / view.zoom, h: view.h / view.zoom } : null;
-  const box = useMemo(() => {
-    const all = [...rects, ...(vw ? [{ ...vw }] : [])];
-    if (!all.length) return { x0: 0, y0: 0, scale: 1, ox: 0, oy: 0 };
-    const x0 = Math.min(...all.map((r) => r.x)); const y0 = Math.min(...all.map((r) => r.y));
-    const x1 = Math.max(...all.map((r) => r.x + r.w)); const y1 = Math.max(...all.map((r) => r.y + r.h));
-    const scale = Math.min((W - 2 * PAD) / Math.max(1, x1 - x0), (H - 2 * PAD) / Math.max(1, y1 - y0));
-    // 短边居中
-    return { x0, y0, scale, ox: (W - 2 * PAD - (x1 - x0) * scale) / 2, oy: (H - 2 * PAD - (y1 - y0) * scale) / 2 };
-  }, [rects, vw?.x, vw?.y, vw?.w, vw?.h]); // eslint-disable-line react-hooks/exhaustive-deps
-  const toMini = (x: number, y: number) => [PAD + box.ox + (x - box.x0) * box.scale, PAD + box.oy + (y - box.y0) * box.scale] as const;
-  const svgRef = useRef<SVGSVGElement>(null);
-  const down = useRef(false);
-  // 点哪儿镜头就平移到哪儿（缩放不变），按住拖动连续平移；指针事件截在这里，不让画布把它当成框选 / 平移
-  const jump = (e: ReactPointerEvent<SVGSVGElement>) => {
-    const r = svgRef.current!.getBoundingClientRect();
-    const mx = e.clientX - r.left; const my = e.clientY - r.top;
-    onPanTo(box.x0 + (mx - PAD - box.ox) / box.scale, box.y0 + (my - PAD - box.oy) / box.scale);
+  }, [onView, draw]);
+  useEffect(() => { draw(); }, [rects, draw]);
+
+  const at = (e: ReactPointerEvent<HTMLCanvasElement>) => { const r = ref.current!.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top] as const; };
+  // 点空白处镜头平移到那一点（缩放不变）；按在视口框上是抓住它拖：从抓住的那一点起按位移 1:1 平移，框不跳到指针下（MOTION-017）。
+  // 指针事件截在这里，不让画布把它当成框选 / 平移
+  const onDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    e.stopPropagation(); e.preventDefault();
+    const [mx, my] = at(e);
+    const v = view.current; if (!v) return;
+    const b = box(); const wv = worldView(v);
+    const [fx, fy] = toMini(b, wv.x, wv.y);
+    const inFrame = mx >= fx && mx <= fx + wv.w * b.scale && my >= fy && my <= fy + wv.h * b.scale;
+    if (!inFrame) { onPanTo(b.x0 + (mx - PAD - b.ox) / b.scale, b.y0 + (my - PAD - b.oy) / b.scale); return; }
+    ref.current?.setPointerCapture(e.pointerId);
+    drag.current = { box: b, mx, my, vx: v.x, vy: v.y, zoom: v.zoom };
+  };
+  const onMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    const d = drag.current;
+    // 指针在视口框上是抓手、在空白处是十字：抓得住的地方要看得出来
+    if (!d) { const v = view.current; if (v && ref.current) { const [mx, my] = at(e); const b = box(); const wv = worldView(v); const [fx, fy] = toMini(b, wv.x, wv.y); ref.current.style.cursor = mx >= fx && mx <= fx + wv.w * b.scale && my >= fy && my <= fy + wv.h * b.scale ? 'grab' : ''; } return; }
+    // 松开发生在捕获丢失的地方时收不到 pointerup：没按键就当拖完了（MOTION-028）
+    if (e.buttons === 0) { drag.current = null; return; }
+    const [mx, my] = at(e);
+    onMoveView(d.vx - ((mx - d.mx) / d.box.scale) * d.zoom, d.vy - ((my - d.my) / d.box.scale) * d.zoom);
   };
   const screens = rects.filter((r) => r.kind === 'screen').length;
   return (
-    <svg ref={svgRef} className="minimap chrome nopan nowheel" width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`小地图：${screens} 屏，点击平移画布`} data-testid="minimap"
-      onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); down.current = true; svgRef.current?.setPointerCapture(e.pointerId); jump(e); }}
-      onPointerMove={(e) => { if (down.current) jump(e); }}
-      onPointerUp={(e) => { down.current = false; svgRef.current?.releasePointerCapture(e.pointerId); }}
-      onPointerCancel={() => { down.current = false; }}
-      onDoubleClick={(e) => e.stopPropagation()}>
-      {rects.map((r) => {
-        const [x, y] = toMini(r.x, r.y);
-        return <rect key={r.id} className={`mm-${r.kind}`} x={x} y={y} width={Math.max(2, r.w * box.scale)} height={Math.max(2, r.h * box.scale)} rx={1.5} data-testid={`minimap-${r.kind}`} />;
-      })}
-      {vw && (() => { const [x, y] = toMini(vw.x, vw.y); return <rect className="mm-view" x={x} y={y} width={Math.max(4, vw.w * box.scale)} height={Math.max(4, vw.h * box.scale)} rx={2} data-testid="minimap-view" />; })()}
-    </svg>
+    <canvas ref={ref} className="minimap chrome nopan nowheel" style={{ width: W, height: H }} role="img" aria-label={`小地图：${screens} 屏，点击平移画布、拖视口框移动视图`} data-testid="minimap" data-screens={screens}
+      onPointerDown={onDown} onPointerMove={onMove}
+      onPointerUp={(e) => { if (ref.current?.hasPointerCapture(e.pointerId)) ref.current.releasePointerCapture(e.pointerId); drag.current = null; draw(); }}
+      onPointerCancel={() => { drag.current = null; draw(); }}
+      onDoubleClick={(e) => e.stopPropagation()} />
   );
 }

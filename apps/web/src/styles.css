@@ -89,11 +89,14 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
   --chrome-left: calc(var(--dock-w) + 1.5rem);
   --chrome-right: var(--rail-w);
   --chrome-top: 3.5rem;
+  --dock-top: 4.5rem;        /* 对话记录上沿最高到这里（顶栏下方） */
   --chrome-bottom: 11.5rem;  /* 首帧默认值（输入框一行时约 162px + 16px 底距）；输入框量到实际高度后由 Canvas 用内联变量覆盖——它会随内容增高、窄视口下工具条会折行 */
 }
 .canvas-shell[data-chat="collapsed"] { --chrome-left: var(--rail-w); }
 .canvas-shell[data-panel="open"] { --chrome-right: calc(var(--panel-w) + var(--rail-w) + 1rem); }
-.canvas-shell[data-composer="hidden"] { --chrome-bottom: 1rem; }  /* 收起后底部没有任何浮层，只留边距 */
+.canvas-shell[data-composer="hidden"] { --chrome-bottom: 1rem; }
+/* 小地图在左上角（顶栏下方 4rem 起、高 112 px）：显示时对话记录的上沿让到它下面，不然消息一多面板往上长、把小地图整块盖住 */
+.canvas-shell[data-minimap="on"] { --dock-top: 11.75rem; }  /* 收起后底部没有任何浮层，只留边距 */
 /* 窄视口：浮层不再横向互相避让（否则总宽超出视口），改为叠在画布上，输入框横跨整宽 */
 @media (max-width: 48rem) {
   .canvas-shell {
@@ -104,8 +107,8 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
   .canvas-shell[data-panel="open"] { --chrome-right: var(--rail-w); }
 }
 /* 对话记录（v0.34）：贴左下角、底部对齐，从下往上长。窄视口下输入框横跨整宽，横条停在输入框上方（输入框收起时 --chrome-bottom 只剩 1rem，横条随之落底） */
-.chat-dock { bottom: 1rem; }
-@media (max-width: 48rem) { .chat-dock { bottom: var(--chrome-bottom); } }
+.chat-dock { --dock-bottom: 1rem; bottom: var(--dock-bottom); max-height: calc(100dvh - var(--dock-top) - var(--dock-bottom)); }
+@media (max-width: 48rem) { .chat-dock { --dock-bottom: var(--chrome-bottom); } }
 /* 底部输入框：实底外壳，不走 .chrome——它是主输入控件，需要一块与画布截图分离的稳定底色。
    聚焦只加深投影、提亮边线（透明 outline 留给强制配色模式顶上，A11Y-008），不再套强调色描边。 */
 .composer {
@@ -197,6 +200,9 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 .viewport.armed { cursor: crosshair; }
 .viewport.armed .card .gesture { cursor: crosshair; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.world.moving { will-change: transform; }  /* 只在平移缩放进行中挂，理由见 CanvasView applyTransform */
+/* 平移缩放进行中骨架卡的循环动画暂停：上百张骨架卡同时在动时，动画自身就占满每帧的 GPU 预算，镜头跟不上手 */
+.world.moving .card .skeleton, .world.moving .card .skeleton::before, .world.moving .card .skeleton * { animation-play-state: paused; }
 /* 卡片底白是恒定色，不跟工具主题走：这块白属于用户的设计稿，是他们 APP 的画布底，
    不是 Quilt 的外壳（VIS-010 的「确需恒定色」情形）。工具品牌只出现在卡片之外的 chrome 上。 */
 .card { position: absolute; left: 0; top: 0; background: #fff; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); outline: 2px solid transparent; outline-offset: 4px; transition: outline-color var(--duration-fast) var(--ease-out); }
@@ -208,7 +214,9 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 /* 生成中占位：设备线框 + 斜向光带扫过 + 状态标签；多张卡按 animation-delay 错开相位。
    这一层是 Quilt 在替尚未存在的用户界面占位，所以用品牌的浅承载面 Paper→Line 灰阶，
    而不是卡片本身的纯白（那块白属于用户的设计稿）。 */
-.card .skeleton { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--brand-paper); display: flex; flex-direction: column; gap: 14px; padding: 0 16px 0; animation: sk-breathe 2.4s ease-in-out infinite; }
+.card .skeleton { position: relative; isolation: isolate; width: 100%; height: 100%; overflow: hidden; background: var(--brand-paper); display: flex; flex-direction: column; gap: 14px; padding: 0 16px 0; }
+/* 呼吸与扫光只动 opacity / transform：动 background-color、background-position 的话每一帧都要重绘，100 张骨架卡同时在动时 GPU 每帧超预算 */
+.card .skeleton::before { content: ""; position: absolute; inset: 0; z-index: -1; background: color-mix(in srgb, var(--brand-line) 30%, var(--brand-paper)); opacity: 0; animation: sk-breathe 2.4s ease-in-out infinite; animation-delay: inherit; pointer-events: none; }
 .card .skeleton .sk { flex: none; border-radius: 10px; background: color-mix(in srgb, var(--brand-line) 55%, var(--brand-paper)); }
 .card .skeleton .sk-appbar { height: 56px; margin: 0 -16px; border-radius: 0; background: color-mix(in srgb, var(--brand-line) 40%, var(--brand-paper)); }
 .card .skeleton .sk-hero { height: 140px; margin-top: 4px; border-radius: 14px; }
@@ -226,17 +234,18 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 .card .skeleton.desktop .sk-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; background: none; }
 .card .skeleton.desktop .sk-grid i { height: 110px; border-radius: 12px; }
 .card .skeleton.desktop .sk-table { min-height: 160px; border-radius: 12px; }
-.card .skeleton .sk-sweep { position: absolute; inset: 0; background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.75) 50%, transparent 65%); background-size: 250% 100%; animation: shimmer 1.8s ease-in-out infinite; animation-delay: inherit; }
+.card .skeleton .sk-sweep { position: absolute; top: 0; bottom: 0; left: 0; width: 75%; background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.75) 50%, transparent); animation: sk-sweep 1.8s ease-in-out infinite; animation-delay: inherit; }
 .card .skeleton .sk-label { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: color-mix(in srgb, var(--brand-ink) 78%, transparent); color: var(--color-on-accent); font-size: 12px; backdrop-filter: blur(6px); white-space: nowrap; }
 .card .skeleton .sk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); animation: sk-pulse 1.2s ease-in-out infinite; }
-@keyframes sk-breathe { 0%, 100% { background-color: var(--brand-paper); } 50% { background-color: color-mix(in srgb, var(--brand-line) 30%, var(--brand-paper)); } }
+@keyframes sk-breathe { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+/* 光带层只有光带那么宽（卡宽 75%），从卡片左外侧扫到右外侧：层做成卡宽的 250% 再平移的话，2 倍屏下每张卡要合成一张近 2000 px 宽的纹理 */
+@keyframes sk-sweep { from { transform: translateX(-283%); } to { transform: translateX(517%); } }
 @keyframes sk-pulse { 0%, 100% { opacity: 0.35; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.15); } }
 /* 页面地图连线（REQ-PROTO-002）：世界坐标系里的 SVG，随画布缩放 */
 .world .edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .world .edges path { fill: none; stroke: var(--color-accent); stroke-width: 2.5; stroke-linecap: round; opacity: 0.85; }
 .world .edges marker path { fill: var(--color-accent); stroke: none; opacity: 1; }
-.world .edges rect { fill: var(--color-accent); }
-.world .edges text { fill: var(--color-on-accent); font-size: 13px; font-weight: 600; font-family: var(--font-sans); }
+.world .edge-count { position: absolute; left: 0; top: 0; width: 28px; height: 22px; border-radius: 11px; background: var(--color-accent); color: var(--color-on-accent); font-size: 13px; font-weight: 600; line-height: 22px; text-align: center; pointer-events: none; font-variant-numeric: tabular-nums; }
 .card .gesture { position: absolute; inset: 0; cursor: default; }
 .card.dragging .gesture { cursor: grabbing; }
 .card .badge, .comp .badge { position: absolute; right: 8px; top: 8px; background: var(--color-accent); color: var(--color-on-accent); font-size: 11px; padding: 2px 8px; border-radius: 999px; pointer-events: none; }
@@ -249,7 +258,7 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 
 /* 候选就地展开（REQ-CORE-015 v0.34）：收起时卡片后面叠两张错位底板示意「还有几版」；展开层画在世界层、盖在卡片原位，
    各版横向排成一行、每格与卡片同尺寸、里面是该版的活 iframe（截图垫底，iframe 就绪后盖住）；
-   动作收进每格右上方（格子外、右缘对齐）的浮层胶囊，按 1/zoom 反向缩放（--zoom 由 CanvasView 写在 .world 上），按钮始终是屏幕尺寸 */
+   动作收进每格右上方（格子外、右缘对齐）的浮层胶囊，按 1/zoom 反向缩放（--zoom 由 CanvasView 写在 .cand-stack 上），按钮始终是屏幕尺寸 */
 .cand-ghost { position: absolute; left: 0; top: 0; border-radius: 14px; background: color-mix(in srgb, #fff 84%, var(--brand-ink)); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35); pointer-events: none; }
 .cand-stack { position: absolute; left: 0; top: 0; z-index: 5; }
 .cand-cell { position: absolute; background: #fff; border-radius: 14px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); outline: 2px solid transparent; outline-offset: 4px; }
@@ -305,11 +314,10 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 /* 框选（屏幕坐标系，不随世界层缩放） */
 .marquee { position: absolute; pointer-events: none; border: 1px solid var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, transparent); border-radius: 2px; }
 
-@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 @keyframes fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .fade-up { animation: fade-up var(--duration-base) var(--ease-out); }
 @media (prefers-reduced-motion: reduce) {
-  .card, .comp, .comp .live-dot, .fade-up, .card .skeleton, .card .skeleton .sk-sweep, .card .skeleton .sk-dot { transition: none; animation: none; }
+  .card, .comp, .comp .live-dot, .fade-up, .card .skeleton, .card .skeleton::before, .card .skeleton .sk-sweep, .card .skeleton .sk-dot { transition: none; animation: none; }
   .composer { transition: none; }
   .slide-in-right { animation: fade-up var(--duration-fast) var(--ease-out); }
   /* 少而柔：换词与菜单只保留淡入，去掉位移、缩放与模糊 */
@@ -317,20 +325,17 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
   .menu[data-state="closed"] { animation: none; }
 }
 
-/* 叠层屏（REQ-PROTO-005 v0.63）：截图带 alpha，卡片铺暗底，像它在播放时压在别的屏上那样 */
-.card.overlay { background: #1c1c21; }
+/* 叠层屏（REQ-PROTO-005 v0.63）：截图带 alpha，卡片铺 45% 黑，与播放时运行时画的遮罩同值——那是遮罩的示意，不随主题变 */
+.card.overlay { background: rgb(0 0 0 / 0.45); }
 .card.overlay img { background: transparent; }
 .card .label .chip { display: inline-block; margin-right: 6px; padding: 0 6px; border: 1px solid var(--color-line); border-radius: 999px; font-size: 10px; line-height: 16px; color: var(--color-muted); vertical-align: 1px; }
 
-/* 状态变体胶囊（REQ-CORE-025 v0.62）：聚焦卡内顶部中央一排（左上是断链角标、右上是交互角标），压在 iframe 之上 */
-.variant-chips { position: absolute; left: 50%; top: 8px; z-index: 3; display: flex; gap: 4px; transform: translateX(-50%); pointer-events: auto; }
+/* 状态变体胶囊（REQ-CORE-025 v0.62）：聚焦卡内顶部中央一排，压在 iframe 之上。放在角标下一行：
+   手机屏只有 390 px 宽，和右上的交互角标同一行会叠在一起、把路由读数盖住 */
+.variant-chips { position: absolute; left: 50%; top: 36px; z-index: 3; display: flex; gap: 4px; transform: translateX(-50%); pointer-events: auto; }
 .variant-chip { pointer-events: auto; border: 1px solid var(--color-line); border-radius: 999px; background: var(--color-panel); color: var(--color-muted); font-size: 11px; font-weight: 600; padding: 3px 10px; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }
 .variant-chip[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); border-color: transparent; }
 .variant-chip:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 
-/* 小地图（REQ-CORE-024 v0.61）：顶栏下方左侧；矩形按类型着色，视口框用强调色 */
+/* 小地图（REQ-CORE-024 v0.61）：顶栏下方左侧；canvas 绘制（Minimap.tsx），矩形按类型着色、视口框用强调色，颜色取本元素上的 --color-fg / --color-accent */
 .minimap { position: absolute; left: 1rem; top: 4rem; z-index: 20; border-radius: 0.75rem; cursor: crosshair; touch-action: none; }
-.minimap .mm-screen { fill: color-mix(in srgb, var(--color-fg) 55%, transparent); }
-.minimap .mm-component { fill: transparent; stroke: color-mix(in srgb, var(--color-fg) 55%, transparent); stroke-width: 1; }
-.minimap .mm-guide { fill: transparent; stroke: color-mix(in srgb, var(--color-fg) 35%, transparent); stroke-width: 1; stroke-dasharray: 2 2; }
-.minimap .mm-view { fill: color-mix(in srgb, var(--color-accent) 12%, transparent); stroke: var(--color-accent); stroke-width: 1.5; }

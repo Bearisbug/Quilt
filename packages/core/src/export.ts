@@ -17,10 +17,16 @@ const EXPORT_RUNTIME = String.raw`(function () {
   function restore() { document.querySelectorAll('input[name],textarea[name],select[name]').forEach(function (el) { if (!(el.name in state)) return; if (el.type === 'checkbox') el.checked = !!state[el.name]; else el.value = state[el.name]; }); }
   var stack = []; var layers = []; var shown = null;
   function icons() { if (window.lucide && window.lucide.createIcons) window.lucide.createIcons(); }
+  // 模板克隆出来的脚本插进文档就执行，每次进这一屏都跑一遍：内联脚本包一层块作用域，第二次执行顶层 const/let 才不报「已声明」
+  function screen(r) {
+    var f = tpls[r].content.cloneNode(true);
+    f.querySelectorAll('script:not([src])').forEach(function (s) { if (s.type !== 'module') s.textContent = '{\n' + s.textContent + '\n}'; });
+    return f;
+  }
   function addLayer(r) {
     var layer = document.createElement('div'); layer.setAttribute('data-quilt-overlay-layer', r);
     layer.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,0.45);overflow:auto;';
-    layer.appendChild(tpls[r].content.cloneNode(true));
+    layer.appendChild(screen(r));
     layer.addEventListener('click', function (e) { if (e.target === layer || e.target === layer.firstElementChild) history.back(); });
     document.body.appendChild(layer); layers.push({ route: r, el: layer });
   }
@@ -34,11 +40,14 @@ const EXPORT_RUNTIME = String.raw`(function () {
       restore(); icons(); document.title = names[stack[stack.length - 1]] || document.title;
     };
     if (base === shown) { sync(); return; }
-    var apply = function () { while (layers.length) layers.pop().el.remove(); document.getElementById('quilt-root').replaceChildren(tpls[base].content.cloneNode(true)); shown = base; window.scrollTo(0, 0); sync(); };
+    var apply = function () { while (layers.length) layers.pop().el.remove(); document.getElementById('quilt-root').replaceChildren(screen(base)); shown = base; window.scrollTo(0, 0); sync(); };
     if (document.startViewTransition) document.startViewTransition(apply); else apply();
   }
   function render(route) {
     var r = tpls[route] ? route : start; if (!tpls[r]) return;
+    // 直接打开叠层的链接（分享、叠层开着时刷新）：先把起始屏垫在底下，叠层照常压在它上面；
+    // 历史里也补一条起始屏，点遮罩的 history.back() 才回到它而不是离开这个文件
+    if (!stack.length && pres[r] === 'overlay' && r !== start) { stack.push(start); history.replaceState(null, '', '#' + start); history.pushState(null, '', '#' + r); }
     if (stack.length >= 2 && stack[stack.length - 2] === r) stack.pop();
     else if (stack[stack.length - 1] !== r) stack.push(r);
     show();
@@ -64,7 +73,7 @@ export function buildPrototypeDocument(args: { title: string; tokens: Tokens; sc
   const colorVars = colorVarsCss(tokens.colors);
   const radiusVars = Object.entries(tokens.radius).map(([k, v]) => `--radius-${k}:${v}`).join(';');
   const font = fontFace(tokens.typography);
-  const start = args.startRoute ?? args.screens[0]?.route ?? '/';
+  const start = args.startRoute ?? (args.screens.find((s) => s.presentation !== 'overlay') ?? args.screens[0])?.route ?? '/';
   const templates = args.screens.map((s) => `<template data-route="${escapeAttr(s.route)}" data-name="${escapeAttr(s.name)}" data-presentation="${s.presentation ?? 'push'}">${s.body}</template>`).join('\n');
   return `<!doctype html>
 <html lang="en">

@@ -6,7 +6,7 @@ import { storage } from '../lib/storage.ts';
 import { assembleDocument, buildPrelude, extractBody, injectQids, reconcileQids, overwrittenInstances, lintScreenBody, expandComponents, OVERLAY_SCREEN_NOTE, COLOR_CLASS_NAMES, DEVICE_SIZE, type DeviceType, type Tokens, type LintReport, type Presentation } from '@quilt/core';
 import { assetsForPrompt } from './assets.ts';
 import { ownedProject } from './projects.ts';
-import { createRevision, deriveLinks, hasActiveJob } from './screens.ts';
+import { createRevision, deriveLinks, hasActiveJob, setFamilyPresentation } from './screens.ts';
 import { enqueueScreenshot } from './jobs.ts';
 import { emitProjectEvent } from '../lib/events.ts';
 import { sharedComponentsOf, contractComponents } from './components.ts';
@@ -40,6 +40,7 @@ export async function ingestScreen(ownerId: string, projectId: string, input: { 
   const [ds] = await db.select().from(schema.designSystems).where(eq(schema.designSystems.projectId, project.id));
   const html = assembleDocument(body, buildPrelude(ds.tokens as Tokens), `${project.name} · ${input.name}`);
   const size = DEVICE_SIZE[project.deviceType as DeviceType];
+  let reshoot: string[] = [];
   const result = await db.transaction(async (tx) => {
     try {
     let screenId = input.screenId;
@@ -51,9 +52,11 @@ export async function ingestScreen(ownerId: string, projectId: string, input: { 
         const [holder] = await tx.select({ id: schema.generationJobs.id }).from(schema.generationJobs).where(and(eq(schema.generationJobs.targetScreenId, screenId), eq(schema.generationJobs.projectId, project.id), eq(schema.generationJobs.status, 'running')));
         if (!input.jobId || holder?.id !== input.jobId) throw problems.screenBusy();
       }
-      // 变体的路由属于默认屏（v0.62）：经这条路改 route 一律拒；呈现方式（v0.63）随写入一起改
+      // 变体的路由与呈现方式属于默认屏（v0.62 / v0.63）：经这条路改一律拒；默认屏改呈现方式，整个家族跟着改
       if (s.variantOf && input.route !== s.route) throw problems.unprocessable([{ path: 'route', message: '变体与默认屏同路由，改路由请改默认屏' }]);
-      if (input.route !== s.route || input.name !== s.name || (input.presentation && input.presentation !== s.presentation)) await tx.update(schema.screens).set({ route: input.route, name: input.name, ...(input.presentation ? { presentation: input.presentation } : {}) }).where(eq(schema.screens.id, screenId));
+      if (s.variantOf && input.presentation && input.presentation !== s.presentation) throw problems.unprocessable([{ path: 'presentation', message: '变体随默认屏的呈现方式，改呈现方式请改默认屏' }]);
+      if (input.route !== s.route || input.name !== s.name) await tx.update(schema.screens).set({ route: input.route, name: input.name }).where(eq(schema.screens.id, screenId));
+      if (input.presentation && input.presentation !== s.presentation) reshoot = await setFamilyPresentation(tx, screenId, input.presentation);
       // 默认屏改路由，它的变体跟着改（v0.62 变体与默认屏同路由）
       if (input.route !== s.route) await tx.update(schema.screens).set({ route: input.route }).where(eq(schema.screens.variantOf, screenId));
     } else {
@@ -70,7 +73,8 @@ export async function ingestScreen(ownerId: string, projectId: string, input: { 
   });
   // 用过的上传位清掉：不清的话同一个 uploadId 再 append 会拼到上一屏后面
   if (input.uploadId) await storage.delete(`uploads/${input.uploadId}.html`).catch(() => {});
-  await enqueueScreenshot(result.revisionId);
+  // 改了呈现方式的话，家族里其他屏的当前修订也要按新方式重拍（本屏的新修订本来就要拍）
+  for (const id of new Set([result.revisionId, ...reshoot])) await enqueueScreenshot(id);
   // 本机会话 / 外部 agent 经 MCP 写进来的屏没有作业事件可订阅，项目级事件让画布立刻刷新（API-CORE-030）
   await emitProjectEvent(project.id, 'screen_changed', { screenId: result.screenId, revisionId: result.revisionId, jobId: input.jobId ?? null }).catch(() => {});
   // componentsOverwritten：写进来的共享组件实例里改过的内容已被组件正式 HTML 盖回，要改它得改组件本身（quilt.update_component）

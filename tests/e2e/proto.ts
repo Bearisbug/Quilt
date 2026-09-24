@@ -289,6 +289,9 @@ await step('TC-PROTO-012', async () => {
   const doc = await (await fetch(s2d.previewUrl.replace('preview.localhost', '127.0.0.1'))).text();
   expect(doc.includes('<style data-quilt-overlay>'), '预览域下发的叠层屏应注入透明背景');
   await page.keyboard.press('Escape');
+  // 1b 给叠层 /s2 出一个变体（继承 overlay），5f 用它验叠层上切变体
+  const { body: vj } = await apiJson<{ job: { id: string } }>(`/v1/projects/${projectId}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': `e2e-ovv-${Date.now()}` }, body: JSON.stringify({ kind: 'generate', input: { prompt: 'error state', count: 1, versions: 1, variantOf: s2.id, variantName: 'err' } }) });
+  expect((await waitJob(vj.job.id, 90)).status === 'succeeded', '给 /s2 出变体的作业没成功');
   // 2 聚焦 /s1 → 点「Go to /s2」→ 叠层压在 /s1 上：/s1 的 h1 还在、层里有 /s2 的 h1；角标 /s2
   const fl = await focus('/s1');
   await fl.locator('a[href="/s2"]', { hasText: 'Go to' }).click();
@@ -324,11 +327,45 @@ await step('TC-PROTO-012', async () => {
   await eventually(async () => expect((await layer.count()) === 0 && (await fl.locator('h1').first().innerText()).startsWith('Screen 1'), '叠层的关闭链接应关层而不是再跳一次'));
   // 5c 屏里自带的 <script> 在热更新换 DOM 之后也要跑（v0.65；此前换进来的脚本是惰性的）
   const mcp = await connectMcp();
+  try {
   const cur = (await apiJson<{ screens: { id: string; route: string; currentRevisionId: string }[] }>(`/v1/projects/${projectId}`)).body.screens.find((s) => s.route === '/s1')!;
   const patched = await callTool(mcp, 'quilt.patch_screen', { screenId: cur.id, expectedRevisionId: cur.currentRevisionId, edits: [{ find: '</header>', replace: '</header><p id="ran">no</p><script>document.getElementById("ran").textContent = "yes"</script>' }] });
   expect(!patched.isError, `patch_screen 出错：${patched.text.slice(0, 160)}`);
   await fl.locator('#ran', { hasText: 'yes' }).waitFor({ timeout: 15000 });
-  await mcp.close();
+  // 5d 同一屏再热更新一次：脚本在同一个 window 里第二次执行，顶层 const 不能报「已声明」（v0.66 包块作用域）
+  const cur2 = (await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${projectId}`)).body.screens.find((s) => s.id === cur.id)!;
+  expect(!(await callTool(mcp, 'quilt.patch_screen', { screenId: cur.id, expectedRevisionId: cur2.currentRevisionId, edits: [{ find: 'document.getElementById("ran").textContent = "yes"', replace: 'const ranText = "yes"; document.getElementById("ran").textContent = ranText' }] })).isError, 'patch_screen 第二次出错');
+  await fl.locator('#ran', { hasText: 'yes' }).waitFor({ timeout: 15000 });
+  const cur3 = (await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${projectId}`)).body.screens.find((s) => s.id === cur.id)!;
+  expect(!(await callTool(mcp, 'quilt.patch_screen', { screenId: cur.id, expectedRevisionId: cur3.currentRevisionId, edits: [{ find: '>no</p>', replace: '>no</p><i id="v3"></i>' }] })).isError, 'patch_screen 第三次出错');
+  await fl.locator('#v3').waitFor({ state: 'attached', timeout: 15000 });
+  await eventually(async () => expect((await fl.locator('#ran').innerText()) === 'yes', '同一个 const 第二次执行后 #ran 应仍是 yes'));
+  // 5e 叠层开着时底下那一屏更新，关叠层后露出新版本（v0.66）；叠层打开时按 qid 打标记只落在叠层里
+  await fl.locator('a[href="/s2"]', { hasText: 'Go to' }).click();
+  await page.locator('.card.focused .badge', { hasText: '/s2' }).waitFor({ timeout: 10000 });
+  await eventually(async () => expect((await layer.count()) === 1, '应压出 /s2'));
+  const frame = (await (await page.locator('.card.focused iframe').elementHandle())!.contentFrame())!;
+  await frame.evaluate(() => window.postMessage({ type: 'quilt:mark', working: ['q1'], done: [] }, '*'));
+  await eventually(async () => expect(await frame.evaluate(() => { const el = Array.from(document.querySelectorAll<HTMLElement>('[data-qid="q1"]')).find((e) => e.style.outline.includes('dashed')); return !!el?.closest('[data-quilt-overlay-layer]'); }), '修改中标记应画在叠层里的 q1 上'));
+  await frame.evaluate(() => window.postMessage({ type: 'quilt:mark', working: [], done: [] }, '*'));
+  const cur4 = (await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${projectId}`)).body.screens.find((s) => s.id === cur.id)!;
+  expect(!(await callTool(mcp, 'quilt.patch_screen', { screenId: cur.id, expectedRevisionId: cur4.currentRevisionId, edits: [{ find: 'id="v3"', replace: 'id="v4"' }] })).isError, 'patch_screen 第四次出错');
+  await page.waitForTimeout(3000);
+  await page.keyboard.press('Alt+ArrowLeft');
+  await page.locator('.card.focused .badge', { hasText: '/s1' }).waitFor({ timeout: 10000 });
+  await eventually(async () => expect((await layer.count()) === 0 && (await fl.locator('#v4').count()) === 1, '关叠层后底下的 /s1 应是新版本'), 10000);
+  } finally { await mcp.close(); }
+  // 5f 叠层上切变体只换那一层：底下 /s1 还在、仍只有一层（v0.66；此前整屏 swap 把底屏换掉）
+  await fl.locator('a[href="/s2"]', { hasText: 'Go to' }).click();
+  await page.locator('.card.focused .badge', { hasText: '/s2' }).waitFor({ timeout: 10000 });
+  const vchip = page.getByTestId('variant-chip').filter({ hasText: 'err' });
+  await vchip.waitFor({ timeout: 5000 });
+  const layerBefore = await layer.innerHTML();
+  await vchip.click();
+  await eventually(async () => expect((await vchip.getAttribute('aria-pressed')) === 'true' && (await fl.locator('[data-quilt-overlay-layer]').count()) === 1 && (await layer.innerHTML()) !== layerBefore && (await fl.locator('#v4').count()) === 1, '切变体后应仍只有一层叠层、层内容换掉、底下 /s1 还在'));
+  await page.keyboard.press('Alt+ArrowLeft');
+  await page.locator('.card.focused .badge', { hasText: '/s1' }).waitFor({ timeout: 10000 });
+  await eventually(async () => expect((await fl.locator('[data-quilt-overlay-layer]').count()) === 0, '后退应关掉变体那一层'));
   await page.keyboard.press('Escape');
   await page.waitForTimeout(400);
   // 6 导出：/s2 的模板带 data-presentation="overlay"
@@ -346,9 +383,19 @@ await step('TC-PROTO-012', async () => {
   const at = async (hash: string | null) => { if (hash === null) await ex.evaluate(() => history.back()); else await ex.evaluate((h) => { location.hash = h; }, hash); await ex.waitForTimeout(400); const s = await state(); seq.push(`${s.layers}:${s.root.trim().split(' ').slice(0, 2).join(' ')}`); };
   await at('#/s1'); await at('#/s2'); await at('#/s3'); await at(null); await at(null);
   expect(seq.join(' | ') === '0:Screen 1 | 1:Screen 1 | 0:Screen 3 | 1:Screen 1 | 0:Screen 1', `导出叠层栈不对：${seq.join(' | ')}`);
+  // 6c 直接打开叠层的 hash（分享链接）：起始屏垫在底下、压一层；history.back() 回到起始屏而不是离开文件（v0.66）
+  const deep = await ctx.newPage();
+  await deep.goto(`file://${file}#/s2`);
+  await deep.waitForTimeout(400);
+  const d1 = await deep.evaluate(() => ({ layers: document.querySelectorAll('[data-quilt-overlay-layer]').length, root: document.querySelector('#quilt-root h1')?.textContent ?? '' }));
+  await deep.evaluate(() => history.back());
+  await deep.waitForTimeout(400);
+  const d2 = await deep.evaluate(() => ({ layers: document.querySelectorAll('[data-quilt-overlay-layer]').length, root: document.querySelector('#quilt-root h1')?.textContent ?? '', href: location.href }));
+  expect(d1.layers === 1 && d1.root.startsWith('Screen 1') && d2.layers === 0 && d2.root.startsWith('Screen 1') && d2.href.startsWith('file:'), `直接打开 #/s2 不对：${JSON.stringify({ d1, d2 })}`);
+  await deep.close();
   await ex.close();
   await rm(file, { force: true });
-  return '设为叠层落库 + 预览注入透明底；播放压层、后退只关层、从层跳 push 屏清层、后退回叠层按栈重摆、关闭链接关层、热更新后脚本执行；导出模板带 presentation、导出叠层栈 0/1/0/1/0';
+  return '设为叠层落库 + 预览注入透明底；播放压层、后退只关层、从层跳 push 屏清层、后退回叠层按栈重摆、关闭链接关层、热更新后脚本执行且重跑不报已声明；叠层下底屏更新关层即见、标记落在叠层；导出模板带 presentation、导出叠层栈 0/1/0/1/0、直开叠层 hash 垫起始屏、叠层上切变体只换那一层';
 });
 
 await browser.close();

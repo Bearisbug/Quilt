@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { launch, openApp, seed, seedJson, apiJson, previewHost, EVIDENCE, ROOT, WEB, API, eventually } from './lib.ts';
@@ -245,23 +245,45 @@ await step('TC-CORE-007', async () => {
 
 await step('TC-CORE-008', async () => {
   const { projectId } = seedJson<{ projectId: string }>('seed:project', '--name', 'Big', '--device', 'mobile', '--screens', '100', '--no-shot');
-  // no-shot 的屏无截图（骨架），帧率测试关注卡片渲染与懒加载；再用有截图的 Layout 项目验证 img 懒加载
-  await page.goto(`${WEB}/p/${projectId}`);
-  await page.locator('[data-testid="screen-card"]').first().waitFor();
-  await page.getByRole('button', { name: '适配视图' }).click();
-  await page.waitForTimeout(600);
-  const box = (await page.locator('[data-testid="canvas"]').boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.evaluate(`(() => { window.__f = 0; window.__long = 0; window.__t0 = performance.now(); const tick = () => { window.__f++; window.__raf = requestAnimationFrame(tick); }; window.__raf = requestAnimationFrame(tick); new PerformanceObserver((l) => { window.__long += l.getEntries().filter(e => e.duration > 100).length; }).observe({ type: 'longtask' }); })()`);
-  await page.keyboard.down('Control'); for (let i = 0; i < 8; i++) { await page.mouse.wheel(0, -60); await page.waitForTimeout(80); } await page.keyboard.up('Control');
-  for (let i = 0; i < 40; i++) { await page.mouse.wheel(i % 2 ? 60 : -60, i % 3 ? 50 : -50); await page.waitForTimeout(80); }
-  await page.keyboard.down('Control'); for (let i = 0; i < 20; i++) { await page.mouse.wheel(0, i % 2 ? 90 : -90); await page.waitForTimeout(80); } await page.keyboard.up('Control');
-  const r = await page.evaluate(`(() => { cancelAnimationFrame(window.__raf); const dt = (performance.now() - window.__t0) / 1000; return { fps: Math.round(window.__f / dt), long: window.__long, dt: +dt.toFixed(1) }; })()`) as { fps: number; long: number; dt: number };
-  expect(r.fps >= 55, `fps=${r.fps}`);
-  expect(r.long === 0, `长任务 ${r.long}`);
-  const cards = await page.locator('[data-testid="screen-card"]').count();
-  await shot(page, 'CORE-008');
-  return `${cards} 屏 ${r.fps} fps / ${r.dt}s，长任务 ${r.long}`;
+  // no-shot 的屏无截图（骨架）：100 张骨架卡带循环动画，也是生成进行中的大项目的真实样子。
+  // 单开一个 2 倍屏上下文（Mac 的设备像素比）：1 倍屏的光栅量只有四分之一，量不出真机的 GPU 压力
+  const hiCtx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+  const hi = await hiCtx.newPage();
+  try {
+    await hi.goto(`${WEB}/p/${projectId}`);
+    await hi.locator('[data-testid="screen-card"]').first().waitFor();
+    await hi.getByRole('button', { name: '适配视图' }).click();
+    await hi.waitForTimeout(800);
+    const box = (await hi.locator('[data-testid="canvas"]').boundingBox())!;
+    await hi.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    // 性能追踪（v0.67）：无头下 rAF 帧率恒为 58～60，看不出 GPU 超预算——100 屏卡顿的根因（世界层每帧整层重新光栅化、SVG 连线文字随缩放重排、
+    // 小地图每帧重画触发整页重新分层、骨架动画逐帧重绘）都在 GPU 主线程与布局上，按每帧平均耗时断言。滚轮按 16 ms 连发，贴近触控板
+    const cdp = await hiCtx.newCDPSession(hi);
+    const trace: { name: string; ph: string; dur?: number; tid: number; args?: { name?: string } }[] = [];
+    cdp.on('Tracing.dataCollected', (e: { value: typeof trace }) => { trace.push(...e.value); });
+    const traced = new Promise<void>((res) => cdp.once('Tracing.tracingComplete', () => res()));
+    await cdp.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline,toplevel,cc,gpu,blink', transferMode: 'ReportEvents' });
+    await hi.evaluate(`(() => { window.__f = 0; window.__long = 0; window.__t0 = performance.now(); const tick = () => { window.__f++; window.__raf = requestAnimationFrame(tick); }; window.__raf = requestAnimationFrame(tick); new PerformanceObserver((l) => { window.__long += l.getEntries().filter(e => e.duration > 100).length; }).observe({ type: 'longtask' }); })()`);
+    for (let i = 0; i < 60; i++) { await hi.mouse.wheel(i < 30 ? 30 : -30, 10); await hi.waitForTimeout(16); }
+    await hi.keyboard.down('Control'); for (let i = 0; i < 60; i++) { await hi.mouse.wheel(0, i < 30 ? -8 : 8); await hi.waitForTimeout(16); } await hi.keyboard.up('Control');
+    const r = await hi.evaluate(`(() => { cancelAnimationFrame(window.__raf); const dt = (performance.now() - window.__t0) / 1000; return { fps: Math.round(window.__f / dt), frames: window.__f, long: window.__long, dt: +dt.toFixed(1) }; })()`) as { fps: number; frames: number; long: number; dt: number };
+    await cdp.send('Tracing.end'); await traced; await cdp.detach();
+    const threads: Record<number, string> = {}; for (const e of trace) if (e.ph === 'M' && e.name === 'thread_name') threads[e.tid] = e.args?.name ?? '';
+    const ms = (pick: (e: (typeof trace)[number]) => boolean) => trace.filter((e) => e.ph === 'X' && pick(e)).reduce((n, e) => n + (e.dur ?? 0), 0) / 1000;
+    const gpuPerFrame = ms((e) => e.name === 'RunTask' && threads[e.tid] === 'CrGpuMain') / r.frames;
+    const layoutPerFrame = ms((e) => e.name === 'Layout') / r.frames;
+    // 结构：连线计数不是 SVG 文字、小地图是 canvas、世界层停下后不留 will-change
+    await hi.waitForTimeout(400);
+    const shape = await hi.evaluate(`({ svgText: document.querySelectorAll('.world svg text').length, minimap: document.querySelector('[data-testid="minimap"]')?.tagName, moving: document.querySelector('.world').classList.contains('moving') })`) as { svgText: number; minimap?: string; moving: boolean };
+    const cards = await hi.locator('[data-testid="screen-card"]').count();
+    await hi.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-core-008.png`) });
+    expect(r.fps >= 55, `fps=${r.fps}`);
+    expect(r.long === 0, `长任务 ${r.long}`);
+    expect(gpuPerFrame <= 4, `GPU 主线程每帧 ${gpuPerFrame.toFixed(1)} ms（> 4 ms：120 Hz 下每帧只有 8.3 ms，还要留给合成与页面主线程）`);
+    expect(layoutPerFrame <= 0.5, `布局每帧 ${layoutPerFrame.toFixed(2)} ms（> 0.5 ms：有东西随缩放重排）`);
+    expect(shape.svgText === 0 && shape.minimap === 'CANVAS' && !shape.moving, `渲染结构不对：${JSON.stringify(shape)}`);
+    return `${cards} 屏（2 倍屏）${r.fps} fps / ${r.dt}s，长任务 ${r.long}；每帧 GPU 主线程 ${gpuPerFrame.toFixed(1)} ms、布局 ${layoutPerFrame.toFixed(2)} ms`;
+  } finally { await hiCtx.close(); }
 });
 
 await step('TC-CORE-023', async () => {
@@ -1871,16 +1893,67 @@ await step('TC-CORE-040', async () => {
   // 3 小地图：4 个屏矩形 + 视口框；点最左侧空白 → 视口框左移、画布镜头随之平移；工具栏可关可开
   const mm = page.getByTestId('minimap');
   await mm.waitFor({ timeout: 3000 });
-  expect((await page.getByTestId('minimap-screen').count()) === 4 && (await page.getByTestId('minimap-view').count()) === 1, '小地图应有 4 个屏矩形与 1 个视口框');
+  // 小地图画在 canvas 上：屏数读 data-screens，视口框（小地图坐标 x y w h）读 data-view
+  const viewRect = async () => { const [x, y, w, h] = ((await mm.getAttribute('data-view')) ?? '').split(' ').map(Number); const b = (await mm.boundingBox())!; return { x, y, w, h, px: b.x + x, py: b.y + y }; };
+  expect((await mm.getAttribute('data-screens')) === '4' && !!(await mm.getAttribute('data-view')), '小地图应有 4 屏与视口框');
   // 小地图按「全部卡片 + 视口」的外接框缩放：视口往左出去后，屏矩形在小地图里整体右移、世界层 transform 的 x 变大
-  const screensX = () => page.getByTestId('minimap-screen').evaluateAll((els) => Math.min(...els.map((e) => Number(e.getAttribute('x')))));
   const worldX = () => page.evaluate(() => new DOMMatrix(getComputedStyle(document.querySelector('.world')!).transform).e);
-  const [vx0, wx0] = [await screensX(), await worldX()];
+  const wx0 = await worldX();
+  // 点视口框外的空白（框左边有空就点左边，否则点右边）：镜头朝那边平移；点在框上是抓框，不跳（3b）
   const box = (await mm.boundingBox())!;
-  await page.mouse.click(box.x + 10, box.y + box.height / 2);
+  const vf = await viewRect();
+  const left = vf.x > 20;
+  await page.mouse.click(left ? box.x + 8 : box.x + box.width - 8, box.y + box.height / 2);
   await page.waitForTimeout(500);
-  const [vx1, wx1] = [await screensX(), await worldX()];
-  expect(vx1 > vx0 && wx1 > wx0, `点小地图左侧后屏矩形应右移（${vx0.toFixed(1)} → ${vx1.toFixed(1)}）、世界层右移（${wx0.toFixed(0)} → ${wx1.toFixed(0)}）`);
+  const wx1 = await worldX();
+  expect(left ? wx1 > wx0 : wx1 < wx0, `点小地图${left ? '左' : '右'}侧空白后镜头应朝那边平移（世界层 x ${wx0.toFixed(0)} → ${wx1.toFixed(0)}）`);
+  // 3b 抓住视口框拖（v0.66）：按下不跳、向左拖镜头左移；原地抖动镜头不再自己跑（此前外接框随视口变大，抖几下就飞到几十万）
+  const f0 = await viewRect();
+  const fb = { x: f0.px, y: f0.py, width: f0.w, height: f0.h };
+  await page.mouse.move(fb.x + fb.width / 2, fb.y + fb.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(150);
+  expect(Math.abs((await viewRect()).x - f0.x) < 0.5, '按下视口框时它不该跳到指针下');
+  const wxDown = await worldX();
+  await page.mouse.move(fb.x + fb.width / 2 - 20, fb.y + fb.height / 2, { steps: 8 });
+  await page.waitForTimeout(150);
+  const wxDragged = await worldX();
+  for (let i = 0; i < 20; i++) await page.mouse.move(fb.x + fb.width / 2 - 20 + (i % 2 ? 1 : -1), fb.y + fb.height / 2);
+  await page.mouse.move(fb.x + fb.width / 2 - 20, fb.y + fb.height / 2);
+  await page.waitForTimeout(150);
+  const wxJitter = await worldX();
+  await page.mouse.up();
+  expect(wxDragged > wxDown && Math.abs(wxJitter - wxDragged) <= 2, `拖视口框：世界层 x ${wxDown.toFixed(0)} → ${wxDragged.toFixed(0)}，原地抖动后 ${wxJitter.toFixed(0)}（应不变）`);
+  // 3c 聚焦屏时不画小地图（它压在可用区左上角，会挡住聚焦屏那一块的点击），退出后回来
+  await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').dblclick();
+  await page.locator('.card.focused .badge', { hasText: '交互中' }).waitFor({ timeout: 20000 });
+  expect((await mm.count()) === 0, '聚焦时小地图应隐藏');
+  // 3d 焦点在预览 iframe 里按 ⌘K 也能开跳屏面板（v0.66 运行时转发）
+  await page.frameLocator('.card.focused iframe').locator('input').first().focus();
+  await page.keyboard.press('ControlOrMeta+k');
+  await finder.waitFor({ timeout: 3000 });
+  await page.keyboard.press('Escape');
+  await finder.waitFor({ state: 'detached', timeout: 3000 });
+  await page.keyboard.press('Escape');
+  await mm.waitFor({ timeout: 3000 });
+  // 3e 从工具栏「找屏」打开、Esc 关：焦点回到这个键（v0.66 useModal 默认归还打开前的焦点）
+  await page.getByTestId('find-screen').click();
+  await finder.waitFor({ timeout: 3000 });
+  await page.keyboard.press('Escape');
+  await finder.waitFor({ state: 'detached', timeout: 3000 });
+  expect(await page.getByTestId('find-screen').evaluate((el) => el === document.activeElement), '关掉跳屏面板后焦点应回到「找屏」键');
+  // 3f 窗口矮到列表放不下时，↓ 移到的行滚进列表可视区
+  await page.setViewportSize({ width: 1440, height: 260 });
+  await page.keyboard.press('ControlOrMeta+k');
+  await finder.waitFor({ timeout: 3000 });
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown');
+  await eventually(async () => {
+    const vis = await page.evaluate(() => { const l = document.getElementById('finder-list')!.getBoundingClientRect(); const r = document.querySelector('[data-testid="finder-row"][aria-selected="true"]')!.getBoundingClientRect(); return r.top >= l.top - 1 && r.bottom <= l.bottom + 1; });
+    expect(vis, '↓ 选中的行应在列表可视区内');
+  });
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.waitForTimeout(300);
   await page.getByTestId('toggle-minimap').click();
   await mm.waitFor({ state: 'detached', timeout: 2000 });
   // 空格在按钮上是激活（v0.65；此前全局空格被画布平移吃掉）
@@ -1888,7 +1961,7 @@ await step('TC-CORE-040', async () => {
   await page.keyboard.press('Space');
   await mm.waitFor({ timeout: 2000 });
   await shot(page, 'CORE-040');
-  return '⌘K 搜到 /s3、Enter 居中选中且 ≤ 1:1；⌥S 列表 4 行、断链筛剩 /s1 并可跳；小地图 4 矩形 + 视口框、点击平移、可开关';
+  return '⌘K 搜到 /s3、Enter 居中选中且 ≤ 1:1；⌥S 列表 4 行、断链筛剩 /s1 并可跳；小地图 4 矩形 + 视口框、点击平移、拖框 1:1 不失控、聚焦时隐藏、可开关；iframe 内 ⌘K、关面板焦点归还、选中行滚入视野';
 });
 
 // TC-CORE-041 状态变体（REQ-CORE-025 v0.62）：出变体 → 落位 / 地图 / 注册表 / 导出 → 播放切状态 → 路由不可改 → 删默认屏级联
@@ -1913,6 +1986,9 @@ await step('TC-CORE-041', async () => {
   const base = d.screens.find((s) => s.id === s1.id)!;
   expect(v!.route === '/s1' && v!.variantName === '空态' && v!.name === 'Screen 1 · 空态', `变体元数据不对：${JSON.stringify({ route: v!.route, variantName: v!.variantName, name: v!.name })}`);
   expect(v!.y === base.y && v!.x === base.x + 390 + 80, `变体应落在默认屏右侧同一行，实际 (${v!.x}, ${v!.y}) vs 默认 (${base.x}, ${base.y})`);
+  // 1b 变体不会被自动钉成样板屏（v0.66）
+  const proj = (await apiJson<{ project: { exemplarScreenId: string | null } }>(`/v1/projects/${projectId}`)).body.project;
+  expect(proj.exemplarScreenId !== v!.id, '变体不该被钉成样板屏');
   // 2 应用地图只指默认屏；注册表（设计契约 routes）不列变体
   expect(d.links.filter((l) => l.href === '/s1').every((l) => l.toScreenId === s1.id), '指向 /s1 的链接目标应是默认屏');
   const map = (await apiJson<{ nodes: { id: string }[] }>(`/v1/projects/${projectId}/app-map`)).body;
@@ -1927,9 +2003,15 @@ await step('TC-CORE-041', async () => {
   const chips = page.getByTestId('variant-chip');
   await chips.first().waitFor({ timeout: 5000 });
   expect((await chips.count()) === 2 && (await chips.first().getAttribute('aria-pressed')) === 'true', '应有「默认 / 空态」两颗胶囊且默认被按下');
+  // 胶囊在交互角标下一行，不与它重叠（v0.66；手机屏上此前叠了 31–86 px）
+  const gap = await page.evaluate(() => { const c = document.querySelector('.variant-chips')!.getBoundingClientRect(); const b = document.querySelector('.card.focused .badge')!.getBoundingClientRect(); return c.top - b.bottom; });
+  expect(gap >= 0, `状态胶囊与交互角标重叠 ${(-gap).toFixed(0)} px`);
   const fl = page.frameLocator('.card.focused iframe');
   const before = await fl.locator('body').innerHTML();
-  const worldBefore = await page.evaluate(() => getComputedStyle(document.querySelector('.world')!).transform);
+  // 聚焦的镜头动画（250 ms）走完再记基线
+  const worldNow = () => page.evaluate(() => getComputedStyle(document.querySelector('.world')!).transform);
+  let worldBefore = await worldNow();
+  await eventually(async () => { await page.waitForTimeout(200); const w = await worldNow(); const same = w === worldBefore; worldBefore = w; expect(same, '镜头还在动'); });
   await page.locator('[data-testid="variant-chip"][data-id="' + v!.id + '"]').click();
 
   await eventually(async () => expect((await page.locator('[data-testid="variant-chip"][data-id="' + v!.id + '"]').getAttribute('aria-pressed')) === 'true', '点过的胶囊应为按下态'));
@@ -1960,6 +2042,23 @@ await step('TC-CORE-041', async () => {
   // 5 变体改 route → 422；默认屏给 variantName → 422
   expect((await apiJson(`/v1/screens/${v!.id}`, { method: 'PATCH', body: JSON.stringify({ route: '/elsewhere' }) })).status === 422, '变体改路由应 422');
   expect((await apiJson(`/v1/screens/${s1.id}`, { method: 'PATCH', body: JSON.stringify({ variantName: 'x' }) })).status === 422, '默认屏给变体名应 422');
+  // 5b 呈现方式属于整个家族（v0.66）：变体上改 422；默认屏改了变体跟着改，两屏当前修订的截图重拍
+  type Shot = { id: string; presentation: string; screenshotUrl: string | null };
+  const shots = async () => (await apiJson<{ screens: Shot[] }>(`/v1/projects/${projectId}`)).body.screens;
+  expect((await apiJson(`/v1/screens/${v!.id}`, { method: 'PATCH', body: JSON.stringify({ presentation: 'overlay' }) })).status === 422, '变体改呈现方式应 422');
+  // 截图重拍看对象存储里当前修订那张 PNG 的写入时间（仓库内开发用 fs 存储）；按内容比较不行——根元素自带底色的屏按透明底拍出来像素一样
+  const shotAt = async (id: string) => {
+    const s = (await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${projectId}`)).body.screens.find((x) => x.id === id)!;
+    return stat(path.join(ROOT, '.data/objects/projects', projectId, 'screens', id, `${s.currentRevisionId}.png`)).then((f) => f.mtimeMs, () => 0);
+  };
+  const t0 = Date.now();
+  expect((await apiJson(`/v1/screens/${s1.id}`, { method: 'PATCH', body: JSON.stringify({ presentation: 'overlay' }) })).status === 200, '默认屏改呈现方式应 200');
+  const fam = (await shots()).filter((s) => s.id === s1.id || s.id === v!.id);
+  expect(fam.every((s) => s.presentation === 'overlay'), `默认屏改呈现方式后变体应跟着改：${fam.map((s) => s.presentation).join('/')}`);
+  await eventually(async () => {
+    for (const id of [s1.id, v!.id]) expect((await shotAt(id)) > t0, '家族两屏当前修订的截图都应重拍');
+  }, 20000, 1000);
+  await apiJson(`/v1/screens/${s1.id}`, { method: 'PATCH', body: JSON.stringify({ presentation: 'push' }) });
   // 6 导出只带默认屏
   const { body: job } = await apiJson<{ job: { id: string } }>(`/v1/projects/${projectId}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': `e2e-var-${Date.now()}` }, body: JSON.stringify({ kind: 'export_prototype', input: {} }) });
   await waitJob(job.job.id, 90);

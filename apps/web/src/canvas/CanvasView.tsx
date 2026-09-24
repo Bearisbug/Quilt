@@ -115,8 +115,9 @@ export function CanvasView(p: CanvasProps) {
   const vp = useRef<Viewport>(savedView ?? { x: 80, y: 80, zoom: 0.5 });
   const [initialWorldStyle] = useState<CSSProperties>(() => ({
     transform: `translate(${vp.current.x}px, ${vp.current.y}px) scale(${vp.current.zoom})`,
-    ['--zoom' as string]: String(vp.current.zoom),
   }));
+  // 候选展开层的操作胶囊按 1/zoom 反向缩放，--zoom 只写在它那一层：写在世界层上的话每帧都让全部卡片重算样式（100 屏时缩放掉帧）
+  const candRef = useRef<HTMLDivElement | null>(null);
   const spaceDown = useRef(false);
   // 空格按住 = 平移就绪：只有这时指针才是抓手；平时是箭头（空白处按下是框选，不是拖画布）
   const [panReady, setPanReady] = useState(false);
@@ -186,6 +187,9 @@ export function CanvasView(p: CanvasProps) {
   // 落盘防抖 300 ms：平移缩放每帧都在变，逐帧写存储会把拖拽拖掉帧（INT-021）。无痕模式写不了就算了，
   // 退化成只本次会话有效，不能让存储异常打断渲染。
   const saveTimer = useRef<number | null>(null);
+  // 平移缩放进行中给世界层挂 will-change 让它独立合成：不挂的话每改一次 transform 整层（跨越大片区域的连线 SVG 尤其贵）都要重新光栅化，
+  // 100 屏时 GPU 每帧超预算。常驻又不行——独立合成层按挂上时的比例光栅化，放大后文字发虚；停下 200 ms 摘掉，按最终比例清晰重画一次
+  const movingTimer = useRef<number | null>(null);
   const viewSubs = useRef(new Set<(v: ViewInfo) => void>());
   const onView = useCallback((cb: (v: ViewInfo) => void) => {
     viewSubs.current.add(cb);
@@ -195,7 +199,14 @@ export function CanvasView(p: CanvasProps) {
   }, []);
   const applyTransform = useCallback((v: Viewport) => {
     vp.current = v;
-    if (worldRef.current) { worldRef.current.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`; worldRef.current.style.setProperty('--zoom', String(v.zoom)); }
+    const world = worldRef.current;
+    if (world) {
+      world.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
+      world.classList.add('moving');
+      if (movingTimer.current) clearTimeout(movingTimer.current);
+      movingTimer.current = window.setTimeout(() => { world.classList.remove('moving'); movingTimer.current = null; }, 200);
+    }
+    candRef.current?.style.setProperty('--zoom', String(v.zoom));
     propsRef.current.onStat?.({ zoom: v.zoom });
     if (viewSubs.current.size) { const node = viewportRef.current; const info = { ...v, w: node?.clientWidth ?? 0, h: node?.clientHeight ?? 0 }; for (const cb of viewSubs.current) cb(info); }
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -302,6 +313,7 @@ export function CanvasView(p: CanvasProps) {
     const top = Math.max(0, (a.h - s.height * zoom) / 2);
     window.getSelection()?.removeAllRanges();
     setIframeReady(false);
+    landed.current = null;  // 换屏或重挂之后，还在等上一份文档换完的重摆作废
     setFocusedSrc(s.previewUrl);
     p.onFocus(id);
     p.setNavStack(() => []);
@@ -328,7 +340,9 @@ export function CanvasView(p: CanvasProps) {
     p.setNavStack((s) => [...s, target.route]);
   }, [p]);
   // 按一条导航栈把 iframe 重新摆出来：栈里最靠上的整屏（没有就是卡片自己）换进去，它上面的叠层逐层压回去。
-  // 后退穿过叠层、叠层关闭链接都走这里——只发一条 overlay-close 的话，底下那一屏若是后来才换进来的就对不上了
+  // 后退穿过叠层、叠层关闭链接都走这里——只发一条 overlay-close 的话，底下那一屏若是后来才换进来的就对不上了。
+  // 叠层要等整屏换完（quilt:swapped，整份重写时是新文档的 quilt:ready）再发：整份重写期间 iframe 里没有任何监听，发过去就丢了
+  const landed = useRef<(() => void) | null>(null);
   const rebuild = useCallback(async (stack: string[]) => {
     if (!focused) return;
     let j = stack.length - 1;
@@ -337,7 +351,7 @@ export function CanvasView(p: CanvasProps) {
     if (!base) return;
     const baseHtml = await htmlOf(base);
     if (baseHtml === null) return;
-    postToPreview({ type: 'quilt:swap', html: baseHtml, route: base.route });
+    await new Promise<void>((done) => { landed.current = done; postToPreview({ type: 'quilt:swap', html: baseHtml, route: base.route }); });
     let top = base;
     for (const route of stack.slice(j + 1)) {
       const o = baseByRoute(route); const html = o && await htmlOf(o);
@@ -355,8 +369,10 @@ export function CanvasView(p: CanvasProps) {
     // 栈顶是叠层屏：只关它这一层，底下那一屏原样留着（滚动位置都在）
     const top = baseByRoute(p.navStack[p.navStack.length - 1]);
     if (top?.presentation === 'overlay') {
-      iframeRef.current?.contentWindow?.postMessage({ type: 'quilt:overlay-close' } as ParentToPreview, p.previewOrigin);
       const under = stack.length ? baseByRoute(stack[stack.length - 1]) : focused;
+      // 叠层开着时底下那一屏出了新修订（热更新只跟最上面那层走）：按栈重摆一遍，露出来的是它的新版本
+      if (under && shownRevs.current.has(under.id) && shownRevs.current.get(under.id) !== under.currentRevisionId) { void rebuild(stack); return; }
+      iframeRef.current?.contentWindow?.postMessage({ type: 'quilt:overlay-close' } as ParentToPreview, p.previewOrigin);
       setShownId(under?.id ?? focused.id);
       p.setNavStack(() => stack);
       return;
@@ -368,7 +384,7 @@ export function CanvasView(p: CanvasProps) {
   // 回到这张卡片自己的屏：重挂 iframe（src 不变时 React 不会重新加载，只能靠换 key）并清空导航栈
   // 清空后由下面的 effect 用「当前这一轮的 props」重新钉住——这里直接读 propsRef 会拿到上一轮的
   // previewUrl（调用方常常是 await refresh() 之后紧接着调，state 还没落到下一次渲染），于是重载出旧修订
-  const resetToOwn = useCallback(() => { setIframeReady(false); setFocusedSrc(null); setReloadKey((k) => k + 1); propsRef.current.setNavStack(() => []); setShownId(propsRef.current.focusedId); }, []);
+  const resetToOwn = useCallback(() => { setIframeReady(false); landed.current = null; setFocusedSrc(null); setReloadKey((k) => k + 1); propsRef.current.setNavStack(() => []); setShownId(propsRef.current.focusedId); }, []);
   // 工具栏 / ⌥G 走这里：把可见区中心当作锚点落点，等价于在那里双击
   const createAtCenter = useCallback(() => {
     const node = viewportRef.current;
@@ -418,12 +434,15 @@ export function CanvasView(p: CanvasProps) {
   const shownRef = useRef(shown);
   shownRef.current = shown;
   const baseline = useRef<{ id: string; rev: string | null } | null>(null);
+  // 每屏最近一次显示在 iframe 里的修订：叠层关掉时拿它判断底下那一屏在被盖住期间有没有更新
+  const shownRevs = useRef(new Map<string, string | null>());
   // 热更新换完 DOM（quilt:swapped，或整份重写后的 quilt:ready）再按这个 qid 重选；跳转的 swap 不重选——同一 qid 在别的屏上是另一个元素
   const pendingReselect = useRef<string | null>(null);
   useEffect(() => {
     if (!p.focusedId || !iframeReady || !shownId) { baseline.current = null; return; }
     const base = baseline.current;
     baseline.current = { id: shownId, rev: shownRev };
+    shownRevs.current.set(shownId, shownRev);
     const cur = shownRef.current;
     if (!base || base.id !== shownId || base.rev === shownRev || !cur?.previewUrl) return;
     let stale = false;
@@ -474,6 +493,8 @@ export function CanvasView(p: CanvasProps) {
     const a = safeArea(); const z = vp.current.zoom;
     panZoom.current?.setViewport({ x: a.x + a.w / 2 - x * z, y: a.y + a.h / 2 - y * z, zoom: z }, { duration: 200 });
   }, [safeArea]);
+  // 小地图拖视口框：直接设平移量（缩放不变、不带动画），拖动全程 1:1 跟手
+  const moveView = useCallback((x: number, y: number) => { panZoom.current?.setViewport({ x, y, zoom: vp.current.zoom }); }, []);
   const reveal = useCallback((id: string) => {
     const s = byId[id]; const c = propsRef.current.components.find((x) => x.id === id);
     const rect = s ? { ...pos(s), w: s.width, h: s.height } : c ? { ...compPos(c), ...compBox(c) } : null;
@@ -483,14 +504,16 @@ export function CanvasView(p: CanvasProps) {
     panZoom.current?.setViewport({ x: a.x + (a.w - rect.w * zoom) / 2 - rect.x * zoom, y: a.y + (a.h - rect.h * zoom) / 2 - rect.y * zoom, zoom }, { duration: 250 });
   }, [byId, pos, compPos, compBox, safeArea]);
   useEffect(() => { propsRef.current.registerApi?.({ fitView, goBack, highlight, focus: focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView }); }, [fitView, goBack, highlight, focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView]);
-  // 切状态变体（v0.62）：同一 iframe 换成该变体的当前修订，镜头不动、导航栈不动；选中的元素属于换掉的那份 DOM，清空
+  // 切状态变体（v0.62）：同一 iframe 换成该变体的当前修订，镜头不动、导航栈不动；选中的元素属于换掉的那份 DOM，清空。
+  // 正显示的是一层叠层时只换这一层，底下那一屏留着（与热更新的叠层分支同理）
   const swapVariant = useCallback(async (id: string) => {
     const target = byId[id];
     if (!target?.previewUrl) return;
     const html = await fetch(target.previewUrl).then((r) => r.text());
     pendingReselect.current = null;
     propsRef.current.onElementSelect(null);
-    postToPreview({ type: 'quilt:swap', html, route: target.route, keepScroll: true });
+    if (target.presentation === 'overlay' && propsRef.current.navStack.length > 0) { postToPreview({ type: 'quilt:overlay-close' }); postToPreview({ type: 'quilt:overlay', html, route: target.route }); }
+    else postToPreview({ type: 'quilt:swap', html, route: target.route, keepScroll: true });
     setShownId(target.id);
   }, [byId, postToPreview]);
   // 小地图的矩形：屏、组件、风格指南卡
@@ -539,6 +562,7 @@ export function CanvasView(p: CanvasProps) {
       // 只认聚焦 iframe 发来的：候选展开层里的活 iframe（REQ-CORE-015）也跑同一套运行时，它们的 ready / navigate / key 不能动聚焦态
       if (e.origin !== p.previewOrigin || !focused || e.source !== iframeRef.current?.contentWindow || !isPreviewMessage(e.data)) return;
       const msg = e.data;
+      if (msg.type === 'quilt:ready' || msg.type === 'quilt:swapped') { landed.current?.(); landed.current = null; }
       if (msg.type === 'quilt:ready') { setIframeReady(true); postToPreview({ type: 'quilt:mode', mode: propsRef.current.inspectMode ? 'inspect' : 'interact' }); reselectAfterSwap(); }
       if (msg.type === 'quilt:swapped') reselectAfterSwap();
       if (msg.type === 'quilt:select') p.onElementSelect({ qid: msg.qid, tag: msg.tag, text: msg.text, classes: msg.classes, href: msg.href ?? null, component: msg.component ?? null, rect: msg.rect });
@@ -709,26 +733,34 @@ export function CanvasView(p: CanvasProps) {
     <div ref={viewportRef} className={`viewport${panReady ? ' pan-ready' : ''}${dragging ? ' dragging' : ''}${p.armed && !p.focusedId ? ' armed' : ''}`} onPointerDown={onViewportPointerDown} onDoubleClick={onViewportDoubleClick} data-testid="canvas">
       {/* 首帧的 transform 写在这里，不等 panzoom 的 effect：effect 跑在绘制之后，画布会先按未变换的原点画一帧。
           值取自惰性初值、之后不再变（后续变换由 applyTransform 直接改 style），React 不会回头覆盖它 */}
-      {p.minimap && <Minimap rects={miniRects} onView={onView} onPanTo={panTo} />}
+      {/* 聚焦屏或组件时不画小地图：它压在可用区左上角，会挡住聚焦屏上那一块的点击 */}
+      {p.minimap && !p.focusedId && !p.focusedComponentId && <Minimap rects={miniRects} onView={onView} onPanTo={panTo} onMoveView={moveView} />}
       <div ref={worldRef} className="world" style={initialWorldStyle}>
-        {p.showLinks && edges.length > 0 && (
+        {/* 连线的计数徽标是 HTML，不是 SVG <text>：祖先的缩放比例一变，Chrome 要按新比例重排每一段 SVG 文字，
+            100 屏时每一步缩放都要重排上百个徽标。HTML 文字随 transform 缩放不重排 */}
+        {p.showLinks && edges.length > 0 && (<>
           <svg className="edges" width={1} height={1} aria-hidden="true" data-testid="link-edges">
             <defs><marker id="edge-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker></defs>
             {edges.map((e) => {
               const from = byId[e.from]; const to = byId[e.to];
               if (!from || !to) return null;
               const reverse = edges.some((r) => r.from === e.to && r.to === e.from);
-              const { d, mx, my } = edgePath(from, to, reverse ? (e.from < e.to ? -36 : 36) : 0);
+              const { d } = edgePath(from, to, reverse ? (e.from < e.to ? -36 : 36) : 0);
               return (
                 <g key={`${e.from}>${e.to}`} data-testid="link-edge" data-count={e.count}>
                   <path d={d} markerEnd="url(#edge-arrow)" />
-                  <rect x={mx - 14} y={my - 11} width={28} height={22} rx={11} />
-                  <text x={mx} y={my + 4} textAnchor="middle">{e.count}</text>
                 </g>
               );
             })}
           </svg>
-        )}
+          {edges.map((e) => {
+            const from = byId[e.from]; const to = byId[e.to];
+            if (!from || !to) return null;
+            const reverse = edges.some((r) => r.from === e.to && r.to === e.from);
+            const { mx, my } = edgePath(from, to, reverse ? (e.from < e.to ? -36 : 36) : 0);
+            return <span key={`${e.from}>${e.to}`} className="edge-count" aria-hidden="true" style={{ transform: `translate(${mx - 14}px, ${my - 11}px)` }}>{e.count}</span>;
+          })}
+        </>)}
         <div className={`styleguide nopan${p.styleGuideSelected ? ' selected' : ''}`} style={{ transform: `translate(${STYLE_GUIDE_POS.x}px, ${STYLE_GUIDE_POS.y}px)` }} onPointerDown={(e) => { e.stopPropagation(); p.onSelectStyleGuide(); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); p.onSelectStyleGuide(); } }} role="button" tabIndex={0} aria-label="风格指南">
           <StyleGuideCard tokens={p.tokens} name={p.projectName} palette={p.palette} colorMode={p.colorMode} assets={p.assets} />
         </div>
@@ -837,7 +869,7 @@ export function CanvasView(p: CanvasProps) {
         })}
         {/* 候选就地展开（REQ-CORE-015）：盖在卡片原位；按下不冒泡给画布，否则会当成框选 / 选卡 */}
         {p.candidateStack && byId[p.candidateStack.screenId] && (
-          <div className="cand-stack nopan" style={{ transform: `translate(${pos(byId[p.candidateStack.screenId]).x}px, ${pos(byId[p.candidateStack.screenId]).y}px)` }} onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+          <div ref={(el) => { candRef.current = el; el?.style.setProperty('--zoom', String(vp.current.zoom)); }} className="cand-stack nopan" style={{ transform: `translate(${pos(byId[p.candidateStack.screenId]).x}px, ${pos(byId[p.candidateStack.screenId]).y}px)` }} onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
             {p.candidateStack.node}
           </div>
         )}

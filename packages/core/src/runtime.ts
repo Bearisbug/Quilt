@@ -21,7 +21,8 @@ export const RUNTIME_JS = String.raw`(function () {
   }
   function icons() { if (window.lucide && window.lucide.createIcons) window.lucide.createIcons(); }
   // 换进来的 DOM 里的 <script> 不会执行（DOMParser 解析出的脚本是惰性的）：屏里的图表库、自写脚本（v0.43 允许）都要按原顺序重建一遍，
-  // 带 src 的等它加载完再跑下一个。不做的话图表屏只有首次打开能画出来，跳转、热更新、切变体、叠层打开后都是空白
+  // 带 src 的等它加载完再跑下一个。不做的话图表屏只有首次打开能画出来，跳转、热更新、切变体、叠层打开后都是空白。
+  // 重跑的内联脚本包一层块作用域：同一个 window 里第二次执行顶层 const/let 会报「已声明」，整段脚本不跑
   function runScripts(root) {
     var list = Array.prototype.slice.call(root.querySelectorAll('script'));
     (function next(i) {
@@ -29,7 +30,7 @@ export const RUNTIME_JS = String.raw`(function () {
       var old = list[i]; var s = document.createElement('script');
       for (var k = 0; k < old.attributes.length; k++) s.setAttribute(old.attributes[k].name, old.attributes[k].value);
       if (old.src) { s.onload = s.onerror = function () { next(i + 1); }; old.replaceWith(s); }
-      else { s.textContent = old.textContent; old.replaceWith(s); next(i + 1); }
+      else { s.textContent = old.type === 'module' ? old.textContent : '{\n' + old.textContent + '\n}'; old.replaceWith(s); next(i + 1); }
     })(0);
   }
   function send(msg) { parent.postMessage(msg, '*'); }
@@ -37,9 +38,12 @@ export const RUNTIME_JS = String.raw`(function () {
   // 滚动位置都留着。层带 data-quilt-ui：选元素态的穿透规则不会把遮罩当成可命中元素。点遮罩（或叠层根元素本身
   // 露出来的透明区域）只上报 dismiss，关不关由父页定——导航栈在父页。
   var overlays = [];
-  // 换整屏还没落地时（view transition 的回调是异步的、整份重写要等新文档加载）收到的压层请求先排队，换完再压——
-  // 否则叠层挂在即将被换掉的旧 body 上，跟着一起消失（父页后退穿过叠层时就是先发 swap 再发 overlay）
-  var swapping = false; var queued = state.__overlayQueue || []; delete state.__overlayQueue;
+  // 换 body 还没落地时（view transition 的回调是异步的）收到的压层请求先排队，换完再压——否则叠层挂在即将被换掉的旧 body 上，
+  // 跟着一起消失。整份重写（document.open）会连 window 上的监听一起抹掉，那段时间到的消息无处可排，所以父页要先等
+  // quilt:swapped / quilt:ready 再发压层
+  var swapping = false; var queued = [];
+  // 叠层打开时按 qid 找元素只在最上面那层里找：每屏的 qid 都从 q1 编起，底下那一屏排在文档前面，全文档找会先命中它
+  function scope() { return overlays.length ? overlays[overlays.length - 1] : document; }
   function flushOverlays() { swapping = false; var q = queued; queued = []; q.forEach(function (o) { openOverlay(o.html, o.route); }); }
   function clearOverlays() { overlays.forEach(function (l) { l.remove(); }); overlays = []; }
   function closeOverlay() { var l = overlays.pop(); if (l) l.remove(); }
@@ -79,10 +83,10 @@ export const RUNTIME_JS = String.raw`(function () {
     var action = e.target && e.target.getAttribute ? (e.target.getAttribute('action') || '') : '';
     if (action.charAt(0) === '/') { snapshotForms(); send({ type: 'quilt:navigate', href: action }); }
   }, true);
-  // 画布级快捷键在预览文档里按下时转发给父页：Esc 退出、Alt+← 后退、⌘E 选择元素、⌘/ 输入框
+  // 画布级快捷键在预览文档里按下时转发给父页：Esc 退出、Alt+← 后退、⌘E 选择元素、⌘/ 输入框、⌘K 找屏
   document.addEventListener('keydown', function (e) {
     var mod = e.metaKey || e.ctrlKey;
-    if (e.key === 'Escape' || (e.altKey && e.key === 'ArrowLeft') || (mod && (e.code === 'KeyE' || e.code === 'Slash'))) {
+    if (e.key === 'Escape' || (e.altKey && e.key === 'ArrowLeft') || (mod && (e.code === 'KeyE' || e.code === 'Slash' || e.code === 'KeyK'))) {
       e.preventDefault();
       send({ type: 'quilt:key', key: e.key, code: e.code, altKey: e.altKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey });
     }
@@ -154,7 +158,7 @@ export const RUNTIME_JS = String.raw`(function () {
   function placeBadge(m) { var r = m.el.getBoundingClientRect(); m.badge.style.left = Math.max(0, r.left) + 'px'; m.badge.style.top = Math.max(0, r.top - 18) + 'px'; }
   function unmark(qid) { var m = marks[qid]; if (!m) return; m.el.style.outline = m.prev.outline; m.el.style.outlineOffset = m.prev.offset; m.badge.remove(); if (m.timer) clearTimeout(m.timer); delete marks[qid]; }
   function mark(qid, kind) {
-    var el = document.querySelector('[data-qid="' + qid + '"]');
+    var el = scope().querySelector('[data-qid="' + qid + '"]');
     if (!el) { unmark(qid); return; }
     var m = marks[qid];
     if (m && m.el !== el) { unmark(qid); m = null; }
@@ -211,10 +215,10 @@ export const RUNTIME_JS = String.raw`(function () {
     var msg = e.data || {};
     if (msg.type === 'quilt:mode') { mode = msg.mode === 'inspect' ? 'inspect' : 'interact'; if (mode !== 'inspect') { highlight(null); setSelection(null); } setPierce(mode === 'inspect'); document.body.style.cursor = mode === 'inspect' ? 'crosshair' : ''; return; }
     // 父页的选中状态是事实源：选中 / 清空都同步到常驻框
-    if (msg.type === 'quilt:highlight') { setSelection(msg.qid ? document.querySelector('[data-qid="' + msg.qid + '"]') : null); return; }
+    if (msg.type === 'quilt:highlight') { setSelection(msg.qid ? scope().querySelector('[data-qid="' + msg.qid + '"]') : null); return; }
     // 热更新后重选：同一 qid 还在就回一份新值（检查器字段跟着刷）并把常驻框接回去，不在了让父页清空
     if (msg.type === 'quilt:reselect') {
-      var el = document.querySelector('[data-qid="' + msg.qid + '"]');
+      var el = scope().querySelector('[data-qid="' + msg.qid + '"]');
       if (el) { if (mode === 'inspect') setSelection(el); send(selection(el)); } else send({ type: 'quilt:deselect', qid: msg.qid });
       return;
     }
@@ -231,8 +235,6 @@ export const RUNTIME_JS = String.raw`(function () {
       // document.open 不换 window——__quiltState 与要恢复的滚动位置都留得住；先摘掉本份监听，否则重写后的新运行时与这一份会各收一次消息
       window.removeEventListener('message', onMessage);
       state.__scrollY = y;
-      // 整份重写：本份运行时随之作废，排队的压层交给新文档里的运行时（__quiltState 跨 document.open 保留）
-      state.__overlayQueue = queued;
       document.open(); document.write(msg.html); document.close();
       return;
     }

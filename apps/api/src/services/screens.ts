@@ -4,7 +4,7 @@ import { problems } from '../lib/errors.ts';
 import { storage, objectKeys } from '../lib/storage.ts';
 import { config } from '../config.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
-import { extractLinks, extractBody, outlineBody, componentNamesIn, type RevisionDto, type SourceKind, type CandidatesDto, DEVICE_SIZE, type DeviceType } from '@quilt/core';
+import { extractLinks, extractBody, outlineBody, componentNamesIn, type RevisionDto, type SourceKind, type CandidatesDto, DEVICE_SIZE, type DeviceType, type Presentation } from '@quilt/core';
 import { ownedProject, type ScreenRow, type RevisionRow, type ProjectRow } from './projects.ts';
 
 type Tx = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -196,6 +196,15 @@ export async function deleteScreen(projectId: string, screenId: string): Promise
     await deriveLinks(tx, projectId);
   });
   for (const id of family) await storage.deletePrefix(`projects/${projectId}/screens/${id}/`).catch((e) => console.warn(`[delete screen] ${id}: ${(e as Error).message}`));
+}
+
+// 呈现方式（v0.63）是整个家族的：变体是同一屏的另一个状态，播放按默认屏的路由找屏，所以默认屏改了变体跟着改。
+// 截图按呈现方式拍（整屏不透明、叠层透明底），家族里每屏当前修订的截图作废，返回要重拍的修订由调用方在事务外入队
+export async function setFamilyPresentation(tx: Tx, screenId: string, presentation: Presentation): Promise<string[]> {
+  const rows = await tx.update(schema.screens).set({ presentation, updatedAt: new Date() }).where(or(eq(schema.screens.id, screenId), eq(schema.screens.variantOf, screenId))).returning({ rev: schema.screens.currentRevisionId });
+  const revs = rows.map((r) => r.rev).filter((r): r is string => !!r);
+  if (revs.length) await tx.update(schema.screenRevisions).set({ screenshotKey: null }).where(inArray(schema.screenRevisions.id, revs));
+  return revs;
 }
 
 // 删屏时样板屏指针要跟着清（不建外键）

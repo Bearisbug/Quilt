@@ -92,7 +92,7 @@ function parseJsonObject<T>(text: string): T {
 function parsePlan(text: string): Plan {
   const plan = parseJsonObject<Plan>(text);
   if (!Array.isArray(plan.screens) || plan.screens.length === 0) throw new Error('empty plan');
-  return plan;
+  return { ...plan, screens: plan.screens.map((p) => ({ ...p, presentation: p.presentation === 'overlay' ? 'overlay' as const : 'push' as const })) };
 }
 function parseOne(text: string): PlannedScreen & { entryFrom?: string | null } {
   const o = parseJsonObject<Partial<PlannedScreen> & { entryFrom?: string | null }>(text);
@@ -106,15 +106,17 @@ async function registry(ctx: Ctx): Promise<RegistryEntry[]> {
   const rows = await db.select({ route: schema.screens.route, name: schema.screens.name, purpose: schema.screens.purpose }).from(schema.screens).where(and(eq(schema.screens.projectId, ctx.project.id), isNull(schema.screens.variantOf))).orderBy(schema.screens.createdAt);
   return rows.map((r) => ({ route: r.route, name: r.name, purpose: r.purpose || undefined }));
 }
-// 参考屏合计 ≤ 40 KB（≈ 10K token 预算里给参考屏的份额），超了先丢来源屏
+// 参考屏合计 ≤ 40 KB（≈ 10K token 预算里给参考屏的份额），超了先丢排在后面的：一般是来源屏；
+// 出变体时默认屏排第一、样板屏在后——变体要照着默认屏改状态，丢了它模型就只能照样板屏重画整屏
 const REF_BUDGET = 40 * 1024;
-async function references(ctx: Ctx, opts: { sourceScreenId?: string | null } = {}): Promise<ReferenceScreen[]> {
+async function references(ctx: Ctx, opts: { sourceScreenId?: string | null; variant?: boolean } = {}): Promise<ReferenceScreen[]> {
   const out: ReferenceScreen[] = [];
   const ex = await exemplarBody(ctx.project);
   if (ex) out.push({ label: 'exemplar screen (the project\'s style anchor)', body: ex.body });
   if (opts.sourceScreenId && opts.sourceScreenId !== ex?.screenId) {
     const b = await currentBody(opts.sourceScreenId);
-    if (b) out.push({ label: 'source screen (the screen that links into the new one)', body: b });
+    if (b && opts.variant) out.unshift({ label: 'default screen (the new screen is this same screen in another state)', body: b });
+    else if (b) out.push({ label: 'source screen (the screen that links into the new one)', body: b });
   }
   while (out.reduce((n, r) => n + r.body.length, 0) > REF_BUDGET && out.length > 1) out.pop();
   return out;
@@ -240,7 +242,7 @@ async function runGenerate(ctx: Ctx) {
   const reg = await registry(ctx);
   const sourceId = base?.id ?? input.fromScreenId ?? existingRows.find((s) => s.route === entryFrom)?.id ?? null;
   // 共享组件卡（REQ-EDIT-006）：每个组件一张卡，框选的那些附完整 HTML
-  const system = screenSystemPrompt(a, ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], reg, await references(ctx, { sourceScreenId: sourceId }), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds }));
+  const system = screenSystemPrompt(a, ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], reg, await references(ctx, { sourceScreenId: sourceId, variant: !!base }), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds }));
   const tasks = created.flatMap((c) => Array.from({ length: versions }, (_, i) => ({ c, i })));
   try {
     await pool(tasks, config.screenConcurrency, async ({ c, i }) => {
@@ -259,9 +261,10 @@ async function runGenerate(ctx: Ctx) {
   }
   // 新屏一落地就派生应用地图：懒生成补的那张屏此刻已能解析断链，不必等后面的反向连线跑完
   if (ctx.produced.length) await db.transaction((tx) => deriveLinks(tx, ctx.project.id));
-  // 样板屏（REQ-CORE-016）：没钦定过就以本次第 1 屏为默认
-  if (!ctx.project.exemplarScreenId && created[0]) {
-    await db.update(schema.projects).set({ exemplarScreenId: created[0].screenId }).where(and(eq(schema.projects.id, ctx.project.id), sql`${schema.projects.exemplarScreenId} is null`));
+  // 样板屏（REQ-CORE-016）：没钦定过就以本次第 1 张整屏默认屏为默认——变体是某个状态、叠层是透明弹层，都当不了风格锚点
+  const pin = base ? undefined : created.find((c) => c.s.presentation !== 'overlay');
+  if (!ctx.project.exemplarScreenId && pin) {
+    await db.update(schema.projects).set({ exemplarScreenId: pin.screenId }).where(and(eq(schema.projects.id, ctx.project.id), sql`${schema.projects.exemplarScreenId} is null`));
   }
   // 反向连线（REQ-CORE-014）：对入口屏跑一次补链；入口屏此刻被用户改了（修订冲突）就跳过，不让整个造屏失败
   const entry = entryFrom ? existingRows.find((s) => s.route === entryFrom) : null;

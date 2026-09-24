@@ -18,18 +18,11 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-09-24 | 设计文档 v0.67（100 屏画布卡顿）：`TC-CORE-008` 重写——2 倍屏上下文、16 ms 连发滚轮、性能追踪断言每帧 GPU 主线程 ≤ 4 ms 与布局 ≤ 0.5 ms、结构检查（无 SVG 文字 / 小地图是 canvas / 停下后摘 will-change），原「首屏 img 请求数」「新进入视口 500 ms 内出图」两步随之去掉（100 屏骨架项目没有截图可数）；`TC-CORE-040` 第 6、7b 步改读小地图 canvas 的 `data-screens` / `data-view` | @bug |
+| 2026-09-23 | 设计文档 v0.66（新功能审查缺陷回写）：`TC-CORE-040` 增 7b–7f 步（拖视口框 1:1 不失控、聚焦时小地图隐藏、iframe 内 `⌘K`、关面板焦点归还、选中行滚入视野）；`TC-CORE-041` 增 1b（变体不被钉成样板）、4 步补胶囊不压角标、6b（呈现方式按家族改、变体上改 422、家族截图重拍）；`TC-PROTO-012` 增 1b（给叠层出变体）、5d–5f（脚本重跑不报已声明、叠层下底屏更新关层即见、标记落在叠层、叠层上切变体只换那一层）、6c（导出直开叠层 hash 垫起始屏） | @bug |
 | 2026-09-23 | e2e 等待改为轮询（审查第 27 项，用例步骤与预期不变）：`tests/e2e/lib.ts` 增 `eventually(check, 5000)`，core / proto / edit / components 四套里 64 处「固定睡一段再断言」改为轮询到断言成立（最多 5 s）；确认「某件事没有发生」的 12 处（单键不开面板、被拦下不发请求、Esc 不清选中、名字没被改等）与「断言之后紧接着读新页面」的 1 处（`TC-PROTO-005` 导出逐屏点链接，要等 view transition 换完 DOM）保留固定等待；固定等待总数 163 → 107，余下为动画让步与「点完读坐标再断言」 | @bug |
 | 2026-09-23 | 设计文档 v0.65（审查缺陷回写）：`TC-AGENT-011` 第 7b 步 `append_upload` 带 `offset`，增第 7c 步（qid 对齐、重发同一段 409、上传位用后即清、超单屏上限 422、组件副本报出、`get_project` 紧凑）、第 8a 步（造变体后 `link_screens` 变体 422、默认屏改路由变体跟随、变体上有作业时删默认屏 409），第 8 步增「已取消作业的 jobId 写屏 409」；`TC-PROTO-012` 第 5 步改为「后退到叠层时底下是来处」，增 5b（叠层关闭链接）、5c（热更新后屏内脚本执行）、6b（导出叠层栈 0/1/0/1/0）；`TC-CORE-040` 第 8 步改为用空格重新打开小地图；`TC-CORE-041` 增 5b（切到变体后直改落在变体上、输入框 Esc 不退出聚焦）；`TC-CORE-010` / `011` 预览 host 改从 `/v1/config` 取 | @bug |
 | 2026-09-23 | 设计文档 v0.64（MCP 写屏改小步）：`TC-AGENT-011` 第 1 步工具数改 54、增第 7b 步（`patch_screen` 改一处 / 缺锚点与多处匹配 422 不落库 / `all` 全换 / 旧基线 409；`append_upload` 三段建屏；非法 `uploadId` 被拒）；第 2 步与 `TC-AGENT-003` 的 `get_screen` 断言改为「只给带 qid 的 body、不带 prelude」 | @bug |
-| 2026-09-23 | 设计文档 v0.63（叠层屏 `REQ-PROTO-005`）：新增 `TC-PROTO-012`（设为叠层落库与预览注入透明底、播放压层、后退只关层、从层跳 push 屏清层、导出模板带 `data-presentation`） | @bug |
-| 2026-09-23 | 设计文档 v0.62（状态变体 `REQ-CORE-025`）：新增 `TC-CORE-041`（出变体落位、地图 / 注册表 / 导出只认默认屏、卡片标签、聚焦切状态不动镜头、变体改路由 422、删默认屏级联） | @bug |
-| 2026-09-23 | 设计文档 v0.61（找屏与总览 `REQ-CORE-024`）：新增 `TC-CORE-040`（⌘K 跳屏居中且 ≤ 1:1、⌥S 屏列表筛选与跳转、小地图矩形 / 视口框 / 点击平移 / 开关） | @bug |
-| 2026-09-23 | 设计文档 v0.60（工程底座）：§5 增「单测轮」、§3 增单测说明；`TC-AGENT-011` 第 1 步工具数改 52、第 4 步改为合并后的 `adopt_candidate { jobId, index, screenId? }`（增「作业没给这屏出过候选 → 404」）、第 7 步改为 `create_upload_url` 按 `mediaType` 分流并增「不带 mediaType 给 uploadId」与「图片缺 `bytes` → 400」；浏览器用例脚本零改动（前端只是拆文件）；变更记录只留最近 5 条，更早的移入 `docs/CHANGELOG.md` | @bug |
-| 2026-09-22 | 设计文档 v0.59（改文案联动无障碍名）：`TC-EDIT-012` 第 11 步增三条断言——一致时联动、邻条不受影响、刻意不同时不动。这是 v0.57 记进遗留问题的那一条，现已收口，遗留问题里相应删去 | @bug |
-| 2026-09-22 | 设计文档 v0.58（今天这批功能的缺陷回写）：`TC-EDIT-012` 第 11 步增「改完一个元素后不退出、直接改第二个」与「组件被 edit_component 占着时直改报 component-busy」两条；`TC-CORE-023` 第 12 步增「改窗口大小后工具条要重量、任何视口下控件都可点」；`TC-CORE-007` 第 7 步增「平移后立刻刷新不丢位置」与「切到没打开过的项目不得用上一个项目的屏算适配」 | @bug |
-| 2026-09-22 | 设计文档 v0.57 补测：`TC-EDIT-012` 第 11 步把「退出路径逐条查残留」写成断言。用户报「退出后样式还在」，实测两条路径确实留着：`⌘E` 在焦点落于组件 iframe 内时根本没到父页（组件分支只转发了 Escape），以及离开时没给组件运行时发回 `interact`（屏是靠卸载 iframe 自然清掉的） | @bug |
-| 2026-09-22 | 设计文档 v0.57（组件里也能选元素直改）：`TC-EDIT-012` 增第 11 步。两条断言是这轮实测踩出来的：① 文案框要读得到文字——组件给 `<span>` 写了 `pointer-events:none`、命中全落外层 `<label>` 时，选中的会是没有直接文案的 label，保存文案会在它下面挂一个游离文本节点；② 面板里不能有「记为共享组件」与子树重生成，组件里套组件本来就被硬校验拒掉 | @bug |
-| 2026-09-22 | 设计文档 v0.56（组件交互态角标换绿点）：`TC-EDIT-012` 第 9 步的角标断言改为「右上出现 `.live-dot` 呼吸绿点、带 `aria-label="交互中"`」，文字角标不再存在 | @bug |
 
 ## 2. 测试范围 / 不测什么
 
@@ -247,13 +240,13 @@
 
 #### `TC-CORE-008` 100 屏截图画布平移缩放帧率 — 对应 `REQ-CORE-004` · 级别: 边缘 · 执行者: AI
 
-前置：`pnpm seed:project --name Big --device mobile --screens 100`；打开该项目；Playwright 已开启 CDP 性能采样。
+前置：`pnpm seed:project --name Big --device mobile --screens 100 --no-shot`（100 张骨架卡带循环动画，也是生成中的大项目的样子）；单开一个 1440×900、**设备像素比 2** 的浏览器上下文（Mac 的像素比；1 倍屏的光栅量只有四分之一，量不出真机的 GPU 压力）打开该项目，点「适配视图」；CDP 开性能追踪（含 `toplevel,cc,gpu` 类别）。
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
-| 1 | 等待画布首屏加载完成 | 视口内卡片显示截图；网络面板中 `img` 请求数小于 100（视口外卡片未加载图片） |
-| 2 | 连续 10 s 执行平移与缩放（每 100 ms 一次滚轮或拖拽） | 采样帧率平均 ≥ 55 fps；期间无长任务超过 100 ms |
-| 3 | 平移到之前视口外区域 | 新进入视口的卡片在 500 ms 内显示截图 |
+| 1 | 滚轮平移 60 次、`Ctrl`+滚轮缩放 60 次，每次间隔 16 ms | rAF 帧率 ≥ 55 fps；无超过 100 ms 的长任务 |
+| 2 | 汇总追踪：`CrGpuMain` 线程 `RunTask` 总时长、`Layout` 总时长，各除以帧数 | GPU 主线程每帧 ≤ 4 ms、布局每帧 ≤ 0.5 ms（无头下 rAF 恒为 58～60，帧率看不出 GPU 超预算，靠这两条拦） |
+| 3 | 停下 400 ms 后查 DOM | 世界层里没有 SVG `<text>`；小地图是 `<canvas>`；世界层不带 `moving` 类（`will-change` 已摘） |
 
 后置：无。
 
@@ -415,8 +408,13 @@
 | 3 | `⌥S` | 屏列表面板（`screens-list`）滑出，4 行（`screens-row`） |
 | 4 | 点筛选片「断链」（`screens-filter-dangling`） | 只剩 /s1 一行，片 `aria-pressed=true` 且计数 1 |
 | 5 | 点那一行 | /s1 被单选并进入视野；再按 `⌥S` 收起面板 |
-| 6 | 看小地图（`minimap`） | 4 个 `minimap-screen` 矩形 + 1 个 `minimap-view` 视口框 |
-| 7 | 点小地图最左侧空白 | 视口框的 `x` 变小，世界层 transform 的 x 变大（镜头往左平移） |
+| 6 | 看小地图（`minimap`，canvas 绘制） | `data-screens=4`，`data-view` 给出视口框在小地图里的位置 |
+| 7 | 点小地图里视口框外的空白（框左边有空点左边，否则点右边） | 镜头朝那边平移：点左边世界层 transform 的 x 变大，点右边变小 |
+| 7b | 按住视口框（`data-view` 算出的位置）中心，向左拖 20 px，再原地左右抖 20 次 1 px，松开 | 按下时视口框 `x` 不变（不跳到指针下）；拖动后世界层 x 变大；抖动前后世界层 x 相差 ≤ 2 px（镜头不自己跑） |
+| 7c | 双击 /s1 聚焦 | 小地图不渲染；退出聚焦后回来 |
+| 7d | 聚焦中把焦点放进 iframe 里的输入框，按 `⌘K`，再 `Esc` 两次 | 跳屏面板打开（运行时转发 `⌘K`）、关闭；第二次 `Esc` 退出聚焦 |
+| 7e | 点工具栏「找屏」（`find-screen`），`Esc` | 面板关闭后焦点回到「找屏」键 |
+| 7f | 视口高度改 260 px，`⌘K`，`↓` 三次 | 选中行（`aria-selected=true`）在列表可视区内 |
 | 8 | 工具栏「小地图」（`toggle-minimap`）点一次；再把焦点放在这个键上按空格 | 第一次小地图消失；空格激活该键（不被画布平移吃掉），小地图回来 |
 
 后置：无。
@@ -428,12 +426,14 @@
 | # | 操作 | 预期 |
 | --- | --- | --- |
 | 1 | 点 /s1 卡片 → 工具栏「出变体」（`new-variant`）→ 状态名填「空态」→「出变体」（`variant-create`） | toast「正在出「Screen 1」的「空态」变体」；60 s 内 `GET /v1/projects/{id}` 多出一屏：`variantOf=/s1 的 id`、`variantName=空态`、`name=Screen 1 · 空态`、`route=/s1`，位置 y 同默认屏、x = 默认屏 x + 390 + 80 |
+| 1b | 看 `GET /v1/projects/{id}` 的 `project.exemplarScreenId` | 不是变体的 id（样板屏只自动钉整屏默认屏） |
 | 2 | 看 `links` 与 `GET /v1/projects/{id}/app-map` | 指向 /s1 的链接 `toScreenId` 都是默认屏；地图 `nodes` 只有 3 个默认屏、不含变体 |
 | 3 | 看画布 | 变体卡（`.card[data-variant="true"]`）标签带「变体」片；/s1 默认屏卡标签含「1 个变体」 |
-| 4 | 双击 /s1 默认屏聚焦 | 卡内顶部中央出现两颗状态胶囊（`variant-chip`）「默认 / 空态」，「默认」`aria-pressed=true` |
+| 4 | 双击 /s1 默认屏聚焦 | 卡内顶部中央出现两颗状态胶囊（`variant-chip`）「默认 / 空态」，「默认」`aria-pressed=true`；胶囊条上沿不高于交互角标下沿（不重叠） |
 | 5 | 点「空态」胶囊 | 该胶囊变为按下；iframe 的 body 内容换成变体的、iframe 未重建；世界层 transform 不变（镜头不动）；角标仍写 /s1 |
 | 5b | `⌘E` → 点 iframe 里的 h1 → 检查器文案框填「Variant edited」→ 按 `Esc` → 点「保存（零 token）」 | Esc 后仍在聚焦、文案框草稿还在；保存后变体最新修订 `sourceKind=manual`，默认屏 `currentRevisionId` 不变 |
 | 6 | `PATCH /v1/screens/{变体}` `{ route }`；`PATCH /v1/screens/{默认屏}` `{ variantName }` | 都是 `422 /errors/validation` |
+| 6b | `PATCH /v1/screens/{变体}` `{ presentation: overlay }`；再 `PATCH /v1/screens/{默认屏}` `{ presentation: overlay }`；之后改回 push | 前者 `422`；后者 `200` 且变体的 `presentation` 同为 overlay；20 s 内两屏的截图内容都变了（按透明底重拍） |
 | 7 | `POST jobs kind=export_prototype` → 下载 | 单文件里只有 3 个 `<template data-route=`（不含变体） |
 | 8 | 选中 /s1 默认屏，`Delete` | 确认框写明「它的 1 个变体一起删除」；确认后项目剩 2 屏 |
 
@@ -791,14 +791,19 @@
 | # | 操作 | 预期 |
 | --- | --- | --- |
 | 1 | 点 /s2 卡片 → 工具栏「设为叠层」（`toggle-presentation`） | toast「已设为叠层屏」；/s2 卡片带 `overlay` 类与「叠层」片；`GET /v1/projects/{id}` 里 `presentation=overlay`；`GET` 它的 `previewUrl` 得到的文档含 `<style data-quilt-overlay>` |
+| 1b | `POST jobs kind=generate { variantOf: /s2, variantName: err }`（stub） | 作业成功，变体继承 overlay |
 | 2 | 双击 /s1 聚焦，点「Go to /s2」 | 角标 /s2；iframe 里多一层 `[data-quilt-overlay-layer="/s2"]`（内含 Screen 2 的 h1），底下 Screen 1 的 h1 仍在；iframe 未重建 |
 | 3 | `Alt+←` | 叠层消失，角标回 /s1 |
 | 4 | 再点「Go to /s2」，在层里点「Go to /s3」 | 层清空，DOM 换成 Screen 3，角标 /s3 |
 | 5 | `Alt+←` | 角标 /s2；iframe 里底下是 Screen 1、上面压一层 `/s2`（后退按导航栈重摆，v0.65） |
 | 5b | 在层里点指向 `/s1` 的链接 | 叠层消失、角标 /s1、底下仍是 Screen 1（叠层里指回来处的链接是关闭，不是再跳一次） |
 | 5c | 经 MCP `patch_screen` 给 /s1 加 `<p id="ran">no</p><script>…textContent="yes"</script>` | 15 s 内 iframe 里 `#ran` 变成 `yes`（热更新换进来的脚本会执行） |
+| 5d | 把脚本改成顶层 `const ranText = "yes"` 的写法，再 `patch_screen` 一次改别处 | 两次热更新后 `#ran` 都是 `yes`（同一个 window 里第二次执行顶层 `const` 不报已声明） |
+| 5e | 打开 /s2 叠层；在 iframe 里向自己发 `quilt:mark { working: [q1] }`；清掉标记后经 MCP 改 /s1；`Alt+←` | 带虚线描边的 q1 在叠层里；关层后底下的 /s1 是新版本 |
+| 5f | 再打开 /s2，点状态胶囊「err」；`Alt+←` | 仍只有一层叠层、层内容换成变体、底下 /s1 还在；后退后层消失 |
 | 6 | `POST jobs kind=export_prototype` → 下载 | 单文件里 /s2 的 `<template>` 带 `data-presentation="overlay"`，运行时含 `data-quilt-overlay-layer` 的压层逻辑 |
 | 6b | 把导出的单文件用浏览器打开，hash 依次 `#/s1` → `#/s2` → `#/s3` → `history.back()` → `history.back()` | 每步的叠层数与 `#quilt-root` 标题依次为 0·Screen 1、1·Screen 1、0·Screen 3、1·Screen 1、0·Screen 1 |
+| 6c | 新开一页直接打开 `导出文件#/s2`，再 `history.back()` | 先是 1 层叠层、底下 Screen 1；后退后 0 层、仍是 Screen 1，页面没离开这个文件 |
 
 后置：无。
 
@@ -1132,6 +1137,10 @@
 | RUN-109 | 2026-09-22 | 未提交工作树（设计文档 v0.57 补两处：离开时打回 interact、组件 iframe 转发 ⌘E/⌘/） | AI(Claude Code) | 边界轮（`TC-EDIT-012` 第 11 步；无头 Edge + 接口直调；临时建一个组件测 A→B 切换与错误码，跑完即删） | 通过 11/11（画布：选中后 `⌘E` 退出 ✅、`Esc` 退出 ✅、双击另一个组件后前一个复位 ✅、点画布空白 ✅、带选择态刷新 ✅、只进不选就退出 ✅、退出后未聚焦的卡片点 tab 不响应（手势罩盖着）✅，六条路径组件文档里都不留选中框 / 标签 / pointer-events 样式 / crosshair；接口：版本冲突 409 `/errors/version-conflict` ✅、qid 不存在 404 `/errors/element-not-found` ✅、删根元素 400 `/errors/validation` 拒掉 ✅、`detach` 被 schema 拒掉 ✅。修掉的两条都是这轮打出来的：`⌘E` 在组件 iframe 内是死键（只转发了 Escape）、离开时没把组件运行时打回 interact。临时组件已删（204）） |
 | RUN-110 | 2026-09-22 | 未提交工作树（设计文档 v0.58：10 条缺陷修复），开发 API 重启后 | AI(Claude Code) | 缺陷轮（多 agent 审查 5 个子系统 + 对抗验证给出 14 条确认项，去重后 10 个不同缺陷，逐条修复并实测） | 通过 10/10（① 选中卡片后再点内部按钮上报 q1→q2（修前第二次点击完全无效）；② 提取建组件 qid 数 3（修前 0）；③ 组件重载后光标仍 crosshair、pierce 仍在；④ 删掉激活那条链接后 active/inactive 类对仍是 `text-primary font-bold` / `text-on-surface-variant`（修前变 null|null）；⑤ 惯性平移后立刻刷新 transform 逐字符一致；⑥ 画布渲染正常、不卡在加载态；⑦⑧ 1440→820→390→1440 四档「点不到的控件」均为空数组，`data-bar` 随之在 wrap / null 间正确切换；⑨ `overflow: clip / 32px`；⑩ 作业跑着时直改 409 `/errors/component-busy`。过程中发现一次**重启假成功**：kill 后旧进程仍占着 3100，新进程 EADDRINUSE 当场退出而 `/v1/health` 照常应答，导致第一轮验证测的还是旧代码——重启脚本改为轮询确认端口空闲后再起。验证用的三个临时项目已删，剩余项目为 Ofcourt / Ofcourt Merchant / Omnivia / Demo Desktop） |
 | RUN-115 | 2026-09-23 | 未提交工作树（设计文档 v0.65 + e2e 等待改轮询） | AI(Claude Code) | 全量（CORE / PROTO / EDIT / COMPONENTS 四套整套，`LIVE_LLM=0`）+ 与 HEAD（`git worktree` 于 `7c8053d`，同一测试库与隔离端口）对照每一条新失败。隔离栈 3200 / 3201 + `quilt_test` + stub + 打包形态；本机负载 1 分钟均值 9～40（25 个会话） | 通过 43/57（另跳过 / 待人工 2）· 失败 14：需真实模型 6（`TC-CORE-005` / `012`、`TC-PROTO-004` / `009`、`TC-EDIT-003` / `008`）、HEAD 同现 6（`TC-CORE-011` / `023` / `035` / `037`、`TC-EDIT-002` / `006`）、环境 1（`TC-CORE-027` 无支持视觉的云端通道）、整套顺序下偶发 1（`TC-CORE-029`，单跑与「028 + 029」组合通过，见明细） |
+| RUN-116 | 2026-09-23 | 未提交工作树（设计文档 v0.66：新功能审查 19 条缺陷回写） | AI(Claude Code) | 单测轮 34/34；e2e 局部轮 `TC-CORE-040` / `TC-CORE-041` / `TC-PROTO-012`（含本版新增步）+ 与 HEAD（`git worktree` 于 `ea87fe5`，同一测试库与隔离端口）对照新增断言。隔离栈 3200 / 3201 + `quilt_test` + stub + 打包形态 | 通过 3/3。HEAD 上同一批断言失败：拖小地图视口框按下即跳、原地抖动世界层 x −64 → 162；聚焦时小地图不隐藏；iframe 内 `⌘K` 打不开面板；胶囊压角标 19 px；变体改呈现方式不拒、家族截图不重拍；叠层下底屏更新关层后仍是旧版；叠层上切变体后底屏消失；导出直开 `#/s2` 后退离开文件。脚本重跑报「已声明」另用探针在 HEAD 预览里复现（同一份含顶层 `const` 的屏 swap 三次，脚本只跑成 1 次、2 次 `Identifier 'probeK' has already been declared`） |
+| RUN-117 | 2026-09-23 | 同 RUN-116 | AI(Claude Code) | 全量（CORE / PROTO / EDIT / COMPONENTS 四套整套，`LIVE_LLM=0`），同一隔离栈；本机 1 分钟负载 40～70 | 首轮失败 17：需真实模型 6（`TC-CORE-005` / `012`、`TC-PROTO-004` / `009`、`TC-EDIT-003` / `008`）、与 RUN-115 同列 HEAD 同现 5（`TC-CORE-023` / `035` / `037`、`TC-EDIT-002` / `006`；`TC-CORE-011` 本轮通过）、环境 1（`TC-CORE-027`）、整套顺序下偶发 5（`TC-CORE-029`、`016`、`017`、`TC-EDIT-001`、`TC-EDIT-012`，后四条单跑或按 013→017 连跑全部通过，见明细） |
+| RUN-119 | 2026-09-24 | 未提交工作树（设计文档 v0.67：100 屏画布卡顿 + 对话记录让开小地图） | AI(Claude Code) | 单测轮 34/34；e2e 局部轮 `TC-CORE-008`（重写后）× 3 + 与改动前前端（`git worktree` 于 `ea87fe5` 构建 web，同一 API / 测试库）对照。隔离栈 3200 / 3201 + `quilt_test` + stub | 通过 3/3（每帧 GPU 主线程 1.7 / 1.8 / 1.9 ms，布局 0.02 ms，60 fps，长任务 0）。改动前前端同一用例失败：每帧 GPU 主线程 7.6 ms；结构检查报 SVG 文字 492 个、小地图是 svg。另用追踪脚本在带截图的 100 屏项目上量（60 步合计）：平移 GPU 主线程 920 → 98 ms、缩放 561 → 242 ms、缩放页面主线程 802 → 约 260 ms、缩放布局 166 → 10 ms；放大到 200% 停下 400 ms 后的画面与刷新后直接渲染逐像素一致（摘掉 will-change 后按最终比例重画，文字不虚） |
+| RUN-120 | 2026-09-24 | 同 RUN-119 | AI(Claude Code) | 局部轮（受影响：`TC-CORE-007` / `023` / `024` / `029` / `030` / `034` / `040`、`TC-PROTO-007` / `008`）+ 对话记录与小地图几何实测（1440×900 / 1440×700，18 条消息） | 通过 8/9；`TC-CORE-023` 失败（「叫回后安全区底部没复原」，RUN-115 起与改动前代码同现，§7 已登记）。几何：700 高时小地图下沿 176 px、对话记录上沿 188 px；关掉小地图后上沿 111 px；900 高时两者本不相交、位置不变 |
 | RUN-114 | 2026-09-23 | 未提交工作树（设计文档 v0.65：审查缺陷回写） | AI(Claude Code) | 单测轮 34/34；e2e 局部轮：`TC-AGENT-011`（含新增 7c / 8a）、`TC-AGENT-003` / `004`；`TC-PROTO-001` / `012`（含新增 5～6b）；`TC-CORE-007` / `010` / `011` / `018` / `023` / `034` / `036` / `040` / `041`（含新增断言）；`TC-EDIT-001` / `005` / `007` / `012`。隔离栈 3200 / 3201 + `quilt_test` + stub + 打包形态，逐套串行 | 通过 18/19 · 失败 1（`TC-CORE-023`，与 RUN-112 同一步、HEAD 同现，判环境） |
 | RUN-113 | 2026-09-23 | 未提交工作树（设计文档 v0.64：MCP 写屏改小步——`patch_screen` / `append_upload`、`get_screen` 只给 body） | AI(Claude Code) | 局部轮（`REQ-AGENT-002` → `TC-AGENT-011` 全部步骤含新增 7b；`get_screen` 口径变化波及的 `TC-AGENT-003` / `004`）。隔离环境 3200 / 3201 + `quilt_test` + stub，纯 MCP / API，未托管前端 | 通过 2/3 · 失败 1（`TC-AGENT-003`：MCP 部分——`get_screen` 只给 body、截图就绪——已过，随后打开浏览器页 `locator.waitFor` 超时：本栈没托管前端，判环境） |
 | RUN-112 | 2026-09-23 | 未提交工作树（设计文档 v0.60 工程底座 + v0.61 找屏与总览 + v0.62 状态变体 + v0.63 叠层屏） | AI(Claude Code) | 单测轮 `pnpm test` 31/31；e2e 局部轮（新增 `TC-CORE-040` / `041`、`TC-PROTO-012`；重构影响面：`TC-CORE-003` / `007` / `012` / `018` / `023` / `034` / `036`、`TC-EDIT-001` / `005`、`TC-AGENT-001` / `003` / `004` / `011`）。隔离环境：3200 / 3201 + `quilt_test` + stub 驱动 + 打包形态（`WEB_DIST` + `WEB_ORIGIN=3200`，§3），3100 / 5173 归另一会话 | 通过 15/17 · 失败 1（`TC-CORE-023`，HEAD 同现、判环境）· 未跑 1（`TC-EDIT-008` 需真实模型）· 跳过 / 待人工 2（`TC-AGENT-009` / `010`） |
@@ -1193,6 +1202,8 @@
 
 | 轮次 | 用例 | 结果 | 现象 / 证据 | 跟进 |
 | --- | --- | --- | --- | --- |
+| RUN-117 | TC-CORE-016 / TC-CORE-017 | 失败 → 通过 | 016「在途预估应比之前多 8 屏，实际 3 → 10」：开跑时已有 3 屏在途，是前序用例的作业在高负载下还没收口；016 失败时没走到释放那步，留下的 running 种子作业让 017 的 `seed:job` 撞上项目级在跑作业唯一索引 | 复测：`ONLY=TC-CORE-013..017` 连跑 5/5 通过；本版没改作业与用量路径，不跟进 |
+| RUN-117 | TC-EDIT-001 / TC-EDIT-012 | 失败 → 通过 | EDIT-001 等检查器 8 s 超时；EDIT-012「点『改组件』后输入框没获得焦点」（断言是一次性读 `activeElement`，不轮询） | 单跑均通过（EDIT-001 保存响应 230 ms）；负载 60～70 下的时序问题，本版的 `useModal` 焦点归还不经过这条路径（改组件不开弹层） |
 | RUN-115 | 全部 | — | 第一次整套跑到 `TC-CORE-035` 时 Docker Desktop 整体退出，Postgres 容器随之停止（`ECONNREFUSED 127.0.0.1:5439`），后续用例与三套全部连坐失败；3100 开发实例同时因连不上库退出 | 重新拉起 Docker 与 `quilt-pg`，核对开发库完好（5 个项目、34 屏），重启隔离 API 后整套重跑 |
 | RUN-115 | TC-PROTO-012 | 失败 → 通过 | 第 5 步「后退到叠层时底下应是 /s1」稳定失败（RUN-114 通过是时序凑巧）：父页后退穿过叠层时先发整屏换、紧跟着发压层，而运行时换整屏在 view transition 回调里异步执行——叠层挂上了即将被换掉的旧 body、随之消失 | 产品修复：运行时换屏未落地时压层请求排队、换完再压（整份重写路径经 `__quiltState` 交给新文档）；设计文档 v0.65 ⑱ 补充 |
 | RUN-115 | TC-PROTO-005 | 失败 → 通过 | 改轮询后「hash 未变为 #/s2」：原固定等待除了等 hash，还在等下一轮点击前 view transition 换完 DOM；轮询只等到 hash，下一轮读到旧页面的链接。HEAD 上通过 | 测试更正：这一处退回固定等待并写明原因 |

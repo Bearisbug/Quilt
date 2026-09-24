@@ -6,7 +6,7 @@ import { db, schema } from '../../db/client.ts';
 import { problems, isUniqueViolation } from '../../lib/errors.ts';
 import { storage } from '../../lib/storage.ts';
 import { parseBody, requireUser, type Env } from '../app.ts';
-import { ownedScreen, hasActiveJob, createRevision, deriveLinks, listRevisions, getRevision, revisionDto, adoptCandidate, deleteScreen } from '../../services/screens.ts';
+import { ownedScreen, hasActiveJob, createRevision, deriveLinks, listRevisions, getRevision, revisionDto, adoptCandidate, deleteScreen, setFamilyPresentation } from '../../services/screens.ts';
 import { screenDtos } from '../../services/projects.ts';
 import { enqueueScreenshot } from '../../services/jobs.ts';
 import { jobDto } from '../../services/projects.ts';
@@ -19,12 +19,16 @@ screenRoutes.patch('/v1/screens/:screenId', async (c) => {
   const user = requireUser(c);
   const { screen, project } = await ownedScreen(user.id, c.req.param('screenId'));
   const patch = await parseBody(c, updateScreenSchema);
-  // 变体（v0.62）：路由属于默认屏，变体改不了；变体名只对变体有意义。呈现方式（v0.63）是元数据，直接落列
+  // 变体（v0.62）：路由与呈现方式属于默认屏，变体改不了；变体名只对变体有意义
   if (patch.route !== undefined && screen.variantOf) throw problems.unprocessable([{ path: 'route', message: '变体与默认屏同路由，改路由请改默认屏' }]);
+  if (patch.presentation !== undefined && screen.variantOf && patch.presentation !== screen.presentation) throw problems.unprocessable([{ path: 'presentation', message: '变体随默认屏的呈现方式，改呈现方式请改默认屏' }]);
   if (patch.variantName !== undefined && !screen.variantOf) throw problems.unprocessable([{ path: 'variantName', message: '只有变体才有状态名' }]);
+  const { presentation, ...rest } = patch;
+  let reshoot: string[] = [];
   try {
     await db.transaction(async (tx) => {
-      await tx.update(schema.screens).set({ ...patch, updatedAt: new Date() }).where(eq(schema.screens.id, screen.id));
+      await tx.update(schema.screens).set({ ...rest, updatedAt: new Date() }).where(eq(schema.screens.id, screen.id));
+      if (presentation && presentation !== screen.presentation) reshoot = await setFamilyPresentation(tx, screen.id, presentation);
       if (patch.route && patch.route !== screen.route) {
         // 变体与默认屏同路由：默认屏改路由，变体跟着改
         await tx.update(schema.screens).set({ route: patch.route }).where(eq(schema.screens.variantOf, screen.id));
@@ -35,6 +39,7 @@ screenRoutes.patch('/v1/screens/:screenId', async (c) => {
     if (isUniqueViolation(e)) throw problems.routeTaken();
     throw e;
   }
+  for (const id of reshoot) await enqueueScreenshot(id);
   const [updated] = await db.select().from(schema.screens).where(eq(schema.screens.id, screen.id));
   return c.json({ screen: (await screenDtos(project, [updated]))[0] });
 });
@@ -91,7 +96,7 @@ screenRoutes.get('/v1/screens/:screenId/revisions/:revisionId', async (c) => {
   return c.json({ revision: await revisionDto(rev) });
 });
 
-// API-CORE-015：以旧版内容建新修订（source_kind=restore），截图直接复用旧版。
+// API-CORE-015：以旧版内容建新修订（source_kind=restore）。截图重拍：旧版的截图可能是按另一种呈现方式拍的（v0.63 切过整屏 / 叠层）
 screenRoutes.post('/v1/screens/:screenId/revisions/:revisionId/restore', async (c) => {
   const user = requireUser(c);
   const { screen, project } = await ownedScreen(user.id, c.req.param('screenId'));
@@ -102,11 +107,10 @@ screenRoutes.post('/v1/screens/:screenId/revisions/:revisionId/restore', async (
     if (await hasActiveJob(tx, project.id, screen.id)) throw problems.screenBusy();
     const r = await createRevision(tx, { projectId: project.id, screenId: screen.id, html, sourceKind: 'restore', lintReport: source.lintReport, expectedRevisionId });
     if (!r) throw problems.revisionConflict();
-    if (source.screenshotKey) await tx.update(schema.screenRevisions).set({ screenshotKey: source.screenshotKey }).where(eq(schema.screenRevisions.id, r.id));
     await deriveLinks(tx, project.id);
-    return { ...r, screenshotKey: source.screenshotKey };
+    return r;
   });
-  if (!rev.screenshotKey) await enqueueScreenshot(rev.id);
+  await enqueueScreenshot(rev.id);
   return c.json({ revision: await revisionDto(rev) }, 201);
 });
 

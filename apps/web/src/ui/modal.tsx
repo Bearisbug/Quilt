@@ -38,6 +38,8 @@ export function useModal<T extends HTMLElement>(
   opts: { initialFocus?: 'first' | 'self' } = {},
 ) {
   const ref = useRef<T>(null);
+  // 没指定归还目标时还给打开前的焦点（A11Y-004）：首次渲染时焦点还在触发处，effect 里读就晚了——子元素的 autoFocus 已经把它挪进弹层
+  const opener = useRef(document.activeElement as HTMLElement | null);
   // onClose 每次父组件重渲染都会换引用；用 ref 持有，陷阱只装一次，不然保存后列表刷新会把焦点甩回首字段
   const closeRef = useRef(onClose); closeRef.current = onClose;
   useEffect(() => {
@@ -66,7 +68,7 @@ export function useModal<T extends HTMLElement>(
       // 归还目标可能已被卸载（刚删掉那一行的「删除」键），也可能还在但已禁用（保存成功后的「保存」键）——
       // 后者 focus() 同样静默失败，所以按「焦点真的落上去了没有」判断，而不是只看它还在不在文档里
       if (layer) popLayer(layer);
-      const back = returnTo?.current;
+      const back = returnTo ? returnTo.current : opener.current;
       if (back?.isConnected) back.focus();
       if (document.activeElement !== back) fallback?.current?.focus();
     };
