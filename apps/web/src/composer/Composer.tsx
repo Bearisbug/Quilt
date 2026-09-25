@@ -2,7 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, u
 import { useNavigate } from 'react-router';
 import { Select } from 'radix-ui';
 import { ArrowUp, Check, ChevronDown, ChevronUp, ImagePlus, MapPin, Settings2, Square, X } from 'lucide-react';
-import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MAX_VERSIONS, SCREEN_COUNT_OPTIONS, estimateJob, type ScreenDto, type ComponentDto, type RunnerOptionDto, type AgentSessionDto, type ScreenCount } from '@quilt/core';
+import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MAX_VERSIONS, SCREEN_COUNT_OPTIONS, estimateJob, type ScreenDto, type ComponentDto, type RunnerOptionDto, type AgentSessionDto, type AgentTool, type ScreenCount } from '@quilt/core';
 import { IconButton } from '@/ui/ui';
 import { VendorIcon } from '@/ui/VendorIcon';
 
@@ -45,8 +45,11 @@ export type ComposerProps = {
   runners: RunnerOptionDto[];
   runnerId: string;
   onRunnerChange: (id: string) => void;
-  /** 本机 agent（REQ-AGENT-003 v0.34）：通道是「交给本机 Claude Code」时还要选投给哪个会话；列表打开时由父组件刷新，null = 还没取到 */
+  /** 本机 agent（REQ-AGENT-003 v0.34 / v0.68）：通道是「交给本机 Claude Code / Codex」时还要选投给哪个会话；列表打开时由父组件刷新，null = 还没取到；
+   *  sessionsReason：列表为什么是空的（例如读不到 Codex 线程库） */
   sessions: AgentSessionDto[] | null;
+  sessionsReason?: string;
+  sessionTool: AgentTool | null;
   sessionId: string;
   onSessionChange: (id: string) => void;
   onSessionsOpen: () => void;
@@ -372,7 +375,7 @@ export function Composer(p: ComposerProps) {
             </button>
           )}
           {/* 投递会话（REQ-AGENT-003 v0.34）：只在通道是本机 agent 时出现，与通道选择一样跨会话记忆 */}
-          {agentRunner && <SessionSelect sessions={p.sessions} value={p.sessionId} onChange={p.onSessionChange} onOpen={p.onSessionsOpen} />}
+          {agentRunner && <SessionSelect tool={p.sessionTool ?? 'claude-code'} sessions={p.sessions} reason={p.sessionsReason} value={p.sessionId} onChange={p.onSessionChange} onOpen={p.onSessionsOpen} />}
           {/* 参考图入口（REQ-CORE-012）。贴图与拖入同样可用，这个按钮是给不知道能贴的人看的 */}
           <input
             ref={fileRef} type="file" accept={IMAGE_MEDIA_TYPES.join(',')} multiple className="sr-only" tabIndex={-1}
@@ -499,13 +502,20 @@ export function RunnerSelect({ runners, value, onChange, disabled, testId = 'run
 const MANAGE_ID = '__manage_channels__';
 const ITEM_CLS = 'relative flex cursor-pointer select-none items-center gap-2 rounded-xl px-2.5 py-2 text-sm text-muted outline-none data-[highlighted]:bg-panel-2 data-[highlighted]:text-fg data-[state=checked]:text-fg';
 
-// 投递会话下拉（REQ-AGENT-003 v0.34）：本机正在运行的 Claude Code 交互式会话。起过名的显示名字，派生名（目录 + 后缀）显示会话 UUID；
-// 每项带目录名与 idle / busy。打开即让父组件重取列表；当前值不在列表里时显示占位「选择会话」（记住的会话已关闭）。
+// 投递会话下拉（REQ-AGENT-003 v0.34 / v0.68）。Claude Code：本机正在运行的交互式会话，起过名的显示名字、派生名（目录 + 后缀）显示会话 UUID，
+// 每项带目录名与 idle / busy。Codex：线程库里的用户线程，显示名字（没起过名就是标题），每项带目录名、开在哪个应用、已打开 / 未打开——
+// 未打开的投递时由 Codex 桌面版打开。打开即让父组件重取列表；当前值不在列表里时显示占位「选择会话」（记住的会话已关闭）。
 const basename = (p: string) => p.split('/').filter(Boolean).pop() ?? p;
-export function SessionSelect({ sessions, value, onChange, onOpen, disabled, testId = 'session-select' }: { sessions: AgentSessionDto[] | null; value: string; onChange: (id: string) => void; onOpen: () => void; disabled?: boolean; testId?: string }) {
+const APP_LABEL: Record<NonNullable<AgentSessionDto['app']>, string> = { desktop: '桌面版', vscode: 'VS Code', cli: '终端' };
+const SESSION_COPY: Record<AgentTool, { group: string; empty: string }> = {
+  'claude-code': { group: '本机正在运行的 Claude Code 会话', empty: '没有正在运行的 Claude Code 会话——在终端开着 claude 再来。' },
+  codex: { group: '本机 Codex 线程（未打开的投递时由桌面版打开）', empty: '没有 Codex 线程——在 Codex 里开一个对话再来。' },
+};
+export function SessionSelect({ tool = 'claude-code', sessions, reason, value, onChange, onOpen, disabled, testId = 'session-select' }: { tool?: AgentTool; sessions: AgentSessionDto[] | null; reason?: string; value: string; onChange: (id: string) => void; onOpen: () => void; disabled?: boolean; testId?: string }) {
   const items = sessions ?? [];
   const current = items.some((s) => s.sessionId === value) ? value : undefined;
-  const label = (s: AgentSessionDto) => (s.named ? s.name : s.sessionId);
+  // Codex 线程没起过名时 name 是标题（首条消息），比 UUID 好认；Claude Code 的派生名只是目录 + 后缀，显示 UUID
+  const label = (s: AgentSessionDto) => (s.named || s.tool === 'codex' ? s.name : s.sessionId);
   return (
     <Select.Root value={current} onValueChange={onChange} disabled={disabled} onOpenChange={(open) => { if (open) onOpen(); }}>
       <Select.Trigger
@@ -523,16 +533,19 @@ export function SessionSelect({ sessions, value, onChange, onOpen, disabled, tes
           <Select.ScrollUpButton className="flex h-6 shrink-0 items-center justify-center text-muted"><ChevronUp size={14} aria-hidden="true" /></Select.ScrollUpButton>
           <Select.Viewport className="min-h-0 flex-1">
             <Select.Group>
-              <Select.Label className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold tracking-wide text-muted">本机正在运行的 Claude Code 会话</Select.Label>
+              <Select.Label className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold tracking-wide text-muted">{SESSION_COPY[tool].group}</Select.Label>
               {sessions === null && <p className="px-2.5 py-2 text-xs text-muted">正在找会话…</p>}
-              {sessions?.length === 0 && <p className="px-2.5 py-2 text-xs text-muted" data-testid="session-empty">没有正在运行的 Claude Code 会话——在终端开着 claude 再来。</p>}
+              {sessions?.length === 0 && <p className="px-2.5 py-2 text-xs text-muted" data-testid="session-empty">{reason ?? SESSION_COPY[tool].empty}</p>}
               {items.map((s) => (
-                <Select.Item key={s.sessionId} value={s.sessionId} textValue={label(s)} data-testid="session-option" data-named={s.named ? '' : undefined} className={ITEM_CLS}>
+                <Select.Item key={s.sessionId} value={s.sessionId} textValue={label(s)} data-testid="session-option" data-named={s.named ? '' : undefined} data-open={s.open ? '' : undefined} className={ITEM_CLS}>
                   <span className="min-w-0 flex-1">
-                    <Select.ItemText><span className={s.named ? '' : 'font-mono text-xs'}>{label(s)}</span></Select.ItemText>
+                    <Select.ItemText><span className={s.named || s.tool === 'codex' ? '' : 'font-mono text-xs'}>{label(s)}</span></Select.ItemText>
                     <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted">
                       <span className="truncate">{basename(s.cwd)}</span>
-                      <span className={`shrink-0 rounded-full border px-1.5 ${s.status === 'busy' ? 'border-warn/60 text-warn' : 'border-line'}`}>{s.status === 'busy' ? '忙' : s.status === 'idle' ? '空闲' : '未知'}</span>
+                      {s.app && <span className="shrink-0">{APP_LABEL[s.app]}</span>}
+                      {s.tool === 'codex'
+                        ? <span className={`shrink-0 rounded-full border px-1.5 ${s.open ? 'border-line' : 'border-dashed border-line'}`}>{s.open ? '已打开' : '未打开'}</span>
+                        : <span className={`shrink-0 rounded-full border px-1.5 ${s.status === 'busy' ? 'border-warn/60 text-warn' : 'border-line'}`}>{s.status === 'busy' ? '忙' : s.status === 'idle' ? '空闲' : '未知'}</span>}
                     </span>
                   </span>
                   <Select.ItemIndicator className="flex shrink-0"><Check size={14} aria-hidden="true" /></Select.ItemIndicator>

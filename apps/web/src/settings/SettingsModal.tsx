@@ -16,7 +16,7 @@ export const SETTINGS_SECTIONS = [
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['id'];
 export const isSettingsSection = (v: string | null): v is SettingsSection => SETTINGS_SECTIONS.some((s) => s.id === v);
 
-const DRIVER_LABEL: Record<string, string> = { 'agent-sdk': '本机 Claude 订阅', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI 兼容', stub: '桩' };
+const DRIVER_LABEL: Record<string, string> = { 'agent-sdk': '本机 Claude 订阅', codex: '本机 Codex 订阅', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI 兼容', stub: '桩' };
 const fmt = (n: number) => n.toLocaleString();
 
 export function SettingsModal({ section, onSection, onClose, returnTo, onCatalog }: { section: SettingsSection; onSection: (s: SettingsSection) => void; onClose: () => void; returnTo?: React.RefObject<HTMLElement | null>; onCatalog?: (items: RunnerOptionDto[], defaultId: string) => void }) {
@@ -28,8 +28,10 @@ export function SettingsModal({ section, onSection, onClose, returnTo, onCatalog
   const load = () => { setUsageError(false); api.usage().then(setUsage).catch(() => setUsageError(true)); };
   useEffect(load, []);
   const copy = async (text: string) => { try { await navigator.clipboard.writeText(text); toast('已复制'); } catch { toast('复制失败，请手动选择', 'error'); } };
-  // MCP 接入命令（API-AGENT-002）：本地版免鉴权，地址就是本机 API
-  const mcpAdd = `claude mcp add --transport http quilt ${window.location.origin.replace(/:5173$/, ':3100')}/mcp`;
+  // MCP 接入命令（API-AGENT-002）：本地版免鉴权，地址就是本机 API；Codex 一条另给（v0.68），接入后要新开线程才加载
+  const mcpUrl = `${window.location.origin.replace(/:5173$/, ':3100')}/mcp`;
+  const mcpAdd = `claude mcp add --transport http quilt ${mcpUrl}`;
+  const codexMcpAdd = `codex mcp add quilt --url ${mcpUrl}`;
 
   return (
     <Overlay onClose={onClose}>
@@ -85,8 +87,9 @@ export function SettingsModal({ section, onSection, onClose, returnTo, onCatalog
               <ChannelManager onCatalog={onCatalog} />
               {/* 反向接入（API-AGENT-002）：本机 agent 自己连 Quilt 的 MCP，本地版免鉴权 */}
               <h3 className="mt-8 text-sm font-semibold">让本机 agent 接入 Quilt（MCP）</h3>
-              <p className="mt-1 text-xs text-muted">在 Claude Code / Codex / Cursor 里接入 Quilt，本地版不需要授权：</p>
-              <div className="mt-2 flex items-center gap-2"><code className="flex-1 truncate rounded-md border border-line bg-canvas px-2 py-1.5 font-mono text-xs" data-testid="mcp-add">{mcpAdd}</code><Button size="sm" onClick={() => copy(mcpAdd)}>复制</Button></div>
+              <p className="mt-1 text-xs text-muted">在 Claude Code / Codex / Cursor 里接入 Quilt，本地版不需要授权。Codex 接入后要新开或重开线程才会加载；想让画布投来的作业不用逐个批准，在 <code className="font-mono">~/.codex/config.toml</code> 的 <code className="font-mono">[mcp_servers.quilt]</code> 下加 <code className="font-mono">default_tools_approval_mode = "approve"</code>：</p>
+              <div className="mt-2 flex items-center gap-2"><code className="flex-1 truncate rounded-md border border-line bg-canvas px-2 py-1.5 font-mono text-xs" data-testid="mcp-add">{mcpAdd}</code><Button size="sm" aria-label="复制 Claude Code 接入命令" onClick={() => copy(mcpAdd)}>复制</Button></div>
+              <div className="mt-2 flex items-center gap-2"><code className="flex-1 truncate rounded-md border border-line bg-canvas px-2 py-1.5 font-mono text-xs" data-testid="codex-mcp-add">{codexMcpAdd}</code><Button size="sm" aria-label="复制 Codex 接入命令" onClick={() => copy(codexMcpAdd)}>复制</Button></div>
             </Tabs.Content>
           </div>
         </Tabs.Root>

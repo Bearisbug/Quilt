@@ -1,7 +1,13 @@
+import { spawn } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { config } from '../config.ts';
 import { sha256 } from './signing.ts';
+import { codexBin } from './agentCli.ts';
 
-// LLM 适配层（§17 Claude API）。驱动：anthropic（生产，API key）| agent-sdk（本机订阅，仅开发）| stub（测试故障注入/回放）。
+// LLM 适配层（§17 Claude API）。驱动：anthropic（生产，API key）| agent-sdk（本机 Claude 订阅，仅开发）| codex（本机 Codex 订阅，v0.68）
+// | gemini | openai（兼容端点）| stub（测试故障注入/回放）。
 export type LlmResult = { text: string; tokensIn: number; tokensOut: number; model: string; ms: number };
 export class ProviderError extends Error { constructor(msg: string, public retryable: boolean) { super(msg); } }
 
@@ -82,6 +88,64 @@ class AgentSdkLlm implements Llm {
       }
     }
     throw new ProviderError('agent-sdk: no result', true);
+  }
+}
+
+// 本机 Codex 订阅（v0.68 ADR-020）：每次拉起本机 codex exec，复用它的 ChatGPT 登录态。
+// --ephemeral：不在用户的 Codex 历史里留会话；空的临时目录 + 只读沙箱：它是出 HTML 的，不该去翻用户的仓库。
+// Codex 没有替换系统提示的入口（base_instructions 实测省不下 token，大头是工具定义），所以系统提示与任务拼进同一条输入，从 stdin 传。
+// 参考图写成临时文件用 -i 传。事件是 JSONL：最后一条 agent_message 是产出，turn.completed 带用量。
+export function parseCodexEvents(lines: string[]): { text: string; tokensIn: number; tokensOut: number; error?: string } {
+  let text = ''; let tokensIn = 0; let tokensOut = 0; let error: string | undefined;
+  for (const line of lines) {
+    let ev: { type?: string; item?: { type?: string; text?: string }; usage?: { input_tokens?: number; output_tokens?: number; reasoning_output_tokens?: number }; error?: { message?: string }; message?: string };
+    try { ev = JSON.parse(line); } catch { continue; }
+    if (ev.type === 'item.completed' && ev.item?.type === 'agent_message' && typeof ev.item.text === 'string') text = ev.item.text;
+    else if (ev.type === 'turn.completed') { tokensIn += ev.usage?.input_tokens ?? 0; tokensOut += (ev.usage?.output_tokens ?? 0) + (ev.usage?.reasoning_output_tokens ?? 0); }
+    else if (ev.type === 'turn.failed') error = ev.error?.message ?? 'turn failed';
+    else if (ev.type === 'error') error = ev.message ?? 'error';
+  }
+  return { text, tokensIn, tokensOut, error };
+}
+
+class CodexLlm implements Llm {
+  readonly vision = true;
+  async complete({ system, prompt, images, model, signal }: LlmArgs) {
+    const bin = codexBin();
+    if (!bin) throw new ProviderError('本机没有找到 codex 命令：安装 Codex 并运行 codex 用 ChatGPT 账号登录', false);
+    const t0 = Date.now();
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'quilt-codex-'));
+    try {
+      const files = await Promise.all((images ?? []).map(async (im, i) => {
+        const f = path.join(dir, `reference-${i + 1}.${im.mediaType.split('/')[1] ?? 'png'}`);
+        await writeFile(f, Buffer.from(im.dataBase64, 'base64'));
+        return f;
+      }));
+      // 提示词用 - 从 stdin 读，放在 -i 之前：-i 收多个值，放后面会把 - 当成图片路径吃掉
+      const args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '-s', 'read-only', '-C', dir, ...(model ? ['-m', model] : []), '-', ...files.flatMap((f) => ['-i', f])];
+      const env = { ...process.env };
+      delete env.OPENAI_API_KEY; delete env.CODEX_API_KEY; // 让它用 ChatGPT 登录态，而不是环境里恰好有的 API Key
+      const { code, lines, stderr } = await new Promise<{ code: number | null; lines: string[]; stderr: string }>((resolve, reject) => {
+        const child = spawn(bin, args, { cwd: dir, env, stdio: ['pipe', 'pipe', 'pipe'] });
+        const out: string[] = []; let buf = ''; let err = '';
+        const onAbort = () => { child.kill('SIGTERM'); reject(new ProviderError('codex: aborted', false)); };
+        if (signal?.aborted) { onAbort(); return; }
+        signal?.addEventListener('abort', onAbort, { once: true });
+        child.stdout.setEncoding('utf8').on('data', (d: string) => { buf += d; const parts = buf.split('\n'); buf = parts.pop() ?? ''; out.push(...parts.filter(Boolean)); });
+        child.stderr.setEncoding('utf8').on('data', (d: string) => { err = (err + d).slice(-4000); });
+        child.once('error', (e) => { signal?.removeEventListener('abort', onAbort); reject(new ProviderError(`codex 启动失败：${e.message}`, false)); });
+        child.once('close', (c) => { signal?.removeEventListener('abort', onAbort); if (buf) out.push(buf); resolve({ code: c, lines: out, stderr: err }); });
+        child.stdin.end(`${system}\n\n---\n\n${prompt}`);
+      });
+      const r = parseCodexEvents(lines);
+      if (r.error || !r.text) {
+        const why = (r.error ?? stderr.trim().split('\n').slice(-2).join(' ')) || `exit ${code}`;
+        throw new ProviderError(`codex ${why.slice(0, 300)}`, /429|rate|5\d\d|overloaded|timeout/i.test(why) || (!r.error && code !== 0 && !/login|auth/i.test(why)));
+      }
+      return { text: r.text, tokensIn: r.tokensIn, tokensOut: r.tokensOut, model: model ?? 'codex', ms: Date.now() - t0 };
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 }
 
@@ -188,7 +252,7 @@ function fixtureScreen(prompt: string): string {
 
 // 驱动按需装配并缓存（REQ-CORE-011）：同一账号可以在不同作业里用不同驱动，
 // 所以不能像以前那样在模块加载时定成单例；缺省仍取 .env 的 LLM_DRIVER。
-export type LlmDriver = 'agent-sdk' | 'anthropic' | 'gemini' | 'openai' | 'stub';
+export type LlmDriver = 'agent-sdk' | 'codex' | 'anthropic' | 'gemini' | 'openai' | 'stub';
 /** 一次调用要用的驱动与凭据。不带 apiKey / baseUrl 就回落到 .env（系统预置通道的路径） */
 export type LlmSpec = { driver: LlmDriver; model?: string; apiKey?: string; baseUrl?: string };
 // 实例按（驱动、端点、凭据哈希）缓存：同一账号可以有多条同驱动不同 Key 的通道（REQ-CORE-013）。
@@ -204,6 +268,7 @@ export function llmFor(spec: LlmDriver | LlmSpec = config.llmDriver): Llm {
     inst = s.driver === 'anthropic' ? new AnthropicLlm(s.apiKey, s.baseUrl)
       : s.driver === 'gemini' ? new GeminiLlm(s.apiKey, s.baseUrl)
       : s.driver === 'openai' ? new OpenAiCompatLlm(s.apiKey ?? '', s.baseUrl ?? 'https://api.openai.com/v1')
+      : s.driver === 'codex' ? new CodexLlm()
       : s.driver === 'stub' ? new StubLlm() : new AgentSdkLlm();
     drivers.set(k, inst);
   }

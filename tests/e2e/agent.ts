@@ -109,6 +109,8 @@ await step('TC-AGENT-004', async () => {
 
 // v0.34（ADR-015 修订）：本机 agent = 投递到本机正在运行的 Claude Code 会话。用假会话（登记文件 + inbox socket，agent-stub.ts）验整条链：
 // 列表（名字 / UUID 规则）→ 输入框会话下拉 → 投递（提示词、running、回执）→ 持屏锁 → 取消 → finish_job 三种收口 → 选择记忆与失效
+// 作业创建限流 10 次 / 分钟（§15）：TC-AGENT-009 与 012 各建五六个作业，同一轮连着跑会撞上，012 开头等过 009 留下的窗口
+let burstAt = 0;
 await step('TC-AGENT-009', async () => {
   const DIR = process.env.QUILT_CLAUDE_SESSIONS_DIR ?? '';
   if (!DIR) return '跳过：未设 QUILT_CLAUDE_SESSIONS_DIR（API 与本脚本都要以同一目录启动，§3）';
@@ -222,8 +224,8 @@ await step('TC-AGENT-009', async () => {
 
     // 7 记忆与失效：刷新后会话仍选中；假会话关掉后打开下拉重取 → 回到「选择会话」、发送钮不可用；直接 POST 旧 sessionId → 400
     await page.goto(`${WEB}/p/${r.projectId}`);
-    await page.getByTestId('session-select').waitFor({ timeout: 10000 });
-    expect((await page.getByTestId('session-select').getAttribute('data-value')) === named.sessionId, '刷新后会话选择没记住');
+    // 触发器先渲染、会话列表稍后才到（到之前 data-value 为空），等值出现而不是立刻读
+    await page.locator(`[data-testid="session-select"][data-value="${named.sessionId}"]`).waitFor({ timeout: 10000 }).catch(() => { throw new Error('刷新后会话选择没记住'); });
     await named.close();
     await sleep(2100);
     await page.getByTestId('session-select').click();
@@ -237,11 +239,173 @@ await step('TC-AGENT-009', async () => {
     const gone = await send('会话已关', named.sessionId);
     expect(gone.status === 400 && gone.body.type === '/errors/validation', `旧 sessionId 直接 POST 应 400：${gone.status}`);
     return '列表 / 下拉按名字或 UUID；投递 → running + 回执；持锁 / 取消 / 取消后 finish_job 409；failed / 旧基线 409 / succeeded 三种收口；选择记忆、失效回到占位';
-  } finally { await named.close().catch(() => {}); await derived.close().catch(() => {}); }
+  } finally { await named.close().catch(() => {}); await derived.close().catch(() => {}); burstAt = Date.now(); }
 });
 
 // 真实 Claude Code：投递进真实会话要用户在终端确认权限门，AI 不代按——登记「待人工」，步骤见 TEST.md
 await step('TC-AGENT-010', async () => '待人工：投递到真实 Claude Code 会话需要在终端确认接收，按 TEST.md 的步骤人工执行');
+
+// v0.68（ADR-020）：Codex 线程投递 + 本机 Codex 订阅通道。API 与本脚本都以同一个 QUILT_CODEX_HOME 启动，API 另以
+// QUILT_CODEX_BIN / QUILT_CODEX_OPENER 指向 codex-stub.mjs（§3）。脚本自建假线程库；「Codex 窗口」一侧由脚本扮演：
+// 读桩记下的队列消息，线程打开着（有写锁）才取走，经 MCP 回写并收口——与真 Codex 的行为一致
+await step('TC-AGENT-012', async () => {
+  const HOME = process.env.QUILT_CODEX_HOME ?? '';
+  if (burstAt) await sleep(Math.max(0, burstAt + 61_000 - Date.now()));
+  if (!HOME) return '跳过：未设 QUILT_CODEX_HOME（API 与本脚本都要以同一目录启动，API 另设 QUILT_CODEX_BIN / QUILT_CODEX_OPENER 指向 tests/e2e/codex-stub.mjs，§3）';
+  const { DatabaseSync } = await import('node:sqlite');
+  const { rm: rmrf, writeFile: wf, readFile: rf, open: fopen } = await import('node:fs/promises');
+  await rmrf(HOME, { recursive: true, force: true });
+  await mkdir(path.join(HOME, 'thread-writer-locks'), { recursive: true });
+  const T_OPEN = '01a0d6fc-0000-7000-8000-00000000a001'; const T_CLOSED = '01a0d6fc-0000-7000-8000-00000000a002';
+  const T_EXEC = '01a0d6fc-0000-7000-8000-00000000a003'; const T_BROKEN = '01a0d6fc-0000-7000-8000-00000000ffff';
+  const db = new DatabaseSync(path.join(HOME, 'state_5.sqlite'));
+  db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, title TEXT, cwd TEXT, source TEXT, originator TEXT, thread_source TEXT, archived INTEGER, updated_at_ms INTEGER)');
+  const add = db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  add.run(T_OPEN, '设计稿', '把首页改成分组列表', '/Users/me/Quilt', 'vscode', 'Codex Desktop', 'user', 0, Date.now());
+  add.run(T_CLOSED, null, '帮我看看首页', '/Users/me/app', 'vscode', null, 'user', 0, Date.now() - 60_000);
+  add.run(T_EXEC, null, '无头 exec', '/tmp', 'exec', 'codex_exec', 'user', 0, Date.now() + 1000);
+  add.run(T_BROKEN, '坏线程', '队列写不进', '/tmp', 'cli', 'codex_cli_rs', 'user', 0, Date.now() - 120_000);
+  db.close();
+  // 「打开着」= 有进程占着写锁（Quilt 用 lsof 查）：本脚本扮演开着 T_OPEN 的 Codex 窗口，打开它的锁文件不放
+  const lockPath = (id: string) => path.join(HOME, 'thread-writer-locks', `${id}.lock`);
+  await wf(lockPath(T_OPEN), '');
+  const held = new Map([[T_OPEN, await fopen(lockPath(T_OPEN), 'r')]]);
+  await wf(lockPath(T_CLOSED), ''); // 残留的锁文件（Codex 进程被杀后留下）：没人占着，应判为未打开
+  type Rec = { cmd: string; thread?: string; message?: string; url?: string; args?: string[]; hasApiKey?: boolean; cwd?: string };
+  const stubLog = async (): Promise<Rec[]> => { try { return (await rf(path.join(HOME, 'stub-log.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  // 深链接打开过的线程（桩记下 open）也由本脚本占住锁，等于桌面版把它打开了
+  const isOpen = async (id: string) => {
+    if (!held.has(id) && (await stubLog()).some((x) => x.cmd === 'open' && x.thread === id)) held.set(id, await fopen(lockPath(id), 'r'));
+    return held.has(id);
+  };
+  // 「Codex 窗口」：线程打开着才取走排队的消息，按提示词里的基线回写并收口
+  const handled = new Set<string>();
+  const drain = async () => {
+    for (const r of await stubLog()) {
+      if (r.cmd !== 'queue' || !r.message || handled.has(r.message) || !(await isOpen(r.thread!))) continue;
+      handled.add(r.message);
+      const jobId = r.message.match(/\(job ([0-9a-f-]{36})\)/)?.[1]; const projectId = r.message.match(/projectId ([0-9a-f-]{36})/)?.[1];
+      const target = r.message.match(/screenId=([0-9a-f-]{36}) expectedRevisionId=([0-9a-f-]{36}|none)/);
+      if (!jobId || !projectId || !target) continue;
+      const mcp = await connectMcp();
+      try {
+        const screen = await callTool(mcp, 'quilt.get_screen', { screenId: target[1] });
+        const body = screen.text.replace(/<script[\s\S]*?<\/script>/g, '').replace(/\sdata-qid="q\d+"/g, '').replace('Screen 1', 'Screen 1 (by codex thread)').trim();
+        await callTool(mcp, 'quilt.update_screen', { projectId, screenId: target[1], name: 'Screen 1', route: '/s1', html: body, jobId, expectedRevisionId: target[2] === 'none' ? undefined : target[2] });
+        await callTool(mcp, 'quilt.finish_job', { jobId, summary: `done in ${r.thread!.slice(-4)}` });
+      } finally { await mcp.close(); }
+    }
+  };
+
+  // 1 列表：只有桌面版 / VS Code / 终端的用户线程（exec 不列），打开与否、在哪个应用、名字规则
+  await sleep(2100);
+  const lr = (await apiJson<{ items: { sessionId: string; name: string; named: boolean; open: boolean; app?: string; tool: string }[]; reason?: string }>('/v1/agent/sessions?tool=codex')).body;
+  const ids = lr.items.map((t) => t.sessionId);
+  expect(ids.join() === [T_OPEN, T_CLOSED, T_BROKEN].join(), `Codex 线程列表不对（API 是否以同一个 QUILT_CODEX_HOME 启动？）：${JSON.stringify(lr).slice(0, 300)}`);
+  const [tOpen, tClosed] = lr.items;
+  expect(tOpen.named && tOpen.name === '设计稿' && tOpen.open && tOpen.app === 'desktop' && tOpen.tool === 'codex', `打开的线程字段不对：${JSON.stringify(tOpen)}`);
+  expect(!tClosed.named && tClosed.name === '帮我看看首页' && !tClosed.open && tClosed.app === 'vscode', `未打开的线程字段不对：${JSON.stringify(tClosed)}`);
+  // 2 通道目录：交给本机 Codex 可用，hint 是桩的版本号；setupHint 带 codex mcp add
+  const codexRunner = (await apiJson<{ items: { id: string; available: boolean; hint?: string; setupHint?: string }[] }>('/v1/runners')).body.items.find((x) => x.id === 'agent:codex');
+  expect(codexRunner?.available && codexRunner.hint === 'codex-cli 0.0.0-stub' && codexRunner.setupHint?.includes('codex mcp add quilt --url'), `目录里的 agent:codex 不对：${JSON.stringify(codexRunner)}`);
+
+  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'CodexJob', '--device', 'mobile', '--screens', '2', '--no-shot');
+  const s1 = r.screens[0].id;
+  const currentOf = async () => (await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${r.projectId}`)).body.screens.find((s) => s.id === s1)!.currentRevisionId;
+  const send = (content: string, sessionId: string) => apiJson<{ job: { id: string }; type?: string }>(`/v1/projects/${r.projectId}/messages`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ content, targetScreenIds: [s1], runner: { kind: 'agent', tool: 'codex', sessionId } }) });
+
+  // 3 输入框：通道选「交给本机 Codex」→ 会话下拉的组标题、名字 / 标题、应用、已打开 / 未打开；选「设计稿」
+  await page.goto(`${WEB}/p/${r.projectId}`);
+  await page.getByTestId('runner-select').waitFor({ timeout: 10000 });
+  await pickOption(page, '[data-testid="runner-select"]', '交给本机 Codex');
+  const sel = page.getByTestId('session-select');
+  await sel.waitFor({ timeout: 5000 });
+  await sel.click();
+  await page.locator('[data-testid="session-option"]').first().waitFor({ timeout: 5000 });
+  const texts = await page.locator('[data-testid="session-option"]').allInnerTexts();
+  const group = await page.getByRole('listbox').innerText();
+  expect(group.includes('本机 Codex 线程') && texts.some((t) => t.includes('设计稿') && t.includes('桌面版') && t.includes('已打开')) && texts.some((t) => t.includes('帮我看看首页') && t.includes('VS Code') && t.includes('未打开')), `Codex 会话下拉不对：${JSON.stringify(texts)}`);
+  await page.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-tc-agent-012-threads.png`) });
+  await page.getByRole('option', { name: /设计稿/ }).click();
+  expect((await sel.getAttribute('data-value')) === T_OPEN, '选中的线程没落到触发器');
+
+  // 4 投给打开着的线程：codex queue 一次、不开深链接；提示词带作业 id / 基线 / 收口 / codex 接入命令；回执写明线程名
+  const rev0 = await currentOf();
+  await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
+  await page.getByTestId('target-chip').waitFor({ timeout: 5000 });
+  await page.fill('#chat-input', '把首页改成分组列表');
+  await page.keyboard.press('Enter');
+  await page.locator('[data-testid="agent-job"]').first().waitFor({ timeout: 10000 });
+  let q: Rec | undefined;
+  for (let i = 0; i < 40 && !q; i++) { await sleep(250); q = (await stubLog()).find((x) => x.cmd === 'queue' && x.thread === T_OPEN); }
+  expect(q?.message, '没有执行 codex queue');
+  const jobId = q!.message!.match(/\(job ([0-9a-f-]{36})\)/)?.[1] ?? '';
+  expect(jobId && q!.message!.includes(`expectedRevisionId=${rev0}`) && q!.message!.includes('quilt.finish_job') && q!.message!.includes('codex mcp add quilt --url') && !q!.message!.includes('claude mcp add'), '提示词缺作业 id / 基线 / 收口 / Codex 接入命令');
+  expect(!(await stubLog()).some((x) => x.cmd === 'open'), '线程打开着却还去开深链接');
+  const j1 = await jobOf(jobId);
+  const d1 = j1.output?.delivery as { tool?: string; name?: string; opened?: boolean } | undefined;
+  expect(j1.status === 'running' && d1?.tool === 'codex' && d1.name === '设计稿' && d1.opened === false, `投递后作业字段不对：${JSON.stringify(j1)}`);
+  const msgs = (await apiJson<{ items: { role: string; jobId: string | null; content: string }[] }>(`/v1/projects/${r.projectId}/messages`)).body.items;
+  expect(msgs.some((m) => m.role === 'assistant' && m.jobId === jobId && m.content.includes('已投递到本机 Codex 线程「设计稿」')), '回执没写明投递到哪个 Codex 线程');
+  // 图标 SVG 里带着不可见的 <title>Codex</title>，按可见文字断言
+  expect((await page.locator('[data-testid="agent-job"]').first().innerText()).includes('Codex'), 'agent 面板没把这条作业标成 Codex');
+  await drain();
+  const done1 = await waitJob(jobId, 20);
+  expect(done1.status === 'succeeded' && done1.output?.screenIds?.[0] === s1 && done1.output?.summary === 'done in a001', `打开着的线程收口后应 succeeded：${JSON.stringify(done1)}`);
+
+  // 5 投给未打开的线程：先 queue 再开深链接（桌面版打开 → 写锁出现 → 取走执行），delivery.opened=true
+  const second = await send('再改一次', T_CLOSED);
+  expect(second.status === 202, `投给未打开的线程应 202：${second.status} ${JSON.stringify(second.body)}`);
+  let opened: Rec | undefined;
+  for (let i = 0; i < 40 && !opened; i++) { await sleep(250); opened = (await stubLog()).find((x) => x.cmd === 'open' && x.thread === T_CLOSED); }
+  const log2 = await stubLog();
+  const qi = log2.findIndex((x) => x.cmd === 'queue' && x.thread === T_CLOSED); const oi = log2.findIndex((x) => x.cmd === 'open' && x.thread === T_CLOSED);
+  expect(opened?.url === `codex://threads/${T_CLOSED}` && qi >= 0 && qi < oi, `未打开的线程应先 queue 再开 codex://threads/<id>：${JSON.stringify(log2.slice(-3))}`);
+  const j2 = await jobOf(second.body.job.id);
+  expect((j2.output?.delivery as { opened?: boolean } | undefined)?.opened === true, '深链接打开后 delivery.opened 应为 true');
+  await drain();
+  expect((await waitJob(second.body.job.id, 20)).status === 'succeeded', '打开后取走的消息没有收口');
+
+  // 6 拒绝：exec 线程、不存在的线程 → 400；codex queue 失败 → 作业 failed(agent) 写明原因
+  expect((await send('exec 线程', T_EXEC)).status === 400, 'exec 线程不该能投');
+  expect((await send('不存在', '01a0d6fc-0000-7000-8000-00000000beef')).status === 400, '不存在的线程应 400');
+  const broken = await send('队列写不进', T_BROKEN);
+  const bj = await waitJob(broken.body.job.id, 10);
+  expect(bj.status === 'failed' && bj.output?.errorClass === 'agent' && /投递失败/.test(bj.output?.message ?? ''), `codex queue 失败应 failed(agent)：${JSON.stringify(bj.output)}`);
+
+  // 7 记忆：刷新后 Codex 线程仍选中「设计稿」（本机记忆按工具分开）；切回 Claude Code 不带 Codex 的线程 id
+  await page.goto(`${WEB}/p/${r.projectId}`);
+  await page.getByTestId('session-select').waitFor({ timeout: 10000 });
+  await page.locator(`[data-testid="session-select"][data-value="${T_OPEN}"]`).waitFor({ timeout: 5000 }).catch(async () => {
+    const st = await page.evaluate(() => ({ runner: localStorage.getItem('quilt:runner'), codex: localStorage.getItem('quilt:agent-session:codex'), value: document.querySelector('[data-testid="session-select"]')?.getAttribute('data-value'), text: (document.querySelector('[data-testid="session-select"]') as HTMLElement | null)?.innerText }));
+    throw new Error(`刷新后 Codex 线程选择没记住：${JSON.stringify(st)}`);
+  });
+  await pickOption(page, '[data-testid="runner-select"]', '交给本机 Claude Code');
+  await sleep(500);
+  expect((await page.getByTestId('session-select').getAttribute('data-value')) !== T_OPEN, '切到 Claude Code 后会话下拉带着 Codex 的线程 id');
+
+  // 8 本机 Codex 订阅通道：不收 Key；探测经 codex exec（--json --ephemeral 只读、去掉 API Key）；用它改屏，产出进修订、用量记账
+  const ch = await apiJson<{ channel: { id: string; apiKeyHint: string | null; status: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'codex', label: 'Codex 订阅', model: 'gpt-stub' }) });
+  expect(ch.status === 201 && ch.body.channel.apiKeyHint === null && ch.body.channel.status === 'unverified', `建 Codex 订阅通道应 201 且没有 Key：${ch.status} ${JSON.stringify(ch.body)}`);
+  const probe = (await apiJson<{ ok: boolean; error?: string }>(`/v1/runners/channel:${ch.body.channel.id}/probe`, { method: 'POST' })).body;
+  expect(probe.ok, `探测应通过：${JSON.stringify(probe)}`);
+  const ex = (await stubLog()).filter((x) => x.cmd === 'exec').pop()!;
+  const a = ex.args ?? [];
+  expect(['--json', '--ephemeral', '--skip-git-repo-check'].every((f) => a.includes(f)) && a[a.indexOf('-s') + 1] === 'read-only' && a[a.indexOf('-m') + 1] === 'gpt-stub' && ex.hasApiKey === false && !(ex.cwd ?? '').includes('Quilt'), `codex exec 参数 / 环境不对：${JSON.stringify(ex)}`);
+  const usage0 = (await apiJson<{ tokensIn: number }>('/v1/me/usage')).body.tokensIn;
+  const edit = await apiJson<{ job: { id: string } }>(`/v1/projects/${r.projectId}/messages`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ content: '用 Codex 订阅改首页', targetScreenIds: [s1], runner: { kind: 'channel', channelId: ch.body.channel.id } }) });
+  expect(edit.status === 202, `用 Codex 订阅通道发改屏消息应 202：${edit.status} ${JSON.stringify(edit.body).slice(0, 300)}`);
+  const ej = await waitJob(edit.body.job.id, 60);
+  expect(ej.status === 'succeeded', `Codex 订阅改屏应成功：${JSON.stringify(ej)}`);
+  const mcp8 = await connectMcp();
+  const html = (await callTool(mcp8, 'quilt.get_screen', { screenId: s1 })).text;
+  await mcp8.close();
+  expect(html.includes('(by codex stub)'), '新修订里没有 codex exec 的产出');
+  expect((await apiJson<{ tokensIn: number }>('/v1/me/usage')).body.tokensIn >= usage0 + 20000, 'Codex 订阅的用量没有记账');
+  await apiJson(`/v1/channels/${ch.body.channel.id}`, { method: 'DELETE' });
+  for (const h of held.values()) await h.close();
+  return `列表只含用户线程且标出应用 / 打开与否；打开的线程只 queue、未打开的 queue 后开深链接；回执 / 面板写明 Codex；exec 线程与不存在 400、队列失败 failed(agent)；选择按工具记忆；Codex 订阅通道 exec 参数与记账`;
+});
 
 await browser.close();
 console.log(`\n=== RUN-${RUN} AGENT ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));

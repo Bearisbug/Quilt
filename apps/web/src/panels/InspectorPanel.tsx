@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ScreenDto, ComponentDto, RunnerOptionDto, AgentSessionDto, Runner } from '@quilt/core';
+import type { ScreenDto, ComponentDto, RunnerOptionDto, AgentTool, Runner } from '@quilt/core';
+import type { SessionList } from '@/composer/useRunnerPrefs';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button, EmptyState, Input, Panel } from '@/ui/ui';
@@ -13,13 +14,15 @@ const NO_LINK = '__none__';
 // component（REQ-EDIT-006）：元素所在的共享组件名——在组件里的元素不直改，给「改组件 / 脱离共享」两个出口
 export type ElementSel = { qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number } };
 const SUBTREE_RUNNER_KEY = 'quilt:runner:subtree';
-const SUBTREE_SESSION_KEY = 'quilt:agent-session:subtree';
+// 子树重生成的投递会话按工具分开记（v0.68）：Claude Code 会话 id 与 Codex 线程 id 互不相干
+const SUBTREE_SESSION_KEY: Record<AgentTool, string> = { 'claude-code': 'quilt:agent-session:subtree', codex: 'quilt:agent-session:subtree:codex' };
+const readKey = (k: string) => { try { return localStorage.getItem(k) ?? ''; } catch { return ''; } };
 // 「记为共享组件」的默认名：按元素标签给个常见叫法，用户可改
 const COMPONENT_NAME_BY_TAG: Record<string, string> = { nav: 'TabBar', header: 'AppBar', aside: 'Sidebar', footer: 'Footer' };
 // 目标是一张屏，或一个共享组件（v0.57 `REQ-EDIT-006`）——组件也能选元素直改，op 与屏同一套，
 // 只是落在组件自己的 HTML 上、乐观并发用版本号，改完由服务端回刷所有用它的屏。
 // 组件没有 AI 子树重生成（整块重写走输入框的「改组件」）、没有批注、也不能再「记为共享组件」。
-export function InspectorPanel({ screen, component, sel, routes = [], busy, runners = [], composerRunnerId = '', sessions = null, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes?: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessions?: AgentSessionDto[] | null; onSessionsOpen?: () => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void }) {
+export function InspectorPanel({ screen, component, sel, routes = [], busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes?: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void }) {
   const toast = useToast();
   const [text, setText] = useState('');
   const [classes, setClasses] = useState('');
@@ -34,16 +37,24 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
   const [compBusy, setCompBusy] = useState(false);
   // 子树重生成的通道（REQ-EDIT-002）：与输入框同一套选择器，但记忆独立——局部改动常只要更快的模型；第一次沿用输入框当前通道（INT-007 / INT-021）
   const [runnerPick, setRunnerPick] = useState(() => { try { return localStorage.getItem(SUBTREE_RUNNER_KEY) ?? ''; } catch { return ''; } });
-  const [sessionId, setSessionId] = useState(() => { try { return localStorage.getItem(SUBTREE_SESSION_KEY) ?? ''; } catch { return ''; } });
+  const [sessionIds, setSessionIds] = useState<Record<AgentTool, string>>(() => ({ 'claude-code': readKey(SUBTREE_SESSION_KEY['claude-code']), codex: readKey(SUBTREE_SESSION_KEY.codex) }));
   const runnerId = runners.some((r) => r.id === runnerPick && r.available) ? runnerPick : composerRunnerId;
   const runnerOpt = runners.find((r) => r.id === runnerId);
-  const agent = runnerOpt?.runner.kind === 'agent';
+  const tool: AgentTool | null = runnerOpt?.runner.kind === 'agent' ? runnerOpt.runner.tool : null;
+  const agent = !!tool;
+  const list = tool ? sessionLists?.[tool] : undefined;
+  const sessions = list?.items ?? null;
+  const sessionId = tool ? sessionIds[tool] : '';
   const sessionOk = !agent || !!sessions?.some((s) => s.sessionId === sessionId);
   const openRef = useRef(onSessionsOpen);
   openRef.current = onSessionsOpen;
-  useEffect(() => { if (agent) openRef.current?.(); }, [agent]);
+  useEffect(() => { if (tool) openRef.current?.(tool); }, [tool]);
   const pickRunner = (id: string) => { setRunnerPick(id); try { localStorage.setItem(SUBTREE_RUNNER_KEY, id); } catch { /* 无痕模式写不了 */ } };
-  const pickSession = (id: string) => { setSessionId(id); try { localStorage.setItem(SUBTREE_SESSION_KEY, id); } catch { /* 无痕模式写不了 */ } };
+  const pickSession = (id: string) => {
+    if (!tool || !id) return; // 空串来自 Radix 隐藏原生 <select> 的回报，不是用户的选择（见 useRunnerPrefs）
+    setSessionIds((m) => ({ ...m, [tool]: id }));
+    try { localStorage.setItem(SUBTREE_SESSION_KEY[tool], id); } catch { /* 无痕模式写不了 */ }
+  };
   const runner: Runner | undefined = runnerOpt?.runner.kind === 'agent' ? { ...runnerOpt.runner, sessionId } : runnerOpt?.runner;
   // 重生成：按钮或文本框里 Shift+Enter（这里是多行说明，Enter 留给换行，与输入框的 Enter 发送不同）。
   // 发出成功只清说明框，选中不动——面板留在这个元素上；建作业被拒（屏忙等）时说明保留
@@ -173,7 +184,7 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
             {/* 通道单独选：与输入框同一套控件；本机 agent 时还要选投给哪个会话。面板 20rem 宽，两个下拉放不下时折行 */}
             <div className="flex flex-wrap items-center gap-1.5" data-testid="el-runner">
               {runners.length > 0 && <RunnerSelect runners={runners} value={runnerId} onChange={pickRunner} disabled={busy} testId="el-runner-select" />}
-              {agent && <SessionSelect sessions={sessions} value={sessionId} onChange={pickSession} onOpen={onSessionsOpen ?? (() => {})} disabled={busy} testId="el-session-select" />}
+              {tool && <SessionSelect tool={tool} sessions={sessions} reason={list?.reason} value={sessionId} onChange={pickSession} onOpen={() => onSessionsOpen?.(tool)} disabled={busy} testId="el-session-select" />}
             </div>
             <div className="flex items-center gap-2">
               <Button size="sm" disabled={!canRegenerate} pending={busy} onClick={() => void regenerate()}>重生成选中区域</Button>

@@ -1,5 +1,5 @@
 import { and, asc, eq } from 'drizzle-orm';
-import { VENDOR_PRESETS, type ChannelDto, type ChannelKind, type ChannelVendor, type ChannelStatus, type ProbeResultDto, type RunnerOptionDto } from '@quilt/core';
+import { VENDOR_PRESETS, LOCAL_CHANNEL_KINDS, type ChannelDto, type ChannelKind, type ChannelVendor, type ChannelStatus, type ProbeResultDto, type RunnerOptionDto } from '@quilt/core';
 import { db, schema } from '../db/client.ts';
 import { problems } from '../lib/errors.ts';
 import { decryptSecret, encryptSecret, secretHint, secretsConfigured } from '../lib/secrets.ts';
@@ -9,15 +9,16 @@ import type { UserRow } from './user.ts';
 
 // 生成通道可配置（REQ-CORE-013 / API-CORE-020~023）。
 // 两类来源合成一张目录：用户自己配的通道（本表，v0.34 起云端通道只有这一种来源——开源自用，没有「系统预置」）、
-// 本机 agent（Claude Code，看 PATH，不入库）。密钥按 ADR-013 加密；任何出口都不带明文。
+// 本机 agent（Claude Code / Codex，看 PATH，不入库）。密钥按 ADR-013 加密；任何出口都不带明文。
 
 type Row = typeof schema.channels.$inferSelect;
-const KIND_DRIVER: Record<ChannelKind, LlmDriver> = { anthropic: 'anthropic', gemini: 'gemini', openai: 'openai', 'agent-sdk': 'agent-sdk' };
-const KIND_VENDOR: Record<ChannelKind, ChannelVendor> = { anthropic: 'anthropic', gemini: 'google', openai: 'custom', 'agent-sdk': 'claude-subscription' };
+const KIND_DRIVER: Record<ChannelKind, LlmDriver> = { anthropic: 'anthropic', gemini: 'gemini', openai: 'openai', 'agent-sdk': 'agent-sdk', codex: 'codex' };
+const KIND_VENDOR: Record<ChannelKind, ChannelVendor> = { anthropic: 'anthropic', gemini: 'google', openai: 'custom', 'agent-sdk': 'claude-subscription', codex: 'codex-subscription' };
 const PROBE = { system: 'Reply with exactly the word OK and nothing else.', prompt: 'ping', maxTokens: 8 };
 // 探测超时按驱动分档：agent-sdk 每次都要拉起子进程、带约 14K token 的缓存前缀，实测冷启动 2.5~3.5 s、
 // 抖动时能到十几秒；给它和 HTTP 驱动同一个 15 s 会把「慢但可用」误判成「不可用」（用户实测反馈）。
-const PROBE_TIMEOUT_MS: Record<LlmDriver, number> = { 'agent-sdk': 60_000, anthropic: 20_000, gemini: 20_000, openai: 20_000, stub: 5_000 };
+// codex 每次冷启动一个 codex 进程、带约 2 万 token 的 Codex 自带提示与工具定义，实测 15～27 s（ADR-020）
+const PROBE_TIMEOUT_MS: Record<LlmDriver, number> = { 'agent-sdk': 60_000, codex: 90_000, anthropic: 20_000, gemini: 20_000, openai: 20_000, stub: 5_000 };
 
 export const channelDto = (r: Row): ChannelDto => ({
   id: r.id, kind: r.kind as ChannelKind, vendor: r.vendor as ChannelVendor, label: r.label, endpoint: r.endpoint, model: r.model,
@@ -76,8 +77,8 @@ export async function resolveChannelSpec(userId: string, channelId: string): Pro
   const [row] = await db.select().from(schema.channels).where(and(eq(schema.channels.id, channelId), eq(schema.channels.userId, userId)));
   if (!row) throw new Error('通道已删除或不属于该账号');
   const driver = KIND_DRIVER[row.kind as ChannelKind];
-  // 本机订阅没有密钥，凭据是机器上的 claude 登录态
-  if (driver === 'agent-sdk') return { driver, model: row.model };
+  // 本机订阅没有密钥，凭据是机器上的 claude / codex 登录态
+  if (LOCAL_CHANNEL_KINDS.includes(row.kind as ChannelKind)) return { driver, model: row.model };
   if (!row.apiKeyEnc) throw new Error('通道没有密钥');
   let apiKey: string;
   try { apiKey = decryptSecret(row.apiKeyEnc); }
@@ -85,7 +86,10 @@ export async function resolveChannelSpec(userId: string, channelId: string): Pro
   return { driver, model: row.model, apiKey, baseUrl: row.endpoint ?? undefined };
 }
 
-const AGENT_SDK_HINT = '在本机终端执行 `claude` 并完成登录；Quilt 进程会复用这份登录态。';
+const LOCAL_HINT: Partial<Record<ChannelKind, string>> = {
+  'agent-sdk': '在本机终端执行 `claude` 并完成登录；Quilt 进程会复用这份登录态。',
+  codex: '安装 Codex 并执行 `codex` 用 ChatGPT 账号登录；Quilt 每次生成拉起一次 `codex exec`（不在你的 Codex 历史里留会话），模型名填你在 Codex 里用的那个。单次调用约 15～30 秒，比 API 通道慢。',
+};
 
 /** 统一目录（API-CORE-023）：输入框只渲染 available 的，设置页渲染全部 */
 export async function runnerCatalog(user: UserRow): Promise<{ items: RunnerOptionDto[]; default: string }> {
@@ -94,15 +98,20 @@ export async function runnerCatalog(user: UserRow): Promise<{ items: RunnerOptio
     available: r.status === 'verified',
     unavailableReason: r.status === 'failed' ? `验证失败：${r.lastError ?? '未知原因'}` : r.status === 'unverified' ? '尚未验证：在设置页点「验证」' : undefined,
     vision: driverSupportsVision(KIND_DRIVER[r.kind as ChannelKind]), source: 'channel' as const, vendor: r.vendor as ChannelVendor, status: r.status as ChannelStatus, channelId: r.id, channelKind: r.kind as ChannelKind,
-    ...(r.kind === 'agent-sdk' ? { setupHint: AGENT_SDK_HINT } : {}),
+    ...(LOCAL_HINT[r.kind as ChannelKind] ? { setupHint: LOCAL_HINT[r.kind as ChannelKind] } : {}),
   }));
-  // 本机 agent（REQ-AGENT-003 v0.34）：PATH 上有 claude 就算装了；投给哪个会话由输入框旁的会话下拉决定，
+  // 本机 agent（REQ-AGENT-003 v0.34 / v0.68）：PATH 上有 claude / codex 就算装了；投给哪个会话由输入框旁的会话下拉决定，
   // 这里的 runner 只是模板（sessionId 留空），前端发送时填上选中的会话
   const claude = toolAvailable('claude-code');
+  const codex = toolAvailable('codex');
   const agents: RunnerOptionDto[] = [{
     id: 'agent:claude-code', label: '交给本机 Claude Code', hint: claude.version ?? '本机 CLI',
     runner: { kind: 'agent' as const, tool: 'claude-code' as const, sessionId: '' }, available: claude.ok, unavailableReason: claude.ok ? undefined : claude.hint,
     vision: true, source: 'builtin' as const, vendor: 'anthropic' as const, setupHint: SETUP_HINT['claude-code'],
+  }, {
+    id: 'agent:codex', label: '交给本机 Codex', hint: codex.version ?? '本机 CLI',
+    runner: { kind: 'agent' as const, tool: 'codex' as const, sessionId: '' }, available: codex.ok, unavailableReason: codex.ok ? undefined : codex.hint,
+    vision: true, source: 'builtin' as const, vendor: 'codex-subscription' as const, setupHint: SETUP_HINT.codex,
   }];
   const items = [...mine, ...agents];
   const pick = (pred: (i: RunnerOptionDto) => boolean) => items.find(pred)?.id;
@@ -126,7 +135,7 @@ export async function probeRunner(user: UserRow, runnerId: string): Promise<Prob
   if (runnerId.startsWith('agent:')) {
     const tool = runnerId.slice('agent:'.length);
     const a = toolAvailable(tool);
-    return a.ok ? { ok: true, detail: `已找到 ${a.version ?? tool}；画布派的活会投递到你在输入框旁选中的会话` } : { ok: false, error: a.hint };
+    return a.ok ? { ok: true, detail: `已找到 ${a.version ?? tool}；画布派的活会投递到你在输入框旁选中的${tool === 'codex' ? '线程' : '会话'}` } : { ok: false, error: a.hint };
   }
   throw problems.notFound();
 }

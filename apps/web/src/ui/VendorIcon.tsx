@@ -1,4 +1,4 @@
-import { Claude, Gemini, OpenAI, DeepSeek, Qwen, Kimi, Zhipu, OpenRouter, Ollama, SiliconCloud } from '@lobehub/icons';
+import { Claude, Codex, Gemini, OpenAI, DeepSeek, Qwen, Kimi, Zhipu, OpenRouter, Ollama, SiliconCloud } from '@lobehub/icons';
 import { Cpu } from 'lucide-react';
 import type { ChannelVendor } from '@quilt/core';
 
@@ -9,6 +9,8 @@ const ICONS: Record<Exclude<ChannelVendor, 'custom'>, IconComponent> = {
   anthropic: Claude.Color,
   // 本机订阅也是 Claude，只是凭据来自机器上的登录态
   'claude-subscription': Claude.Color,
+  // 本机 Codex 订阅（v0.68）：本机 codex 的 ChatGPT 登录态
+  'codex-subscription': Codex.Color,
   google: Gemini.Color,
   openai: OpenAI,
   deepseek: DeepSeek.Color,

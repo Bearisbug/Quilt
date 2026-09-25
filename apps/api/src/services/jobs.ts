@@ -7,6 +7,7 @@ import { storage } from '../lib/storage.ts';
 import { InProcessQueue } from '../lib/queue.ts';
 import { toolAvailable } from '../lib/agentCli.ts';
 import { findSession } from '../lib/claudeSessions.ts';
+import { findCodexThread } from '../lib/codexSessions.ts';
 import { runnerCatalog } from './channels.ts';
 import { hasActiveJob } from './screens.ts';
 import { estimateJob, type CreateJobInput, type JobRunner } from '@quilt/core';
@@ -81,11 +82,13 @@ export async function createJob(args: { user: UserRow; projectId: string; input:
     }
   }
   if (runner === 'agent') {
-    // 投递到本机会话（v0.34）：claude 得装着，选中的会话得还活着——建作业前就拒，不让作业带着死目标进 running
+    // 投递到本机会话（v0.34）：CLI 得装着，选中的会话得还在——建作业前就拒，不让作业带着死目标进 running。
+    // Claude Code 要会话此刻活着；Codex（v0.68）只要线程还在线程库里，没打开的投递时由桌面版打开
     const r = (input.input as { runner?: { tool?: string; sessionId?: string } }).runner;
     const a = toolAvailable(r?.tool);
     if (!a.ok) throw problems.validation([{ path: 'runner', message: a.hint }]);
-    if (!r?.sessionId || !(await findSession(r.sessionId))) throw problems.validation([{ path: 'runner.sessionId', message: '会话已关闭或不存在，重新选一个' }]);
+    const exists = !!r?.sessionId && !!(r.tool === 'codex' ? await findCodexThread(r.sessionId) : await findSession(r.sessionId));
+    if (!exists) throw problems.validation([{ path: 'runner.sessionId', message: '会话已关闭或不存在，重新选一个' }]);
     // 本机会话拿到的是一段文字指令，钉死路由的懒生成、造变体、叠层屏这三种它没有对应的写法，与其静默当普通造屏做，不如当场拒
     if (input.kind === 'generate' && (input.input.route || input.input.variantOf || input.input.presentation)) throw problems.validation([{ path: 'runner', message: '懒生成、出变体、叠层屏请换一个模型通道，本机会话不接这类作业' }]);
   }

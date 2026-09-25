@@ -6,13 +6,16 @@ import { randomToken, signObject, verifyObject } from '../../lib/signing.ts';
 import { config } from '../../config.ts';
 import { ownedProject } from '../../services/projects.ts';
 import { listSessions, sessionDto } from '../../lib/claudeSessions.ts';
+import { listCodexThreads } from '../../lib/codexSessions.ts';
 
 export const agentRoutes = new Hono<Env>();
 
-// API-AGENT-010：本机正在运行的 Claude Code 会话（会话下拉打开时取；建作业时服务端再校验一次）
+// API-AGENT-010：本机会话（会话下拉打开时取；建作业时服务端再校验一次）。tool=codex 列 Codex 线程库里的用户线程（v0.68），
+// 读不到线程库时带 reason 给下拉写明原因
 agentRoutes.get('/v1/agent/sessions', async (c) => {
   requireUser(c);
   c.header('Cache-Control', 'no-store');
+  if (c.req.query('tool') === 'codex') return c.json(await listCodexThreads());
   return c.json({ items: (await listSessions()).map(sessionDto) });
 });
 

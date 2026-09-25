@@ -1,4 +1,4 @@
-import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, LinkDto, ElementOp, AnnotationDto, RunnerOptionDto, AgentSessionDto, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto } from '@quilt/core';
+import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, LinkDto, ElementOp, AnnotationDto, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto } from '@quilt/core';
 
 // API 客户端：同源 /v1（开发时 Vite 代理 → API；打包后 API 进程自己托管前端），错误统一为 ApiError（RFC 9457 信封）。
 // v0.32 本地版没有登录：所有请求都是默认用户。
@@ -117,7 +117,7 @@ export const api = {
   },
   runners: () => call<{ items: RunnerOptionDto[]; default: string }>('/v1/runners'),
   // 本机正在运行的 Claude Code 会话（API-AGENT-010）：会话下拉打开时取
-  agentSessions: () => call<{ items: AgentSessionDto[] }>('/v1/agent/sessions'),
+  agentSessions: (tool: AgentTool = 'claude-code') => call<{ items: AgentSessionDto[]; reason?: string }>(`/v1/agent/sessions?tool=${tool}`),
   // 生成通道可配置（REQ-CORE-013）
   probeRunner: (runnerId: string) => call<ProbeResultDto>(`/v1/runners/${encodeURIComponent(runnerId)}/probe`, { method: 'POST' }),
   channels: {

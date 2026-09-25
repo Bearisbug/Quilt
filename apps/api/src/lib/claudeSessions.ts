@@ -39,7 +39,7 @@ export async function listSessions(): Promise<LiveSession[]> {
     if (!rec.sessionId || !rec.messagingSocketPath || rec.kind !== 'interactive' || rec.peerProtocol !== 1) return null;
     if (!(await alive(rec.messagingSocketPath))) return null;
     return {
-      sessionId: rec.sessionId, name: rec.name ?? rec.sessionId, named: rec.nameSource === 'user', cwd: rec.cwd ?? '',
+      tool: 'claude-code' as const, open: true, sessionId: rec.sessionId, name: rec.name ?? rec.sessionId, named: rec.nameSource === 'user', cwd: rec.cwd ?? '',
       status: rec.status === 'idle' || rec.status === 'busy' ? rec.status : 'unknown',
       updatedAt: new Date(rec.updatedAt ?? 0).toISOString(), socketPath: rec.messagingSocketPath,
     };

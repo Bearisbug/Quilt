@@ -36,7 +36,7 @@ export const config = {
   openBrowser: env('QUILT_OPEN_BROWSER', '0') === '1',
   version: env('QUILT_VERSION', '0.1.0'),
   previewSigningSecret: env('PREVIEW_SIGNING_SECRET', 'dev-preview-secret-change-me'),
-  llmDriver: env('LLM_DRIVER', 'agent-sdk') as 'agent-sdk' | 'anthropic' | 'gemini' | 'stub',
+  llmDriver: env('LLM_DRIVER', 'agent-sdk') as 'agent-sdk' | 'codex' | 'anthropic' | 'gemini' | 'stub',
   llmStub: env('LLM_STUB', '') as '' | '503' | 'fixture',
   // 用户自填通道密钥的加密主密钥（ADR-013）；为空则拒绝保存含密钥的通道（fail closed）。打包运行时首次启动自动生成
   secretsKey: process.env.QUILT_SECRETS_KEY ?? '',
@@ -49,6 +49,11 @@ export const config = {
   modelInitial: env('QUILT_MODEL_INITIAL', 'claude-sonnet-5'),
   // 本机 agent（REQ-AGENT-003 v0.34）：Claude Code 会话登记处，投递按这里的记录找会话的 inbox socket。QUILT_CLAUDE_SESSIONS_DIR 只给测试桩用
   claudeSessionsDir: process.env.QUILT_CLAUDE_SESSIONS_DIR ? path.resolve(process.env.QUILT_CLAUDE_SESSIONS_DIR) : path.join(os.homedir(), '.claude', 'sessions'),
+  // Codex（v0.68 ADR-020）：线程库与写锁在 CODEX_HOME（缺省 ~/.codex）下；命令缺省在 PATH 上找 codex；
+  // 线程没打开时用深链接让桌面版打开它。三个 QUILT_CODEX_* 只给测试桩用（假线程库、假 codex、不真去开桌面版）
+  codexHome: path.resolve(process.env.QUILT_CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), '.codex')),
+  codexBin: process.env.QUILT_CODEX_BIN ?? '',
+  codexOpener: process.env.QUILT_CODEX_OPENER ?? '',
   agentJobTimeoutMs: 30 * 60_000,
   storageDriver: env('STORAGE_DRIVER', 'fs') as 'fs' | 's3',
   s3: { bucket: process.env.S3_BUCKET ?? '', region: process.env.S3_REGION ?? '', endpoint: process.env.S3_ENDPOINT ?? '', accessKeyId: process.env.S3_ACCESS_KEY_ID ?? '', secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? '' },

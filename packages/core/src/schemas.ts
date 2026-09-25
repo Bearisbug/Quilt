@@ -33,11 +33,12 @@ export const createProjectSchema = z.object({
 });
 
 // runner 先于 jobInputSchemas 定义，供生成类作业带上「这一轮由谁来做」（REQ-CORE-011）
-export const LLM_DRIVERS = ['agent-sdk', 'anthropic', 'gemini', 'openai', 'stub'] as const;
-export const AGENT_TOOLS = ['claude-code'] as const;
+export const LLM_DRIVERS = ['agent-sdk', 'codex', 'anthropic', 'gemini', 'openai', 'stub'] as const;
+export const AGENT_TOOLS = ['claude-code', 'codex'] as const;
+export type AgentTool = (typeof AGENT_TOOLS)[number];
 export const runnerSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('model'), driver: z.enum(LLM_DRIVERS), model: z.string().trim().min(1).max(80) }),
-  // 本机 agent（REQ-AGENT-003 v0.34）：投递到本机某个正在运行的 Claude Code 会话，sessionId 是 Claude Code 登记处里的会话 UUID
+  // 本机 agent（REQ-AGENT-003 v0.34）：投递到本机某个 Claude Code 会话（sessionId = 登记处里的会话 UUID）或 Codex 线程（v0.68，sessionId = 线程 UUID）
   z.object({ kind: z.literal('agent'), tool: z.enum(AGENT_TOOLS), sessionId: z.uuid() }),
   // 账号自建通道（REQ-CORE-013）：作业里只记 id，凭据由 worker 运行时解密——换 Key 不必重发作业
   z.object({ kind: z.literal('channel'), channelId: z.uuid() }),
@@ -325,10 +326,13 @@ export type AnnotationDto = {
 };
 /** 设置页配置、前端下拉直接渲染的可选通道清单（只含标识与显示名） */
 // ---- 生成通道可配置（REQ-CORE-013 / API-CORE-020~023）----
-// agent-sdk = 本机 Claude 订阅：复用服务端机器上的 `claude` 登录态，没有 Key 也没有端点，只需要选模型（REQ-CORE-013）
-export const CHANNEL_KINDS = ['anthropic', 'gemini', 'openai', 'agent-sdk'] as const;
+// agent-sdk = 本机 Claude 订阅：复用服务端机器上的 `claude` 登录态；codex = 本机 Codex 订阅（v0.68 ADR-020）：复用 `codex` 的 ChatGPT 登录态。
+// 两者都没有 Key 也没有端点，只需要选模型（REQ-CORE-013）
+export const CHANNEL_KINDS = ['anthropic', 'gemini', 'openai', 'agent-sdk', 'codex'] as const;
+/** 用本机登录态、不收 Key 的通道类型 */
+export const LOCAL_CHANNEL_KINDS: readonly ChannelKind[] = ['agent-sdk', 'codex'];
 export type ChannelKind = (typeof CHANNEL_KINDS)[number];
-export const CHANNEL_VENDORS = ['anthropic', 'claude-subscription', 'google', 'openai', 'deepseek', 'qwen', 'moonshot', 'zhipu', 'openrouter', 'ollama', 'siliconflow', 'custom'] as const;
+export const CHANNEL_VENDORS = ['anthropic', 'claude-subscription', 'codex-subscription', 'google', 'openai', 'deepseek', 'qwen', 'moonshot', 'zhipu', 'openrouter', 'ollama', 'siliconflow', 'custom'] as const;
 export type ChannelVendor = (typeof CHANNEL_VENDORS)[number];
 export const CHANNEL_STATUSES = ['unverified', 'verified', 'failed'] as const;
 export type ChannelStatus = (typeof CHANNEL_STATUSES)[number];
@@ -336,6 +340,7 @@ export type ChannelStatus = (typeof CHANNEL_STATUSES)[number];
 export const VENDOR_PRESETS: Record<ChannelVendor, { label: string; kind: ChannelKind; endpoint: string }> = {
   anthropic: { label: 'Anthropic', kind: 'anthropic', endpoint: 'https://api.anthropic.com' },
   'claude-subscription': { label: '本机 Claude 订阅', kind: 'agent-sdk', endpoint: '' },
+  'codex-subscription': { label: '本机 Codex 订阅', kind: 'codex', endpoint: '' },
   google: { label: 'Google Gemini', kind: 'gemini', endpoint: 'https://generativelanguage.googleapis.com' },
   openai: { label: 'OpenAI', kind: 'openai', endpoint: 'https://api.openai.com/v1' },
   deepseek: { label: 'DeepSeek', kind: 'openai', endpoint: 'https://api.deepseek.com/v1' },
@@ -357,7 +362,7 @@ export const createChannelSchema = z.object({
   // 本机订阅走的是机器上的登录态，没有 Key 可填
   apiKey: z.string().max(500).optional(),
 }).refine((v) => v.kind !== 'openai' || !!v.endpoint, { path: ['endpoint'], message: 'OpenAI 兼容通道必须填端点' })
-  .refine((v) => v.kind === 'agent-sdk' || !!v.apiKey, { path: ['apiKey'], message: '这类通道必须填 API Key' });
+  .refine((v) => LOCAL_CHANNEL_KINDS.includes(v.kind) || !!v.apiKey, { path: ['apiKey'], message: '这类通道必须填 API Key' });
 export const updateChannelSchema = z.object({
   label: z.string().trim().min(1).max(60).optional(),
   endpoint: endpointSchema.optional(),
@@ -383,8 +388,10 @@ export type RunnerOptionDto = {
 export type JobDto = { id: string; projectId: string; kind: JobKind; status: JobStatus; runner: JobRunner; input: unknown; output: unknown; createdAt: string; startedAt: string | null; finishedAt: string | null };
 /** 项目级事件（API-CORE-030）：只是「有变化」的提示——screen_changed 带 screenId / revisionId，job_changed 带 jobId 与作业事件类型 */
 export type ProjectEventDto = { type: 'screen_changed' | 'job_changed'; data: unknown; at: string };
-/** 本机正在运行的 Claude Code 会话（API-AGENT-010）：named=false 是派生名（目录 + 后缀），前端显示 UUID */
-export type AgentSessionDto = { sessionId: string; name: string; named: boolean; cwd: string; status: 'idle' | 'busy' | 'unknown'; updatedAt: string };
+/** 本机会话（API-AGENT-010）：Claude Code 正在运行的会话，或 Codex 线程库里的用户线程（v0.68）。
+ *  named=false：Claude Code 是派生名（目录 + 后缀，前端显示 UUID），Codex 是没起过名、name 取的是标题。
+ *  open：Claude Code 恒为 true；Codex = 线程此刻在某个 Codex 窗口里打开着。app：Codex 线程开在哪（桌面版 / VS Code / 终端） */
+export type AgentSessionDto = { tool: AgentTool; sessionId: string; name: string; named: boolean; cwd: string; status: 'idle' | 'busy' | 'unknown'; open: boolean; app?: 'desktop' | 'vscode' | 'cli'; updatedAt: string };
 export type JobEventDto = { seq: number; type: JobEventType; data: unknown; at: string };
 export type MessageDto = { id: string; projectId: string; role: 'user' | 'assistant'; content: string; attachments: AttachmentDto[]; jobId: string | null; jobKind: JobKind | null; affectedScreenIds: string[]; createdAt: string };
 export type ProjectDto = { id: string; name: string; deviceType: (typeof DEVICE_TYPES)[number]; status: 'active' | 'archived'; brief: string; exemplarScreenId: string | null; createdAt: string; updatedAt: string };

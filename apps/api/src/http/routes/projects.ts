@@ -27,7 +27,16 @@ async function chatRunner(userId: string, runner: Runner | undefined): Promise<R
 }
 import { problems } from '../../lib/errors.ts';
 import { findSession } from '../../lib/claudeSessions.ts';
+import { findCodexThread } from '../../lib/codexSessions.ts';
 import { subscribeProject } from '../../lib/events.ts';
+
+// 本机 agent 作业的助手回执：写明投给了谁。Claude Code 会话没起过名时显示 UUID；Codex 线程没起过名时 name 就是标题，照用（v0.68）
+async function deliveredText(runner?: { tool?: string; sessionId?: string }): Promise<string> {
+  const id = runner?.sessionId ?? '';
+  if (runner?.tool === 'codex') return `已投递到本机 Codex 线程「${(await findCodexThread(id))?.name ?? id}」：它做完会经 MCP 收口，结果回写到画布`;
+  const s = await findSession(id);
+  return `已投递到本机 Claude Code 会话「${s ? (s.named ? s.name : s.sessionId) : id}」：它做完会经 MCP 收口，结果回写到画布`;
+}
 
 export const projectRoutes = new Hono<Env>();
 
@@ -81,13 +90,11 @@ projectRoutes.post('/v1/projects/:projectId/jobs', async (c) => {
   const input = await parseBody(c, createJobSchema);
   const content = describeJob(input);
   // 输入里带的通道决定执行者：本机 agent（如检查器里选了会话的子树重生成）投递到会话，其余入 worker 队列
-  const jobRunner = (input.input as { runner?: { kind?: string; sessionId?: string } }).runner;
+  const jobRunner = (input.input as { runner?: { kind?: string; tool?: string; sessionId?: string } }).runner;
   const agent = jobRunner?.kind === 'agent';
   const { job, assistantMessage, reused } = await createJob({ user, projectId: project.id, input, idempotencyKey: c.req.header('idempotency-key') ?? null, requestId: c.get('requestId'), runner: agent ? 'agent' : 'model', withMessage: content ? { content } : undefined });
   if (agent && assistantMessage && !reused) {
-    const session = await findSession(jobRunner?.sessionId ?? '');
-    const who = session ? (session.named ? session.name : session.sessionId) : jobRunner?.sessionId ?? '';
-    await db.update(schema.messages).set({ content: `已投递到本机 Claude Code 会话「${who}」：它做完会经 MCP 收口，结果回写到画布` }).where(eq(schema.messages.id, assistantMessage.id));
+    await db.update(schema.messages).set({ content: await deliveredText(jobRunner) }).where(eq(schema.messages.id, assistantMessage.id));
   }
   return c.json({ job: jobDto(job) }, reused ? 200 : 202);
 });
@@ -139,10 +146,7 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
     return c.json({ userMessage: u && await messageDto(u), assistantMessage: a && await messageDto(a), job: jobDto(job) }, 200);
   }
   if (agent) {
-    const sessionId = runner && runner.kind === 'agent' ? runner.sessionId : '';
-    const session = await findSession(sessionId);
-    const who = session ? (session.named ? session.name : session.sessionId) : sessionId;
-    const [assistant] = await db.update(schema.messages).set({ content: `已投递到本机 Claude Code 会话「${who}」：它做完会经 MCP 收口，结果回写到画布`, affectedScreenIds: targets ?? [] }).where(eq(schema.messages.id, assistantMessage!.id)).returning();
+    const [assistant] = await db.update(schema.messages).set({ content: await deliveredText(runner?.kind === 'agent' ? runner : undefined), affectedScreenIds: targets ?? [] }).where(eq(schema.messages.id, assistantMessage!.id)).returning();
     return c.json({ userMessage: await messageDto(userMessage!), assistantMessage: await messageDto(assistant), job: jobDto(job) }, 202);
   }
   return c.json({ userMessage: await messageDto(userMessage!), assistantMessage: await messageDto(assistantMessage!), job: jobDto(job) }, 202);

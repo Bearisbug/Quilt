@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { CHANNEL_VENDORS, VENDOR_PRESETS, type ChannelDto, type ChannelKind, type ChannelVendor, type ProbeResultDto, type RunnerOptionDto } from '@quilt/core';
+import { CHANNEL_VENDORS, LOCAL_CHANNEL_KINDS, VENDOR_PRESETS, type ChannelDto, type ChannelKind, type ChannelVendor, type ProbeResultDto, type RunnerOptionDto } from '@quilt/core';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button, Field, Input, cn } from '@/ui/ui';
@@ -11,11 +11,11 @@ import { ConfirmDialog, Overlay, useModal } from '@/ui/modal';
 // 每行都能「验证」——真的发一次最小请求；只有验证通过的才会出现在画布输入框的下拉里。
 // 数据：/v1/runners 给统一目录（含不可用项与原因），/v1/channels 给自建通道的明细（端点、状态、密钥末位）。
 
-const KIND_LABEL: Record<ChannelKind, string> = { anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI 兼容', 'agent-sdk': '本机 Claude 订阅' };
-const DEFAULT_VENDOR: Record<ChannelKind, ChannelVendor> = { anthropic: 'anthropic', gemini: 'google', openai: 'openai', 'agent-sdk': 'claude-subscription' };
+const KIND_LABEL: Record<ChannelKind, string> = { anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI 兼容', 'agent-sdk': '本机 Claude 订阅', codex: '本机 Codex 订阅' };
+const DEFAULT_VENDOR: Record<ChannelKind, ChannelVendor> = { anthropic: 'anthropic', gemini: 'google', openai: 'openai', 'agent-sdk': 'claude-subscription', codex: 'codex-subscription' };
 // 模型名不预填（型号更新太快），只给一个看得出格式的例子
 const MODEL_HINT: Record<ChannelVendor, string> = {
-  'claude-subscription': 'claude-sonnet-5',
+  'claude-subscription': 'claude-sonnet-5', 'codex-subscription': 'gpt-6-astra',
   anthropic: 'claude-sonnet-5', google: 'gemini-3.8-flash', openai: 'gpt-5', deepseek: 'deepseek-chat', qwen: 'qwen-plus',
   moonshot: 'kimi-k2', zhipu: 'glm-4.6', openrouter: 'anthropic/claude-sonnet-5', ollama: 'llama3.1', siliconflow: 'Qwen/Qwen3-32B', custom: 'model-id',
 };
@@ -98,7 +98,7 @@ export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOption
       {loading ? <RowsSkeleton /> : (
         <div className="mt-4 space-y-5">
           <Group title="我的通道" hint={mine.length === 0 ? '还没有自建通道。点右上角「添加通道」，填端点与密钥，保存时会自动验证。' : undefined}>{mine.map(row)}</Group>
-          {builtins.length > 0 && <Group title="本机 agent" hint="Quilt 会把画布派的活投递到本机正在运行的 Claude Code 会话，投给谁在输入框旁的会话下拉里选；可用与否只看 claude 命令是否在 PATH 上，展开「如何配置」看安装与接入步骤。">{builtins.map(row)}</Group>}
+          {builtins.length > 0 && <Group title="本机 agent" hint="Quilt 会把画布派的活投递到本机的 Claude Code 会话或 Codex 线程，投给谁在输入框旁的会话下拉里选；可用与否只看 claude / codex 命令是否在 PATH 上，展开「如何配置」看安装与接入步骤。">{builtins.map(row)}</Group>}
         </div>
       )}
 
@@ -236,9 +236,10 @@ function ChannelDialog(p: { mode: 'add' | 'edit'; channel?: ChannelDto; onClose:
     if (!label.trim()) e['ch-label'] = '给这个通道起个名字，例如「DeepSeek 主力」';
     if (!model.trim()) e['ch-model'] = '填模型名，供应商文档里的模型 id';
     if (kind === 'openai' && !endpoint.trim()) e['ch-endpoint'] = 'OpenAI 兼容通道必须填端点';
-    if (kind === 'agent-sdk') { delete e['ch-endpoint']; delete e['ch-key']; }
+    const local = LOCAL_CHANNEL_KINDS.includes(kind);
+    if (local) { delete e['ch-endpoint']; delete e['ch-key']; }
     if (endpoint.trim()) { try { new URL(endpoint.trim()); } catch { e['ch-endpoint'] = '端点要是完整 URL，例如 https://api.deepseek.com/v1'; } }
-    if (!editing && !apiKey && kind !== 'agent-sdk') e['ch-key'] = '填 API Key';
+    if (!editing && !apiKey && !local) e['ch-key'] = '填 API Key';
     setErrors(e); return Object.keys(e).length === 0;
   };
 
@@ -294,7 +295,7 @@ function ChannelDialog(p: { mode: 'add' | 'edit'; channel?: ChannelDto; onClose:
             <Input id="ch-label" name="label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="例如 DeepSeek 主力" maxLength={60} autoComplete="off" data-1p-ignore data-lpignore="true" {...err('ch-label')} />
             {errorLine('ch-label')}
           </Field>
-          {kind !== 'agent-sdk' && (
+          {!LOCAL_CHANNEL_KINDS.includes(kind) && (
           <Field label={kind === 'openai' ? '端点（Base URL）' : '端点（可选）'} htmlFor="ch-endpoint">
             <Input id="ch-endpoint" name="endpoint" type="url" inputMode="url" value={endpoint} onChange={(e) => { setEndpoint(e.target.value); setEndpointTouched(true); }} placeholder={endpointPlaceholder} autoComplete="off" data-1p-ignore data-lpignore="true" spellCheck={false} className="font-mono" {...err('ch-endpoint')} />
             {errorLine('ch-endpoint')}
@@ -306,7 +307,7 @@ function ChannelDialog(p: { mode: 'add' | 'edit'; channel?: ChannelDto; onClose:
             <Input id="ch-model" name="model" value={model} onChange={(e) => setModel(e.target.value)} placeholder={`例如 ${MODEL_HINT[vendor]}`} maxLength={80} autoComplete="one-time-code" data-1p-ignore data-lpignore="true" spellCheck={false} className="font-mono" {...err('ch-model')} />
             {errorLine('ch-model')}
           </Field>
-          {kind !== 'agent-sdk' && (
+          {!LOCAL_CHANNEL_KINDS.includes(kind) && (
           <Field label="API Key" htmlFor="ch-key" hint={editing ? '留空表示不改；密钥加密保存，不会再回显' : '加密保存，只回显末 4 位'}>
             <Input id="ch-key" name="apiKey" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={editing && saved?.apiKeyHint ? `••••${saved.apiKeyHint}` : 'sk-…'} autoComplete="new-password" data-1p-ignore data-lpignore="true" spellCheck={false} className="font-mono" {...err('ch-key')} />
             {errorLine('ch-key')}
@@ -315,6 +316,11 @@ function ChannelDialog(p: { mode: 'add' | 'edit'; channel?: ChannelDto; onClose:
           {kind === 'agent-sdk' && (
             <p className="rounded-md border border-line bg-canvas p-3 text-xs leading-cn text-muted">
               用运行 Quilt 服务端那台机器上的 <code className="font-mono text-fg">claude</code> 登录态，不需要 API Key。只要填一个这个订阅能用的模型名。
+            </p>
+          )}
+          {kind === 'codex' && (
+            <p className="rounded-md border border-line bg-canvas p-3 text-xs leading-cn text-muted">
+              用运行 Quilt 服务端那台机器上的 <code className="font-mono text-fg">codex</code> 登录态（ChatGPT 账号），不需要 API Key；模型名填你在 Codex 里用的那个。每次生成拉起一次 <code className="font-mono text-fg">codex exec</code>，单次约 15～30 秒，比 API 通道慢，也不会在你的 Codex 历史里留会话。
             </p>
           )}
         </div>

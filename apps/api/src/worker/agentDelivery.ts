@@ -3,16 +3,25 @@ import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
 import { emitJobEvent } from '../lib/events.ts';
 import { findSession, injectMessage } from '../lib/claudeSessions.ts';
+import { findCodexThread, openCodexThread, queueCodexMessage } from '../lib/codexSessions.ts';
 import { registerAgentHooks } from '../services/jobs.ts';
 import { deriveLinks } from '../services/screens.ts';
 import type { JobRow } from '../services/projects.ts';
+import type { AgentTool } from '@quilt/core';
 
 // 本机 agent 投递（REQ-AGENT-003 / ADR-015 v0.34）：runner=agent 的作业由这里投递到用户选定的本机 Claude Code 会话——
 // 往它的 inbox socket 写一行用户消息；会话在自己的窗口里做、经 MCP 回写，最后调 quilt.finish_job 收口。
+// Codex 线程（v0.68 ADR-020）：执行 codex queue 排进线程的队列，线程开在哪个 Codex 窗口就由哪个取走；没打开就让桌面版打开它。
 // 这里只管三件事：组提示词并投递、计时（30 分钟没收口算失败）、收口时把作业收成终态。
 // 回写守卫（带 jobId 的 update_screen 必须传 expectedRevisionId）在 ingestScreen 里，这里只负责把 id 写进提示词。
 const timers = new Map<string, NodeJS.Timeout>();
 const mcpUrl = () => `http://127.0.0.1:${config.apiPort}/mcp`;
+
+// 没接 quilt MCP 时怎么接：Claude Code 接上后 /mcp 重连即可；Codex 线程在打开时加载 MCP 配置，接入后得新开或重开线程
+const MCP_SETUP: Record<AgentTool, (url: string) => string> = {
+  'claude-code': (url) => `If this session has no MCP server named "quilt", run \`claude mcp add --transport http quilt ${url}\` and reconnect it (/mcp) before continuing.`,
+  codex: (url) => `If this thread has no MCP tools from a server named "quilt", do not attempt the job: tell the user to run \`codex mcp add quilt --url ${url}\` and then start a new Codex thread or reopen this one (MCP servers are loaded when a thread is opened), then send the job again from the Quilt canvas.`,
+};
 
 async function buildPrompt(job: JobRow): Promise<string> {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, job.projectId));
@@ -28,7 +37,7 @@ async function buildPrompt(job: JobRow): Promise<string> {
     : '';
   return [
     `[Quilt] The Quilt canvas delivered a job to this session (job ${job.id}).`,
-    `You are working on the Quilt project "${project.name}" (projectId ${project.id}, ${project.deviceType}) through the Quilt MCP server "quilt" at ${mcpUrl()}. If this session has no MCP server named "quilt", run \`claude mcp add --transport http quilt ${mcpUrl()}\` and reconnect it (/mcp) before continuing.`,
+    `You are working on the Quilt project "${project.name}" (projectId ${project.id}, ${project.deviceType}) through the Quilt MCP server "quilt" at ${mcpUrl()}. ${MCP_SETUP[toolOf(job)](mcpUrl())}`,
     project.brief ? `App brief: ${project.brief}` : '',
     `Instruction from the user:\n${input.prompt}`,
     scope,
@@ -38,6 +47,8 @@ async function buildPrompt(job: JobRow): Promise<string> {
     `When you are done, call quilt.finish_job with jobId="${job.id}" and a one-line summary (status "failed" with the reason if you could not do it). Quilt keeps the job open until this call.`,
   ].filter(Boolean).join('\n\n');
 }
+
+const toolOf = (job: JobRow): AgentTool => ((job.input as { runner?: { tool?: AgentTool } }).runner?.tool === 'codex' ? 'codex' : 'claude-code');
 
 function disarm(jobId: string) { const t = timers.get(jobId); if (t) { clearTimeout(t); timers.delete(jobId); } }
 function arm(job: JobRow) {
@@ -80,11 +91,23 @@ export async function deliverAgentJob(jobId: string): Promise<void> {
     .where(and(eq(schema.generationJobs.id, jobId), eq(schema.generationJobs.status, 'queued'))).returning();
   if (!claimed) return;
   const sessionId = (claimed.input as { runner?: { sessionId?: string } }).runner?.sessionId ?? '';
-  const session = await findSession(sessionId);
+  const tool = toolOf(claimed);
+  const claude = tool === 'claude-code' ? await findSession(sessionId) : null;
+  const codex = tool === 'codex' ? await findCodexThread(sessionId) : null;
+  const session = claude ?? codex;
   if (!session) { await finishAgentJob(claimed, 'failed', { errorClass: 'agent', message: '会话已关闭或不存在，没有投递出去' }); return; }
-  try { await injectMessage(session.socketPath, await buildPrompt(claimed)); }
-  catch (e) { await finishAgentJob(claimed, 'failed', { errorClass: 'agent', message: `投递失败：${(e as Error).message}` }); return; }
-  const delivery = { sessionId: session.sessionId, name: session.named ? session.name : session.sessionId, deliveredAt: new Date().toISOString() };
+  let opened = false;
+  try {
+    const prompt = await buildPrompt(claimed);
+    if (claude) await injectMessage(claude.socketPath, prompt);
+    else if (codex) {
+      await queueCodexMessage(codex.sessionId, prompt);
+      // 线程没在任何 Codex 窗口里打开：消息只会躺在队列里，让桌面版打开它（会切到前台）才会被取走
+      if (!codex.open) { await openCodexThread(codex.sessionId); opened = true; }
+    }
+  } catch (e) { await finishAgentJob(claimed, 'failed', { errorClass: 'agent', message: `投递失败：${(e as Error).message}` }); return; }
+  // Codex 线程没起过名时 name 是标题（首条消息），比 UUID 好认，照用
+  const delivery = { tool, sessionId: session.sessionId, name: session.named || tool === 'codex' ? session.name : session.sessionId, deliveredAt: new Date().toISOString(), ...(tool === 'codex' ? { opened } : {}) };
   await db.update(schema.generationJobs).set({ output: { delivery } }).where(eq(schema.generationJobs.id, jobId));
   await emitJobEvent(jobId, 'progress', { stage: 'delivered', session: delivery.name });
   arm({ ...claimed, output: { delivery } });
