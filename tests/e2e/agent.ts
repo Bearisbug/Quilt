@@ -384,11 +384,24 @@ await step('TC-AGENT-012', async () => {
   await sleep(500);
   expect((await page.getByTestId('session-select').getAttribute('data-value')) !== T_OPEN, '切到 Claude Code 后会话下拉带着 Codex 的线程 id');
 
-  // 8 本机 Codex 订阅通道：不收 Key；探测经 codex exec（--json --ephemeral 只读、去掉 API Key）；用它改屏，产出进修订、用量记账
-  const ch = await apiJson<{ channel: { id: string; apiKeyHint: string | null; status: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'codex', label: 'Codex 订阅', model: 'gpt-stub' }) });
-  expect(ch.status === 201 && ch.body.channel.apiKeyHint === null && ch.body.channel.status === 'unverified', `建 Codex 订阅通道应 201 且没有 Key：${ch.status} ${JSON.stringify(ch.body)}`);
-  const probe = (await apiJson<{ ok: boolean; error?: string }>(`/v1/runners/channel:${ch.body.channel.id}/probe`, { method: 'POST' })).body;
-  expect(probe.ok, `探测应通过：${JSON.stringify(probe)}`);
+  // 8 本机 Codex 订阅通道：在设置弹窗里添加（不填 Key）→「保存并验证」。桩让验证拖 18 s（真 codex 约 20 s），
+  //   前端要等得住——此前所有请求共用 15 s 上限，服务端验证成功了面板却报「保存失败」（v0.69）。
+  //   探测经 codex exec（--json --ephemeral 只读、去掉 API Key）；再用它改屏，产出进修订、用量记账
+  await page.goto(`${WEB}/p/${r.projectId}?settings=runners`);
+  await page.getByTestId('add-channel').click();
+  const dlg = page.getByTestId('channel-dialog');
+  await dlg.waitFor({ timeout: 5000 });
+  await pickOption(page, '#ch-kind', '本机 Codex 订阅');
+  expect((await page.locator('#ch-key').count()) === 0 && (await page.locator('#ch-endpoint').count()) === 0, 'Codex 订阅通道不该有 Key / 端点字段');
+  await page.fill('#ch-label', 'Codex 订阅');
+  await page.fill('#ch-model', 'gpt-stub');
+  const t0 = Date.now();
+  await page.getByTestId('ch-save').click();
+  await dlg.waitFor({ state: 'detached', timeout: 60_000 }).catch(async () => { throw new Error(`「保存并验证」没有成功关掉面板：${(await dlg.innerText()).slice(0, 160)}`); });
+  const waited = Math.round((Date.now() - t0) / 1000);
+  expect(waited >= 15, `验证应等过桩的 18 s，实际 ${waited} s（桩没生效？）`);
+  const ch = { body: { channel: (await apiJson<{ items: { id: string; label: string; apiKeyHint: string | null; status: string }[] }>('/v1/channels')).body.items.find((c) => c.label === 'Codex 订阅')! } };
+  expect(ch.body.channel?.apiKeyHint === null && ch.body.channel.status === 'verified', `Codex 订阅通道应无 Key 且已验证：${JSON.stringify(ch.body.channel)}`);
   const ex = (await stubLog()).filter((x) => x.cmd === 'exec').pop()!;
   const a = ex.args ?? [];
   expect(['--json', '--ephemeral', '--skip-git-repo-check'].every((f) => a.includes(f)) && a[a.indexOf('-s') + 1] === 'read-only' && a[a.indexOf('-m') + 1] === 'gpt-stub' && ex.hasApiKey === false && !(ex.cwd ?? '').includes('Quilt'), `codex exec 参数 / 环境不对：${JSON.stringify(ex)}`);

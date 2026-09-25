@@ -37,7 +37,9 @@ if (args[0] === 'exec') {
   let input = '';
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (d) => { input += d; });
-  process.stdin.on('end', () => {
+  process.stdin.on('end', async () => {
+    // 验证（只回 OK）故意拖 18 s：真 codex 冷启动约 20 s，超过前端普通请求的 15 s 上限——用来守住验证请求单独的等待上限
+    if (/Reply with exactly the word OK/.test(input)) await new Promise((r) => setTimeout(r, 18_000));
     rec({ cmd: 'exec', args, cwd: process.cwd(), hasApiKey: !!(process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY), promptChars: input.length });
     const out = (o) => process.stdout.write(JSON.stringify(o) + '\n');
     out({ type: 'thread.started', thread_id: crypto.randomUUID() });

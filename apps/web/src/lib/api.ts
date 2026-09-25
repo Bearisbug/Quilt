@@ -7,13 +7,18 @@ export class ApiError extends Error {
   get type() { return this.problem.type; }
 }
 
-async function call<T>(path: string, init: RequestInit & { idempotencyKey?: string } = {}): Promise<T> {
+// 请求等待上限：普通 15 s。通道验证（API-CORE-022）另给 100 s——服务端按驱动最长等 90 s（本机 Codex 订阅冷启动一次 codex exec 约 20 s），
+// 共用 15 s 的话服务端验证成功了、面板却报「保存失败」（v0.69）
+const REQUEST_TIMEOUT_MS = 15_000;
+const PROBE_TIMEOUT_MS = 100_000;
+
+async function call<T>(path: string, { timeoutMs = REQUEST_TIMEOUT_MS, ...init }: RequestInit & { idempotencyKey?: string; timeoutMs?: number } = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json', ...(init.headers as Record<string, string>) };
   // FormData 的 Content-Type 必须由浏览器带 boundary 生成，手写会让服务端解不出分段（素材直传走这条）
   if (init.body && !(init.body instanceof FormData)) headers['Content-Type'] = 'application/json';
   if (init.idempotencyKey) headers['Idempotency-Key'] = init.idempotencyKey;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15_000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(path, { ...init, headers, credentials: 'same-origin', signal: controller.signal });
     if (res.status === 204) return undefined as T;
@@ -119,7 +124,7 @@ export const api = {
   // 本机正在运行的 Claude Code 会话（API-AGENT-010）：会话下拉打开时取
   agentSessions: (tool: AgentTool = 'claude-code') => call<{ items: AgentSessionDto[]; reason?: string }>(`/v1/agent/sessions?tool=${tool}`),
   // 生成通道可配置（REQ-CORE-013）
-  probeRunner: (runnerId: string) => call<ProbeResultDto>(`/v1/runners/${encodeURIComponent(runnerId)}/probe`, { method: 'POST' }),
+  probeRunner: (runnerId: string) => call<ProbeResultDto>(`/v1/runners/${encodeURIComponent(runnerId)}/probe`, { method: 'POST', timeoutMs: PROBE_TIMEOUT_MS }),
   channels: {
     list: () => call<{ items: ChannelDto[] }>('/v1/channels'),
     create: (body: { kind: ChannelKind; vendor?: ChannelVendor; label: string; endpoint?: string; model: string; apiKey: string }) => call<{ channel: ChannelDto }>('/v1/channels', { method: 'POST', body: JSON.stringify(body) }),
