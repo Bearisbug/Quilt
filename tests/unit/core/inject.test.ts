@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { injectQids, reconcileQids, extractBody, assembleDocument, replaceSubtree, applyElementOps, describeElement, stripFences } from '@quilt/core';
+import { injectQids, reconcileQids, extractBody, assembleDocument, replaceSubtree, applyElementOps, describeElement, stripFences, withScreenCsp, SCREEN_CSP } from '@quilt/core';
 import { norm } from '../lib.ts';
 
 test('injectQids 按文档顺序从 q1 起编号，重打时覆盖旧号', () => {
@@ -59,4 +59,14 @@ test('reconcileQids：保留合法且唯一的旧 qid，新元素与重复号从
   const out = norm(reconcileQids('<div data-qid="q1"><p data-qid="q5">a</p><p>new</p><p data-qid="q5">dup</p><i data-qid="x9">bad</i></div>'));
   assert.equal(out, norm('<div data-qid="q1"><p data-qid="q5">a</p><p data-qid="q6">new</p><p data-qid="q7">dup</p><i data-qid="q8">bad</i></div>'));
   assert.equal(norm(reconcileQids('<a>x</a><b>y</b>')), norm('<a data-qid="q1">x</a><b data-qid="q2">y</b>'), '没有 qid 时等同 injectQids');
+});
+
+test('withScreenCsp：截图渲染的 CSP <meta> 在 doctype 之后、prelude 与屏内容之前；没有 doctype 时放最前', () => {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${SCREEN_CSP}">`;
+  const doc = assembleDocument('<main data-qid="q1"><script>x()</script></main>', '<script src="https://cdn.tailwindcss.com"></script>', 'T');
+  const out = withScreenCsp(doc);
+  assert.ok(out.startsWith(`<!doctype html>${meta}\n<html`));
+  assert.ok(out.indexOf(meta) < out.indexOf('<script'));
+  assert.equal(withScreenCsp('<div>x</div>'), `${meta}<div>x</div>`);
+  assert.match(SCREEN_CSP, /form-action 'none'/);
 });

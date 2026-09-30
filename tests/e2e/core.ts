@@ -1,10 +1,13 @@
 import { mkdir, writeFile, stat } from 'node:fs/promises';
+import http from 'node:http';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { launch, openApp, seed, seedJson, apiJson, previewHost, EVIDENCE, ROOT, WEB, API, eventually } from './lib.ts';
 import { startOpenAiStub } from './openai-stub.ts';
 import { pickOption, selectedValue } from './lib.ts';
 import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT } from '@quilt/core';
+import { connectMcp, callTool } from './mcp-client.ts';
+import { chromium } from 'playwright';
 
 // docs/TEST.md CORE 域用例（TC-CORE-003~031）的 AI 执行脚本。每条用例独立前置（种子构造），
 // 输出「TC 结果 备注」，证据截图落 docs/test-runs/run-<RUN>-tc-core-NNN.png。执行者=人工 的用例登记「待人工」。
@@ -2678,6 +2681,203 @@ await step('TC-CORE-046', async () => {
   } catch (e) { S.fail(e); } finally { await page.unroute(SEND_RE); await page.unroute(RUNNERS_RE); await page.unroute(UP_RE); await stub.close(); }
   S.done();
   return `切聊天再切回通道不丢；Esc 清草稿 ⌘Z 找回；一次贴 3 张立刻 3 张、上限 4 当场提示；上传中按 Enter 写理由；在途补打的字与新图保留；${agentNote}`;
+});
+
+// v0.75 来源校验（DESIGN §15「本地服务」）：DNS 重绑后的同源请求（Host 是攻击者域名）、跨站表单与 no-cors 盲写
+// （Origin 是别人的或 null）一律 403；本机画布、回环写法、MCP 客户端与脚本（不带 Origin）照常
+await step('TC-CORE-060', async () => {
+  const port = new URL(API).port;
+  const csrfCount = async () => (await apiJson<{ items: { name: string }[] }>('/v1/projects')).body.items.filter((p) => p.name === 'csrf-060').length;
+  const mcpBody = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'quilt.list_projects', arguments: {} } });
+  const mcpHeaders = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
+  // fetch（undici）会丢掉自定义的 Host 头，伪造请求头一律走 node:http
+  const raw = (p: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) => new Promise<{ status: number; text: string }>((resolve, reject) => {
+    const req = http.request(`${API}${p}`, { method: init.method ?? 'GET', headers: init.headers }, (res) => {
+      let d = ''; res.setEncoding('utf8'); res.on('data', (c) => (d += c)); res.on('end', () => resolve({ status: res.statusCode ?? 0, text: d }));
+    });
+    req.on('error', reject); req.end(init.body);
+  });
+  const forbidden = (r: { status: number; text: string }, what: string) => expect(r.status === 403 && r.text.includes('/errors/forbidden'), `${what} 应 403 /errors/forbidden：${r.status} ${r.text.slice(0, 120)}`);
+
+  // 1 伪造 Host（DNS 重绑后浏览器发出的样子）：读项目、读通道、调 MCP
+  const evilHost = `rebind.attacker.example:${port}`;
+  forbidden(await raw('/v1/projects', { headers: { Host: evilHost } }), '伪造 Host 读项目');
+  forbidden(await raw('/v1/channels', { headers: { Host: evilHost } }), '伪造 Host 读通道');
+  forbidden(await raw('/mcp', { method: 'POST', headers: { ...mcpHeaders, Host: evilHost, Origin: `http://${evilHost}` }, body: mcpBody }), '伪造 Host 调 MCP');
+
+  // 2 跨站盲写：text/plain（CORS 简单请求，不预检）+ 别人的 Origin / null
+  const before = await csrfCount();
+  for (const origin of ['http://evil.example', 'null']) {
+    forbidden(await raw('/v1/projects', { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8', Origin: origin }, body: JSON.stringify({ name: 'csrf-060', deviceType: 'mobile' }) }), `Origin: ${origin} 的 text/plain 写请求`);
+  }
+  forbidden(await raw('/mcp', { method: 'POST', headers: { ...mcpHeaders, Origin: 'http://evil.example' }, body: mcpBody }), '别人的 Origin 调 MCP');
+
+  // 3 合法来源照常：画布 origin、回环另一种写法、不带 Origin 的脚本与 MCP 客户端
+  for (const origin of [new URL(WEB).origin, `http://127.0.0.1:${port}`]) {
+    const r = await raw('/v1/projects', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin }, body: JSON.stringify({ name: 'legit-060', deviceType: 'mobile' }) });
+    expect(r.status === 201, `Origin ${origin} 建项目应 201：${r.status} ${r.text.slice(0, 120)}`);
+  }
+  const loop = await raw('/v1/projects', { headers: { Host: `127.0.0.1:${port}` } });
+  expect(loop.status === 200, `Host 127.0.0.1:${port} 应 200：${loop.status}`);
+  const mcp = await connectMcp();
+  try {
+    const listed = await callTool(mcp, 'quilt.list_projects', {});
+    expect(!listed.isError && listed.text.includes('legit-060'), `MCP 客户端（不带 Origin）应照常列出项目：${listed.text.slice(0, 120)}`);
+  } finally { await mcp.close(); }
+
+  // 4 真实浏览器：攻击者域名解析到回环（DNS 重绑之后的状态），页内同源 fetch 与跨站 text/plain 表单
+  const rb = await chromium.launch({ channel: 'msedge', headless: true, args: ['--host-resolver-rules=MAP rebind.test 127.0.0.1', '--no-proxy-server'] });
+  try {
+    const pg = await rb.newPage();
+    await pg.goto(`http://rebind.test:${port}/`);
+    const same = await pg.evaluate(async (body) => {
+      const g = await fetch('/v1/projects');
+      const m = await fetch('/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body });
+      return [g.status, m.status];
+    }, mcpBody);
+    expect(same[0] === 403 && same[1] === 403, `重绑页同源读项目 / 调 MCP 应 403：${same.join(' / ')}`);
+    const [resp] = await Promise.all([
+      pg.waitForResponse((r) => r.url() === `${API}/v1/projects` && r.request().method() === 'POST'),
+      pg.evaluate((api) => {
+        const f = document.createElement('form'); f.method = 'post'; f.enctype = 'text/plain'; f.action = `${api}/v1/projects`;
+        const i = document.createElement('input'); i.name = '{"name":"csrf-060","deviceType":"mobile","x":"'; i.value = '"}';
+        f.appendChild(i); document.body.appendChild(f); f.submit();
+      }, API),
+    ]);
+    expect(resp.status() === 403, `跨站 text/plain 表单应 403：${resp.status()}`);
+    await pg.waitForLoadState('load').catch(() => {});
+    await pg.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-tc-core-060.png`) });
+  } finally { await rb.close(); }
+  expect((await csrfCount()) === before, `跨站写请求建出了项目（csrf-060 多了 ${(await csrfCount()) - before} 个）`);
+  return `伪造 Host 读项目 / 通道 / MCP 与 evil / null Origin 写入全部 403；画布 origin、127.0.0.1、MCP 客户端照常；重绑页同源 fetch 与跨站表单 403，未建出项目`;
+});
+
+// v0.75 屏里的脚本写不了主站（DESIGN §15「预览域」「对象下发」，ADR-004 补充）：同一张屏的脚本在截图渲染、导出抽 CSS、
+// 预览域活 iframe、对象地址四处各跑一遍，每处都用 fetch no-cors 与 text/plain 表单往本机 API 写；库里一条都不能多。
+// 屏里放一块探针：看到 connect-src 与 form-action 两类 CSP 违规、且预览域素材与 https 图片都加载出来才涂绿
+await step('TC-CORE-061', async () => {
+  const bad: string[] = [];
+  const check = (cond: unknown, msg: string) => { if (!cond) bad.push(msg); };
+  const pid = (await apiJson<{ project: { id: string } }>('/v1/projects', { method: 'POST', body: JSON.stringify({ name: 'Isolation', deviceType: 'mobile' }) })).body.project.id;
+  const form = new FormData();
+  form.append('file', new Blob(['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" width="10" height="10"><rect width="10" height="10" fill="#2f9e44"/></svg>'], { type: 'image/svg+xml' }), 'green.svg');
+  const assetUrl = ((await (await fetch(`${API}/v1/projects/${pid}/assets`, { method: 'POST', body: form })).json()) as { asset: { url: string } }).asset.url;
+  const html = `<div class="bg-background p-6 space-y-4">
+  <h1 class="text-2xl font-bold text-primary">Isolation</h1>
+  <i data-lucide="house"></i>
+  <img id="asset" src="${assetUrl}" width="40" height="40" alt="">
+  <img id="remote" src="https://picsum.photos/id/10/40/40" width="40" height="40" alt="">
+  <div id="probe" style="position:fixed;left:0;top:0;margin:0;width:60px;height:60px;background:#808080"></div>
+  <script>
+  (function () {
+    var api = '${API}', pid = '${pid}', seen = {};
+    function paint() {
+      var ok = seen['form-action'] && seen['connect-src'] && document.getElementById('asset').naturalWidth > 0 && document.getElementById('remote').naturalWidth > 0;
+      document.getElementById('probe').style.background = ok ? '#00c800' : '#c80000';
+    }
+    document.addEventListener('securitypolicyviolation', function (e) { seen[e.effectiveDirective] = 1; paint(); });
+    function body(how) { return JSON.stringify({ content: 'csrf-061 ' + how + ' ' + location.origin, runner: { kind: 'model', driver: 'stub', model: 'stub' } }); }
+    // 等 load 之后再动手：被 CSP 挡下的 form.submit() 会中止文档自己的加载，解析中途调用的话后面的内容与图片都不再加载
+    window.addEventListener('load', function () {
+      paint();
+      fetch(api + '/v1/projects/' + pid + '/messages', { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: body('fetch') }).catch(function () {});
+      fetch(api + '/v1/projects', { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ name: 'csrf-061', deviceType: 'mobile' }) }).catch(function () {});
+      var f = document.createElement('form'); f.method = 'post'; f.enctype = 'text/plain'; f.action = api + '/v1/projects/' + pid + '/messages';
+      var i = document.createElement('input'); var b = body('form'); i.name = b.slice(0, -1) + ',"x":"'; i.value = '"}';
+      f.appendChild(i); document.body.appendChild(f); f.submit();
+    });
+  })();
+  </script>
+</div>`;
+  // 写进库的痕迹：本项目里 csrf-061 开头的消息（每条都带发出它的 origin）与名为 csrf-061 的项目
+  const leaks = async () => {
+    const msgs = (await apiJson<{ items: { content: string }[] }>(`/v1/projects/${pid}/messages?limit=100`)).body.items.filter((m) => m.content.startsWith('csrf-061')).map((m) => m.content);
+    const projs = (await apiJson<{ items: { name: string }[] }>('/v1/projects')).body.items.filter((p) => p.name === 'csrf-061').length;
+    return { msgs, projs, none: msgs.length === 0 && projs === 0, text: `消息 ${JSON.stringify(msgs)}，csrf-061 项目 ${projs} 个` };
+  };
+  const probeColor = (b64: string, x: number, y: number) => page.evaluate(async ([data, px, py]) => {
+    const img = new Image(); img.src = `data:image/png;base64,${data}`; await img.decode();
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+    const g = c.getContext('2d')!; g.drawImage(img, 0, 0);
+    return Array.from(g.getImageData(px as number, py as number, 1, 1).data.slice(0, 3));
+  }, [b64, x, y] as const);
+  const green = (rgb: number[]) => rgb[0] < 40 && rgb[1] > 160 && rgb[2] < 40;
+
+  const mcp = await connectMcp();
+  try {
+    const created = await callTool(mcp, 'quilt.create_screen', { projectId: pid, name: 'Isolation', route: '/iso', html });
+    expect(!created.isError, `推屏失败：${created.text.slice(0, 200)}`);
+    const sid = (created.json as { screenId: string }).screenId;
+
+    // 1 截图渲染：入库即截图，截图浏览器里同一段脚本执行
+    let shotUrl: string | null = null;
+    for (let i = 0; i < 40 && !shotUrl; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      shotUrl = (await apiJson<{ screens: { id: string; screenshotUrl: string | null }[] }>(`/v1/projects/${pid}`)).body.screens.find((s) => s.id === sid)?.screenshotUrl ?? null;
+    }
+    const afterShot = await leaks();
+    check(afterShot.none, `截图渲染后库里多出写入：${afterShot.text}`);
+    if (!shotUrl) bad.push('截图 40 s 内未就绪');
+    else {
+      const b64 = Buffer.from(await (await fetch(shotUrl)).arrayBuffer()).toString('base64');
+      const rgb = await probeColor(b64, 30, 30);
+      check(green(rgb), `截图里探针不是绿色（${rgb.join(',')}）：截图渲染页没报出 connect-src / form-action 违规，或素材 / https 图片没加载出来`);
+    }
+
+    // 2 导出：抽 Tailwind 并集 CSS 时全部屏的 body 放进一页，脚本同样执行；产物与下载照常
+    const exp = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ kind: 'export_prototype', input: {} }) });
+    const expJob = await waitJob(exp.body.job.id, 90);
+    check(expJob.status === 'succeeded', `导出作业 ${expJob.status}`);
+    const afterExport = await leaks();
+    check(afterExport.none, `导出后库里多出写入：${afterExport.text}`);
+    const dl = await fetch(`${API}/v1/jobs/${exp.body.job.id}/export`);
+    const dlText = await dl.text();
+    check(dl.status === 200 && (dl.headers.get('content-disposition') ?? '').startsWith('attachment') && dlText.includes('Isolation') && dlText.includes('--tw-'), `画布的导出下载应 200 attachment 且含屏与 Tailwind CSS：${dl.status} ${dl.headers.get('content-disposition')}`);
+    const ge = await callTool(mcp, 'quilt.get_export', { jobId: exp.body.job.id });
+    const exportUrl = (ge.json as { url?: string }).url ?? '';
+    check(exportUrl, `get_export 没给出地址：${ge.text.slice(0, 160)}`);
+
+    // 3 对象地址：修订 htmlUrl 与 get_export 的 url 在 API origin 上下发——必须是附件、不在浏览器里渲染
+    const rev = (await apiJson<{ items: { htmlUrl: string }[] }>(`/v1/screens/${sid}/revisions`)).body.items[0];
+    for (const [what, url] of [['htmlUrl', rev.htmlUrl], ['get_export url', exportUrl]] as const) {
+      if (!url) continue;
+      const r = await fetch(url);
+      const cd = r.headers.get('content-disposition') ?? ''; const csp = r.headers.get('content-security-policy') ?? '';
+      check(r.status === 200 && cd.startsWith('attachment') && csp.includes('sandbox') && r.headers.get('x-content-type-options') === 'nosniff', `${what} 响应头应为附件 + CSP sandbox + nosniff：${r.status} cd=${cd} csp=${csp}`);
+      check((await r.text()).includes('csrf-061'), `${what} 的正文应照常可取`);
+      const download = page.waitForEvent('download', { timeout: 5000 }).catch(() => null);
+      await page.goto(url).catch(() => {});
+      const d = await download;
+      check(d, `浏览器打开 ${what} 应是下载，实际渲染在 ${page.url().slice(0, 60)}`);
+      const name = d?.suggestedFilename() ?? '';
+      check(!d || /^[0-9a-f-]{36}\.html$/.test(name), `${what} 的下载文件名应是对象键末段（<id>.html）：${name}`);
+      await d?.cancel().catch(() => {});
+    }
+    await page.waitForTimeout(1500);
+    const afterObjects = await leaks();
+    check(afterObjects.none, `打开对象地址后库里多出写入：${afterObjects.text}`);
+
+    // 4 预览域：响应头 CSP 含 form-action 'none'；双击进交互态，活 iframe 里同样报出两类违规，库里不多东西
+    const pv = (await apiJson<{ screens: { id: string; previewUrl: string }[] }>(`/v1/projects/${pid}`)).body.screens.find((s) => s.id === sid)!.previewUrl;
+    const pvRes = await fetch(pv.replace(/\/\/[^/:]+/, '//127.0.0.1'));
+    check((pvRes.headers.get('content-security-policy') ?? '').includes("form-action 'none'"), `预览响应的 CSP 缺 form-action 'none'：${pvRes.headers.get('content-security-policy')}`);
+    await page.goto(`${WEB}/p/${pid}`);
+    await page.locator('[data-testid="screen-card"][data-route="/iso"]').waitFor({ timeout: 15000 });
+    await page.locator('[data-testid="screen-card"][data-route="/iso"] .gesture').dblclick();
+    const fl = page.frameLocator('.card.focused iframe');
+    let bg = '';
+    if (await fl.locator('#probe').waitFor({ timeout: 15000 }).then(() => true, () => false)) {
+      await eventually(async () => { bg = await fl.locator('#probe').evaluate((el) => getComputedStyle(el).backgroundColor); expect(bg === 'rgb(0, 200, 0)', bg); }, 10000).catch(() => {});
+      check(bg === 'rgb(0, 200, 0)', `预览 iframe 里探针不是绿色（${bg}）：没报出 connect-src / form-action 违规，或素材 / https 图片没加载出来`);
+    } else bad.push(`预览 iframe 里 15 s 找不到探针（iframe 现在是 ${await page.locator('.card.focused iframe').evaluate((el) => (el as HTMLIFrameElement).src.slice(0, 60)).catch(() => '无')}，可能被屏里的表单提交带走了）`);
+    await shot(page, 'CORE-061');
+    await page.waitForTimeout(1500);
+    const afterPreview = await leaks();
+    check(afterPreview.none, `预览 iframe 跑过后库里多出写入：${afterPreview.text}`);
+    await page.keyboard.press('Escape');
+  } finally { await mcp.close(); }
+  if (bad.length) { console.log(`   TC-CORE-061 全部失败项：\n   - ${bad.join('\n   - ')}`); throw new Error(bad.join('；')); }
+  return '截图渲染 / 导出抽 CSS / 对象地址 / 预览 iframe 四处都没写进库；截图与预览里探针为绿（两类 CSP 违规 + 素材与 https 图片加载）；htmlUrl 与导出地址为附件，浏览器下载不渲染；导出下载照常';
 });
 
 await browser.close();

@@ -10,7 +10,7 @@
 | Owner | @bug |
 | 关联设计文档 | `docs/DESIGN.md` |
 | 被测系统 | `~/Documents/Projects/Quilt`（Web 画布 + API/MCP 服务 + Worker + 预览域服务） |
-| 最后更新 | 2026-10-01（设计文档 v0.74） |
+| 最后更新 | 2026-10-01（设计文档 v0.75） |
 
 变更记录（登用例增改，不登执行轮次）：
 
@@ -18,6 +18,7 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-10-01 | 设计文档 v0.75（安全边界）：`TC-CORE-031` 第 5 步建项目带打包画布的 `Origin`、增伪造 `Host` 403 的断言；新增 `TC-CORE-060`（伪造 `Host` / 跨站与 `null` 的 `Origin` 一律 403，画布 origin、回环写法、MCP 客户端照常，另用无头 Edge 模拟 DNS 重绑后的同源 fetch 与跨站表单）与 `TC-CORE-061`（同一张屏的脚本在截图渲染、导出抽 CSS、对象地址、预览域 iframe 四处往本机 API 写，库里一条都不能多；截图与预览里探针为绿；`htmlUrl` 与导出地址是附件、下载文件名为 `<id>.html`）；§2「不测」的安全渗透一行改写；§3 单测清单加 `api/origin` | @bug |
 | 2026-10-01 | 设计文档 v0.74（对话轮次与输入框的缺陷回写 13 条）：新增 `TC-CORE-043`（「修改」还原完整参数：锚点 + 组件的造屏轮、出变体 / 补缺失页 / 补链 / 按新约定重生成的胶囊与同类作业、附加要求的拼接与反解、`/messages` 三种 400）、`TC-CORE-044`（对话记录贴底才跟随、重试在途锁、预览按图定位）、`TC-CORE-045`（失败文案、折叠横条失败标记、toast 位置）、`TC-CORE-046`（通道不被模式切换冲掉、`Esc` 清草稿可撤销、贴图批量与上限、`Enter` 被挡写理由、在途输入保留）；`TC-CORE-006` 第 2 步增失败文案断言，脚本把这一轮改走 stub；`tests/e2e/openai-stub.ts` 的 `holdMs` 对 401 也生效；单测增 `tests/unit/core/failure.test.ts`，提示词底稿的拼接反解与胶囊还原各一条 | @bug |
 | 2026-09-27 | 设计文档 v0.73（组件卡预览关掉背景模糊）：`TC-EDIT-012` 增第 7a 步（组件卡 iframe 里给根元素加 `backdrop-blur-xl` 后计算值仍为 `none`）。原现象（非 100% 缩放下交互态悬停出现灰影）只在有头浏览器里出现，无头截图整帧重画、复现不出来，由用户在自己的浏览器里确认 | @bug |
 | 2026-09-27 | 设计文档 v0.72（对话记录：参考图预览，消息复制 / 重试 / 修改）：新增 `TC-CORE-042`（大图预览的切换 / 到头停住 / 关闭与焦点归还、操作条显隐与归属、复制、重试只换通道且跑着时置灰与 409、修改填回、接口 404 / 400）；`tests/e2e/openai-stub.ts` 增 `holdMs`（拖一阵再回，造一个在跑的作业） | @bug |
@@ -34,7 +35,7 @@
 | --- | --- |
 | 单元 / 集成 / 契约自动化（lint 规则、状态机守卫穷举、权限矩阵、openapi↔MCP schema） | 代码仓测试套件（策略见设计文档 §19） |
 | 延迟 P95、并发 20 作业、队列等待等容量指标 | 专项压测（指标见设计文档 §15）；本文档仅含 100 屏画布帧率一条功能性检查 |
-| 安全渗透（预览域 CSP 绕过；SaaS 阶段的鉴权攻击面） | 上线前专项审计——本地版服务只绑 `127.0.0.1`、无鉴权面；SaaS 阶段再审 |
+| 安全渗透（CSP 绕过的系统性搜索；SaaS 阶段的鉴权攻击面） | 上线前专项审计；本地版两条已知攻击路径——网页借浏览器打本机 API、屏里的脚本写主站——由 `TC-CORE-060` / `061` 回归（v0.75） |
 | 生成内容的美学质量（超出「对标 Stitch」人工门之外） | 无归属——由 §3 指标持续观察 |
 | 部署管线、灰度、回滚演练 | deploy-pipeline（设计文档 §23） |
 
@@ -62,7 +63,7 @@
 - 本机 Codex（`REQ-AGENT-003` / `REQ-CORE-013` v0.68，`ADR-020`）：`TC-AGENT-012` 用**假 Codex**验整条链——API 以 `QUILT_CODEX_HOME=/tmp/quilt-e2e-codex`、`QUILT_CODEX_BIN` 与 `QUILT_CODEX_OPENER` 都指向 `tests/e2e/codex-stub.mjs` 启动（另设 `OPENAI_API_KEY=sk-must-not-reach-codex`，验驱动会把它去掉），测试脚本也以同一个 `QUILT_CODEX_HOME` 运行（未设时登记「跳过」）。脚本自建假线程库（`state_5.sqlite`）；桩只记下 `queue` / 深链接 / `exec` 调用并回放 `exec` 的 JSONL（验证用的最小请求故意拖 18 s，与真 codex 冷启动相当，超过前端普通请求的 15 s 上限）；「Codex 窗口」一侧由脚本扮演——占住写锁文件表示线程打开着，读桩记下的队列消息、经 MCP 回写并收口。作业创建限流 10 次 / 分钟（§15），脚本在 `TC-AGENT-009` 之后先等过限流窗口再跑 012。`TC-AGENT-013`（真实 Codex）要本机 `codex` 已用 ChatGPT 登录、开着 Codex 桌面版，并临时把 Codex 的 `quilt` MCP 指到测试 API（`codex mcp add quilt --url http://127.0.0.1:3200/mcp` 加 `default_tools_approval_mode = "approve"`，测完改回 3100）；终端会话在伪终端里起 TUI（脚本替它回答终端能力探测与目录信任确认，只写进该伪终端，不动真实键盘鼠标）。
 - 聊天模式（`REQ-CORE-023` v0.45）：`TC-CORE-039` 要本机 `claude` 已登录——脚本经 API 建一条 `agent-sdk` 通道并探测通过后才发真实回合（模型 `CHAT_MODEL`，缺省 `claude-sonnet-5`；一轮 1～5 分钟，按订阅额度计费）；`LIVE_LLM=0` 只跑通道校验与串行守卫。SDK 会话文件落在 `~/.claude/projects/` 下按 `$dataDir/chat` 编码的目录，测试库与开发库共用该目录、会话 id 各自记在项目上，互不干扰。
 - MCP 与画布同面（`REQ-AGENT-002` v0.51）：`TC-AGENT-011` 由 `pnpm --filter @quilt/tests e2e:mcp` 执行，纯 MCP / REST、不开浏览器，要求 API 以 `LLM_DRIVER=stub` 启动（脚本先查 `/v1/health`，不是 stub 就退出）。为了不占用 3100 上的开发实例，可另起一套：`API_PORT=3200 PREVIEW_PORT=3201 API_ORIGIN=http://localhost:3200 PREVIEW_ORIGIN=http://preview.localhost:3201 DATABASE_URL=postgres://quilt:quilt@127.0.0.1:5439/quilt_test LLM_DRIVER=stub LLM_STUB= pnpm --filter @quilt/api dev`，脚本侧 `QUILT_E2E_API=http://localhost:3200 DATABASE_URL=…quilt_test`（种子脚本走同一个 `DATABASE_URL`）。`PREVIEW_ORIGIN` 必须一起改：`.env` 里写死的 3101 会让素材 URL 与截图渲染都打到开发实例的预览域。**浏览器用例也能在这套上跑**（v0.60 起）：先 `pnpm --filter @quilt/web build`，起 API 时再加 `WEB_DIST=$PWD/apps/web/dist WEB_ORIGIN=http://localhost:3200`（打包形态：API 同端口托管前端；`WEB_ORIGIN` 不改的话预览域的 `frame-ancestors` 还写着 6688，聚焦的 iframe 会整张拒载），脚本侧再加 `QUILT_E2E_WEB=http://localhost:3200`。
-- 单测（v0.60）：`pnpm test` 在 `tests/unit` 用 `node:test` 跑 `packages/core` 与前端纯函数的单测（不起库、不起浏览器，约 0.5 s）。TEST.md 不为单测逐条建 TC——测试文件名即覆盖范围（`core/inject`、`core/components`、`core/outline`、`core/lint`、`core/tokens`、`core/contract`、`web/arrange`、`web/jobs`、`api/codex`、`api/agentSdk`），失败按「单测轮」登记。
+- 单测（v0.60）：`pnpm test` 在 `tests/unit` 用 `node:test` 跑 `packages/core` 与前端纯函数的单测（不起库、不起浏览器，约 0.5 s）。TEST.md 不为单测逐条建 TC——测试文件名即覆盖范围（`core/inject`、`core/components`、`core/outline`、`core/lint`、`core/tokens`、`core/contract`、`web/arrange`、`web/jobs`、`api/codex`、`api/agentSdk`、`api/origin`），失败按「单测轮」登记。
 - LLM 故障注入：`LLM_STUB=503 pnpm dev` 让所有调用返回 503；`LLM_STUB=fixture` 回放固定 HTML（需要确定性时使用，用例中显式注明）。真实调用会消耗额度，每条用例后置不做特殊清理。
 - 工具：浏览器（自动化遵循运行环境既有约定：Playwright 驱动本机 Edge；帧率用页面内 rAF 计数 + `longtask` PerformanceObserver 采样；**在预览 iframe（跨域）内点击元素前必须先让画布处于该屏 1:1 聚焦态**——Playwright 不感知外层 CSS transform 缩放，非 1:1 下点击坐标会偏；键盘快捷键在焦点位于 iframe 内时由预览运行时转发，测试可直接对页面按键）；curl（不带凭据）；`pnpm mcp:call <tool> '<json>'` / `--resource <uri>` / `--list`（MCP 调用脚本，打印工具返回）。
 - 执行脚本：`tests/e2e/core.ts`（CORE）、`proto.ts`、`edit.ts`、`agent.ts`、`install.ts`（`TC-CORE-031`）、`smoke.ts`（开发冒烟）；环境变量 `RUN=轮次`、`ONLY=用例子集`、`LIVE_LLM=0` 跳过真实生成。各套件串行执行，不并行——每套开头的 `pnpm seed` 会清掉另一套正在用的数据。
@@ -555,6 +556,19 @@
 
 后置：删除桩通道、关闭桩。
 
+#### `TC-CORE-061` 屏里的脚本写不了主站 — 对应 `REQ-CORE-005`、`REQ-CORE-022`、`REQ-PROTO-004`（v0.75）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：`POST /v1/projects` 建项目 `Isolation`（mobile），上传一张纯绿 SVG 素材（得到预览域 `/a/` 地址）；经 MCP `quilt.create_screen` 推一屏 `/iso`：有 Tailwind 类、`<i data-lucide="house">`、该素材图、一张 https 外链图（picsum）、左上角 60×60 的灰色探针；脚本在 `load` 之后（被 CSP 挡下的 `form.submit()` 会中止文档自己的加载，解析中途调用会让后面的图片都不再加载）① 用 `fetch` no-cors 往 `POST /v1/projects/<id>/messages`（正文带 stub 通道与 `location.origin`）和 `POST /v1/projects` 各发一次，② 用 `enctype=text/plain` 的表单 `form.submit()` 往 `…/messages` 发一次；监听 `securitypolicyviolation`，同时看到 `connect-src` 与 `form-action` 两类违规、两张图也都加载出来时把探针涂成 `#00c800`，否则 `#c80000`。同一段脚本会在截图渲染、导出抽 CSS、对象地址、预览域 iframe 四处各执行一遍。脚本 `tests/e2e/core.ts`（`ONLY=TC-CORE-061`）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 等该屏截图就绪（≤ 40 s），读截图 PNG 在 (30, 30) 处的像素；查本项目消息与名为 `csrf-061` 的项目 | 截图就绪（Tailwind、图标已生效）；像素为绿（R < 40、G > 160、B < 40）；没有 `csrf-061` 开头的消息，也没有 `csrf-061` 项目 |
+| 2 | 建 `export_prototype` 作业等它结束；`GET /v1/jobs/<id>/export`；MCP `quilt.get_export` | 作业 `succeeded`；下载 `200`、`Content-Disposition: attachment`、正文含 `Isolation` 与 Tailwind 产物（`--tw-`）；库里仍无写入 |
+| 3 | 取该屏修订的 `htmlUrl` 与 `get_export` 给的 `url`，各 `fetch` 一次看响应头与正文，再各在浏览器里打开一次 | 响应头 `Content-Disposition: attachment; filename="<id>.html"`、`Content-Security-Policy` 含 `sandbox`、`X-Content-Type-Options: nosniff`；正文照常可取；浏览器触发下载、不渲染，下载文件名是 `<修订 id>.html` / `<作业 id>.html`；库里仍无写入 |
+| 4 | `fetch` 该屏的 `previewUrl` 看 CSP；打开画布双击 `/iso` 进交互态，读 iframe 里探针的背景色 | CSP 含 `form-action 'none'`；探针 10 s 内为 `rgb(0, 200, 0)`；库里仍无写入 |
+
+后置：`Esc` 退出交互。
+
 ### CORE · 对话迭代与修订
 
 #### `TC-CORE-012` 对话只修改选中屏 — 对应 `REQ-CORE-006` · 级别: 冒烟 · 执行者: 皆可
@@ -713,10 +727,23 @@
 | 2 | `quilt --home <空目录> --port 3410 --preview-port 3411 --no-open` | 120 s 内 `GET /v1/health` 200；`<home>/config.env` 生成且含随机 `QUILT_SECRETS_KEY` 与 `PREVIEW_SIGNING_SECRET`；`<home>/db` 存在（PGlite） |
 | 3 | `GET /`、`GET /assets/*.js`、`GET /p/不存在` | 主页是打包的前端（含 `<div id="root">` 与 `/assets/*.js`）；静态资源 `Content-Type` 为 JavaScript；SPA 路径回退到 `index.html` |
 | 4 | `GET /v1/config`；`GET http://127.0.0.1:3411/healthz`；`POST /mcp` initialize | `local=true`、`previewOrigin=http://127.0.0.1:3411`、`home` 等于临时目录；预览域 200；MCP 免鉴权返回 200 |
-| 5 | `POST /v1/projects` 建项目 | 201；`<home>/db` 非空 |
+| 5 | `POST /v1/projects` 建项目（带画布 origin `http://localhost:3410` 作 `Origin`）；再带 `Host: rebind.attacker.example:3410` 调 `GET /v1/projects`（v0.75） | 201；`<home>/db` 非空；伪造 `Host` 的请求 403 |
 | 6 | 杀掉进程再以同样参数启动 | 二次启动就绪且日志无「首次运行」；`GET /v1/projects` 仍含步骤 5 的项目 |
 
 后置：停进程、删临时目录。
+
+#### `TC-CORE-060` 只受理本机来源的请求 — 对应 `REQ-CORE-017`、`REQ-AGENT-002`（`ADR-016` v0.75）· 级别: 回归 · 执行者: AI
+
+前置：API 已起（任一形态），记下 API 端口 `<P>` 与画布 origin（跑脚本时即 `QUILT_E2E_WEB`）。脚本 `tests/e2e/core.ts`（`ONLY=TC-CORE-060`）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 带 `Host: rebind.attacker.example:<P>` 调 `GET /v1/projects`、`GET /v1/channels`、`POST /mcp`（`tools/call quilt.list_projects`） | 三个都 `403`，`type` 为 `/errors/forbidden`，响应里没有项目与通道 |
+| 2 | `POST /v1/projects`（`Content-Type: text/plain`），`Origin` 分别为 `http://evil.example` 与 `null`；再以 `Origin: http://evil.example` 调 `POST /mcp` | 全部 `403 /errors/forbidden`；项目列表里没有 `csrf-060` |
+| 3 | `POST /v1/projects` 带画布 origin 作 `Origin`、再带 `http://127.0.0.1:<P>`；不带 `Origin`、以 `Host: 127.0.0.1:<P>` 调 `GET /v1/projects`；MCP 客户端（不带 `Origin`）调 `quilt.list_projects` | `201` / `201` / `200`；MCP 正常返回并列出刚建的 `legit-060` |
+| 4 | 无头 Edge 以 `--host-resolver-rules=MAP rebind.test 127.0.0.1` 启动（DNS 重绑之后的状态），打开 `http://rebind.test:<P>/`，页内 `fetch('/v1/projects')` 与 `fetch('/mcp', POST)`；再从该页提交一个 `enctype=text/plain` 的表单到 `http://localhost:<P>/v1/projects` | 两个同源 fetch 都 `403`；表单导航的响应 `403`；项目列表里仍没有 `csrf-060` |
+
+后置：无（项目随下一次 `pnpm seed` 清掉）。
 
 ### PROTO · 原型播放
 
@@ -1258,6 +1285,12 @@
 | RUN-130 | 2026-10-01 | 同 RUN-129 | AI(Claude Code) | 局部轮（受影响回归 + 新用例，`LIVE_LLM=0`）：`TC-CORE-013` / `017` / `018` / `023` / `024` / `025` / `027` / `028` / `029` / `030` / `036` / `041` / `042` / `043`~`046`；另用无头 Edge 在 1440×900 与 390×844 下看补链胶囊、重试转圈、失败 toast、折叠横条失败标记、上传中的理由 | 通过 13/16，失败 3 均为基线：`TC-CORE-023`（「重新展开后输入框没回到原位」，§7 已登记、RUN-126 同一失败点）、`TC-CORE-027`（没有视觉通道，环境）、`TC-CORE-029`（动词行「造屏 · 交给本机会话」，§7 登记的整套顺序偶发，单跑见 RUN-131）；待人工 1（`020`）、跳过 1（`006`，见 RUN-132）。画面：两个视口 console 错误 0、无横向溢出；toast 在输入框上方，390 宽时与折叠横条重叠（toast 3.2 s 后消失） |
 | RUN-131 | 2026-10-01 | 同 RUN-129 | AI(Claude Code) | 局部轮：`TC-CORE-029` 单跑、`TC-EDIT-009`、`TC-EDIT-012`（components 套件，`LIVE_LLM=0`）、`TC-AGENT-009` / `012` | 通过 5/5 |
 | RUN-132 | 2026-10-01 | 同 RUN-129 | AI(Claude Code) | `TC-CORE-006`（`tests/e2e/core-stub.ts`，同一隔离端口上的 API 以 `LLM_STUB=503` 重启，跑完恢复） | 第 1、2 步通过：20 s 后 `failed`、`errorClass=provider`，助手回执「造屏失败：模型服务暂时不可用（HTTP 503）。稍后点「重试」，或在输入框换一个通道再发」；第 3、4 步（数 worker 日志里的调用次数、恢复后重试）脚本不覆盖，未执行 |
+| RUN-133 | 2026-10-01 | 修复前代码（c537fd5 的 `apps/api` 与 `packages/core`；工作树只带新用例，第二次执行时用 `git stash` 把修复临时撤掉再重启隔离栈） | AI(Claude Code) | 复现轮：新增 `TC-CORE-060` / `061`，`LIVE_LLM=0`。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态（`WEB_DIST`，画布与 API 同源） | 失败 2/2（预期）：060 第 1 步伪造 `Host: rebind.attacker.example:3410` 读项目 200 并返回全部项目；061 共 12 条失败项——截图渲染页的 `fetch` no-cors 建出消息「csrf-061 fetch null」与 `csrf-061` 项目、截图 40 s 内未就绪（表单把截图页带走）；导出抽 CSS 的那一页同样写入，导出作业 failed；`htmlUrl` 无附件头，浏览器在 API origin 上渲染并写入「csrf-061 fetch http://localhost:3410」；预览 CSP 没有 `form-action`，iframe 里的表单写入「csrf-061 form http://preview.localhost:3411」（证据 `run-133-tc-core-061-fail.png`） |
+| RUN-134 | 2026-10-01 | 未提交工作树（设计文档 v0.75：来源校验 + 屏文档 CSP + 对象 HTML 附件） | AI(Claude Code) | 修复轮：`TC-CORE-060` / `061`；单测轮；typecheck。同一隔离栈 | 首两次执行失败，原因都在脚本（见明细），更正后 2/2 通过：060 伪造 `Host` 的三处、evil / `null` 的 `Origin` 写入与调 MCP 全部 403，画布 origin、`127.0.0.1`、MCP 客户端照常，重绑页的同源 fetch 与跨站表单 403、未建出项目；061 截图渲染 / 导出抽 CSS / 对象地址 / 预览 iframe 四处都没写进库，截图与预览 iframe 里的探针为绿（两类 CSP 违规都报出，预览域素材与 picsum 图都加载出来），`htmlUrl` 与 `get_export` 的地址为附件、浏览器下载，导出下载 200 且含 Tailwind 产物。单测 44/44（新增 `api/origin` 5 条、`core/inject` 1 条；上一轮 38），typecheck 通过 |
+| RUN-135 | 2026-10-01 | 同 RUN-134 | AI(Claude Code) | 回归轮（来源校验挡在每个 `/v1` 与 `/mcp` 请求前、截图与预览换了 CSP，按跨功能改动圈用例）：CORE `003` / `007` / `010` / `011` / `032` / `035` / `042`；PROTO 整套；EDIT `001` / `005` / `007`；COMPONENTS（`TC-EDIT-012`）；MCP（`TC-AGENT-011`）；AGENT 整套。同一隔离栈，`LIVE_LLM=0` | 通过 26/29（CORE 6、PROTO 10、EDIT 3、COMPONENTS 1、MCP 1、AGENT 5）· 失败 3：`TC-PROTO-004` / `009` 需真实模型（基线）、`TC-CORE-035` 环境（见明细，RUN-115 / 117 已记 HEAD 同现）· 待人工 1（`TC-AGENT-010`）；core 脚本固定输出的 `TC-CORE-020` 待人工、`006` 跳过不计 |
+| RUN-136 | 2026-10-01 | 同 RUN-134 | AI(Claude Code) | `TC-CORE-031`（打包形态，第 5 步本版加了来源断言）；隔离栈停掉让出 3410 / 3411。再把 `apps/api`、`packages/core` 临时 `git stash` 回 c537fd5 跑同一用例对照 | 失败 1/1，修复前同现：冷启动打出「首次运行：已初始化」后进程以退出码 13 退出，没走到本版新增的断言；换回 c537fd5 的服务端代码结果相同（见明细） |
+| RUN-137 | 2026-10-01 | 同 RUN-134 | AI(Claude Code) | 开发形态实测（§3 仓库内开发：Vite 代理 `/v1`）：隔离 API 以 `WEB_ORIGIN=http://localhost:3412` 起，临时 Vite 配置（端口 3412、代理 `/v1` 到 3410、`changeOrigin: false`、沿用 `host: true`）起画布；无头 Edge 分别从 `localhost:3412`、`127.0.0.1:3412`、局域网 `192.168.1.22:3412` 打开，先经代理确认背后是 `quilt_test`，再页内 `POST /v1/projects` | 通过：`localhost` 与 `127.0.0.1` 两个入口画布正常加载、页面加载时的 `/v1` 请求全 200、建项目 201（`run-137-devform.png`）；局域网入口 `/v1` 请求全部 403（§15 的决定）。验证完临时 Vite 配置已删、Vite 与这套 API 已停，隔离栈按原参数重启 |
+| RUN-138 | 2026-10-01 | 未提交工作树（v0.75 审查修复：`install.ts` 伪造 `Host` 改走 `node:http`；设计文档 `REQ-AGENT-001` 与 §10 开头段对齐 `ADR-016` v0.75 修订；`/v1/objects` 的 HTML 附件带文件名；`TC-CORE-060` 追溯改挂 `REQ-AGENT-002`） | AI(Claude Code) | 审查修复轮：`TC-CORE-060` / `061`（061 第 3 步新增下载文件名断言，先在临时去掉文件名的服务端上跑、再在修复后跑）；`TC-CORE-031` 第 5 步那段伪造 `Host` 的请求原样对隔离栈（打包形态，3410）单独执行；单测；typecheck。同一隔离栈，`LIVE_LLM=0` | 通过 2/2（060、061；061 在去掉文件名的服务端上失败 1 项，预期，见明细）。031 第 5 步的请求：`node:http` 伪造 `Host` 得 403，同一请求用 `fetch` 得 200（undici 丢掉 `Host`，原脚本那条断言修对了代码也会失败），不伪造得 200；完整 `TC-CORE-031` 未重跑——冷启动退出码 13 走不到第 5 步（RUN-136，§7）。单测 44/44，typecheck 通过 |
 | RUN-114 | 2026-09-23 | 未提交工作树（设计文档 v0.65：审查缺陷回写） | AI(Claude Code) | 单测轮 34/34；e2e 局部轮：`TC-AGENT-011`（含新增 7c / 8a）、`TC-AGENT-003` / `004`；`TC-PROTO-001` / `012`（含新增 5～6b）；`TC-CORE-007` / `010` / `011` / `018` / `023` / `034` / `036` / `040` / `041`（含新增断言）；`TC-EDIT-001` / `005` / `007` / `012`。隔离栈 3200 / 3201 + `quilt_test` + stub + 打包形态，逐套串行 | 通过 18/19 · 失败 1（`TC-CORE-023`，与 RUN-112 同一步、HEAD 同现，判环境） |
 | RUN-113 | 2026-09-23 | 未提交工作树（设计文档 v0.64：MCP 写屏改小步——`patch_screen` / `append_upload`、`get_screen` 只给 body） | AI(Claude Code) | 局部轮（`REQ-AGENT-002` → `TC-AGENT-011` 全部步骤含新增 7b；`get_screen` 口径变化波及的 `TC-AGENT-003` / `004`）。隔离环境 3200 / 3201 + `quilt_test` + stub，纯 MCP / API，未托管前端 | 通过 2/3 · 失败 1（`TC-AGENT-003`：MCP 部分——`get_screen` 只给 body、截图就绪——已过，随后打开浏览器页 `locator.waitFor` 超时：本栈没托管前端，判环境） |
 | RUN-112 | 2026-09-23 | 未提交工作树（设计文档 v0.60 工程底座 + v0.61 找屏与总览 + v0.62 状态变体 + v0.63 叠层屏） | AI(Claude Code) | 单测轮 `pnpm test` 31/31；e2e 局部轮（新增 `TC-CORE-040` / `041`、`TC-PROTO-012`；重构影响面：`TC-CORE-003` / `007` / `012` / `018` / `023` / `034` / `036`、`TC-EDIT-001` / `005`、`TC-AGENT-001` / `003` / `004` / `011`）。隔离环境：3200 / 3201 + `quilt_test` + stub 驱动 + 打包形态（`WEB_DIST` + `WEB_ORIGIN=3200`，§3），3100 / 5173 归另一会话 | 通过 15/17 · 失败 1（`TC-CORE-023`，HEAD 同现、判环境）· 未跑 1（`TC-EDIT-008` 需真实模型）· 跳过 / 待人工 2（`TC-AGENT-009` / `010`） |
@@ -1319,6 +1352,14 @@
 
 | 轮次 | 用例 | 结果 | 现象 / 证据 | 跟进 |
 | --- | --- | --- | --- | --- |
+| RUN-133 | TC-CORE-060 | 失败（预期） | 第一次执行时脚本用 `fetch` 带伪造的 `Host`，而 Node 的 fetch（undici）会丢掉自定义 `Host`（本机 `node:http` 小服务实测收到的是 `127.0.0.1:34999`），那次的 200 证明不了缺陷；脚本改走 `node:http` 后在修复前代码上重跑，伪造 `Host` 读项目 200、返回全部项目。此前 `curl --noproxy '*' -H 'Host: rebind.attacker.example:3410'` 对 `/v1/projects` 与 `/mcp` 也都 200 | 缺陷复现成立；脚本已更正 |
+| RUN-133 | TC-CORE-061 | 失败（预期） | 两次执行都复现了截图、导出、对象地址三处写入。第一次（写请求在解析中途发出）预览 iframe 那一步没写进库，此前同一分钟里已建出 7 个作业，作业创建限流（10 次 / 分钟）可能挡下了它，未查；第二次（写请求挪到 `load` 之后）预览表单写入「csrf-061 form http://preview.localhost:3411」，与审计复现一致 | — |
+| RUN-134 | TC-CORE-060 | 失败 → 通过 | 首跑第 1 步 200：同 RUN-133 的 `fetch` 丢 `Host` | 脚本更正（`node:http`）后通过 |
+| RUN-134 | TC-CORE-061 | 失败 → 通过 | 首跑截图与导出都报「页面未就绪：Tailwind CDN 未生效或图标未替换」、预览探针红：测试屏在解析中途 `form.submit()`，被 CSP 挡下的提交在 Chromium 里会中止文档自己的加载——最小复现里解析中途提交则 `DOMContentLoaded` 0 次、其后的元素不存在（运行时因此没替换 lucide 图标），放进 `DOMContentLoaded` 再提交则 `load` 不再触发。第二次：截图采样点取到背景色 `254,251,255`，`space-y-4` 给固定定位的探针加了 16 px 上外边距，采样点落在探针上方（截图本身正确：探针绿、图标 / 素材 / picsum 都在）；导出作业 failed「页面未就绪」，随后对同一项目重建导出作业成功，同时段本机访问 fonts.gstatic.com 报 `ERR_CONNECTION_CLOSED`，另测 8 次渲染（带 / 不带 CSP 各 4 次）Tailwind 与图标全部生效，判网络抖动 | 脚本更正：写请求挪到 `load` 之后、探针 `margin:0`；设计文档 §15 记下被挡提交的这一后果（只落在这张屏自己身上）；第三次 2/2 通过 |
+| RUN-135 | TC-CORE-035 | 失败 | 「fetch failed」：脚本在 Node 里直接取素材 URL `http://preview.localhost:3411/a/…`，本机 Node 26 请求 `preview.localhost` 报 `UND_ERR_SOCKET`，与 API 无关（同一时刻 `node -e "fetch('http://preview.localhost:3411/healthz')"` 同样失败）；本版没动 `/a/` 路由 | 环境，非本版引入 |
+| RUN-135 | TC-PROTO-004 / TC-PROTO-009 | 失败 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-136 | TC-CORE-031 | 失败 | 冷启动 `quilt --home <临时目录> --port 3410 --preview-port 3411 --no-open` 打出「首次运行：已初始化」后退出码 13：`Detected unsettled top-level await at …/quilt-canvas/bin/quilt.js:51 await import(path.join(dist, 'server.mjs'))`；直接跑仓内 `apps/cli/bin/quilt.js` 同样如此。`apps/api`、`packages/core` 换回 c537fd5 后同样失败。`apps/api` 下单独 `PGlite.create` 934 ms 正常，挂在哪一步未查 | 修复前同现，非本版引入；记入 §7 |
+| RUN-138 | TC-CORE-061 | 失败（预期）→ 通过 | 服务端临时换回不带文件名的 `Content-Disposition: attachment`：无头 Edge 下载 `htmlUrl` 的建议文件名是 `projects_<项目 id>_screens_<屏 id>_<修订 id>.html`，`get_export` 的地址是 `projects_<项目 id>_exports_<作业 id>.html`——浏览器拿 URL 末段（`projects%2F…%2F<id>.html` 整串）当文件名、把 `/` 换成 `_`；其余断言通过 | 附件头带 `filename="<对象键末段>"` 后通过 |
 | RUN-130 | TC-CORE-029 | 失败 | 「无目标时动词行应为『造 1 屏 · 自动摆放』：造屏 · 交给本机会话」：`TC-CORE-025` 把本机 agent 通道留作这个浏览器上下文记住的通道 | §7 已登记；单跑通过（RUN-131） |
 | RUN-130 | TC-CORE-023 | 失败 | 「重新展开后输入框没回到原位」，与 RUN-126 同一失败点 | §7 已登记，基线 |
 | RUN-129 | TC-CORE-046 | 失败 → 通过 | 首次调用第 6 步：没选会话按 `Enter` 后那一行写的是冲突理由「「Screen 1」正在改」——第 5 步发出的改屏作业还在跑，冲突理由优先占住同一行 | 用例修正：第 6 步先清空目标 |
@@ -1433,6 +1474,8 @@
 
 ## 7. 遗留问题
 
+- **`TC-CORE-031` 打包形态冷启动退出码 13**（RUN-136，c537fd5 同现）：打包的 `server.mjs` 顶层 await 一直不落定、事件循环排空后进程退出，一键安装在本机（Node 26.5.0）起不来。`apps/api` 下单独起 PGlite 正常，挂起点未定位；排查从打包产物的启动序列（迁移、截图浏览器、队列）逐段打点开始。
+- **从 `127.0.0.1:<画布端口>` 打开画布时交互态 iframe 被拦**（v0.75 审查实测，c537fd5 同现）：预览域 CSP 的 `frame-ancestors` 只写 `WEB_ORIGIN` 一个地址，来源校验却放行 `localhost` / `127.0.0.1` / `[::1]` 三种回环写法；开发形态从 `127.0.0.1:3412` 打开时 `/v1` 请求全 200，双击进交互态的 iframe 显示禁止图标。RUN-137 写的「`127.0.0.1` 入口画布正常加载」只覆盖页面加载时的 `/v1` 请求。修法方向：`frame-ancestors` 列出来源名单展开出的全部画布 origin。
 - **出变体落在默认屏右侧时与右边已有的屏重叠**（RUN-129）：Screen 1 的第一张 Loading 变体落在 (470, 0)，与 Screen 2 同一坐标、整张盖住它，画布上点不到 Screen 2。`TC-CORE-043` 改点别的卡绕开。修法方向：变体落位避开已占用的矩形。
 - **`TC-CORE-029` 在整套 core 顺序下偶发**（RUN-115）：更早的用例（通道相关的 `TC-CORE-025` 一带）把本机 agent 通道留作浏览器上下文里记住的默认通道，029 开头的动词行于是是「造屏 · 交给本机会话」而不是「造 1 屏 · 自动摆放」。单跑与「028 + 029」组合都通过。修法方向：029 开头显式选一条模型通道，或前面的用例收尾时清掉 `quilt:runner` 的本机记忆。
 - **`TC-CORE-023` 在打包形态的隔离栈上失败**（RUN-112 / 114 / 115，HEAD 同现）：失败点在「刷新 / 叫回后输入框位置或焦点未复原」之间漂移，开发实例（3100 + Vite）上 RUN-111 通过。需在开发实例上复测定性。

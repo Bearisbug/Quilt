@@ -25,7 +25,7 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL ?? '',
   migrationsDir: process.env.QUILT_MIGRATIONS_DIR ?? path.resolve(import.meta.dirname, '../drizzle'),
   apiPort, previewPort,
-  // 本地版只绑回环地址：MCP 免鉴权的前提就是这一条（§15 安全）
+  // 本地版只绑回环地址；MCP 免鉴权另靠 Host / Origin 来源校验（lib/origin.ts，§15 安全）
   bindHost: env('BIND_HOST', '127.0.0.1'),
   // 打包运行时静态前端由 API 进程托管，画布与 API 同源；开发时 Vite 在 6688 代理 /v1
   webDist: process.env.WEB_DIST && existsSync(process.env.WEB_DIST) ? path.resolve(process.env.WEB_DIST) : '',

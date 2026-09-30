@@ -4,13 +4,13 @@ import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
 import { verifyPreview } from '../lib/signing.ts';
 import { storage } from '../lib/storage.ts';
-import { withCurrentRuntime, withOverlayStyle, buildPrelude, type Tokens } from '@quilt/core';
+import { withCurrentRuntime, withOverlayStyle, buildPrelude, SCREEN_CSP, type Tokens } from '@quilt/core';
 import { readAsset } from '../services/assets.ts';
 import { componentPreviewDocument } from '../services/components.ts';
 
 // 预览域服务（ADR-004 / API-CORE-016）：独立 origin、无 cookie、HMAC 签名。
-// CSP 在 v0.43 放开到任意 https: 源——屏里允许用 Chart.js 这类开源库（REQ-CORE-022）。
-// 安全边界没变：这是独立 origin、无 cookie、拿不到主站 storage，屏里的脚本只能影响它自己那张屏。
+// CSP 在 v0.43 放开到任意 https: 源——屏里允许用 Chart.js 这类开源库（REQ-CORE-022）；v0.75 补 form-action 'none'（SCREEN_CSP）。
+// 安全边界：独立 origin、无 cookie、拿不到主站 storage，也写不了主站 API，屏里的脚本只能影响它自己那张屏。
 // 下发时把修订里存的运行时脚本换成当前版本（v0.34）：运行时是 Quilt 的代码，修复不该等每张屏再出一版修订。
 export const previewApp = new Hono();
 
@@ -32,7 +32,7 @@ previewApp.get('/p/:projectId/:screenId', async (c) => {
   // 修订本身不可变，但这份响应不是：运行时每次下发都换成当前版本（上一行）。标成 immutable 时浏览器 10 分钟内
   // 连条件请求都不发，运行时修复到不了已经开着的会话，而 iframe 是聚焦时才建的、硬刷新页面也绕不过这层缓存。
   c.header('Cache-Control', 'no-cache');
-  c.header('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https:; script-src 'unsafe-inline' 'unsafe-eval' https:; img-src * data: blob:; font-src https: data:; connect-src https:; frame-ancestors ${config.webOrigin}`);
+  c.header('Content-Security-Policy', `${SCREEN_CSP}; frame-ancestors ${config.webOrigin}`);
   c.header('Referrer-Policy', 'no-referrer');
   // 父页需要 fetch 目标屏 HTML 做同 iframe 换屏（ADR-003）；URL 已带签名，只放行画布 origin
   c.header('Access-Control-Allow-Origin', config.webOrigin);
@@ -50,7 +50,7 @@ previewApp.get('/c/:projectId/:componentId', async (c) => {
   c.header('Content-Type', 'text/html; charset=utf-8');
   // 同 /p/：这份文档是每次请求现拼的（prelude 里带当前运行时与当前 token），缓存住等于把 Quilt 自己的代码冻在旧版
   c.header('Cache-Control', 'no-cache');
-  c.header('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline' https:; script-src 'unsafe-inline' 'unsafe-eval' https:; img-src * data: blob:; font-src https: data:; connect-src https:; frame-ancestors ${config.webOrigin}`);
+  c.header('Content-Security-Policy', `${SCREEN_CSP}; frame-ancestors ${config.webOrigin}`);
   c.header('Referrer-Policy', 'no-referrer');
   return c.body(componentPreviewDocument(row, buildPrelude(ds.tokens as Tokens)));
 });

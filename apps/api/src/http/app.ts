@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono';
 import { z, type ZodType } from 'zod';
 import { Problem, problems, problemResponse } from '../lib/errors.ts';
 import { localUser, type UserRow } from '../services/user.ts';
+import { requestSource } from '../lib/origin.ts';
 
 export type Env = { Variables: { requestId: string; user: UserRow | null } };
 export type AppContext = Context<Env>;
@@ -25,7 +26,15 @@ export function createApp() {
   });
   app.notFound((c) => problemResponse(c, problems.notFound()));
 
-  // 本地单用户壳（ADR-016）：无鉴权，每个 /v1 请求都是默认用户；服务只绑 127.0.0.1，进程边界即权限边界。
+  // 来源校验（§15 v0.75，ADR-016 修订）：无鉴权的前提是请求确实来自本机画布或本机客户端，Host / Origin 不在名单里一律 403
+  const fromLocal = async (c: AppContext, next: () => Promise<void>) => {
+    if (!requestSource.allows(c.req.header('host'), c.req.header('origin'))) throw new Problem(403, '/errors/forbidden', '请求来源不在本机名单（Host / Origin）');
+    await next();
+  };
+  app.use('/v1/*', fromLocal);
+  app.use('/mcp', fromLocal);
+
+  // 本地单用户壳（ADR-016）：无鉴权，每个 /v1 请求都是默认用户；服务只绑 127.0.0.1，来源校验见上。
   // 对象 / 上传 / 附件直传仍按 URL 签名校验（URL 会被贴进预览页与对象链接）。
   app.use('/v1/*', async (c, next) => {
     const path = c.req.path;

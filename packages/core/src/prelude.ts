@@ -21,6 +21,16 @@ export function buildPrelude(tokens: Tokens): string {
   ].join('\n');
 }
 
+// 屏文档的 CSP（§15 / ADR-004）：预览域下发（响应头，另加 frame-ancestors）与截图渲染（<meta>，见 withScreenCsp）共用这一份。
+// https: 放行 prelude 的 Tailwind / lucide CDN 与屏自带的开源库（REQ-CORE-022）。form-action 不继承 default-src，不写就等于放行——
+// 屏里的脚本 form.submit() 一个 text/plain 表单就能往本机 API 发写请求（submit() 不触发 submit 事件，运行时拦不到）
+export const SCREEN_CSP = "default-src 'none'; style-src 'unsafe-inline' https:; script-src 'unsafe-inline' 'unsafe-eval' https:; img-src * data: blob:; font-src https: data:; connect-src https:; form-action 'none'; base-uri 'none'";
+
+// 截图浏览器用 page.setContent 渲染，没有响应头可带：CSP 以 <meta> 插在 doctype 之后、一切内容之前，屏的脚本全在它之后解析
+export function withScreenCsp(html: string): string {
+  return html.replace(/^\s*(<!doctype[^>]*>)?/i, (m) => `${m}<meta http-equiv="Content-Security-Policy" content="${SCREEN_CSP}">`);
+}
+
 // 叠层屏（v0.63 REQ-PROTO-005）：呈现方式是元数据，不重烤修订——预览域下发与截图时临时注入透明背景，
 // 压在别的屏上时露出底下那一屏（截图 omitBackground 拍成带 alpha 的 PNG，卡片再铺暗底）。只认第一个 </head>
 export function withOverlayStyle(html: string): string {

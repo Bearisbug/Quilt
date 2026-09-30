@@ -1,6 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm, readdir, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { ROOT } from './lib.ts';
@@ -60,9 +61,14 @@ try {
   expect(mcp.status === 200, `MCP initialize ${mcp.status}`);
   const spa = await fetch(`${API}/p/does-not-exist`).then((r) => r.text());
   expect(spa.includes('<div id="root">'), 'SPA 路径未回退到 index.html');
-  // 2 建项目落到 PGlite
-  const created = await fetch(`${API}/v1/projects`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cold start', deviceType: 'mobile' }) });
+  // 2 建项目落到 PGlite；请求带打包画布的 Origin（画布与 API 同源），来源校验放行、伪造的 Host 拒（v0.75）
+  const created = await fetch(`${API}/v1/projects`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: `http://localhost:${PORT}` }, body: JSON.stringify({ name: 'Cold start', deviceType: 'mobile' }) });
   expect(created.status === 201, `建项目 ${created.status}`);
+  // fetch（undici）会丢掉自定义的 Host 头，伪造 Host 走 node:http
+  const rebound = await new Promise<number>((resolve, reject) => {
+    http.get(`${API}/v1/projects`, { headers: { Host: `rebind.attacker.example:${PORT}` } }, (res) => { res.resume(); resolve(res.statusCode ?? 0); }).on('error', reject);
+  });
+  expect(rebound === 403, `伪造 Host 读项目应 403：${rebound}`);
   const pid = ((await created.json()) as { project: { id: string } }).project.id;
   expect((await readdir(path.join(home, 'db'))).length > 0, 'PGlite 目录为空');
   // 3 停掉再起：秒开、数据还在

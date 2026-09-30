@@ -10,7 +10,7 @@
 | 项目画像 | 生产产品（全部核心节生效） |
 | Owner | @bug |
 | 评审人 | @bug（产品 / 架构） |
-| 最后更新 | 2026-10-01（v0.74） |
+| 最后更新 | 2026-10-01（v0.75） |
 | 关联 | 契约 `api/openapi.yaml`（实现期建立） · 仓库 `github.com/Bearisbug/Quilt` · 安装 `npx quilt-canvas`（包 `apps/cli`） · 调研结论见会话记录 2026-09-07/08/09 |
 
 变更记录：
@@ -19,6 +19,7 @@
 
 | 日期 | 版本 | 改动 | 作者 |
 | --- | --- | --- | --- |
+| 2026-10-01 | v0.75 | **安全边界：API 只受理本机来源的请求，屏里的脚本写不了主站**（§8 鉴权与 `API-CORE-014` / `API-PROTO-002` / `API-AGENT-002`、§14 `/errors/forbidden`、§15 安全三行、`ADR-004` / `ADR-016` 补充、`REQ-CORE-017` / `REQ-AGENT-001` 补一句、§10 开头段改写）。审计实测四处：① API 与 `/mcp` 不看 `Host` / `Origin`，带 `Host: rebind.attacker.example:3410` 读项目、读通道（含密钥末 4 位）、调 MCP `list_projects` 全部 200——DNS 重绑后攻击页与 API 同源，同源策略反而替它放行；② 任意网页用 `text/plain` 表单（CORS 简单请求，不预检）对本机 API 盲写，`POST /v1/projects` 回 201；③ 预览域 CSP 没有 `form-action`（它不继承 `default-src`），屏里的脚本 `form.submit()` 往 `…/messages` 发请求，建出用户消息与 `generate` 作业，不带通道时套用户的默认付费通道；截图 worker 用 `page.setContent` 渲染、不带任何 CSP，屏一入库脚本就执行，`fetch` no-cors 同样建出作业，不需要用户做任何操作；④ `/v1/objects` 把修订与导出 HTML 以 `text/html` 在 API origin 下发（打包形态即画布 origin），在浏览器里打开 `htmlUrl` 或 `quilt.get_export` 的地址，屏里的脚本同源读到全部项目与通道。改法：`/v1/*` 与 `/mcp` 先过来源校验（`Host` 必须在本机名单里；带 `Origin` 时也必须在，`null` 拒），不合格 `403 /errors/forbidden`，MCP transport 同时开 SDK 的 `enableDnsRebindingProtection`；预览域与组件预览的 CSP 加 `form-action 'none'; base-uri 'none'`，截图与导出抽 CSS 的渲染页以 `<meta>` 带同一份 CSP；`/v1/objects` 下发 HTML 一律附件（`attachment` + `default-src 'none'; sandbox` + `nosniff`）。非回环 `Host` 默认拒绝：Vite `host: true` 把开发代理暴露在局域网地址上，从别的机器打开时请求全部 403，要用就把 `WEB_ORIGIN` 设成那个地址 | @bug |
 | 2026-10-01 | v0.74 | **对话轮次与输入框的缺陷回写（13 条）**（`REQ-CORE-026` 扩写：「修改」还原完整参数、重试在途锁、预览按图定位；`API-CORE-010` 增 `variantOf` / `variantName` / `route` / `fromScreenId` / `preset`；`REQ-CORE-006` / `012` / `020`、`PAGE-CANVAS` 对话记录与 toast、§14 作业失败文案各补一句）。① 对「用组件 X 在锚点处造屏」那一轮点「修改」，锚点被清掉、输入框变成「改组件」，一按发送就拿造屏指令改写共享组件：回填时同时写了画布选中，触发「选中即改、清锚点」。「修改」改为只写输入框目标、不动画布选中。② 系统代发轮次（出变体、懒生成、补链、按新约定重生成）的「修改」把描述文字当提示词填回，发出去是一张普通新屏：隐藏参数还原成目标区里一枚可移除的胶囊，`/messages` 按它建同一类作业；补链、按新约定重生成、懒生成的提示词由服务端拼，留空发 = 与「重试」同一个作业，写了字就作为附加要求。③ 大图预览按「哪条消息的哪张图」定位（此前按下标：列表被截短时静默换图，或读越界整页崩成错误页）。④ 「重试」在途时置灰转圈（此前 300 ms 内连点 3 次发出 3 个请求）。⑤ 切一次「聊天」再切回「造 / 改」，通道被清空、下一轮静默走默认通道：Radix 隐藏 `<select>` 在选项换批的那一帧回报空串，通道这一路补上会话那一路已有的判空——实现追齐设计（聊天模式一段已写「切回时通道恢复上次选的那条」）。⑥ 对话记录只在停在底部时跟随新内容：此前每条进度都把正在往上翻的列表拽回底部。⑦ toast 挪到输入框上方、单条限宽 28rem 换行（此前与输入框同在底部正中，盖住发送键与屏数档位）。⑧ 作业失败文案按作业种类写「造屏失败 / 改屏失败 / 改组件失败 / 回答失败…」，按失败类别写原因与下一步，不再原样输出供应商报文与内部错误类。⑨ 对话记录折叠时有作业失败，横条上留「N 轮失败」直到展开（此前 toast 3.2 s 后界面上没有任何失败痕迹）。⑩ 输入框 `Esc` 清草稿后 `⌘Z` 能撤销。⑪ 一次贴几张图立刻都出缩略图，4 张上限按输入框里已有的张数（含上传中）算，连贴两批不再超限。⑫ 本机 agent 没选会话、参考图还在传、聊天没有可用通道时按 `Enter`，理由写在发送键上方那一行（此前只在发送键的悬停提示里，`Enter` 看起来失灵）。⑬ 发送在途期间新打的字与新贴的图，发送成功后留着，只去掉发出去的那部分。测试：新增 `TC-CORE-043`～`046`，`TC-CORE-006` 第 2 步增失败文案断言 | @bug |
 | 2026-09-27 | v0.73 | **组件卡预览关掉背景模糊**（`API-CORE-016` 共享组件预览一条补充）。用户反馈：组件卡进交互态后悬停底栏的 tab，tab 周围出现一片往外渐暗的灰影；画布缩放 100% 时不出现，其余缩放都出现。组件底栏用了毛玻璃（`backdrop-blur-xl`），组件卡在画布缩放下按原缩放交互（屏进交互态会推到 1:1，组件卡不推）；浏览器只重画悬停处那一小块时，块里的背景模糊取样到块外的透明像素。无头浏览器截图每次整帧重画，复现不出来（Edge 154，真实 GPU，1 / 2 倍像素密度 × 0.73 / 1.46 倍缩放 × 悬停 / 按下，该区域亮度恒为 240～241）。组件预览文档注入 `backdrop-filter: none`：卡片里组件背后只有纯色底，画面不变；屏里的毛玻璃照旧 | @bug |
 | 2026-09-27 | v0.72 | **对话记录：参考图大图预览，消息复制 / 重试 / 修改**（新增 `REQ-CORE-026`、`API-CORE-034`，`PAGE-CANVAS` 对话记录面板补一句）。对话记录里的参考图此前只有 56 px 缩略图、点不开；最后一轮失败了只能重新打字、重新贴图、重新选目标。① 缩略图点开是大图预览，整个对话的参考图可左右切换；② 消息悬停或聚焦显示「复制」，最后一轮加「修改」（原样填回输入框再发，不改写历史）与「重试」（服务端复制原作业输入、只换通道，通道取输入框当前选的——通道本身出错时换一条就能重试）。重试放在服务端而不是前端拼请求：系统代发的轮次（补链、按新约定重生成）消息正文是描述、不是提示词，前端还原不出原请求 | @bug |
@@ -129,7 +130,7 @@
 | REQ-CORE-014 | 画布空白处放锚点：双击空白 / 工具栏「新建屏幕」`⌥G` 在该点放一个锚点并聚焦输入框，目标区显示「新屏 · 此处」（可移除）；下一次「造」把屏（一组屏按流程顺序排成一行，包围盒与既有屏相交则整行下移）摆在锚点，无锚点接在最右一屏右侧；规划器声明「既有屏 X 进入新组」时对 X 跑一次现成的「接上跳转」固定指令（指令里把新组路由标为「本次新增」），产生一条可回溯修订，回执列出实际改动的链接；新屏不强制与既有屏连线（`links` 可为空） | 目标 ①④ | P1 / M8 · M9 改写 |
 | REQ-CORE-013 | 生成通道可配置：设置页管理 API 类通道（Anthropic / Gemini / OpenAI 兼容端点：显示名、Endpoint、Key、模型），本机通道（Claude Code / Codex CLI）的可用性 = 命令在 PATH 上，不可用时就地给出安装步骤；两类本机订阅通道（v0.68）：「本机 Claude 订阅」（`kind=agent-sdk`，复用本机 `claude` 登录态）与「本机 Codex 订阅」（`kind=codex`，复用本机 `codex` 的 ChatGPT 登录态，经 `codex exec` 调模型），都没有 Key 与端点、只填模型名；每条可一键验证；只有验证通过的才进输入框下拉；密钥加密落库（v0.32：加密主密钥由首次启动写进 `~/.quilt/config.env`，用户不必手配） | 目标 ①③⑤ | P1 / M7 · M10 改写 |
 | REQ-CORE-011 | 生成通道可选：输入框内选择本次由谁来做——自己在设置页配的云端通道（Claude / Gemini / OpenAI 兼容端点）或本机 agent（交给本机某个 Claude Code 会话或 Codex 线程——选了它再在旁边的会话下拉里选投给谁，见 `REQ-AGENT-003`；Codex 自 v0.68 起）；可选清单与默认值在设置页配置，凭据只在服务端 | 目标 ①③⑤ | P1 / M6 · M10 · v0.34 改写 |
-| REQ-CORE-017 | **一键安装与本地运行**（v0.32）：`npx quilt-canvas` 首次运行即初始化 `~/.quilt`（PGlite 数据库、对象存储、`config.env` 密钥）、跑迁移、起服务（API + 静态前端同端口，预览域另一端口，只绑 `127.0.0.1`）、自动打开浏览器；第二次启动秒开；截图优先用本机已装的 Chrome / Edge，都没有时提示 `npx playwright install chromium`；`DATABASE_URL` 留空即用内置 PGlite，设了就连外部 Postgres（开发 / 将来 SaaS 用）；不需要 Docker、不需要手写 `.env` | 目标 ⑥ | P0 / M10 |
+| REQ-CORE-017 | **一键安装与本地运行**（v0.32）：`npx quilt-canvas` 首次运行即初始化 `~/.quilt`（PGlite 数据库、对象存储、`config.env` 密钥）、跑迁移、起服务（API + 静态前端同端口，预览域另一端口，只绑 `127.0.0.1`）、自动打开浏览器；第二次启动秒开；截图优先用本机已装的 Chrome / Edge，都没有时提示 `npx playwright install chromium`；`DATABASE_URL` 留空即用内置 PGlite，设了就连外部 Postgres（开发 / 将来 SaaS 用）；不需要 Docker、不需要手写 `.env`；API 与 MCP 只受理本机画布与本机客户端发来的请求（`Host` / `Origin` 校验，v0.75，见 §15） | 目标 ⑥ | P0 / M10 · v0.75 补充 |
 | REQ-CORE-018 | **多选排列**（v0.34）：选中 ≥ 2 屏、未聚焦、未在就地展开候选时，画布顶部出现排列条（在可用区内居中、右端避让侧面板）：左对齐 / 水平居中 / 右对齐 / 上对齐 / 垂直居中 / 下对齐（按选中集合的外接框算），横向等距 / 纵向等距（≥ 3 屏；保住首尾两屏，中间按间隙均分）；点即生效、只动位置变了的屏，落库走 `API-CORE-012` 的位置 PATCH，**等全部 PATCH 有结果再决定**：任一失败就点名哪几屏没排上并重取（成功的那几屏不回滚，它们已经落库） ；**可撤销**（v0.41）：拖动与对齐 / 等距都压进画布的位置撤销栈，`⌘Z` 逐步还原、至多 20 步；**排成一行 / 排成一列**（v0.52，≥ 2 屏）：按固定 80 px 间距把选中的屏排成同一行（同 y）或同一列（同 x），顺序取当前位置（行按 x、列按 y 升序，相同再按另一轴），起点取外接框左上角；落库与撤销同上，撤销标签「排列」 | 目标 ③ | P1 / v0.34 · v0.52 补充 |
 | REQ-CORE-019 | **项目素材库**（v0.35）：项目级素材（logo / 插图 / 模板）上传即有稳定 URL——`SVG / PNG / JPEG / WebP`（类型按文件正文认定，不信客户端给的 `Content-Type`：浏览器按扩展名给，改名的 webp 会以 `image/png` 下发、屏里永远渲染不出来），单个 ≤ 5 MB、每项目 ≤ 50 个；设计系统面板里管理（上传 / 删除 / 复制引用地址），URL 走预览域 `/a/{projectId}/{assetId}`，随项目删除一并清理；素材清单（名字 + URL + 像素尺寸）进每次生成的 prompt，模型用 `<img src="…">` 引用真实素材，不再拿纯色块占位 | 目标 ④ | P1 / v0.35 |
 | REQ-CORE-020 | **并行作业**（v0.36）：一个项目可同时有多个作业在跑，输入框不因「有作业在跑」被锁死——textarea 任何时候可输入，通道 / 会话下拉、屏数 / 版数档位、参考图入口都不禁用；只有**这一轮要发的东西与在跑作业真冲突**时才挡住发送（发送键 `aria-disabled` + 就地写出理由，草稿与参考图不动；发送在途期间照样能打字、贴图，发送成功只去掉发出去的那段文字与那几张图，在途期间新加的留着，v0.74），两种冲突：① 没有目标（= 造）且已有 `generate` 在跑 → 「上一批屏还在造，等它落地再造下一批」（懒生成补屏、锚点造屏、工具栏「新建屏幕」都是 `generate`，同受这一条挡）；② 有目标（= 改）且任一目标屏落在某个在跑作业的**覆盖屏集**里 → 「「<屏名>」正在改，等这一轮完事」。其余组合一律放行：造屏 + 改另一屏、改 A + 改 B、在不同屏上各自重生成子树。覆盖屏集按 `kind` 从 `input` 反推——`edit_screens` = `screenIds` 全部、`regenerate_subtree` / `ingest_screen` = `screenId`、`apply_design_system` = `screenIds`（`'all'` = 项目全部屏）、`generate` = `fromScreenId`（懒生成补屏 / 断链补屏的入口屏，作业会给它落一条反向连线修订；没有则为空——造屏占的是项目级名额，不占屏。规划器自己声明的 `entryFrom` 同样会被补链改到，但那要等作业跑起来才知道是哪一屏，前端与后端都拦不住，见 §16 真值表的 `entryFrom` 缺口行）、`propose_design_system` / `export_prototype` = 空；判定读 `activeJobs` 全量**含 `runner=agent`**（它同样持屏锁），在跑作业行只显示非 agent 的（agent 作业在本机 agent 面板）。在跑作业逐个成行摆在输入框上方、各自可取消，`Esc` 取消最新一个（§13）。前端拦截只为免掉一次白等，后端 `409 /errors/screen-busy` 仍是最终判据（§16）。冲突之外还有三种本地原因挡住发送：本机 agent 通道没选会话、参考图还在上传、聊天没有可用通道；按 `Enter` 被它们挡住时，理由写在冲突理由同一行（`send-blocked-reason`），原因消失即撤（v0.74） | 目标 ①③ | P0 / v0.36 |
@@ -139,7 +140,7 @@
 | REQ-CORE-024 | **找屏与总览**（v0.61）：`⌘K` 跳屏（按名字 / 路由 / 用途模糊匹配屏与共享组件，Enter 把镜头摆到那张卡、选中它）；屏列表面板（`⌥S`，画布阅读顺序，筛选片「断链 / 待选候选 / 有偏离 / 正在改」带计数，变体缩进跟在默认屏后）；小地图（顶栏下方左侧，画屏 / 组件 / 风格指南卡与视口框，点即平移、框可拖，聚焦屏或组件时隐藏，工具栏可开关、本机记忆）。零 token 纯前端 | 目标 ① | P1 / v0.61 |
 | REQ-CORE-025 | **状态变体**（v0.62）：同路由下的具名兄弟屏（`variantOf` + `variantName`，只有一层，删默认屏级联删变体）。应用地图、导航目标、屏注册表、导出只认默认屏；变体发出的链接照常入图。造变体 = 钉死路由的 `generate`（`variantOf + variantName`，跳过规划器、默认屏作第一个参考屏且超预算时最后被丢、落在默认屏那一行最右），之后是普通屏（改 / 直改 / 批注 / 候选 / 回溯都一样），只是 `route` 不可改、`variantName` 可改。画布：变体卡标「变体」、默认屏标「N 个变体」；聚焦时家族 ≥ 2 在卡内顶部中央出状态胶囊，点即同 iframe 换成该变体（不动镜头、不进导航栈）。入口：工具栏「出变体」、MCP `generate_screens` | 目标 ①② | P1 / v0.62 |
 | REQ-CORE-026 | **对话记录里的参考图与消息操作**（v0.72）：① 消息里的参考图缩略图可点开大图预览，预览里左右切换的范围是整个对话已加载的全部参考图（按时间顺序，翻到头不循环），顶部显示「第几张 / 共几张」与这张图所在的那句话；`←` / `→` 切换、`Esc` 或关闭键退出，关闭后焦点回到点开它的缩略图；图的签名链接过期时在原处写「参考图已过期」；预览按「哪条消息的哪张图」定位、不按序号：预览开着时对话列表变了（最近 100 条的窗口滑过、新消息进来），它停在同一张图、序号随之更新，这张图已不在已加载的对话里就关闭预览并 toast 说明（v0.74）。② 每条有正文的消息悬停或键盘聚焦时显示「复制」（复制这一条的正文）；最后一轮额外显示：用户那条的「修改」、助手那条的「重试」。**重试** = 用原来的文字、参考图与目标原样再发一轮（`API-CORE-034`），通道取输入框此刻选中的那一条（聊天轮取聊天通道），作为新的一轮追加在记录末尾；这一轮的作业还在排队或在跑时「重试」置灰并写明原因；点下之后到服务端响应回来之前同样置灰并转圈，不接受第二次点击（v0.74）。**修改** = 把这一轮的文字、参考图、目标（屏 / 组件 / 锚点）、动词（造改 / 聊天）与屏数版数原样填回输入框、替换输入框里原有的草稿，改完按发送算新的一轮；历史记录不改写——上一轮对屏的改动已经落地，替换历史撤销不了它们。填回只写输入框的目标、不动画布选中（v0.74：写选中会触发「选中即改」把锚点清掉，「用组件 X 在此处造屏」会变成改组件）。**系统代发的轮次**（出变体、懒生成补屏、补链、按新约定重生成，v0.74）正文是描述、真实参数在作业输入里：「修改」把这些隐藏参数还原成目标区里一枚可移除的胶囊（`data-testid=preset-chip`：「「<默认屏>」的 <状态名> 变体」/「缺失页 <路由>」/「补链」/「按新约定重生成」，后两种连同目标屏一起填回），动词行写「出变体 1 屏」/「造 1 屏 · <路由>」/「补链 N 屏」/「按新约定重生成 N 屏」，屏数档位不显示、版数照常，发送得到的仍是同一类作业（`API-CORE-010` 的对应字段）。出变体的正文就是它的提示词，原样填回（弹层里留空时用的默认提示填回为空）；另三类的提示词由服务端拼，输入框填回为空，留空直接发 = 与「重试」同一个作业，写了字就作为附加要求接在系统提示词之后。胶囊跟着它那种动词走：点选屏、框选、放锚点都会把它换掉（与锚点让位于选中同一条规则），× 或「清空」去掉它后就是一轮普通的造 / 改，补链 / 按新约定重生成的目标屏逐个移除到一个不剩时胶囊随之失效；出变体 / 补缺失页走不了本机会话，通道是本机 agent 时发送键挡住并写明换模型通道。只对从输入框发出、或系统代发的四类作业（`generate` / `edit_screens` / `edit_component` / `chat`）提供重试与修改；触屏（无悬停）时操作按钮常显 | 目标 ③ | P1 / v0.72 |
-| REQ-AGENT-001 | MCP server（Streamable HTTP，`http://127.0.0.1:3100/mcp`）+ 高层工具（生成/编辑/列表/取屏/截图）。**v0.32：本地版免鉴权**——服务只绑回环地址，能连上的就是本机用户；OAuth 2.1 接入推迟到 SaaS | 目标 ⑤ | P0 / M4 · M10 改写 |
+| REQ-AGENT-001 | MCP server（Streamable HTTP，`http://127.0.0.1:3100/mcp`）+ 高层工具（生成/编辑/列表/取屏/截图）。**v0.32：本地版免鉴权**——服务只绑回环地址，不校验凭据；v0.75 起 `/mcp` 先过来源校验（`Host` 须是本机地址，带 `Origin` 时须在名单里，见 §15「本地服务」），本机 MCP 客户端不带 `Origin`、照常接入；OAuth 2.1 接入推迟到 SaaS | 目标 ⑤ | P0 / M4 · M10 改写 · v0.75 补充 |
 | REQ-AGENT-002 | MCP 底层原语与资源：设计契约、校验、创建/更新屏、连接屏、应用地图、上传 URL、resources。**v0.51 与画布同面**：画布能做的每一件事都有对应工具——删屏 / 组件 / 项目，读旧修订与回溯、采用候选，摆放屏与组件，素材、预设、导出，作业列表 / 取消 / 事件，批注处理，元素直改，全部作业类型与造 / 改屏的全部选项（通道、参考图、锚点、懒生成、组件上下文）；只有通道的增删改（含密钥）留在设置页 | 目标 ⑤ | P0 / M4 · v0.51 补充 |
 | REQ-AGENT-003 | **本机 agent 执行作业**（v0.34 改写）：通道选「交给本机 Claude Code」并在会话下拉里选定一个本机正在运行的 Claude Code 交互式会话后，发送建的是 `runner=agent` 的 `generate` / `edit_screens` 作业（`input.runner = { kind:"agent", tool:"claude-code", sessionId }`），由 Quilt 进程的 `agentDelivery` 立即把提示词（项目、指令、目标屏与各自的 `expectedRevisionId`、作业 id、MCP 地址与接入命令、收口要求）**投递到该会话的 inbox socket**，作业随即 `running`（`output.delivery = { sessionId, name, deliveredAt }`）；会话在自己的终端窗口里做，经本机 MCP 回写（带 `jobId` 的 `quilt.update_screen` 必须传 `expectedRevisionId`，不一致 409），做完调 `quilt.finish_job { jobId, status, summary }` 收口 → `succeeded`（`output.screenIds` = 该作业名下修订所在屏）或 `failed errorClass=agent`；投递失败（会话已关、socket 拒绝）→ `failed errorClass=agent`；30 分钟没收口 → `failed errorClass=timeout`；取消作业 = 标 `cancelled`，之后该 jobId 的回写与收口都被拒（会话那边的活由用户自己叫停）；作业运行期间持屏锁（与云端作业同一条索引）；agent 通道固定 1 版。**会话列表**（`API-AGENT-010`）：读 Claude Code 登记处 `~/.claude/sessions/*.json`，只取 `kind=interactive`、`peerProtocol=1`、socket 250 ms 探活通过的，按最近活跃排序、列全机；有名字（`nameSource=user`）显示名字，派生名显示会话 UUID，另带目录名与 idle / busy。**选择跨会话记忆**，同通道选择一样不必每条重选；记住的会话已关闭时不自动换人，下拉回到「选择会话」、发送被挡并说明。agent 面板 = `runner=agent` 的作业列表（投递到谁、状态、收口摘要），靠**轮询** `API-CORE-029` 推进、不订阅作业事件流（各开一条会撞满浏览器同源 6 条的连接额度，见 §16 连接预算）。无头 `claude -p` / `codex exec` 拉起路径删除；派活队列、租约、长轮询领取仍不存在。**Codex（v0.68，`ADR-020`）**：通道「交给本机 Codex」（`input.runner = { kind:"agent", tool:"codex", sessionId: <线程 UUID> }`），会话下拉列 Codex 线程库 `$CODEX_HOME/state_5.sqlite`（只读）里用户自己开的线程（`thread_source=user`、来源为桌面版 / VS Code / 终端，排除无头 `exec`、子 agent 与审查线程，未归档，按最近活跃排序、取前 50），每项带标题、目录名、在哪个应用（桌面版 / VS Code / 终端）与「已打开 / 未打开」（`$CODEX_HOME/thread-writer-locks/<id>.lock` 此刻被某个进程占着即已打开，用 `lsof` 查；只看文件在不在会误判——Codex 进程被杀后锁文件会留下，实测）；投递 = 执行 `codex queue --thread <id> --message <提示词>`，线程在任何 Codex 窗口里打开着就由那个窗口取走执行（排在当前这一轮之后，不打断）；线程未打开时再执行 `open codex://threads/<id>` 让桌面版打开它（会把桌面版切到前台）、取走排队的消息；`output.delivery` 另记 `tool` 与 `opened`；收口、计时、屏锁、取消与 Claude Code 完全一致。只能投给已有线程：桌面版没有带提示词新开会话的入口。Codex 默认每次调 MCP 工具都要用户批准，要让投来的作业自己跑完，`[mcp_servers.quilt]` 须设 `default_tools_approval_mode = "approve"`（设置页与安装提示写明）；不设时由用户在 Codex 窗口里逐个批准 | 目标 ⑤ | P0 / M4 · M10 · v0.34 改写 |
 | REQ-AGENT-004 | Deeplink 派活：零安装，把任务预填进本机 Claude Code / Codex（**v0.32 推迟**：本机直接拉起后无此需要） | 目标 ⑤ | 推迟 |
@@ -359,7 +360,7 @@ erDiagram
 
 ## 8. 接口契约 (API-first)
 
-契约权威文件：`api/openapi.yaml`（OpenAPI 3.1，实现期建立并冻结；本节为摘要）。全部 REST 端点前缀 `/v1`。**鉴权（v0.32）**：本地版无鉴权——服务只绑 `127.0.0.1`，中间件把每个请求解析为默认用户；`/v1/objects/*`、`/v1/uploads/*`、`/v1/attachments/*` 仍按签名校验（URL 会被贴进预览页与对象链接）。SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。统一错误信封见 §14。除注明外，写端点接受 `Idempotency-Key` 头，24 小时内同键同参返回首次结果。
+契约权威文件：`api/openapi.yaml`（OpenAPI 3.1，实现期建立并冻结；本节为摘要）。全部 REST 端点前缀 `/v1`。**鉴权（v0.32）**：本地版无鉴权——服务只绑 `127.0.0.1`，中间件把每个请求解析为默认用户；`/v1/objects/*`、`/v1/uploads/*`、`/v1/attachments/*` 仍按签名校验（URL 会被贴进预览页与对象链接）。**来源校验（v0.75）**：`/v1/*`（含上面三类签名端点与 `/health`）与 `/mcp` 在一切处理之前先看 `Host` 与 `Origin`，不在本机名单里 `403 /errors/forbidden`，规则见 §15「本地服务」。SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。统一错误信封见 §14。除注明外，写端点接受 `Idempotency-Key` 头，24 小时内同键同参返回首次结果。
 
 ### CORE（M1）
 
@@ -434,7 +435,7 @@ erDiagram
   - `PATCH /screens/{screenId}`，请求 `{ x?, y?, name?, route?, variantName?, presentation? }`；响应 `200 { screen }`；`route` 变更会重新派生应用地图；`presentation`（v0.63）改的是元数据，不建修订；它属于整个家族（v0.66）：默认屏改了变体跟着改，家族里每屏当前修订的截图作废并重拍（截图按呈现方式拍：整屏不透明、叠层透明底），画布卡片与预览域下一次取到时按新值呈现
   - 错误：`409 /errors/route-taken`；`422 /errors/validation`：变体改 `route` 或 `presentation`（都属于默认屏，v0.62 / v0.66）、默认屏给 `variantName`（v0.62）
 - **`API-CORE-013` listRevisions** — 实现 `REQ-CORE-007`：`GET /screens/{screenId}/revisions`，倒序，`no-store`；每条含 `parentRevisionId`、`candidateIndex`、`candidateSettledAt`（v0.31），面板据此把同批候选折成一组、标出未选用
-- **`API-CORE-014` getRevision**：`GET /screens/{screenId}/revisions/{revisionId}`；响应含 `htmlUrl`（对象存储签名 URL，5 分钟）、`screenshotUrl`、`lintReport`；修订不可变，`Cache-Control: private, max-age=300`
+- **`API-CORE-014` getRevision**：`GET /screens/{screenId}/revisions/{revisionId}`；响应含 `htmlUrl`（对象存储签名 URL，5 分钟；v0.75 起以附件下发，浏览器里打开是下载而不是渲染，见 §15「对象下发」）、`screenshotUrl`、`lintReport`；修订不可变，`Cache-Control: private, max-age=300`
 - **`API-CORE-015` restoreRevision** — 实现 `REQ-CORE-007`
   - `POST /screens/{screenId}/revisions/{revisionId}/restore`，请求 `{ expectedRevisionId }`；以该版内容创建新修订（`source_kind=restore`）并置为当前，截图重拍（v0.66：旧版截图可能是按另一种呈现方式拍的，不复用）；响应 `201 { revision }`
   - 错误：`409 /errors/revision-conflict`、`409 /errors/screen-busy`
@@ -466,7 +467,7 @@ erDiagram
   - `POST /projects` 增可选 `presetId`：建项目时直接按预设初始化设计系统与素材，省掉「建完再套」这一步
   - 错误：`404 /errors/not-found`（预设不存在或不属于当前账号）、`409 /errors/version-conflict`、`422 /errors/validation`（名字为空 / 超长）
 - **`API-PROTO-001` getAppMap** — 实现 `REQ-PROTO-002`：`GET /projects/{projectId}/app-map`；响应 `{ nodes:[{screenId, route}], edges:[{fromScreenId, qid, href, toScreenId|null}] }`（`toScreenId=null` 即断链）；`no-store`
-- **`API-PROTO-002` downloadExport** — 实现 `REQ-PROTO-004`（v0.62 起只导出默认屏；v0.63 `template[data-presentation=overlay]` 由导出运行时压层呈现）：`GET /jobs/{jobId}/export`；作业 `kind=export_prototype` 成功后可下载单文件 HTML；`302` 到签名 URL；未完成 `409 /errors/job-not-finished`
+- **`API-PROTO-002` downloadExport** — 实现 `REQ-PROTO-004`（v0.62 起只导出默认屏；v0.63 `template[data-presentation=overlay]` 由导出运行时压层呈现）：`GET /jobs/{jobId}/export`；作业 `kind=export_prototype` 成功后可下载单文件 HTML（`Content-Disposition: attachment`）；`?inline=1` 时 `302` 到签名对象地址，该地址 v0.75 起同样以附件下发（§15「对象下发」），导出原型要下载后在本地打开；未完成 `409 /errors/job-not-finished`
 
 ### EDIT（M3）
 
@@ -497,7 +498,7 @@ erDiagram
 - **`API-EDIT-005` applyComponentElementEdit** — 实现 `REQ-EDIT-006`（v0.57）：`POST /components/{componentId}/elements/{qid}`，请求 `{ ops, expectedVersion }`。op 与 `API-EDIT-001` 同一套（`text` / `classes` / `style` / `link` / `remove`），**不含 `detach`**——脱离共享是把某一屏里的实例摘出来，对组件本体不成立。乐观并发用组件版本号（组件没有修订）：版本对不上 `409 /errors/version-conflict`，qid 不在组件里 `404 /errors/element-not-found`，改完不再是单根或带 script `422`。成功后与 `PATCH /components/{id}` 同构：组件升版 + 确定性回刷所有用它的屏，响应 `{ component, applied, skipped }`
 - **`API-AGENT-001` oauth** — **v0.32 推迟**（编号保留）。本地版 MCP 免鉴权：服务只绑 `127.0.0.1`，`/mcp` 不校验任何凭据；SaaS 阶段按 OAuth 2.1 + PKCE 重建
 - **`API-AGENT-002` mcp** — 实现 `REQ-AGENT-001`、`REQ-AGENT-002`
-  - `POST /mcp`（MCP Streamable HTTP，协议版本 `2025-06-18` 主 + `2026-07-28` 分支）；无鉴权（v0.32）。接入方式：`claude mcp add --transport http quilt http://127.0.0.1:3100/mcp`，Codex 为 `codex mcp add quilt --url http://127.0.0.1:3100/mcp`（v0.68；Codex 线程在打开时加载 MCP 配置，接入后新开或重开线程；让投来的作业不必逐个批准要在 `[mcp_servers.quilt]` 下设 `default_tools_approval_mode = "approve"`；两条命令都在设置弹层「生成通道」一节可复制）。工具、资源、提示词均为服务层投影，与 REST 同源：
+  - `POST /mcp`（MCP Streamable HTTP，协议版本 `2025-06-18` 主 + `2026-07-28` 分支）；无鉴权（v0.32）；来源校验同 §8（v0.75：`Host` 不是本机地址、或带了不在名单里的 `Origin` 即 `403`，transport 另开 SDK 的 `enableDnsRebindingProtection`，名单同一份）。接入方式：`claude mcp add --transport http quilt http://127.0.0.1:3100/mcp`，Codex 为 `codex mcp add quilt --url http://127.0.0.1:3100/mcp`（v0.68；Codex 线程在打开时加载 MCP 配置，接入后新开或重开线程；让投来的作业不必逐个批准要在 `[mcp_servers.quilt]` 下设 `default_tools_approval_mode = "approve"`；两条命令都在设置弹层「生成通道」一节可复制）。工具、资源、提示词均为服务层投影，与 REST 同源：
 
 | MCP 工具 | 层 | 投影到 | 说明 |
 | --- | --- | --- | --- |
@@ -629,7 +630,7 @@ v0.32 删除的字段（随表删除）：派活任务全部字段（`kind` / `s
 
 ## 10. 权限与角色
 
-v0.32 本地版只有一个主体：**本机用户**（`ROLE-Owner`，默认用户 `local@quilt.local`）。浏览器、MCP 客户端、收到投递的本机 Claude Code 会话三者都以它的身份访问，服务只绑 `127.0.0.1`，进程边界就是权限边界。下表是 SaaS 阶段的矩阵，本地版全部按 `ROLE-Owner` 一列生效；`ROLE-Agent` / `ROLE-Companion` / `ROLE-Anon` 三列随 OAuth 与伴侣一起推迟。
+v0.32 本地版只有一个主体：**本机用户**（`ROLE-Owner`，默认用户 `local@quilt.local`）。浏览器、MCP 客户端、收到投递的本机 Claude Code 会话三者都以它的身份访问。服务只绑 `127.0.0.1`，但本机浏览器会替任意网页往回环地址发请求，所以 v0.75 起 `/v1/*` 与 `/mcp` 另按 `Host` / `Origin` 只受理本机画布与本机客户端（§15「本地服务」、`ADR-016` v0.75 修订）。下表是 SaaS 阶段的矩阵，本地版全部按 `ROLE-Owner` 一列生效；`ROLE-Agent` / `ROLE-Companion` / `ROLE-Anon` 三列随 OAuth 与伴侣一起推迟。
 
 | 端点 | ROLE-Owner | ROLE-Agent（scope） | ROLE-Companion | ROLE-Anon |
 | --- | --- | --- | --- | --- |
@@ -1051,7 +1052,7 @@ CSS-only 覆盖不了的交互（拖拽、异步、跨组件联动）不在组�
 | 错误码(type) | HTTP | 语义 | FE 处理 |
 | --- | --- | --- | --- |
 | `/errors/validation` | 400（素材与附件校验为 422，见 `API-CORE-032` / `API-CORE-019`） | 请求参数不合法（附 `errors[]` 字段级）；v0.32 起本机 agent 命令不在 PATH 也在这里报（`errors[].path=runner`，message 含安装命令） | 表单内联提示 / toast（前端只认 `type` 与 `errors[0].message`，不看状态码） |
-| `/errors/forbidden` | 403 | 签名 URL 校验失败（对象 / 上传直传） | 提示并刷新 |
+| `/errors/forbidden` | 403 | 签名 URL 校验失败（对象 / 上传直传）；v0.75 起也表示请求来源不在本机名单（`Host` / `Origin`，§15「本地服务」，`title` 点名是来源问题） | 提示并刷新。来源校验画布自己不会撞上；从名单外的地址（如局域网 IP）打开画布时它的请求全部 403，按 §15 设 `WEB_ORIGIN` |
 | `/errors/preview-token-invalid` | 403 | 预览签名无效或过期 | 静默重取 `API-CORE-004` 后重载 iframe |
 | `/errors/not-found` | 404 | 资源不存在或不属于本人 | 提示并返回上一级 |
 | `/errors/element-not-found` | 404 | `qid` 在当前修订不存在 | 刷新屏幕后重选 |
@@ -1095,8 +1096,9 @@ v0.32 删除：`/errors/unauthorized`、`/errors/token-expired`（无登录）�
 | 数据增长 | 修订与截图对象存储 12 个月 | ≈ 55 GB（§2）；保留全部修订（回溯需求）；截图仅保留每屏最近 20 版 + 当前版，其余按月清理（`storage.gc`）；超 200 GB 重估 |
 | 数据增长 | `generation_jobs`、`usage_entries` | < 100 万行/年；作业 `input/output` 90 天后归档到对象存储 |
 | 兼容性 | 画布浏览器 | Chrome / Edge / Safari 最近 2 个大版本；Firefox 最近 2 版（同文档 View Transitions 已 Baseline） |
-| 安全 | 预览域 | 与主站不同 origin（本地版 `127.0.0.1:3101` vs `localhost:3100`，无 cookie 故 origin 隔离即够）；HTML 响应带 `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline' https:; script-src 'unsafe-inline' 'unsafe-eval' https:; img-src * data: blob:; font-src https: data:; connect-src https:; frame-ancestors <画布 origin>`。v0.43 放开到任意 `https:` 源，是为了让屏能用 Chart.js 这类开源库与自写组件库（`REQ-CORE-022`）；安全边界不变——预览域是独立 origin、无 cookie、拿不到主站 storage，屏里的脚本只能影响自己那张屏 |
-| 安全 | 本地服务 | API / 预览域只绑 `127.0.0.1`（`BIND_HOST` 可改）；MCP 免鉴权的前提就是这一条 |
+| 安全 | 预览域 | 与主站不同 origin（本地版 `127.0.0.1:3101` vs `localhost:3100`，无 cookie 故 origin 隔离即够）；HTML 响应带 `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline' https:; script-src 'unsafe-inline' 'unsafe-eval' https:; img-src * data: blob:; font-src https: data:; connect-src https:; form-action 'none'; base-uri 'none'; frame-ancestors <画布 origin>`（组件预览 `/c/` 同一份）。v0.43 放开到任意 `https:` 源，是为了让屏能用 Chart.js 这类开源库与自写组件库（`REQ-CORE-022`）。**v0.75 补 `form-action 'none'`**：它不继承 `default-src`，缺了它屏里的脚本可以 `form.submit()` 一个 `enctype=text/plain` 的表单往本机 API 发写请求（`submit()` 不触发 submit 事件，运行时拦不到）；运行时本就拦下全部表单提交、改发 `quilt:navigate`，合法路径不受影响。被挡下的 `form.submit()` 在 Chromium 里会中止这张屏自己的加载（没加载完的子资源被取消、`load` 不再触发；解析中途调用时其后的内容也不再解析），后果只落在它自己身上：预览与截图里这张屏停在半截。`base-uri 'none'` 让屏改不了相对地址的解析基准。**截图渲染用同一份 CSP**（去掉 `frame-ancestors`：`<meta>` 里不支持，截图也不嵌套）：截图 worker 以 `page.setContent` 渲染，没有响应头可带，CSP 以 `<meta http-equiv>` 插在文档最前（doctype 之后、prelude 之前），屏的任何内容都在它之后解析；导出时抽 Tailwind 并集 CSS 的那一页（全部屏的 body 拼在一起）同样带它。这里不能改成「拦截请求、在固定地址下发文档」来带响应头：拦截返回的文档没有对端 IP，Chromium 的本地网络访问限制按公网算，屏里引用的预览域素材（`/a/`，回环地址）会整张加载失败。边界：预览域是独立 origin、无 cookie、拿不到主站 storage，也写不了主站 API（CSP 挡住表单与 fetch，API 的来源校验再挡一层），屏里的脚本只能影响自己那张屏 |
+| 安全 | 本地服务 | API / 预览域只绑 `127.0.0.1`（`BIND_HOST` 可改）。绑回环只挡远端 TCP，挡不住本机浏览器替任意网页发的请求，所以 **v0.75 起 `/v1/*` 与 `/mcp` 先过来源校验**：`Host` 必须在本机名单里；请求带 `Origin` 时它也必须在名单里（`Origin: null` 拒——沙箱 iframe、`about:blank` 文档、`no-referrer` 的表单都发它）；不合格 `403 /errors/forbidden`。不带 `Origin` 的放行：MCP 客户端、curl、e2e 与脚本都不带，而现代浏览器的跨源 POST 一律带。名单从 `WEB_ORIGIN` / `API_ORIGIN`（外加 `http://localhost:<API 端口>`）推出：它们本身，回环地址再展开成 `localhost` / `127.0.0.1` / `[::1]` 三种写法配同一端口——开发时 Vite 代理（`changeOrigin: false`）送来的 `Host` 与 `Origin` 都是画布地址，打包形态画布与 API 同源，端口改了名单跟着变。挡住的三类：DNS 重绑（`Host` 是攻击者域名）、跨站表单与 no-cors 盲写（`Origin` 是别人的）、预览域与截图里的屏（`Origin` 是预览域或 `null`）。MCP transport 另开 SDK 的 `enableDnsRebindingProtection`，名单同一份。**非回环 `Host` 默认拒绝**：Vite 配了 `host: true`，开发代理也监听局域网地址，从别的机器用 `http://<局域网 IP>:<画布端口>` 打开时请求全部 403；确要在局域网用，把 `WEB_ORIGIN` 设成那个地址（预览域 `frame-ancestors` 本来就要它）；名单里的画布地址随之换成它，本机也要用这个地址打开画布，从 `localhost` / `127.0.0.1:<画布端口>` 打开时请求会 403。预览域端口不做来源校验：它只下发签名预览与公开素材，不受理写请求 |
+| 安全 | 对象下发 | `/v1/objects/*` 挂在 API origin 上（打包形态即画布 origin），按签名校验。**v0.75 起 `.html` 一律附件**：`Content-Disposition: attachment; filename="<对象键末段>"`（如 `<revisionId>.html`）、`Content-Security-Policy: default-src 'none'; sandbox`、`X-Content-Type-Options: nosniff`——修订 HTML 与导出原型是不可信内容，在这个 origin 上渲染等于把屏脚本放回画布同源（`ADR-004` 的立论）。`htmlUrl` 与 `quilt.get_export` 的地址照常可 curl / fetch 取正文；浏览器里打开是下载。要在浏览器里看某一版走预览域（候选的 `previewUrl`、聚焦 iframe），导出原型下载后本地打开。截图 PNG、JSON、参考图的下发不变 |
 
 ## 16. 并发与一致性
 
@@ -1209,6 +1211,7 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
   - Decision：预览文档由预览域服务提供，URL 带 HMAC 签名 token，无 cookie，CSP 收紧；截图/选择等能力通过 prelude 内脚本 + postMessage 完成，不依赖父页直取 DOM。
   - Alternatives：同源 srcDoc + `sandbox`（被否：加 sandbox 就失去 contentDocument，截图与注入同时失效）。
   - Consequences：需要一个额外的可注册域名（如 `quiltpreview.app`，v1 单主机即可）与证书（建议通配符，便于后续按项目分子域进一步隔离）；元素检查器改走消息协议；预览响应带 `Access-Control-Allow-Origin: <画布 origin>`（URL 已签名），供父页取目标屏 HTML 做同 iframe 换屏（ADR-003）。
+  - v0.75 补充（写方向）：原决策只隔离了「读」——独立 origin、无 cookie、`connect-src` 限 `https:`，屏里 `fetch` 本机 API 被拦。「写」有三条漏网：CSP 没有 `form-action`，屏用 `text/plain` 表单往主 API 发写请求照样落库（建作业、花用户的通道额度）；截图 worker 以 `page.setContent` 渲染、不带 CSP，屏一入库脚本就在截图浏览器里执行；`/v1/objects` 把修订 HTML 以 `text/html` 在 API origin 下发，打开 `htmlUrl` 即把屏脚本放回画布同源。补法：预览与组件预览的 CSP 加 `form-action 'none'; base-uri 'none'`，截图与导出抽 CSS 的渲染页以 `<meta>` 带同一份 CSP，`/v1/objects` 的 HTML 改附件（§15），API 侧再加来源校验（`ADR-016` v0.75 修订）——CSP 与来源校验各挡一层，任一层失守另一层仍在。
 - **`ADR-005` ⚠ token 由服务端注入 prelude，模型只引用变量；生成后确定性 lint** — Status: Accepted（Owner 2026-09-09 签字）
   - Context：Stitch 让模型自己写 token，实测产物全是硬编码 hex，多屏漂移；CHI 2026 对照实验显示预建 registry 合规率最高。
   - Decision：每版 HTML 的 `<head>` 由服务端拼装：`:root` CSS 变量（来自 token）+ 内联 Tailwind config 映射到变量 + 运行时脚本；模型 prompt 禁止 hex/字号/字体字面量；lint 检查裸色值、arbitrary value、组件白名单、`data-qid` 完整性；违规先自动修复一回合，再失败作业失败 `errorClass=lint`。调色板由种子色按 Material HCT 算出。DESIGN.md 采用 google-labs-code/design.md 开源规范。
@@ -1287,6 +1290,7 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
   - Decision：① 保留 `users` 与所有 `owner_id` / `created_by` 外键，启动时确保一行默认用户 `local@quilt.local`，鉴权中间件把每个请求解析为它；删除 magic link、会话、OAuth、设备 token、派活任务六组表与对应代码、页面、邮件驱动；② 服务只绑 `127.0.0.1`，MCP 不校验凭据——进程边界即权限边界；③ 硬上限删除（`ADR-011` 修订）；④ 本机 agent 由 `agentRunner` 拉起 CLI（`ADR-015` 修订），伴侣 / deeplink / 派活队列删除（`ADR-009` 作废）；⑤ 安装 = `npx quilt-canvas`：PGlite + 进程内队列 + 静态前端 + 本机浏览器截图 + 自动生成 `~/.quilt/config.env`（`ADR-010` 修订）。SaaS 相关 REQ 标「推迟」并保留编号，不删。
   - Alternatives：物理删除 `users` 与外键（被否：SaaS 时重做数据模型）；保留 OAuth 表当空表（被否：死表与死 schema 只会让人误以为还在用）；Docker 一键（被否：把「装 Docker」推给用户不叫一键）；先做 Electron（被否：四项基建不先做，Electron 只是把同样的问题搬进壳里）。
   - Consequences：`REQ-CORE-001`、`REQ-AGENT-001` 的 OAuth 部分、`REQ-AGENT-004/005` 推迟；§10 矩阵只剩 `ROLE-Owner` 一列生效；测试脚手架去掉登录与第二账号；`pnpm seed` 清的是默认用户的全部项目（只对开发库用，`DATABASE_URL` 指向 docker），绝不能对着 `~/.quilt` 跑。
+  - **v0.75 修订（来源校验）**：Decision ② 的「进程边界即权限边界」不成立——绑回环只挡远端 TCP，受害者自己的浏览器是一个混淆代理：DNS 重绑后攻击页的 origin 与 API 同源，任意网页的跨站表单是 CORS 简单请求、不预检，预览域里的屏同理。无鉴权保留，改为在 `/v1/*` 与 `/mcp` 前校验 `Host` 与 `Origin`（规则与名单见 §15「本地服务」），MCP 同时开 SDK 自带的 DNS 重绑防护。Alternatives：写方法要求自定义头（如 `X-Quilt-Client`，被否：直传 URL、MCP 客户端、脚本都得跟着带，而浏览器发出的跨源写请求一律带 `Origin`，校验它已经够）；本机随机 token 当 Bearer（被否：每个 MCP 客户端的接入命令都要带它，与本决策的「MCP 免鉴权」相悖，挡的仍是同一个混淆代理）。Consequences：非回环地址默认不可用（局域网访问要显式设 `WEB_ORIGIN`）；校验只看请求头，不依赖浏览器是否实现本地网络访问限制（Chromium 已实现，Safari / Firefox 未核实）。
 - **`ADR-013` 用户自配通道的密钥落库加密，主密钥来自 `.env`** — Status: Accepted（2026-09-17）
   - Context：`REQ-CORE-013` 要求用户在设置页自填 API Key；worker 异步执行作业时请求早已结束，密钥必须能被服务端事后读到，存浏览器不可行。产品先做开源自部署，将来可能 SaaS。
   - Decision：`channels.api_key_enc` 用 AES-256-GCM 加密存储，密钥 = `sha256(QUILT_SECRETS_KEY)`（接受任意长度口令、推荐 `openssl rand -base64 32`），格式 `enc:v1:<iv>:<tag>:<ct>`；未配置该变量时**拒绝保存**含密钥的通道并点名变量名（fail closed），不回落为明文。接口只回显末 4 位，探测错误截断且不含请求体，日志不打印密钥。按账号隔离。
@@ -1381,6 +1385,30 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
   Then 返回 200（默认用户的项目）
   When 用 MCP 客户端不带 Bearer 连接 http://127.0.0.1:3100/mcp 并调用 quilt.list_projects
   Then 正常返回
+
+场景: 只受理本机来源的请求 (REQ-CORE-017 / ADR-016 · v0.75)
+  Given 服务已启动（画布地址 WEB_ORIGIN，API 端口 3100）
+  When 带 Host: rebind.attacker.example:3100 调用 GET /v1/projects、GET /v1/channels、POST /mcp tools/call quilt.list_projects
+  Then 三个都返回 403 /errors/forbidden，响应里没有项目与通道
+  When 带 Origin: http://evil.example、Content-Type: text/plain 调用 POST /v1/projects；再带 Origin: null 调一次
+  Then 两次都 403，项目未建
+  When 带 Origin 为画布地址、或 http://127.0.0.1:3100 调用 POST /v1/projects；不带 Origin 以 Host: 127.0.0.1:3100 调用 GET /v1/projects
+  Then 201 / 201 / 200
+  When 开发时画布在 Vite（WEB_ORIGIN=http://localhost:<画布端口>）经代理请求 /v1，Host 与 Origin 都是 localhost:<画布端口>
+  Then 放行
+  When 从局域网地址（Host: 192.168.1.5:<画布端口>）打开画布，WEB_ORIGIN 没设成它
+  Then 请求 403
+
+场景: 屏里的脚本写不了主站 (REQ-CORE-005 / REQ-CORE-022 / ADR-004 · v0.75)
+  Given 一屏的脚本在加载时用 fetch no-cors 与 text/plain 表单 form.submit() 往本机 API 的 POST /v1/projects 与 POST /v1/projects/{id}/messages 发请求
+  When 经 MCP 推入该屏，等截图就绪
+  Then 截图照常生成（Tailwind、lucide、https 图片与预览域素材都在），截图渲染页报出 connect-src 与 form-action 两类 CSP 违规
+  And 库里没有多出项目、消息与作业
+  When 双击该屏进交互态（预览域活 iframe）
+  Then 预览响应的 CSP 含 form-action 'none'，iframe 里同样报出两类违规，库里仍没有多出任何东西
+  When 在浏览器里打开该修订的 htmlUrl，或导出原型后 quilt.get_export 给的地址
+  Then 响应带 Content-Disposition: attachment 与 Content-Security-Policy: default-src 'none'; sandbox，浏览器下载而不渲染，屏脚本没有在 API origin 上执行
+  And 画布的「导出原型」下载照常（GET /jobs/{id}/export 200、attachment、正文含全部屏）
 
 场景: 创建手机项目自动生成设计系统 (REQ-CORE-002)
   Given 已登录用户

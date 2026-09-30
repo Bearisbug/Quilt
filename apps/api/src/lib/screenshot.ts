@@ -1,5 +1,5 @@
 import { chromium, type Browser } from 'playwright';
-import { withOverlayStyle } from '@quilt/core';
+import { withOverlayStyle, withScreenCsp } from '@quilt/core';
 import { config } from '../config.ts';
 
 // 服务端截图（ADR-002）：单浏览器实例复用，按屏开 page。
@@ -46,8 +46,11 @@ export async function screenshotHtml(html: string, size: { w: number; h: number 
   const context = await b.newContext({ viewport: { width: size.w, height: size.h }, deviceScaleFactor: 2 });
   try {
     const page = await context.newPage();
-    // 预览域外链（Tailwind CDN / 字体 / 图片）需要网络；等 networkidle 但不超过超时
-    await page.setContent(opts.overlay ? withOverlayStyle(html) : html, { waitUntil: 'networkidle', timeout: timeoutMs }).catch(() => {});
+    // 预览域外链（Tailwind CDN / 字体 / 图片）需要网络；等 networkidle 但不超过超时。
+    // 屏的脚本在这里同样会执行，带上与预览域同一份 CSP（§15）：不带的话它一入库就能往本机 API 发写请求。
+    // 不能改成 context.route 拦截一个固定地址来带响应头——拦截返回的文档没有对端 IP，Chromium 按公网算，
+    // 本地网络访问限制会把屏里引用的预览域素材（回环地址）整张拦掉
+    await page.setContent(withScreenCsp(opts.overlay ? withOverlayStyle(html) : html), { waitUntil: 'networkidle', timeout: timeoutMs }).catch(() => {});
     await settle(page, timeoutMs);
     return await page.screenshot({ type: 'png', fullPage: false, omitBackground: !!opts.overlay });
   } finally {
@@ -61,7 +64,8 @@ export async function extractTailwindCss(prelude: string, bodies: string[], time
   const context = await b.newContext({ viewport: { width: 1280, height: 800 } });
   try {
     const page = await context.newPage();
-    const html = `<!doctype html><html><head>${prelude}</head><body>${bodies.map((x) => `<div>${x}</div>`).join('')}</body></html>`;
+    // 全部屏的 body 拼在这一页里，脚本同样会执行：带同一份 CSP
+    const html = withScreenCsp(`<!doctype html><html><head>${prelude}</head><body>${bodies.map((x) => `<div>${x}</div>`).join('')}</body></html>`);
     await page.setContent(html, { waitUntil: 'networkidle', timeout: timeoutMs }).catch(() => {});
     await settle(page, timeoutMs);
     return await page.evaluate(() => Array.from(document.head.querySelectorAll('style')).map((s) => s.textContent ?? '').filter((t) => t.includes('--tw-') || t.includes('.bg-')).join('\n'));
