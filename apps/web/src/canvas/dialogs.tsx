@@ -12,7 +12,6 @@ export function DeleteDialog({ screens, components, selected, variantCount = 0, 
   const ref = useModal<HTMLDivElement>(onClose);
   return (
     <Overlay onClose={onClose}>
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-[2px]" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div ref={ref} role="alertdialog" aria-modal="true" aria-labelledby="del-title" tabIndex={-1} className="outline-none w-full max-w-xs rounded-lg border border-line bg-panel p-5 shadow-2xl fade-up" data-testid="delete-dialog">
         <h2 id="del-title" className="text-sm font-semibold">
           {screens.length === 0
@@ -26,7 +25,6 @@ export function DeleteDialog({ screens, components, selected, variantCount = 0, 
         </p>
         <div className="mt-4 flex justify-end gap-2"><Button onClick={() => onClose()}>取消</Button><Button variant="danger" onClick={onConfirm}>删除</Button></div>
       </div>
-    </div>
     </Overlay>
   );
 }
@@ -36,7 +34,6 @@ export function MissingDialog({ missing, busyReason, onGenerate, onClose }: { mi
   const ref = useModal<HTMLDivElement>(onClose, undefined, undefined, { initialFocus: 'self' });
   return (
     <Overlay onClose={onClose}>
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-[2px]" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="miss-title" tabIndex={-1} className="outline-none w-full max-w-sm rounded-lg border border-line bg-panel p-5 shadow-2xl fade-up" data-testid="missing-dialog">
         <h2 id="miss-title" className="text-sm font-semibold">{missing.hrefs.length === 1 ? `「${missing.hrefs[0]}」尚不存在，生成它？` : '这些路由尚不存在，生成哪一个？'}</h2>
         <p className="mt-1 text-xs text-muted">会按当前设计系统生成新屏幕并接上链接（消耗额度）。</p>
@@ -52,7 +49,6 @@ export function MissingDialog({ missing, busyReason, onGenerate, onClose }: { mi
         {busyReason && <p className="mt-2 text-xs text-warn">{busyReason}</p>}
         <div className="mt-4 flex justify-end"><Button onClick={() => onClose()}>关闭</Button></div>
       </div>
-    </div>
     </Overlay>
   );
 }

@@ -7,37 +7,70 @@ import { Overlay, useModal } from '@/ui/modal';
 import { AssetsSection, PaletteSection } from '@/panels/BrandSections';
 import { PresetsSection } from '@/panels/PresetsSection';
 import { FONTS, SYSTEM_FONTS, FONT_SOURCE_OPTIONS, RADIUS } from './designOptions';
+import { SAVE_KEYS, drafts, rebase, same, savedFields, type Fields } from './designDraft';
 
 // 设计系统面板（REQ-CORE-010 只读展示 / REQ-EDIT-003 编辑与回刷 / REQ-CORE-016 应用简介与样板屏）。
 // 设计系统是唯一的持久记忆且只显式改：约定条目只经「用一句话改设计系统」→ 提炼 → 预览确认写入，这里可删不可手写。
 export function DesignPanel({ ds, project, screens, assets, busy, onClose, onSaved, onApplyAll, onPropose }: { ds: DesignSystemDto; project: ProjectDto; screens: ScreenDto[]; assets: AssetDto[]; busy: boolean; onClose: () => void; onSaved: () => void; onApplyAll: () => void; onPropose: (instruction: string) => void }) {
   const toast = useToast();
   const tokens = ds.tokens as Tokens;
-  const [seed, setSeed] = useState(ds.seedColor);
-  const [font, setFont] = useState<string>(tokens.typography.fontFamily);
-  const [fontSource, setFontSource] = useState<FontSource>(tokens.typography.fontSource ?? 'google');
-  const [fontUrl, setFontUrl] = useState<string>(tokens.typography.fontUrl ?? '');
+  const saved = savedFields(ds, project);
+  // 品牌色板（REQ-EDIT-005）：和种子 / 字体 / 圆角同属「保存后回刷」这一组，不单独走接口
+  const [form, setForm] = useState<Fields>(() => { const d = drafts.get(ds.projectId); return d ? rebase(d.form, d.base, saved, []) : saved; });
+  const set = (patch: Partial<Fields>) => setForm((f) => ({ ...f, ...patch }));
+  const { seed, font, fontSource, fontUrl, radius, md, palette, colorMode, brief } = form;
+  const setSeed = (v: string) => set({ seed: v });
+  const setFont = (v: string) => set({ font: v });
+  const setFontSource = (v: FontSource) => set({ fontSource: v });
+  const setFontUrl = (v: string) => set({ fontUrl: v });
+  const setRadius = (v: Fields['radius']) => set({ radius: v });
+  const setMd = (v: string) => set({ md: v });
+  const setBrief = (v: string) => set({ brief: v });
   const [fontError, setFontError] = useState<string | null>(null);
   const [fontUrlError, setFontUrlError] = useState<string | null>(null);
-  const [radius, setRadius] = useState<'sharp' | 'default' | 'round'>(RADIUS.find((r) => r.md === tokens.radius.md)?.key ?? 'default');
-  const [md, setMd] = useState(ds.designMd);
-  // 品牌色板（REQ-EDIT-005）：和种子 / 字体 / 圆角同属「保存后回刷」这一组，不单独走接口
-  const [palette, setPalette] = useState(ds.palette);
-  const [colorMode, setColorMode] = useState(ds.colorMode);
   const [saving, setSaving] = useState(false);
   const [askApply, setAskApply] = useState(false);
   const saveRef = useRef<HTMLButtonElement>(null);
   const applyRef = useRef<HTMLButtonElement>(null);
-  const [brief, setBrief] = useState(project.brief);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const [savingBrief, setSavingBrief] = useState(false);
-  const [instruction, setInstruction] = useState('');
-  useEffect(() => { setSeed(ds.seedColor); setFont(tokens.typography.fontFamily); setFontSource(tokens.typography.fontSource ?? 'google'); setFontUrl(tokens.typography.fontUrl ?? ''); setFontError(null); setFontUrlError(null); setRadius(RADIUS.find((r) => r.md === tokens.radius.md)?.key ?? 'default'); setMd(ds.designMd); setPalette(ds.palette); setColorMode(ds.colorMode); }, [ds.id, ds.version, ds.seedColor, ds.designMd, tokens.typography.fontFamily, tokens.typography.fontSource, tokens.typography.fontUrl, tokens.radius.md]);
-  useEffect(() => { setBrief(project.brief); }, [project.id, project.brief]);
+  const [instruction, setInstruction] = useState(() => drafts.get(ds.projectId)?.instruction ?? '');
+  // 已保存的那份变了：按格同步（rebase）；刚由这里保存的那几格强制取服务端的值。
+  // 版本号也算「变了」：保存的值被服务端规范化回原值（种子色只改了大小写、字体名多打了空格）时各格都没变，只有版本 +1
+  const baseRef = useRef(saved);
+  const forceRef = useRef<(keyof Fields)[]>([]);
+  const savedKey = JSON.stringify(saved);
+  useEffect(() => {
+    const prev = baseRef.current;
+    baseRef.current = saved;
+    const force = forceRef.current;
+    forceRef.current = [];
+    if (same(prev, saved) && !force.length) return;
+    setForm((f) => rebase(f, prev, saved, force));
+    setFontError(null); setFontUrlError(null);
+  }, [savedKey, ds.version]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 卸载（关面板 / 切面板 / 切项目）时把草稿留给下一次打开
+  const formRef = useRef(form); formRef.current = form;
+  const instructionRef = useRef(instruction); instructionRef.current = instruction;
+  useEffect(() => {
+    const id = ds.projectId;
+    return () => {
+      if (same(formRef.current, baseRef.current) && !instructionRef.current) drafts.delete(id);
+      else drafts.set(id, { form: formRef.current, base: baseRef.current, instruction: instructionRef.current });
+    };
+  }, [ds.projectId]);
   // 只有这几项会改 tokens，进而改每屏 HTML 的 prelude；designMd 只进生成 prompt，回刷它产出的是逐字节相同的新修订
-  const tokenDirty = seed !== ds.seedColor || font !== tokens.typography.fontFamily || radius !== (RADIUS.find((r) => r.md === tokens.radius.md)?.key ?? 'default')
-    || fontSource !== (tokens.typography.fontSource ?? 'google') || (fontSource === 'url' && fontUrl.trim() !== (tokens.typography.fontUrl ?? ''))
-    || JSON.stringify(palette ?? null) !== JSON.stringify(ds.palette ?? null) || colorMode !== ds.colorMode;
-  const dirty = tokenDirty || md !== ds.designMd;
+  const tokenDirty = seed !== saved.seed || font !== saved.font || radius !== saved.radius
+    || fontSource !== saved.fontSource || (fontSource === 'url' && fontUrl.trim() !== saved.fontUrl)
+    || !same(palette, saved.palette) || colorMode !== saved.colorMode;
+  const dirty = tokenDirty || md !== saved.md;
+  // 放弃改动：「保存」管的那几格回到已保存的值（简介有自己的保存键，不动）。按钮随之消失，焦点交给面板的「关闭」，
+  // 不让它掉到 body——那时按 Esc 会被画布接走去取消在跑作业
+  const discard = () => {
+    setForm((f) => ({ ...saved, brief: f.brief }));
+    setFontError(null); setFontUrlError(null);
+    requestAnimationFrame(() => closeRef.current?.focus());
+  };
   const conventions = parseConventions(ds.designMd);
   const exemplar = screens.find((s) => s.id === project.exemplarScreenId) ?? null;
 
@@ -50,6 +83,7 @@ export function DesignPanel({ ds, project, screens, assets, busy, onClose, onSav
     setSaving(true);
     try {
       await api.designSystem.update(ds.projectId, { seedColor: seed.toUpperCase(), fontFamily: family.data, fontSource, fontUrl: url?.success ? url.data : null, radiusScale: radius, palette, colorMode, designMd: md, expectedVersion: ds.version });
+      forceRef.current = [...forceRef.current, ...SAVE_KEYS];
       toast('设计系统已保存'); setAskApply(tokenDirty && screens.length > 0); onSaved();
     } catch (e) {
       toast(e instanceof ApiError && e.type === '/errors/version-conflict' ? '设计系统已被更新，请刷新后重试' : '保存失败', 'error');
@@ -57,7 +91,7 @@ export function DesignPanel({ ds, project, screens, assets, busy, onClose, onSav
   };
   const saveBrief = async () => {
     setSavingBrief(true);
-    try { await api.projects.patch(project.id, { brief: brief.trim() }); toast('应用简介已保存'); onSaved(); }
+    try { await api.projects.patch(project.id, { brief: brief.trim() }); forceRef.current = [...forceRef.current, 'brief']; toast('应用简介已保存'); onSaved(); }
     catch { toast('保存失败', 'error'); } finally { setSavingBrief(false); }
   };
   const removeConvention = async (i: number) => {
@@ -66,7 +100,7 @@ export function DesignPanel({ ds, project, screens, assets, busy, onClose, onSav
   };
 
   return (
-    <Panel title="设计系统" className="h-full" actions={<Button size="sm" onClick={onClose}>关闭</Button>}>
+    <Panel title="设计系统" className="h-full" actions={<Button ref={closeRef} size="sm" onClick={onClose}>关闭</Button>}>
       <div className="scroll flex-1 space-y-4 p-3">
         {/* 持久记忆（REQ-CORE-016）：应用简介每次生成都带；样板屏在画布上选中后用工具栏更换 */}
         <div className="space-y-1.5">
@@ -81,7 +115,7 @@ export function DesignPanel({ ds, project, screens, assets, busy, onClose, onSav
         <div className="grid grid-cols-6 gap-1">
           {Object.entries(tokens.colors).map(([k, v]) => <div key={k} title={`${k} ${v}`} className="h-6 rounded-sm border border-line" style={{ background: v }} />)}
         </div>
-        <PaletteSection tokens={tokens} palette={palette} colorMode={colorMode} savedColorMode={ds.colorMode} onChange={(next) => { setPalette(next.palette); setColorMode(next.colorMode); }} />
+        <PaletteSection tokens={tokens} palette={palette} colorMode={colorMode} savedColorMode={ds.colorMode} onChange={(next) => set({ palette: next.palette, colorMode: next.colorMode })} />
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <label htmlFor="ds-seed" className="block text-xs font-medium text-muted">种子色</label>
@@ -162,6 +196,7 @@ export function DesignPanel({ ds, project, screens, assets, busy, onClose, onSav
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
           <span>版本 {ds.version}{dirty ? ' · 有未保存改动' : ''}</span>
           <div className="flex gap-2">
+            {dirty && <Button size="sm" onClick={discard} data-testid="ds-discard">放弃改动</Button>}
             <Button ref={saveRef} size="sm" variant="primary" pending={saving} disabled={!dirty} onClick={save} data-testid="ds-save">保存</Button>
             {/* 有未保存改动时不能回刷：作业只带 screenIds，worker 用的是库里那份 tokens，
                 拿旧色板给每屏出一版一模一样的新修订，回执还写「已回刷 N 屏」，用户看到的是「颜色一点没变」 */}

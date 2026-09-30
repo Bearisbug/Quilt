@@ -46,7 +46,9 @@ export function CreateProjectDialog({ onClose, returnTo, fallback }: { onClose?:
         <h2 id="np-title" className="text-sm font-semibold">新建项目</h2>
         <div className="mt-4 space-y-4">
           <Field label="项目名" htmlFor="np-name" error={error ?? undefined}>
-            <Input id="np-name" name="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：PawPal" maxLength={80} autoComplete="off" />
+            {/* 报过错后每次输入即时重验，填上即清；错误经 aria-describedby 关联到输入框（INT-003） */}
+            <Input id="np-name" name="name" value={name} onChange={(e) => { setName(e.target.value); if (e.target.value.trim()) setError(null); }} placeholder="例如：PawPal" maxLength={80} autoComplete="off"
+              aria-invalid={error ? true : undefined} aria-describedby={error ? 'np-name-error' : undefined} />
           </Field>
           <fieldset>
             <legend className="mb-1.5 block text-xs font-medium text-muted">设备形态（创建后不可改）</legend>

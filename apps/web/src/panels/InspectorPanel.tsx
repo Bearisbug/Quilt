@@ -13,6 +13,7 @@ const NO_LINK = '__none__';
 // 元素检查器（REQ-EDIT-001 / REQ-EDIT-002）：本地直改零 token；AI 只重生成选中子树。
 // component（REQ-EDIT-006）：元素所在的共享组件名——在组件里的元素不直改，给「改组件 / 脱离共享」两个出口
 export type ElementSel = { qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number } };
+type ElementDraft = { base: string; text?: string; classes?: string; link?: string; prompt?: string };
 const SUBTREE_RUNNER_KEY = 'quilt:runner:subtree';
 // 子树重生成的投递会话按工具分开记（v0.68）：Claude Code 会话 id 与 Codex 线程 id 互不相干
 const SUBTREE_SESSION_KEY: Record<AgentTool, string> = { 'claude-code': 'quilt:agent-session:subtree', codex: 'quilt:agent-session:subtree:codex' };
@@ -24,10 +25,18 @@ const COMPONENT_NAME_BY_TAG: Record<string, string> = { nav: 'TabBar', header: '
 // 组件没有 AI 子树重生成（整块重写走输入框的「改组件」）、没有批注、也不能再「记为共享组件」。
 export function InspectorPanel({ screen, component, sel, routes = [], busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes?: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void }) {
   const toast = useToast();
-  const [text, setText] = useState('');
-  const [classes, setClasses] = useState('');
-  const [link, setLink] = useState('');
-  const [prompt, setPrompt] = useState('');
+  // 改了没存的文案 / 类名 / 跳转与重生成说明按元素暂存（v0.78）：点别的元素再点回来还在。
+  // 直改三格记着起草时元素的原值：元素本身变了（保存后热更新重选、别处改了它）就作废、回到新值；说明不随元素内容作废
+  const [drafts, setDrafts] = useState<Record<string, ElementDraft>>({});
+  const draftKey = sel ? `${component?.id ?? screen?.id}:${sel.qid}` : '';
+  const base = sel ? JSON.stringify([sel.text, sel.classes, sel.href ?? '']) : '';
+  const draft = drafts[draftKey];
+  const fresh = draft?.base === base ? draft : undefined;
+  const text = fresh?.text ?? sel?.text ?? '';
+  const classes = fresh?.classes ?? sel?.classes ?? '';
+  const link = fresh?.link ?? sel?.href ?? '';
+  const prompt = draft?.prompt ?? '';
+  const edit = (patch: Omit<ElementDraft, 'base'>) => setDrafts((m) => ({ ...m, [draftKey]: { ...(m[draftKey]?.base === base ? m[draftKey] : { prompt: m[draftKey]?.prompt }), ...patch, base } }));
   const [saving, setSaving] = useState(false);
   // 记为共享组件（REQ-EDIT-006）：内联表单，名字 + 要不要同步替换其他屏里对应的元素
   const [making, setMaking] = useState(false);
@@ -61,8 +70,8 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
   // 这块已有作业在改（本机会话投递的作业不占 busy，靠这个挡重复发起；屏锁在服务端还有一道 409）
   const working = !!sel && workingQids.includes(sel.qid);
   const canRegenerate = !!sel && !!onRegenerate && !!prompt.trim() && !busy && sessionOk && !working;
-  const regenerate = async () => { if (sel && canRegenerate && onRegenerate && (await onRegenerate(sel.qid, prompt.trim(), runner))) setPrompt(''); };
-  useEffect(() => { setText(sel?.text ?? ''); setClasses(sel?.classes ?? ''); setLink(sel?.href ?? ''); setPrompt(''); setMaking(false); setCompError(null); }, [sel?.qid, sel?.text, sel?.classes, sel?.href]);
+  const regenerate = async () => { if (sel && canRegenerate && onRegenerate && (await onRegenerate(sel.qid, prompt.trim(), runner))) edit({ prompt: '' }); };
+  useEffect(() => { setMaking(false); setCompError(null); }, [sel?.qid, sel?.text, sel?.classes, sel?.href]);
   // 当前指向的路由若不在项目里（断链）也要能显示出来
   const linkOptions = link && !routes.includes(link) ? [link, ...routes] : routes;
 
@@ -129,15 +138,15 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
           <div className="text-xs text-muted">&lt;{sel.tag}&gt; · {sel.qid}</div>
           <div className="space-y-1.5">
             <label htmlFor="el-text" className="block text-xs font-medium text-muted">文案</label>
-            <input id="el-text" value={text} onChange={(e) => setText(e.target.value)} className="h-9 w-full rounded-md border border-line bg-canvas px-2 text-sm" placeholder="（无直接文本）" />
+            <input id="el-text" value={text} onChange={(e) => edit({ text: e.target.value })} className="h-9 w-full rounded-md border border-line bg-canvas px-2 text-sm" placeholder="（无直接文本）" />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="el-classes" className="block text-xs font-medium text-muted">类名（Tailwind，只能用 token 色）</label>
-            <textarea id="el-classes" value={classes} onChange={(e) => setClasses(e.target.value)} rows={4} className="w-full resize-y rounded-md border border-line bg-canvas p-2 font-mono text-xs [overflow-wrap:anywhere]" />
+            <textarea id="el-classes" value={classes} onChange={(e) => edit({ classes: e.target.value })} rows={4} className="w-full resize-y rounded-md border border-line bg-canvas p-2 font-mono text-xs [overflow-wrap:anywhere]" />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="el-link" className="block text-xs font-medium text-muted">跳转到（{sel.tag === 'a' ? 'href' : sel.tag === 'form' ? '提交后 action' : 'data-href'}）</label>
-            <Select id="el-link" data-testid="el-link" value={link || NO_LINK} onChange={(v) => setLink(v === NO_LINK ? '' : v)} aria-label="跳转目标"
+            <Select id="el-link" data-testid="el-link" value={link || NO_LINK} onChange={(v) => edit({ link: v === NO_LINK ? '' : v })} aria-label="跳转目标"
               options={[{ value: NO_LINK, label: '不跳转' }, ...linkOptions.map((r) => ({ value: r, label: r, hint: routes.includes(r) ? undefined : '断链' }))]} />
           </div>
           <div className="flex flex-wrap gap-2">
@@ -179,7 +188,7 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
           ) : (
           <div className="space-y-1.5 border-t border-line pt-3">
             <label htmlFor="el-prompt" className="block text-xs font-medium text-muted">用 AI 重生成这块</label>
-            <textarea id="el-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} className="w-full resize-none rounded-md border border-line bg-canvas p-2 text-sm" placeholder="例如：改成横向滑动的卡片列表" disabled={busy}
+            <textarea id="el-prompt" value={prompt} onChange={(e) => edit({ prompt: e.target.value })} rows={3} className="w-full resize-none rounded-md border border-line bg-canvas p-2 text-sm" placeholder="例如：改成横向滑动的卡片列表" disabled={busy}
               onKeyDown={(e) => { if (e.key === 'Enter' && e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void regenerate(); } }} />
             {/* 通道单独选：与输入框同一套控件；本机 agent 时还要选投给哪个会话。面板 20rem 宽，两个下拉放不下时折行 */}
             <div className="flex flex-wrap items-center gap-1.5" data-testid="el-runner">

@@ -7,6 +7,7 @@ import { storage } from '../../lib/storage.ts';
 import { verifyObject } from '../../lib/signing.ts';
 import { attachmentKey, storeUpload } from '../../services/attachments.ts';
 import { config } from '../../config.ts';
+import { secretsConfigured } from '../../lib/secrets.ts';
 import type { ConfigDto } from '@quilt/core';
 
 export const miscRoutes = new Hono<Env>();
@@ -18,7 +19,7 @@ const dbName = /\/([^/?]+)(\?|$)/.exec(config.databaseUrl)?.[1] ?? (config.datab
 miscRoutes.get('/v1/health', (c) => c.json({ status: 'ok', llm: config.llmDriver, model: config.model, storage: config.storageDriver, database: dbName }));
 
 // API-CORE-028：运行时配置（前端启动时取一次；预览域地址随打包 / 开发环境变）
-miscRoutes.get('/v1/config', (c) => c.json({ previewOrigin: config.previewOrigin, version: config.version, local: true, home: config.dataDir } satisfies ConfigDto));
+miscRoutes.get('/v1/config', (c) => c.json({ previewOrigin: config.previewOrigin, version: config.version, local: true, home: config.dataDir, secretsConfigured: secretsConfigured() } satisfies ConfigDto));
 
 // /v1/runners 已迁到 routes/channels.ts（API-CORE-023：预置 + 本机 + 账号自建的统一目录）
 

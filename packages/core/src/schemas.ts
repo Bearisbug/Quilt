@@ -310,7 +310,8 @@ export const cursorQuerySchema = z.object({ cursor: z.iso.datetime().optional(),
 // ---------- AGENT 域（v0.32：本地版无 OAuth、无派活任务；本机 agent 是被投递的 Claude Code 会话）----------
 export const listJobsQuerySchema = z.object({ runner: z.enum(JOB_RUNNERS).optional(), limit: z.coerce.number().int().min(1).max(100).default(50) });
 /** 运行时配置（API-CORE-028）：前端启动时取一次 */
-export type ConfigDto = { previewOrigin: string; version: string; local: true; home: string };
+/** secretsConfigured（v0.78）：服务端配了 QUILT_SECRETS_KEY；为 false 时通道管理器提前说明、需要 API Key 的通道存不了 */
+export type ConfigDto = { previewOrigin: string; version: string; local: true; home: string; secretsConfigured: boolean };
 
 // 响应 DTO（前端据此生成类型）
 export type JobKind = (typeof JOB_KINDS)[number];

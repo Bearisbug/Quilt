@@ -4,10 +4,9 @@ import { Button, Input } from '@/ui/ui';
 import { Overlay, useModal } from '@/ui/modal';
 
 // 跳屏面板（REQ-CORE-024 v0.61）：⌘K 打开，按名字 / 路由 / 用途做不区分大小写的子串匹配——名字命中排最前、路由次之、用途最后，
-// 共享组件按名字匹配、排在所有屏之后。↑↓ 选、Enter 跳、Esc 关（Esc / 焦点陷阱 / 背景 inert 由 useModal 管）。
+// 共享组件按名字匹配、排在所有屏之后。命中项全部列出（v0.78），列表封顶 50dvh 内部滚动。↑↓ 选、Enter 跳、Esc 关（Esc / 焦点陷阱 / 背景 inert 由 useModal 管）。
 export type FinderPick = { kind: 'screen' | 'component'; id: string };
 type Row = FinderPick & { title: string; sub: string; badges: string[]; score: number };
-const MAX_ROWS = 12;
 
 export function screenBadges(s: ScreenDto, links: LinkDto[], busy: Set<string>): string[] {
   const dangling = links.filter((l) => l.fromScreenId === s.id && !l.toScreenId).length;
@@ -36,7 +35,7 @@ export function ScreenFinder({ screens, components, links, busy, onPick, onClose
       })),
       ...components.map((c) => ({ kind: 'component' as const, id: c.id, title: c.name, sub: `组件 · 用于 ${c.usedBy.length} 屏`, badges: [], score: hit(c.name) || !q ? 0.5 : 0 })),
     ];
-    return all.filter((r) => r.score > 0).sort((a, b) => b.score - a.score || a.title.localeCompare(b.title)).slice(0, MAX_ROWS);
+    return all.filter((r) => r.score > 0).sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
   }, [query, screens, components, links, busy]);
   const at = Math.min(cursor, Math.max(0, rows.length - 1));
   const pick = (r: Row | undefined) => { if (r) onPick({ kind: r.kind, id: r.id }); };

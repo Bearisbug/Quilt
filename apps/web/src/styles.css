@@ -87,6 +87,9 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
   --dock-w: 20rem;     /* 左侧对话记录 */
   --panel-w: 20rem;    /* 右侧滑出面板 */
   --chrome-left: calc(var(--dock-w) + 1.5rem);
+  /* 输入框的左边界与画布可用区的左边界分开算（v0.78）：对话记录展开或折叠成横条都贴在左下角、和输入框同一条横带，
+     折叠只让出画布可用区（--chrome-left），不让出这一截 */
+  --composer-left: calc(var(--dock-w) + 1.5rem);
   --chrome-right: var(--rail-w);
   --chrome-top: 3.5rem;
   --dock-top: 4.5rem;        /* 对话记录上沿最高到这里（顶栏下方） */
@@ -106,9 +109,20 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
   }
   .canvas-shell[data-panel="open"] { --chrome-right: var(--rail-w); }
 }
-/* 对话记录（v0.34）：贴左下角、底部对齐，从下往上长。窄视口下输入框横跨整宽，横条停在输入框上方（输入框收起时 --chrome-bottom 只剩 1rem，横条随之落底） */
+/* 对话记录（v0.34）：贴左下角、底部对齐，从下往上长（输入框收起时 --chrome-bottom 只剩 1rem，停在它上方的横条随之落底） */
 .chat-dock { --dock-bottom: 1rem; bottom: var(--dock-bottom); max-height: calc(100dvh - var(--dock-top) - var(--dock-bottom)); }
-@media (max-width: 48rem) { .chat-dock { --dock-bottom: var(--chrome-bottom); } }
+/* 放不下「对话记录 + 30rem 输入框 + 右侧浮层」时（v0.78），对话记录连同折叠横条改停在输入框上方、输入框的左边界退到边距：
+   面板关着 21.5 + 30 + 4.75 = 56.25rem，开着 21.5 + 30 + 25.75 = 77.25rem。两侧一起让位的话，
+   768～1100 px 同时开着对话记录与面板时输入框被挤成竖条（800 px 下 44 px 宽、顶出视口）。
+   画布可用区照旧为对话记录让位（--chrome-left 不动）：它还在左侧，只是不和输入框抢底部这一条 */
+@media (max-width: 56.25rem) {
+  .canvas-shell { --composer-left: var(--rail-w); }
+  .chat-dock { --dock-bottom: var(--chrome-bottom); }
+}
+@media (max-width: 77.25rem) {
+  .canvas-shell[data-panel="open"] { --composer-left: var(--rail-w); }
+  .canvas-shell[data-panel="open"] .chat-dock { --dock-bottom: var(--chrome-bottom); }
+}
 /* 消息操作（REQ-CORE-026）：精确指针悬停或键盘聚焦到这条消息时显示；触屏没有悬停，常显（INT-006）。
    只用 opacity 隐藏、不用 visibility / display：纯文字消息里没有别的可聚焦元素，按钮必须留在 Tab 序里，
    键盘才进得来（进来即 focus-within 显形）；指针能点到它时必然悬停在这条消息上，此时它已经显形 */
@@ -126,10 +140,10 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
   /* 宽度 = 工具条排成一行需要多宽（`--composer-need`，由 Composer 量出来写进内联样式），下限 30rem 免得
      控件少的时候缩成一条细缝，上限是让开左右浮层之后的可用宽。工具条内容变了（换通道、选中一屏少一组档位）
      宽度跟着变，走下面那条 width 过渡滑过去，不跳。量到之前用 30rem 顶着——首帧就有值，看不到回退宽。 */
-  --composer-w: min(max(30rem, var(--composer-need, 30rem)), calc(100% - var(--chrome-left) - var(--chrome-right)));
+  --composer-w: min(max(30rem, var(--composer-need, 30rem)), calc(100% - var(--composer-left) - var(--chrome-right)));
   width: var(--composer-w);
   left: clamp(
-    var(--chrome-left),
+    var(--composer-left),
     calc((100% - var(--composer-w)) / 2),
     calc(100% - var(--chrome-right) - var(--composer-w))
   );
@@ -157,11 +171,13 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 .composer-bar { opacity: 0.78; transition: opacity var(--duration-base) var(--ease-out); }
 /* 工具条默认不折行：宽度是按它一行排满量出来的，终态必然装得下。动画中途外壳比终态窄，nowrap 让它
    保持一行、多出来的部分被外壳裁掉——折行会让工具条在动画里先变两行再弹回一行，高度来回跳（那就是「抖」）。
-   只有可用宽度真的装不下终态时（窄视口），Composer 量完打上 data-bar="wrap"，这时才允许折行。 */
-/* 装不下时两组都允许内部折行：390px 视口只分到 206px，光左组（动词段控 + 通道 + 参考图）就要 299px，
+   可用宽度差一点时 Composer 先截短通道名；截到头仍装不下才打上 data-bar，这时才允许折行。 */
+/* wrap：左组守住一行，右组（屏数 · 版数 · 发送）整组落到第二行、靠右（v0.78）——两组一起折的话参考图按钮会单独掉下去、档位组悬在两行中间 */
+.composer[data-bar="wrap"] .composer-bar { flex-wrap: wrap; }
+/* wrap-all：连左组自己都放不下一行（390px 视口只分到 206px，光左组就要 299px）时两组内部各自折行——
    只让外层与右组折行的话左组照样溢出去被裁掉，参考图按钮整颗在框外、点下去命中的是画布 */
-.composer[data-bar="wrap"] .composer-bar,
-.composer[data-bar="wrap"] .composer-bar > * { flex-wrap: wrap; }
+.composer[data-bar="wrap-all"] .composer-bar,
+.composer[data-bar="wrap-all"] .composer-bar > * { flex-wrap: wrap; }
 /* 首帧不做过渡：宽度要等量完工具条才知道，量出来之前那一帧的宽度是回退值，让它过渡等于每次开页面都先长一下 */
 .composer:not([data-measured]) { transition: none; }
 .composer:focus-within .composer-bar, .composer[data-has-text] .composer-bar, .composer[data-busy] .composer-bar { opacity: 1; }
@@ -198,6 +214,8 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 
 /* 滚动条：槽位恒定、外观定制（RESP-007 / RESP-015）；导航壳隐藏滚动条但保留滚动（RESP-016） */
 .scroll { overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--color-line-strong) transparent; }
+/* 文本框内容多了会自己滚：scrollbar-width 不继承，声明要落在 textarea 本身上（v0.78），不然是默认宽度 + 继承来的颜色 */
+textarea { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) transparent; }
 .scroll-nav { overflow-y: auto; scrollbar-width: none; }
 .scroll-nav::-webkit-scrollbar { display: none; }
 

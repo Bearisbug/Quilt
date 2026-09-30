@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { ScreenDto, AnnotationDto } from '@quilt/core';
 import { Button, EmptyState, Panel } from '@/ui/ui';
 import type { ElementSel } from './InspectorPanel';
@@ -7,18 +7,30 @@ import type { ElementSel } from './InspectorPanel';
 // 发送按屏合并成一条整屏指令——N 屏计 N 次费，而不是 N 条批注计 N 次。
 export function AnnotationPanel({ screen, sel, items, busy, onClose, onAdd, onUpdate, onRemove, onSend }: {
   screen: ScreenDto; sel: ElementSel | null; items: AnnotationDto[]; busy: boolean;
-  onClose: () => void; onAdd: (note: string) => Promise<void>; onUpdate: (id: string, note: string) => Promise<void>;
+  /** onAdd 回新批注的 id、onUpdate 回是否存上；存不上时回 null / false，原因已由调用方 toast */
+  onClose: () => void; onAdd: (note: string) => Promise<string | null>; onUpdate: (id: string, note: string) => Promise<boolean>;
   onRemove: (id: string) => Promise<void>; onSend: (ids: string[]) => Promise<void>;
 }) {
-  const [draft, setDraft] = useState('');
+  // 说明框的草稿按「屏 + 元素」暂存（v0.78）：点别的元素换成它自己的草稿，点回来原样还在
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const draftKey = sel ? `${screen.id}:${sel.qid}` : '';
+  const draft = drafts[draftKey] ?? '';
+  const setDraft = (v: string) => setDrafts((m) => ({ ...m, [draftKey]: v }));
   const [editing, setEditing] = useState<{ id: string; note: string } | null>(null);
   const [pending, setPending] = useState(false);
-  useEffect(() => { setDraft(''); }, [sel?.qid]);
   const open = items.filter((a) => a.status === 'open');
   // 共享组件里的元素不批注（REQ-EDIT-006）：批注发出去是改屏，改屏动不了组件展开的那一块
   const locked = sel?.component ?? null;
 
   const run = async (fn: () => Promise<void>) => { setPending(true); try { await fn(); } finally { setPending(false); } };
+  // 存上了才清草稿；「记下并立刻发送」只发刚记下的这一条、存不上就不发（v0.78）
+  const add = async (send: boolean) => {
+    const k = draftKey;
+    const id = await onAdd(draft.trim());
+    if (!id) return;
+    setDrafts((m) => { const next = { ...m }; delete next[k]; return next; });
+    if (send) await onSend([id]);
+  };
 
   return (
     <Panel title={`批注 · ${screen.name}`} className="h-full" actions={<Button size="sm" onClick={onClose}>关闭</Button>}>
@@ -33,9 +45,9 @@ export function AnnotationPanel({ screen, sel, items, busy, onClose, onAdd, onUp
             placeholder={sel && !locked ? '例如：这个按钮改成次要样式，文案换成「稍后再说」' : ''} />
           <div className="flex gap-2">
             <Button size="sm" disabled={!sel || !!locked || !draft.trim() || pending} pending={pending}
-              onClick={() => run(async () => { await onAdd(draft.trim()); setDraft(''); })}>记下（不发送）</Button>
+              onClick={() => run(() => add(false))}>记下（不发送）</Button>
             <Button size="sm" variant="primary" disabled={!sel || !!locked || !draft.trim() || pending || busy}
-              onClick={() => run(async () => { await onAdd(draft.trim()); setDraft(''); await onSend([]); })}>记下并立刻发送</Button>
+              onClick={() => run(() => add(true))}>记下并立刻发送</Button>
           </div>
         </div>
 
@@ -61,7 +73,7 @@ export function AnnotationPanel({ screen, sel, items, busy, onClose, onAdd, onUp
                         className="w-full resize-none rounded-md border border-line bg-canvas p-2 text-xs text-fg" />
                       <div className="flex gap-1.5">
                         <Button size="sm" variant="primary" disabled={!editing.note.trim() || pending}
-                          onClick={() => run(async () => { await onUpdate(a.id, editing.note.trim()); setEditing(null); })}>保存</Button>
+                          onClick={() => run(async () => { if (await onUpdate(a.id, editing.note.trim())) setEditing(null); })}>保存</Button>
                         <Button size="sm" onClick={() => setEditing(null)}>取消</Button>
                       </div>
                     </div>

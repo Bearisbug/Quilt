@@ -65,8 +65,8 @@ export type ComposerProps = {
   hidden: boolean;
   /** 实际高度（px）：外壳用它算画布安全区的底部占位与对话记录的落点——输入框随内容增高、窄视口下工具条折行，写死一个数会压住别的浮层 */
   onResize?: (heightPx: number) => void;
-  /** 可用区探针（画布那一个）：让开四周浮层之后还剩多少——工具条要不要折行按它判 */
-  safeAreaRef?: { current: HTMLElement | null };
+  /** 输入框这一条横带的探针（画布提供）：让开左右浮层之后输入框还能有多宽——通道名要不要截短、工具条要不要折行按它判 */
+  laneRef?: { current: HTMLElement | null };
   handle?: Ref<ComposerHandle>;
 };
 
@@ -86,6 +86,8 @@ const CHAT_PHRASES = [
 const ROTATE_MS = 3200;
 /** 在跑作业最多摆几行，其余折成一条「+N」（REQ-CORE-020）：最新那行永不被折进去 */
 const MAX_ROWS = 3;
+/** 可用宽度差一点时通道触发器最多截到多窄（rem）：再窄连通道名的头几个字都看不出（v0.78） */
+const RUNNER_MIN_REM = 6;
 
 /** 待发的参考图：key 是本地身份，id 是上传完成后服务端给的；id 为 null 表示还在传 */
 type Shot = { key: string; url: string; name: string; id: string | null };
@@ -146,32 +148,54 @@ export function Composer(p: ComposerProps) {
   // 所以「量到的值 → 改外壳宽 → 再量」不会来回振荡。读完当帧还原，不落到画面上。
   // 放 useLayoutEffect 里是为了首帧就是终值：改成 useEffect 会先按回退宽度画一帧再跳（INT-021）。
   const barRef = useRef<HTMLDivElement>(null);
-  const safeArea = p.safeAreaRef;
-  const [bar, setBar] = useState<{ need: number; wrap: boolean }>({ need: 0, wrap: false });
+  const lane = p.laneRef;
+  // runnerMax：差一点放不下时通道触发器截到多宽（px，null = 不截）；wrap：'bar' 右组整组落到第二行，'all' 连左组自己都放不下一行、两组内部各自折行
+  const [bar, setBar] = useState<{ need: number; runnerMax: number | null; wrap: false | 'bar' | 'all' }>({ need: 0, runnerMax: null, wrap: false });
   const measureBar = useCallback(() => {
     const el = barRef.current; const form = formRef.current;
     if (!el || !form || p.hidden) return;
+    // 量的是不截短时的一行宽度：触发器上截短用的内联 max-width 只在量的这一刻撤掉
+    const trig = el.querySelector<HTMLElement>('[data-testid="runner-select"]');
+    const squeezed = trig?.style.maxWidth ?? '';
+    if (trig) trig.style.maxWidth = '';
     const prev = el.style.width;
     el.style.width = 'max-content';
     const need = el.getBoundingClientRect().width;
+    const left = (el.firstElementChild as HTMLElement | null)?.getBoundingClientRect().width ?? need;
+    const trigW = trig?.getBoundingClientRect().width ?? 0;
     el.style.width = prev;
+    if (trig) trig.style.maxWidth = squeezed;
     // 外壳自己的内边距与边框；工具条量的是内容宽，两者相加才是外壳该有的宽
     const chrome = form.offsetWidth - el.offsetWidth;
-    // 让开左右浮层之后还剩多少：读画布的可用区探针，不要去 parse --chrome-left——自定义属性取回来是没求值的
+    // 输入框这一条横带有多宽：读画布的探针，不要去 parse --composer-left——自定义属性取回来是没求值的
     // calc(...)，parseFloat 得 NaN，判断会静默恒假、窄视口下工具条被裁掉够不到。也不能拿正在过渡的
     // form.offsetWidth 判，那是中间值。
-    const avail = safeArea?.current?.getBoundingClientRect().width ?? Infinity;
-    const next = { need: Math.ceil(need + chrome), wrap: need + chrome > avail + 1 };
-    setBar((v) => (Math.abs(v.need - next.need) < 1 && v.wrap === next.wrap ? v : next));
-  }, [p.hidden, safeArea]);
+    const avail = lane?.current?.getBoundingClientRect().width ?? Infinity;
+    // 差一点放不下：先截短通道名（最窄 6rem），截到头仍放不下才折行（v0.78）——为几十 px 整条折行，参考图按钮会单独掉到第二行、档位组悬在两行中间
+    const short = need + chrome - avail;
+    const room = trigW - RUNNER_MIN_REM * parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const next = short <= 1 ? { need: Math.ceil(need + chrome), runnerMax: null, wrap: false as const }
+      : short <= room ? { need: Math.floor(avail), runnerMax: Math.floor(trigW - short), wrap: false as const }
+      : { need: Math.ceil(need + chrome), runnerMax: null, wrap: left + chrome > avail + 1 ? 'all' as const : 'bar' as const };
+    setBar((v) => (Math.abs(v.need - next.need) < 1 && v.runnerMax === next.runnerMax && v.wrap === next.wrap ? v : next));
+  }, [p.hidden, lane]);
   useLayoutEffect(measureBar);
+  // 宽度过渡在首次量完的下一帧才启用（v0.78）：与第一次写入宽度落在同一帧的话，浏览器按量宽时算过的 30rem 起跑过渡，
+  // 每次加载都先长一下。通道清单还没到时不启用——触发器随后才出现，那一下变宽不该滑
+  const [measured, setMeasured] = useState(false);
+  const hasRunners = p.runners.length > 0;
+  useEffect(() => {
+    if (measured || !bar.need || !hasRunners) return;
+    const id = requestAnimationFrame(() => setMeasured(true));
+    return () => cancelAnimationFrame(id);
+  }, [measured, bar.need, hasRunners]);
   // 字体晚于首帧到达时控件会变宽，补量一次
   useEffect(() => { document.fonts?.ready.then(measureBar).catch(() => {}); }, [measureBar]);
   // 可用宽度变了要重量：改窗口大小、开合侧边面板都不经过 React 渲染，只靠上面那个 useLayoutEffect
   // 量不到——工具条会停在缩窄前算出的 nowrap 上，被外壳裁掉的那截（屏数 / 版数 / 发送）点都点不到。
   // 画布的可用区探针正是「让开四周浮层之后还剩多少」，拿它当信号；探针不在时退回窗口 resize。
   useEffect(() => {
-    const el = safeArea?.current;
+    const el = lane?.current;
     if (!el) {
       const onResize = () => measureBar();
       window.addEventListener('resize', onResize);
@@ -180,7 +204,7 @@ export function Composer(p: ComposerProps) {
     const ro = new ResizeObserver(() => measureBar());
     ro.observe(el);
     return () => ro.disconnect();
-  }, [safeArea, measureBar]);
+  }, [lane, measureBar]);
 
   // 随内容增高；上限只有一个来源——styles.css 里 .composer textarea 的 max-height，到顶后内部滚动（INT-010）
   // 收起期间 display:none 量不到高度，叫回时要重量一次
@@ -305,7 +329,7 @@ export function Composer(p: ComposerProps) {
     <form
       ref={formRef} className="composer absolute bottom-4 z-20 p-3.5" onSubmit={submit} hidden={p.hidden}
       style={bar.need ? ({ '--composer-need': `${bar.need}px` } as CSSProperties) : undefined}
-      data-measured={bar.need ? '' : undefined} data-bar={bar.wrap ? 'wrap' : undefined}
+      data-measured={measured ? '' : undefined} data-bar={bar.wrap === 'bar' ? 'wrap' : bar.wrap === 'all' ? 'wrap-all' : undefined}
       data-has-text={text ? '' : undefined} data-busy={busy ? '' : undefined} data-dropping={dropping ? '' : undefined} data-verb={chat ? 'chat' : compOnly ? 'component' : creating ? 'create' : 'edit'}
       onPaste={onPaste} onDrop={onDrop}
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
@@ -420,7 +444,7 @@ export function Composer(p: ComposerProps) {
             <button type="button" data-testid="runners-failed" onClick={p.onReloadRunners} className="min-w-0 truncate rounded-md px-1.5 py-1 text-xs text-warn transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">
               通道清单没加载出来 · 重试
             </button>
-          ) : p.runners.length > 0 && <RunnerSelect runners={p.runners} value={p.runnerId} onChange={p.onRunnerChange} />}
+          ) : p.runners.length > 0 && <RunnerSelect runners={p.runners} value={p.runnerId} onChange={p.onRunnerChange} maxWidth={bar.runnerMax} />}
           {chat && !chatChannelOk && !p.runnersFailed && (
             <button type="button" data-testid="chat-no-channel" onClick={() => navigate('?settings=runners')} className="min-w-0 truncate rounded-md px-1.5 py-1 text-xs text-warn transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">
               聊天需要「本机 Claude 订阅」通道，去设置页添加
@@ -508,20 +532,23 @@ function Placeholder({ phrases, active }: { phrases: string[]; active: boolean }
 
 // 通道下拉：Radix Select 承担键盘导航、焦点归还与定位；外观在 styles.css 的 .menu。
 // 云端模型与本机 agent 分两组；缺凭据的通道照样列出但不可选，并就地写明原因（INT-013 / A11Y-007）。
-export function RunnerSelect({ runners, value, onChange, disabled, testId = 'runner-select' }: { runners: RunnerOptionDto[]; value: string; onChange: (id: string) => void; disabled?: boolean; testId?: string }) {
+// maxWidth：输入框差一点放不下时截短触发器（px，由 Composer 量出来）
+export function RunnerSelect({ runners, value, onChange, disabled, testId = 'runner-select', maxWidth }: { runners: RunnerOptionDto[]; value: string; onChange: (id: string) => void; disabled?: boolean; testId?: string; maxWidth?: number | null }) {
   const navigate = useNavigate();
   // 只列可用项（REQ-CORE-013）：不可用的去设置页看原因，这里不灰化陈列
   const usable = runners.filter((r) => r.available);
   const cloud = usable.filter((r) => r.runner.kind !== 'agent');
   const agents = usable.filter((r) => r.runner.kind === 'agent');
-  const current = usable.some((r) => r.id === value) ? value : undefined;
+  const cur = usable.find((r) => r.id === value);
+  const current = cur?.id;
   return (
     <Select.Root value={current} onValueChange={(v) => { if (v === MANAGE_ID) navigate('?settings=runners'); else onChange(v); }} disabled={disabled}>
       <Select.Trigger
-        aria-label="生成通道" data-testid={testId} data-value={value}
+        aria-label="生成通道" data-testid={testId} data-value={value} style={maxWidth ? { maxWidth } : undefined}
         className="group flex h-9 max-w-44 shrink-0 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium text-muted transition-[color,background-color] duration-[var(--duration-fast)] hover:bg-panel-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 data-[state=open]:bg-panel-2 data-[state=open]:text-fg disabled:pointer-events-none disabled:opacity-50 sm:max-w-56"
       >
-        <span className="min-w-0 truncate"><Select.Value placeholder={usable.length ? '选择通道' : '没有可用通道'} /></span>
+        {/* 当前通道名直接渲染（v0.78）：Radix 默认要等选项挂上后才把名字填进来，输入框首次量宽时触发器还是空的，宽度量小了 */}
+        <span className="min-w-0 truncate"><Select.Value placeholder={usable.length ? '选择通道' : '没有可用通道'}>{cur ? <span className="flex min-w-0 items-center gap-2"><VendorIcon vendor={cur.vendor} size={14} className="shrink-0" /><span className="truncate">{cur.label}</span></span> : undefined}</Select.Value></span>
         <Select.Icon className="flex shrink-0 opacity-60 transition-transform duration-[var(--duration-base)] ease-out group-data-[state=open]:rotate-180">
           <ChevronDown size={14} aria-hidden="true" />
         </Select.Icon>
@@ -620,8 +647,7 @@ function RunnerGroup({ label, items }: { label: string; items: RunnerOptionDto[]
       {items.map((r) => (
         <Select.Item key={r.id} value={r.id} textValue={r.label} className={ITEM_CLS}>
           <span className="min-w-0 flex-1 truncate">
-            {/* 图标放在 ItemText 里，触发器上显示当前项时也带图标。
-                这里只给图标 + 显示名：选通道时认的是名字，模型 id 是配置细节，在设置弹层的通道管理器里看 */}
+            {/* 只给图标 + 显示名：选通道时认的是名字，模型 id 是配置细节，在设置弹层的通道管理器里看 */}
             <Select.ItemText><span className="inline-flex items-center gap-2"><VendorIcon vendor={r.vendor} size={14} />{r.label}</span></Select.ItemText>
           </span>
           <Select.ItemIndicator className="flex shrink-0"><Check size={14} aria-hidden="true" /></Select.ItemIndicator>

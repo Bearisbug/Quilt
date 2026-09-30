@@ -426,7 +426,7 @@ await step('TC-EDIT-009', async () => {
     const items = await dlg.locator('input[type="checkbox"]').count();
     expect(items === 2, `预览应列出 2 条约定，实际 ${items}`);
     expect(!(await dlg.innerText()).includes('再大一点'), '约定里不该出现相对表述');
-    // 3 确认写入 → 问是否重生成 → 只写入：DESIGN.md 出现「## 约定」、version+1；面板列出 2 条约定
+    // 3 确认写入（即落库）→ 问是否重生成 → 不重生成：DESIGN.md 出现「## 约定」、version+1；面板列出 2 条约定
     await page.getByTestId('ds-proposal-confirm').click();
     await page.getByTestId('ds-proposal-write-only').waitFor({ timeout: 5000 });
     await page.getByTestId('ds-proposal-write-only').click();
@@ -441,7 +441,7 @@ await step('TC-EDIT-009', async () => {
     await page.getByTestId('ds-conventions').locator('li').first().getByRole('button').click();
     await page.waitForFunction(() => document.querySelectorAll('[data-testid="ds-conventions"] li').length === 1, null, { timeout: 10000 });
     expect((await detail(r.projectId)).designSystem.version === version0 + 2, '删除约定后 version 未 +1');
-    return '⌘A 不改设计系统；记为约定 → 提炼作业 → 预览 2 条绝对规则 → 只写入 → 约定节 + version+1；面板可删';
+    return '⌘A 不改设计系统；记为约定 → 提炼作业 → 预览 2 条绝对规则 → 确认写入、不重生成 → 约定节 + version+1；面板可删';
   } finally { await stub.close(); if (cid) await apiJson(`/v1/channels/${cid}`, { method: 'DELETE' }).catch(() => {}); }
 });
 
@@ -560,6 +560,242 @@ await step('TC-EDIT-011', async () => {
   await page.locator('[data-testid="ds-font-source"] label', { hasText: '本机字体' }).click();
   expect((await page.getByTestId('ds-font-url').count()) === 0, '切到本机字体后链接框应收起');
   return 'Google 任意族名进 prelude 链接；本机字体不发外链、栈以族名开头带 -apple-system 回退；自定义链接原样进 <link>；缺链接 / 带引号族名 400；面板回显、就地报错、切来源收起链接框';
+});
+
+// ---- v0.78 共用（TC-EDIT-013 / 014）----
+// 软断言：缺陷相关的检查不在第一处就停，整条跑完一并报（修复前一轮就能看到每一步的现象）；前置条件仍用 expect 硬停
+const softly = () => {
+  const errs: string[] = [];
+  const line = (e: unknown) => (e as Error).message.split('\n')[0].slice(0, 160);
+  return {
+    check: async (f: () => unknown) => { try { await f(); } catch (e) { errs.push(line(e)); } },
+    fail: (e: unknown) => { errs.push(`中断：${line(e)}`); },
+    done: () => { if (!errs.length) return; console.log(`   明细：\n   - ${errs.join('\n   - ')}`); throw new Error(`${errs.length} 处不符：${errs.join(' ｜ ')}`); },
+  };
+};
+const blurActive = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+const STUB_RUNNER = { kind: 'model', driver: 'stub', model: 'stub' };
+
+// TC-EDIT-013 设计系统提案点「确认写入」即落库、按 20 屏一批重生成全部屏；面板草稿跨关闭 / 切换留存、已保存值变了只同步没动过的格子（REQ-EDIT-003 v0.78）
+await step('TC-EDIT-013', async () => {
+  const { startOpenAiStub } = await import('./openai-stub.ts');
+  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Proposal', '--device', 'mobile', '--screens', '21', '--no-shot');
+  const S = softly();
+  // 第一次提案一条约定，之后两条：两次确认都改了约定，都会问要不要重生成
+  let calls = 0;
+  const RULES = [['按钮一律圆角胶囊'], ['按钮一律圆角胶囊', '页面标题一律 text-xl']];
+  const stub = startOpenAiStub({ port: 3996, apiKey: 'good-key-0013', reply: (hit) => (hit.user.startsWith('INSTRUCTION:') ? JSON.stringify({ summary: '按钮与标题定成绝对规则', conventions: RULES[Math.min(calls++, 1)], regenerate: true }) : 'OK') });
+  // 画布建的作业：提炼走桩通道，重生成走 stub 驱动（缺省通道是真实模型，不能让它打出去）；请求体记下来供断言
+  const JOBS_RE = /\/v1\/projects\/[^/]+\/jobs$/;
+  const jobs: { kind: string; input: Record<string, unknown> }[] = [];
+  let cid = '';
+  try {
+    cid = (await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label: 'Stub 提案', endpoint: stub.url, model: 'stub-13', apiKey: 'good-key-0013' }) })).body.channel.id;
+    expect((await apiJson<{ ok: boolean }>(`/v1/runners/channel:${cid}/probe`, { method: 'POST' })).body.ok, '桩通道探测未通过');
+    await page.route(JOBS_RE, async (route) => {
+      const req = route.request();
+      if (req.method() !== 'POST') return route.fallback();
+      const body = JSON.parse(req.postData() || '{}') as { kind: string; input: Record<string, unknown> };
+      jobs.push(body);
+      const runner = body.kind === 'propose_design_system' ? { kind: 'channel', channelId: cid } : STUB_RUNNER;
+      await route.continue({ postData: JSON.stringify({ ...body, input: { ...body.input, runner } }) });
+    });
+    const ds = async () => (await detail(r.projectId)).designSystem as Detail['designSystem'] & { designMd: string };
+    const saved = await ds();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(`${WEB}/p/${r.projectId}`);
+    await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+    await page.keyboard.press('Alt+d');
+    await page.getByTestId('ds-brief').waitFor({ timeout: 5000 });
+    // 1 两个会溢出的文本框：细滚动条（RESP-015）
+    const sw = await page.evaluate(() => ['#ds-brief', '#ds-md'].map((s) => getComputedStyle(document.querySelector(s)!).scrollbarWidth));
+    await S.check(() => expect(sw.every((v) => v === 'thin'), `① 文本框应是细滚动条：${JSON.stringify(sw)}`));
+    // 2 改种子色、DESIGN.md 与简介各加一行 → 关面板再开、切到屏列表再切回：都还在
+    const hex = page.getByLabel('种子色十六进制');
+    const md = page.locator('#ds-md');
+    const brief = page.getByTestId('ds-brief');
+    const versionLine = page.locator('.slide-in-right').getByText(/^版本 \d+/);
+    await hex.fill('#123456');
+    await md.fill(`${await md.inputValue()}\n草稿里加的一行`);
+    await brief.fill(`${await brief.inputValue()}简介草稿`);
+    expect((await versionLine.innerText()).includes('有未保存改动'), '改完版本行应标有未保存改动');
+    const kept = async (where: string) => {
+      await hex.waitFor({ timeout: 5000 });
+      const v = { hex: await hex.inputValue(), md: await md.inputValue(), brief: await brief.inputValue(), line: await versionLine.innerText() };
+      await S.check(() => expect(v.hex === '#123456' && v.md.includes('草稿里加的一行') && v.brief.endsWith('简介草稿') && v.line.includes('有未保存改动'), `② ${where}后草稿应还在：种子 ${v.hex}，DESIGN.md 末行「${v.md.trim().split('\n').at(-1)}」，简介末尾「${v.brief.slice(-6)}」，${v.line}`));
+    };
+    await page.locator('.slide-in-right').getByRole('button', { name: '关闭' }).click();
+    await eventually(async () => expect((await page.locator('.slide-in-right').count()) === 0, '「关闭」应关掉面板'));
+    await blurActive();
+    await page.keyboard.press('Alt+d');
+    await kept('关面板再打开');
+    await blurActive();
+    await page.keyboard.press('Alt+s');
+    // 等屏列表真的渲染出来再按 ⌥D：URL 先变、页面后渲染，这之间按下去的键读到的还是「设计系统开着」，会把它关掉
+    await eventually(async () => expect((await page.locator('.slide-in-right h2').allInnerTexts()).some((t) => t.startsWith('屏')), '⌥S 应切到屏列表'));
+    await page.keyboard.press('Alt+d');
+    await kept('切到屏列表再切回');
+    // 3 提案：点「确认写入」就落库；第二步焦点在「不重生成」；Esc 关掉后约定还在，不建重生成作业
+    await blurActive();
+    await page.getByTestId('ds-instruction').fill('按钮做成胶囊');
+    await page.getByTestId('ds-propose').click();
+    const dlg = page.getByTestId('ds-proposal');
+    await dlg.waitFor({ timeout: 60000 });
+    const v0 = (await ds()).version;
+    await page.getByTestId('ds-proposal-confirm').click();
+    await page.getByTestId('ds-proposal-write-only').waitFor({ timeout: 5000 });
+    await page.waitForTimeout(600);
+    const afterConfirm = await ds();
+    await S.check(() => expect(afterConfirm.version === v0 + 1 && afterConfirm.designMd.includes('按钮一律圆角胶囊'), `③ 点「确认写入」就应落库：version ${v0} → ${afterConfirm.version}`));
+    const focused = await page.evaluate(() => document.activeElement?.getAttribute('data-testid'));
+    await S.check(() => expect(focused === 'ds-proposal-write-only', `③ 第二步的焦点应落在「不重生成」：${focused}`));
+    await page.keyboard.press('Escape');
+    await dlg.waitFor({ state: 'detached', timeout: 5000 });
+    await page.waitForTimeout(600);
+    const afterEsc = await ds();
+    await S.check(() => expect(afterEsc.designMd.includes('按钮一律圆角胶囊') && !jobs.some((j) => j.kind === 'edit_screens'), `③ Esc 之后约定应已写入、不建重生成作业：约定在 ${afterEsc.designMd.includes('按钮一律圆角胶囊')}，作业 ${jobs.map((j) => j.kind).join(',')}`));
+    // 草稿里的约定节换成了新写入的，其余草稿不动
+    await S.check(async () => { const m = await md.inputValue(); expect(m.includes('按钮一律圆角胶囊') && m.includes('草稿里加的一行') && (await hex.inputValue()) === '#123456', '③ 确认提案后 DESIGN.md 草稿应带上新约定、改过的格子留着'); });
+    // 4 第二个提案 → 重生成所有屏：21 屏按 20 + 1 两个作业全部发出
+    await page.getByTestId('ds-instruction').fill('标题统一');
+    await page.getByTestId('ds-propose').click();
+    await dlg.waitFor({ timeout: 60000 });
+    await page.getByTestId('ds-proposal-confirm').click();
+    await page.getByTestId('ds-proposal-regenerate').click();
+    await dlg.waitFor({ state: 'detached', timeout: 10000 });
+    await page.waitForTimeout(1500);
+    const eds = jobs.filter((j) => j.kind === 'edit_screens');
+    const ids = eds.flatMap((j) => j.input.screenIds as string[]);
+    await S.check(() => expect(eds.length === 2 && eds.map((j) => (j.input.screenIds as string[]).length).sort((a, b) => a - b).join('+') === '1+20' && new Set(ids).size === 21, `④ 21 屏应分 20 + 1 两个作业全部发出：${eds.map((j) => (j.input.screenIds as string[]).length).join(' + ')}（共 ${new Set(ids).size} 屏）`));
+    // 5 面板开着时删一条约定：改过的种子色与 DESIGN.md 草稿留着，草稿里的约定节换成删后的
+    await eventually(async () => expect((await detail(r.projectId) as unknown as { activeJobs: unknown[] }).activeJobs.length === 0, '重生成作业应跑完'), 120000);
+    await page.getByTestId('ds-conventions').locator('li').first().getByRole('button').click();
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="ds-conventions"] li').length === 1, null, { timeout: 10000 });
+    await page.waitForTimeout(400);
+    await S.check(async () => { const m = await md.inputValue(); const h = await hex.inputValue(); expect(h === '#123456' && m.includes('草稿里加的一行') && !m.includes('按钮一律圆角胶囊') && m.includes('页面标题一律 text-xl'), `⑤ 删约定后：种子 ${h}，草稿末行「${m.trim().split('\n').at(-1)}」，还含删掉的约定 ${m.includes('按钮一律圆角胶囊')}`); });
+    // 6 「放弃改动」回到已保存的那份
+    await page.getByRole('button', { name: '放弃改动' }).click();
+    await S.check(async () => { const now = await ds(); expect((await hex.inputValue()) === saved.seedColor && (await md.inputValue()) === now.designMd && !(await versionLine.innerText()).includes('有未保存改动'), '⑥ 放弃改动后应回到已保存的值'); });
+    // 7 只改大小写 / 多打空格再保存：服务端规范化回原值，保存完不再标有未保存改动；之后删约定不把别的格子的草稿冲掉
+    const before = await ds();
+    const font = page.getByTestId('ds-font');
+    await hex.fill(before.seedColor.toLowerCase());
+    await font.fill(`${await font.inputValue()} `);
+    await page.getByTestId('ds-save').click();
+    await eventually(async () => expect((await ds()).version === before.version + 1, '⑦ 保存应落库'));
+    await page.waitForTimeout(600);
+    if (await page.getByTestId('ds-apply-ask').count()) await page.getByTestId('ds-apply-ask').getByRole('button', { name: '以后再说' }).click();
+    await S.check(async () => {
+      const v = { hex: await hex.inputValue(), font: await font.inputValue(), line: await versionLine.innerText(), save: await page.getByTestId('ds-save').isEnabled(), discard: await page.getByTestId('ds-discard').count() };
+      expect(v.hex === before.seedColor && !v.font.endsWith(' ') && !v.line.includes('有未保存改动') && !v.save && v.discard === 0, `⑦ 规范化后与原值相同，保存完应无未保存改动：种子 ${v.hex}，字体「${v.font}」，${v.line}，保存可点 ${v.save}，放弃改动 ${v.discard}`);
+    });
+    await hex.fill('#654321');
+    await page.getByTestId('ds-conventions').locator('li').first().getByRole('button').click();
+    await page.getByTestId('ds-conventions').waitFor({ state: 'detached', timeout: 10000 });
+    await page.waitForTimeout(400);
+    await S.check(async () => { const h = await hex.inputValue(); expect(h === '#654321', `⑦ 保存之后再删约定，改过的种子色应留着：${h}`); });
+  } catch (e) { S.fail(e); } finally { await page.unroute(JOBS_RE); await stub.close(); if (cid) await apiJson(`/v1/channels/${cid}`, { method: 'DELETE' }).catch(() => {}); }
+  S.done();
+  return '文本框细滚动条；草稿跨关闭与切面板留存；确认写入即落库、第二步焦点在「不重生成」、Esc 不丢约定；21 屏按 20 + 1 两个作业全部重生成；删约定只同步没动过的格子、草稿约定节换新；放弃改动复原；只改大小写 / 空格的保存不留未保存标记、不冲掉之后的草稿';
+});
+
+// TC-EDIT-014 批注与检查器的草稿：按元素暂存、存不上不清、「记下并立刻发送」只发这一条、改写失败不关（REQ-EDIT-004 / REQ-EDIT-001 v0.78）
+await step('TC-EDIT-014', async () => {
+  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Drafts', '--device', 'mobile', '--screens', '1');
+  const s1 = r.screens[0].id;
+  const S = softly();
+  // 已有一条未处理批注：修复前「记下并立刻发送」会把它一起发出去
+  const pre = await apiJson<{ annotation: { id: string } }>(`/v1/screens/${s1}/annotations`, { method: 'POST', body: JSON.stringify({ qid: 'q1', note: '已有的一条', anchorText: '', rect: { x: 4, y: 4, w: 10, h: 10 } }) });
+  expect(pre.status === 201, `预置批注 ${pre.status}`);
+  // 发送一律在浏览器里截下（不建作业、不打模型），只记请求体；建批注可切换成失败（模拟 422）
+  const SEND_A = /\/v1\/projects\/[^/]+\/annotations\/send$/;
+  const CREATE_A = /\/v1\/screens\/[^/]+\/annotations$/;
+  const PATCH_A = /\/v1\/annotations\/[^/]+$/;
+  const sends: { annotationIds: string[] }[] = [];
+  let failCreate = false;
+  await page.route(SEND_A, async (route) => { sends.push(JSON.parse(route.request().postData() || '{}')); await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ jobs: [] }) }); });
+  await page.route(CREATE_A, async (route) => {
+    if (route.request().method() === 'POST' && failCreate) return route.fulfill({ status: 422, contentType: 'application/problem+json', body: JSON.stringify({ type: '/errors/validation', title: '批注说明太长', status: 422 }) });
+    return route.fallback();
+  });
+  try {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(`${WEB}/p/${r.projectId}`);
+    await page.locator('[data-testid="screen-card"] img').first().waitFor({ timeout: 15000 });
+    await page.keyboard.press('Alt+n');
+    await page.getByTestId('armed-hint').waitFor({ timeout: 5000 });
+    await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
+    await page.locator('.card.focused .badge', { hasText: '批注中' }).waitFor({ timeout: 20000 });
+    const fl = page.frameLocator('.card.focused iframe');
+    await fl.locator('#toggle').waitFor({ timeout: 15000 });
+    // 点屏内元素，直到面板报的选中 qid 就是它（quilt:mode 送达前的那一下会被当成普通交互）
+    const pickIn = async (sel: string, readQid: () => Promise<string | null>) => {
+      const want = await fl.locator(sel).first().getAttribute('data-qid');
+      for (let i = 0; i < 6; i++) { await fl.locator(sel).first().click(); await page.waitForTimeout(500); if ((await readQid()) === want) return; }
+      throw new Error(`点 ${sel} 后没选中它（要 ${want}，实际 ${await readQid()}）`);
+    };
+    const annoQid = () => page.getByTestId('anno-target').getAttribute('data-qid');
+    const note = page.locator('#anno-note');
+    // 1 写一半点别的元素再点回来：草稿还在
+    await pickIn('#toggle', annoQid);
+    await note.fill('写了一半的批注');
+    await pickIn('h1', annoQid);
+    await S.check(async () => expect((await note.inputValue()) === '', `① 换到另一个元素时说明框应是它自己的（空）：「${await note.inputValue()}」`));
+    await pickIn('#toggle', annoQid);
+    await S.check(async () => expect((await note.inputValue()) === '写了一半的批注', `① 点回原来的元素草稿应还在：「${await note.inputValue()}」`));
+    if ((await note.inputValue()) !== '写了一半的批注') await note.fill('写了一半的批注');
+    // 2 「记下」存不上：toast 报原因，草稿留着
+    failCreate = true;
+    await page.getByRole('button', { name: '记下（不发送）' }).click();
+    await page.getByText('批注说明太长').first().waitFor({ timeout: 5000 });
+    await S.check(async () => expect((await note.inputValue()) === '写了一半的批注', `② 存不上时草稿应留着：「${await note.inputValue()}」`));
+    if ((await note.inputValue()) !== '写了一半的批注') await note.fill('写了一半的批注');
+    // 3 「记下并立刻发送」存不上：不发送
+    await page.getByRole('button', { name: '记下并立刻发送' }).click();
+    await page.waitForTimeout(1200);
+    await S.check(() => expect(sends.length === 0, `③ 新批注没存上时不应发送：${JSON.stringify(sends)}`));
+    await S.check(async () => expect((await note.inputValue()) === '写了一半的批注', `③ 存不上时草稿应留着：「${await note.inputValue()}」`));
+    if ((await note.inputValue()) !== '写了一半的批注') await note.fill('写了一半的批注');
+    // 4 存得上：只发刚记下的这一条
+    failCreate = false;
+    const n0 = sends.length;
+    await page.getByRole('button', { name: '记下并立刻发送' }).click();
+    await eventually(async () => expect(sends.length > n0, '应发出一次发送'), 8000);
+    const created = (await apiJson<{ items: { id: string; note: string }[] }>(`/v1/screens/${s1}/annotations`)).body.items.find((a) => a.note === '写了一半的批注');
+    await S.check(() => expect(!!created && JSON.stringify(sends.at(-1)) === JSON.stringify({ annotationIds: [created.id] }), `④ 只应发刚记下的这一条：${JSON.stringify(sends.at(-1))}（新批注 ${created?.id}，预置 ${pre.body.annotation.id}）`));
+    await S.check(async () => expect((await note.inputValue()) === '', '④ 记下之后说明框应清空'));
+    // 5 改写保存失败：改写框不关、内容留着
+    await page.route(PATCH_A, async (route) => (route.request().method() === 'PATCH' ? route.fulfill({ status: 500, contentType: 'application/problem+json', body: JSON.stringify({ type: '/errors/internal', title: '服务端出错', status: 500 }) }) : route.fallback()));
+    const item = page.locator('[data-testid="anno-item"][data-status="open"]').first();
+    await item.getByRole('button', { name: '改写' }).click();
+    const ed = item.locator('textarea');
+    await ed.fill('改写后的说明');
+    await item.getByRole('button', { name: '保存' }).click();
+    await page.waitForTimeout(1000);
+    await S.check(async () => expect((await ed.count()) === 1 && (await ed.inputValue()) === '改写后的说明', '⑤ 改写保存失败时改写框应不关、内容留着'));
+    await page.unroute(PATCH_A);
+    // 6 检查器：改了没存的文案与重生成说明按元素暂存
+    await blurActive();
+    await page.keyboard.press('Alt+n');
+    await eventually(async () => expect(!page.url().includes('panel=annotate'), '⌥N 应退出批注'));
+    // 这一屏还选中着：⌘E 直接推镜头进它；没选中时才是待命态，点一下进去
+    await page.keyboard.press('ControlOrMeta+e');
+    const inspectBadge = page.locator('.card.focused .badge', { hasText: '选择元素中' });
+    await inspectBadge.waitFor({ timeout: 5000 }).catch(async () => { await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click(); await inspectBadge.waitFor({ timeout: 20000 }); });
+    await fl.locator('#toggle').waitFor({ timeout: 15000 });
+    const inspQid = async () => (await page.locator('.slide-in-right').innerText()).match(/· (q\d+)/)?.[1] ?? null;
+    await pickIn('#toggle', inspQid);
+    await page.locator('#el-text').fill('改过但还没保存的文案');
+    await page.locator('#el-prompt').fill('改成横向卡片');
+    await pickIn('h1', inspQid);
+    const other = { text: await page.locator('#el-text').inputValue(), prompt: await page.locator('#el-prompt').inputValue() };
+    await S.check(() => expect(other.text.startsWith('Screen 1') && other.prompt === '', `⑥ 换到标题时字段应是标题自己的：${JSON.stringify(other)}`));
+    await pickIn('#toggle', inspQid);
+    const back = { text: await page.locator('#el-text').inputValue(), prompt: await page.locator('#el-prompt').inputValue() };
+    await S.check(() => expect(back.text === '改过但还没保存的文案' && back.prompt === '改成横向卡片', `⑥ 点回按钮时没存的文案与说明应还在：${JSON.stringify(back)}`));
+  } catch (e) { S.fail(e); } finally { await page.unroute(SEND_A); await page.unroute(CREATE_A); await page.unroute(PATCH_A); }
+  S.done();
+  return '批注草稿按元素暂存；记下失败草稿留着、立刻发送不发；存上后只发这一条；改写失败框不关；检查器没存的文案与说明按元素暂存';
 });
 
 await browser.close();

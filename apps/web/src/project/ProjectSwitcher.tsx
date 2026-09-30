@@ -87,7 +87,10 @@ export function ProjectSwitcher({ current, placeholder = '选择项目', onRenam
               <Select.Group>
                 <Select.Label className="px-2.5 pb-1 pt-1.5 text-[11px] text-muted">项目 · 按更新时间</Select.Label>
                 {list.map((p) => (
-                  <Select.Item key={p.id} value={p.id} textValue={p.name} data-testid="project-option" data-project-id={p.id} className={ITEM_CLS}>
+                  <Select.Item key={p.id} value={p.id} textValue={p.name} data-testid="project-option" data-project-id={p.id} className={ITEM_CLS}
+                    // 改名期间指针移过哪一行都不抢焦点：Radix 在 pointermove 时把焦点交给指针下的那一行，改名框随之失焦，
+                    // 后面打的字进了下拉的字母检索，Enter 选中那一行、切走项目（preventDefault 让 Radix 跳过它自己的处理）
+                    onPointerMove={renaming ? (e) => e.preventDefault() : undefined} onPointerLeave={renaming ? (e) => e.preventDefault() : undefined}>
                     <span className="flex w-4 shrink-0 justify-center"><Select.ItemIndicator><Check size={14} aria-hidden="true" /></Select.ItemIndicator></span>
                     {renaming === p.id ? (
                       <>

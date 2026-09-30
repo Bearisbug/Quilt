@@ -158,7 +158,8 @@ export function ChatDock(p: ChatDockProps) {
               </div>
             ))}
           </div>
-          <p className="shrink-0 border-t border-line p-3 text-[11px] leading-relaxed text-muted">
+          {/* 鼠标手势提示：48rem 以下与触屏上不显示（v0.78）——窄屏时对话记录叠在输入框上方、高度本就紧，这三行比消息区还高，而滚轮 / 空格拖拽 / Shift 点击在这两种场合用不上 */}
+          <p className="shrink-0 border-t border-line p-3 text-[11px] leading-relaxed text-muted [@media(hover:none)]:hidden [@media(max-width:48rem)]:hidden">
             滚轮/触控板平移 · Ctrl+滚轮或捏合缩放 · 空格+拖拽平移 · 空白处拖拽框选 · Shift/⌘ 点击加选 · 拖动卡片摆放 · 双击进入交互 · Esc 退出
           </p>
         </>

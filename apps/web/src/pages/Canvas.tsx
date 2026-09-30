@@ -124,6 +124,8 @@ export function CanvasPage() {
   const canvasApi = useRef<CanvasApi | null>(null);
   const composerRef = useRef<ComposerHandle>(null);
   const safeAreaRef = useRef<HTMLDivElement>(null);
+  // 输入框这一条横带的探针（v0.78）：左边界是 --composer-left，与画布可用区的左边界不是一回事（styles.css）
+  const laneRef = useRef<HTMLDivElement>(null);
   // 生成通道 / 投递会话 / 动词模式三个跨会话偏好（REQ-CORE-011 / REQ-AGENT-003 / REQ-CORE-023）：见 useRunnerPrefs
   const { runners, runnersFailed, loadRunners, runnerId, applyCatalog, onRunnerChange, agentTool, sessionList, sessionId, loadSessions, lists, loadSessionsFor, onSessionChange, sendRunner, modelRunner, mode, onMode, chatRunners, chatRunnerId, chatRunner } = useRunnerPrefs();
   const panel = (params.get('panel') as Panel) ?? null;
@@ -133,6 +135,23 @@ export function CanvasPage() {
   const settingsSection: SettingsSection | null = settingsParam ? (isSettingsSection(settingsParam) ? settingsParam : 'usage') : null;
   const setSettings = useCallback((v: SettingsSection | null) => setParams((q) => { if (v) q.set('settings', v); else q.delete('settings'); return q; }, { replace: true }), [setParams]);
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
+  // 侧面板关掉后焦点归还（A11Y-013，v0.78）：挂载时记下焦点所在（点工具栏按钮打开时就是那个按钮）。卸载时焦点若在面板里、
+  // 且是键盘焦点（按面板自己的「关闭」），就还给它；它已不在（快捷键打开时焦点本不在工具栏上）就给工具栏上同名的工具。
+  // 鼠标点的「关闭」不挪焦点：焦点停在工具栏按钮上，接着按空格就是点它，而不是平移画布
+  const panelRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const a = document.activeElement;
+    const opener = a instanceof HTMLElement && a !== document.body && !el.contains(a) ? a : null;
+    const tool = panel;
+    return () => {
+      const f = document.activeElement;
+      if (!(f instanceof HTMLElement) || !el.contains(f) || !f.matches(':focus-visible')) return;
+      requestAnimationFrame(() => {
+        if (document.activeElement && document.activeElement !== document.body) return;
+        (opener?.isConnected ? opener : document.querySelector<HTMLElement>(`[data-tool="${tool}"]`))?.focus();
+      });
+    };
+  }, [panel]);
   // 批注态与选择元素态共用屏内的 inspect 运行时（都靠点元素），但面板与去向不同
   // 选择元素 / 批注是**全局模式**：先开模式（不必先选中某一屏），再点任意一屏进去。
   // armed = 模式已开；进到某一屏（focusedId）之后才谈得上把 inspect 下发给屏内运行时。
@@ -324,6 +343,9 @@ export function CanvasPage() {
   // 选中集合即上下文；「恰好一屏」另算，修订链等单屏概念只在这种情况下成立
   const selectedScreens = useMemo(() => screens.filter((s) => selectedIds.includes(s.id)), [screens, selectedIds]);
   const selected = selectedScreens.length === 1 ? selectedScreens[0] : null;
+  // ?panel=revisions 只在恰好选中一屏时成立（INT-020 标识非法回默认，v0.78）：加载后没有选中、点空白、加选成多屏都把它从 URL 去掉——
+  // 留着的话面板不显示，下次单选某屏时它自己弹出来
+  useEffect(() => { if (panel === 'revisions' && detail && !selected) setPanel(null); }, [panel, detail, selected, setPanel]);
   const targetScreens = useMemo(() => screens.filter((s) => targetIds.includes(s.id)), [screens, targetIds]);
   const components = detail?.components ?? [];
   const selectedComponents = useMemo(() => components.filter((c) => selectedComponentIds.includes(c.id)), [components, selectedComponentIds]);
@@ -616,18 +638,32 @@ export function CanvasPage() {
     if (!userMsg) { toast('找不到这一轮的指令', 'error'); return; }
     propose(userMsg.content, assistant.affectedScreenIds[0]);
   };
-  const confirmProposal = async (choice: { conventions: string[]; tokens: DesignProposalDto['tokens']; regenerate: boolean }) => {
-    if (!detail) return;
+  // 提案「确认写入」即落库（v0.78）；返回是否写成——写不成提案弹层留着，可以再点一次
+  const writeProposal = async (choice: { conventions: string[]; tokens: DesignProposalDto['tokens'] }): Promise<boolean> => {
+    if (!detail) return false;
     try {
       await api.designSystem.update(projectId, { conventions: choice.conventions, ...(choice.tokens ?? {}), expectedVersion: detail.designSystem.version });
-      setProposal(null);
       toast('设计系统已更新');
       await refresh();
-      if (choice.regenerate && screens.length) await startJob({ kind: 'edit_screens', input: { prompt: CONVENTIONS_REGENERATE_PROMPT, screenIds: screens.slice(0, MAX_TARGETS).map((s) => s.id), versions: 1 } }, '重生成失败');
-      else if (choice.tokens && screens.length) await applyDesignSystem();
+      return true;
     } catch (e) {
       toast(e instanceof ApiError && e.type === '/errors/version-conflict' ? '设计系统已被更新，请刷新后重试' : '写入失败', 'error');
+      return false;
     }
+  };
+  // 写入之后的收尾：按新约定重生成全部屏，或只改了 token 就确定性回刷。
+  // 重生成按契约上限每 20 屏一个作业、全部发出（v0.78）；某一批被拒（限流等，startJob 已说原因）就停下，说清还剩几屏没发
+  const finishProposal = async (regenerate: boolean, tokensChanged: boolean) => {
+    setProposal(null);
+    if (!screens.length) return;
+    if (!regenerate) { if (tokensChanged) await applyDesignSystem(); return; }
+    let sent = 0;
+    for (let i = 0; i < screens.length; i += MAX_TARGETS) {
+      const batch = screens.slice(i, i + MAX_TARGETS);
+      if (!(await startJob({ kind: 'edit_screens', input: { prompt: CONVENTIONS_REGENERATE_PROMPT, screenIds: batch.map((s) => s.id), versions: 1 } }, '重生成失败'))) break;
+      sent += batch.length;
+    }
+    if (sent < screens.length) toast(`已为 ${sent} 屏发起重生成，其余 ${screens.length - sent} 屏没发出去`, 'error');
   };
 
   // 对话记录折叠与输入框显隐（useComposerChrome）：输入框高度换算成画布底部占位 --chrome-bottom
@@ -642,16 +678,15 @@ export function CanvasPage() {
   };
   const annotations = detail?.annotations ?? [];
   const screenAnnotations = useMemo(() => annotations.filter((a) => a.screenId === shownScreen?.id), [annotations, shownScreen?.id]);
-  const addAnnotation = async (note: string) => {
-    if (!shownScreen || !elementSel) return;
-    try { await api.annotations.create(shownScreen.id, { qid: elementSel.qid, note, anchorText: elementSel.text.slice(0, 200), rect: elementSel.rect }); await refresh(); }
-    catch (e) { handleJobError(e, '批注失败'); }
+  // 存不上时 toast 原因并回 null / false（v0.78）：面板据此留着草稿与改写框，「记下并立刻发送」存不上就不发
+  const addAnnotation = async (note: string): Promise<string | null> => {
+    if (!shownScreen || !elementSel) return null;
+    try { const { annotation } = await api.annotations.create(shownScreen.id, { qid: elementSel.qid, note, anchorText: elementSel.text.slice(0, 200), rect: elementSel.rect }); await refresh(); return annotation.id; }
+    catch (e) { handleJobError(e, '批注失败'); return null; }
   };
-  const updateAnnotation = async (id: string, note: string) => { try { await api.annotations.update(id, { note }); await refresh(); } catch { toast('保存失败', 'error'); } };
+  const updateAnnotation = async (id: string, note: string): Promise<boolean> => { try { await api.annotations.update(id, { note }); await refresh(); return true; } catch { toast('保存失败', 'error'); return false; } };
   const removeAnnotation = async (id: string) => { try { await api.annotations.remove(id); await refresh(); } catch { toast('删除失败', 'error'); } };
-  const sendAnnotations = async (ids: string[]) => {
-    const d = await refresh();
-    const target = ids.length ? ids : (d?.annotations ?? []).filter((a) => a.screenId === shownScreen?.id && a.status === 'open').map((a) => a.id);
+  const sendAnnotations = async (target: string[]) => {
     if (!target.length) return;
     try {
       const { jobs } = await api.annotations.send(projectId, target);
@@ -791,6 +826,7 @@ export function CanvasPage() {
     <div className="canvas-shell relative h-full" style={shellStyle} data-chat={chatCollapsed ? 'collapsed' : 'open'} data-panel={panelBody ? 'open' : 'closed'} data-composer={composerVisible ? 'open' : 'hidden'} data-minimap={minimapOn && !focusedId && !focusedComponentId ? 'on' : 'off'}>
       {/* 可用区探针：四边跟着浮层占位的 CSS 变量走，画布只负责测量它，避免两处各写一套数 */}
       <div ref={safeAreaRef} aria-hidden="true" data-testid="safe-area" className="pointer-events-none absolute bottom-[var(--chrome-bottom)] left-[var(--chrome-left)] right-[var(--chrome-right)] top-[var(--chrome-top)]" />
+      <div ref={laneRef} aria-hidden="true" data-testid="composer-lane" className="pointer-events-none absolute bottom-0 left-[var(--composer-left)] right-[var(--chrome-right)] h-0" />
       <div className="absolute inset-0">
         {ready && detail && tokens && previewOrigin ? (
           <CanvasView
@@ -798,7 +834,7 @@ export function CanvasPage() {
             projectName={detail.project.name} tokens={tokens} palette={detail.designSystem.palette} colorMode={detail.designSystem.colorMode} assets={detail.assets} screens={screens} links={detail.links} previewOrigin={previewOrigin}
             selectedIds={selectedIds} focusedId={focusedId} styleGuideSelected={panel === 'design'} inspectMode={inspectMode} annotateMode={annotateMode} armed={inspectArmed ? 'inspect' : annotateArmed ? 'annotate' : null} showLinks={showLinks}
             anchor={anchor} screenSize={DEVICE_SIZE[detail.project.deviceType]} exemplarScreenId={detail.project.exemplarScreenId}
-            onSelect={(id, additive) => { setSelectedId(id, additive); if (!id && panel === 'revisions') setPanel(null); }}
+            onSelect={setSelectedId}
             onSelectMany={(ids, compIds, additive) => { setSelectedIds((prev) => (additive ? [...new Set([...prev, ...ids])] : ids)); setSelectedComponentIds((prev) => (additive ? [...new Set([...prev, ...compIds])] : compIds)); }}
             onSelectStyleGuide={() => { setSelectedIds([]); setSelectedComponentIds([]); setPanel('design'); }}
             onFocus={(id) => { setFocusedId(id); if (id) { setFocusedComponentId(null); setSelectedIds([id]); setSelectedComponentIds([]); } }}
@@ -860,7 +896,7 @@ export function CanvasPage() {
         // 项目不存在时消息自然也取不到：那不是「没加载出来」，画布区已经说明了
         loadState={msgState === 'ok' || loadFailure?.kind === 'not-found' ? undefined : msgState} onReload={() => { setMsgState('loading'); void refreshMessages(); }} />
       <Composer
-        handle={composerRef} safeAreaRef={safeAreaRef} running={running} blockedReason={blockedReason} targets={targetScreens} totalScreens={screens.length} anchor={anchor} maxTargets={MAX_TARGETS}
+        handle={composerRef} laneRef={laneRef} running={running} blockedReason={blockedReason} targets={targetScreens} totalScreens={screens.length} anchor={anchor} maxTargets={MAX_TARGETS}
         componentTargets={targetComponents}
         onRemoveComponentTarget={(id) => { setTargetComponentIds((prev) => prev.filter((x) => x !== id)); setSelectedComponentIds((prev) => prev.filter((x) => x !== id)); }}
         count={count} versions={versions} onCount={setCount} onVersions={setVersions}
@@ -876,8 +912,8 @@ export function CanvasPage() {
       />
       {/* 项目没到手时只留三个本机开关可用，其余写明为什么用不了 */}
       <CanvasToolbar groups={ready ? tools : tools.map((g) => g.map((t) => (['composer', 'minimap', 'links'].includes(t.id) ? t : { ...t, unavailable: pendingReason })))} />
-      {panelBody && <div key={panel} className="chrome slide-in-right absolute bottom-4 right-[var(--rail-w)] top-16 z-20 flex w-[var(--panel-w)] flex-col overflow-hidden rounded-xl">{panelBody}</div>}
-      {proposal && detail && <ProposalDialog proposal={proposal} ds={detail.designSystem} busy={busy} onConfirm={confirmProposal} onClose={() => setProposal(null)} />}
+      {panelBody && <div key={panel} ref={panelRef} className="chrome slide-in-right absolute bottom-4 right-[var(--rail-w)] top-16 z-20 flex w-[var(--panel-w)] flex-col overflow-hidden rounded-xl">{panelBody}</div>}
+      {proposal && detail && <ProposalDialog proposal={proposal} ds={detail.designSystem} busy={busy} screenCount={screens.length} batches={Math.ceil(screens.length / MAX_TARGETS)} onWrite={writeProposal} onFinish={finishProposal} onClose={() => setProposal(null)} />}
       {newComponentOpen && <NewComponentDialog onCreate={createComponent} onClose={() => setNewComponentOpen(false)} />}
       {finderOpen && detail && <ScreenFinder screens={screens} components={components} links={detail.links} busy={busyScreens} onPick={(pick) => { setFinderOpen(false); reveal(pick); }} onClose={() => setFinderOpen(false)} />}
       {variantFor && <VariantDialog base={variantFor} onCreate={createVariant} onClose={() => setVariantFor(null)} />}
