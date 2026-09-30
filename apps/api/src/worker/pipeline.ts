@@ -12,13 +12,13 @@ import { screenshotHtml, extractTailwindCss } from '../lib/screenshot.ts';
 import { recordUsage } from '../services/usage.ts';
 import { createRevision, deriveLinks, pointCurrentToFirstCandidate, priorInstructions, exemplarBody, currentBody, storeRevisionShot } from '../services/screens.ts';
 import { screenDtos } from '../services/projects.ts';
-import { timeoutFor, modelAborts } from '../services/jobs.ts';
+import { timeoutFor, modelAborts, enqueueScreenshot } from '../services/jobs.ts';
 import { runChatTurn, ChatFailure } from './chat.ts';
 import { sharedComponentsOf, componentCards, reflowComponent } from '../services/components.ts';
 import {
   buildPrelude, lintScreenBody, injectQids, assembleDocument, extractBody, stripFences, buildPrototypeDocument, replaceSubtree, extractLinks,
   expandComponents, validateComponentHtml, classifyComponentHtml, componentSummary, componentSystemPrompt, componentUserPrompt,
-  type ProjectAsset, type SharedComponent,
+  type ProjectAsset,
   OVERLAY_SCREEN_NOTE, screenSystemPrompt, planSystemPrompt, planUserPrompt, planOneScreenSystemPrompt, planOneScreenUserPrompt, screenUserPrompt, editUserPrompt, subtreeUserPrompt, linkRepairPrompt,
   proposeDesignSystemSystemPrompt, proposeDesignSystemUserPrompt, parseConventions, REFERENCE_IMAGE_NOTE, FONT_FAMILIES, RADIUS_SCALES, MAX_CONVENTIONS,
   DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput, type JobKind, failureText,
@@ -64,14 +64,24 @@ type Ctx = {
   images: { mediaType: string; dataBase64: string }[];
   // 本项目的素材清单（REQ-CORE-019），整轮只读一次，进每屏的 system 前缀
   assets: ProjectAsset[];
-  // 本项目的共享组件（REQ-EDIT-006）：每次落屏前把占位展开成正式 HTML；改组件的作业改完后自己刷新这一份
-  shared: SharedComponent[];
   produced: { screenId: string; revisionId: string; lintPassed: boolean }[];
   // 反向连线（REQ-CORE-014）：造一组屏后对入口屏跑了一次补链，回执里点名
   entryRepair: { name: string; added: string[] } | null;
 };
 
 class JobFailure extends Error { constructor(public errorClass: ErrorClass, msg: string) { super(msg); } }
+
+// 取消或超时之后回来的模型产出不落库（§11 running→cancelled）：屏锁此刻已释放，用户可能已在这屏上继续改了。
+// 每处写修订 / 组件行之前都要过这一道——模型调用本身不一定理会中止（stub、重试退避里的调用）
+function assertNotAborted(ctx: Ctx) {
+  if (ctx.signal.aborted) throw new JobFailure('timeout', 'job aborted before its output was written');
+}
+
+// 共享组件占位（REQ-EDIT-006）在落修订前一刻按最新组件展开：模型一跑几分钟，这期间改的组件在回刷时跳过了这屏（它有在跑作业），
+// 拿作业开跑时的组件快照展开，这屏就永久停在旧版
+async function expandLatest(ctx: Ctx, body: string, route: string): Promise<string> {
+  return expandComponents(body, await sharedComponentsOf(ctx.project.id), route).html;
+}
 
 // 参考图只跟第一次出屏 / 改屏的调用走；修复轮是「按 lint 违规改你上一版 HTML」，
 // 再把图塞一遍既多花 token 又会把模型往复刻方向带（REQ-CORE-012）
@@ -127,8 +137,8 @@ const app = (ctx: Ctx, description: string) => ({ name: ctx.project.name, descri
 async function produceScreen(ctx: Ctx, args: { screenId: string; system: string; prompt: string; sourceKind: 'generate' | 'edit'; expectedRevisionId?: string | null; parentRevisionId?: string | null; candidateIndex?: number | null; advanceCurrent?: boolean; model?: string }) {
   const raw = await llmCall(ctx, args.system, args.prompt, args.model, true);
   const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, args.screenId));
-  // 共享组件占位（REQ-EDIT-006）在这里展开成正式 HTML，再 lint、再打 qid——模型手写的副本也会被盖成正式版
-  const body = expandComponents(stripFences(raw), ctx.shared, screen.route).html;
+  // 共享组件占位在这里展开成正式 HTML，再 lint、再打 qid——模型手写的副本也会被盖成正式版
+  const body = await expandLatest(ctx, stripFences(raw), screen.route);
   const routes = (await db.select({ route: schema.screens.route }).from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id))).map((r) => r.route);
   // v0.43：偏离设计契约不再触发修复回合，也不再让作业失败——token 是共享词汇表，不是判分标准。
   // 报告照算，进 lintReport 与 screen_html_ready 事件，画布逐屏显示偏离了什么
@@ -137,8 +147,7 @@ async function produceScreen(ctx: Ctx, args: { screenId: string; system: string;
   report = lintScreenBody(withQids, routes, report.firstTry); // 违规带上 qid
   const html = assembleDocument(withQids, ctx.prelude, `${ctx.project.name} · ${screen.name}`);
   if (Buffer.byteLength(html) > config.maxScreenHtmlBytes) throw new JobFailure('validation', `screen html too large (${Buffer.byteLength(html)} bytes)`);
-  // 取消或超时之后回来的模型产出不落库：屏锁此刻已释放，用户可能已在这屏上继续改了
-  if (ctx.signal.aborted) throw new JobFailure('timeout', 'job aborted before the revision was written');
+  assertNotAborted(ctx);
   const rev = await db.transaction((tx) => createRevision(tx, { projectId: ctx.project.id, screenId: args.screenId, html, sourceKind: args.sourceKind, jobId: ctx.job.id, lintReport: report, expectedRevisionId: args.expectedRevisionId, parentRevisionId: args.parentRevisionId, candidateIndex: args.candidateIndex, advanceCurrent: args.advanceCurrent }));
   if (!rev) throw new JobFailure('validation', 'revision conflict');
   ctx.usage.screens += 1;
@@ -156,7 +165,9 @@ async function screenshotRevision(ctx: Ctx, screenId: string, revisionId: string
     if (!key) return;
     await emitJobEvent(ctx.job.id, 'screen_screenshot_ready', { screenId, revisionId, screenshotUrl: await storage.signedUrl(key) });
   } catch (e) {
+    // 拍失败不影响作业（修订已落库）：交给 screenshot.render 队列重试，拍成后由它推 screen_changed 让画布换图
     console.warn(`[job ${ctx.job.id}] screenshot failed for ${revisionId}: ${(e as Error).message}`);
+    await enqueueScreenshot(revisionId);
   }
 }
 
@@ -300,15 +311,20 @@ async function runEditScreens(ctx: Ctx) {
     return { screen, base: screen.currentRevisionId!, prompt: editUserPrompt(screen.name, screen.route, body, instruction, prior) };
   }));
   const tasks = prepared.flatMap((p) => Array.from({ length: versions }, (_, i) => ({ p, i })));
-  await pool(tasks, config.screenConcurrency, async ({ p, i }) => {
-    if (ctx.signal.aborted) return;
-    await produceScreen(ctx, {
-      screenId: p.screen.id, system, prompt: p.prompt, sourceKind: 'edit',
-      expectedRevisionId: versions === 1 ? p.base : undefined, parentRevisionId: p.base,
-      candidateIndex: versions > 1 ? i : null, advanceCurrent: versions === 1,
+  try {
+    await pool(tasks, config.screenConcurrency, async ({ p, i }) => {
+      if (ctx.signal.aborted) return;
+      await produceScreen(ctx, {
+        screenId: p.screen.id, system, prompt: p.prompt, sourceKind: 'edit',
+        expectedRevisionId: versions === 1 ? p.base : undefined, parentRevisionId: p.base,
+        candidateIndex: versions > 1 ? i : null, advanceCurrent: versions === 1,
+      });
     });
-  });
-  if (versions > 1 && !ctx.signal.aborted) for (const p of prepared) await db.transaction((tx) => pointCurrentToFirstCandidate(tx, p.screen.id, ctx.job.id, p.base));
+  } finally {
+    // 失败或取消也要收尾（同 runGenerate）：已落的候选让 current 指过去，否则它们既不在卡片上也没有角标；
+    // current 已不是这批的基线（用户在这之后自己写过）就不顶掉
+    if (versions > 1) for (const p of prepared) await db.transaction((tx) => pointCurrentToFirstCandidate(tx, p.screen.id, ctx.job.id, p.base));
+  }
 }
 
 // 设计系统提炼（REQ-EDIT-003）：只产出提案，写入由用户在预览里确认
@@ -355,10 +371,11 @@ async function runRegenerateSubtree(ctx: Ctx) {
   const replaced = replaceSubtree(body, input.qid, newFrag);
   if (!replaced) throw new JobFailure('validation', 'replacement produced no element');
   // 共享组件（REQ-EDIT-006）：新片段里放的占位在这里展开；实例根沿用 qid、新子树接着编号
-  const expanded = expandComponents(replaced.body, ctx.shared, screen.route).html;
+  const expanded = await expandLatest(ctx, replaced.body, screen.route);
   // v0.43：同 produceScreen——偏离只记录，不为它再烧一次调用
   const report = lintScreenBody(expanded, routes, true);
   const html = assembleDocument(expanded, ctx.prelude, `${ctx.project.name} · ${screen.name}`);
+  assertNotAborted(ctx);
   const created = await db.transaction((tx) => createRevision(tx, { projectId: ctx.project.id, screenId: screen.id, html, sourceKind: 'subtree', jobId: ctx.job.id, lintReport: report, expectedRevisionId: input.expectedRevisionId }));
   if (!created) throw new JobFailure('validation', 'revision conflict');
   ctx.usage.screens += 1;
@@ -399,11 +416,12 @@ async function runEditComponent(ctx: Ctx): Promise<{ component: string; applied:
   if (!v.ok) { out = stripFences(await llmCall(ctx, system, `${prompt}\n\nYour previous output was rejected: ${v.error}. Return exactly ONE root element, no <script>/<style>.`, undefined, true)); v = validateComponentHtml(out); }
   if (!v.ok) throw new JobFailure('validation', v.error);
   const c = classifyComponentHtml(out);
+  // 取消只在组件行升版之前生效：升版之后回刷必须做完，屏里的实例要与组件一致
+  assertNotAborted(ctx);
   const [updated] = await db.update(schema.components)
     .set({ html: c.html, summary: componentSummary(c.html), activeClass: c.activeClass, inactiveClass: c.inactiveClass, version: comp.version + 1, updatedAt: new Date() })
     .where(and(eq(schema.components.id, comp.id), eq(schema.components.version, comp.version))).returning();
   if (!updated) throw new JobFailure('validation', '组件在这一轮里被别处改过，重新发一次');
-  ctx.shared = await sharedComponentsOf(ctx.project.id);
   const { applied, skipped } = await reflowComponent(ctx.project.id, updated, { jobId: ctx.job.id });
   await emitJobEvent(ctx.job.id, 'progress', { stage: 'component_synced', screens: applied.length });
   for (const a of applied) {
@@ -459,6 +477,21 @@ async function layoutNewScreens(ctx: Ctx, ids: string[], anchor?: { x: number; y
   for (const id of ids) { await db.update(schema.screens).set({ x, y }).where(eq(schema.screens.id, id)); x += size.w + gap; }
 }
 
+// 回刷类作业逐屏落修订并截图，耗时随屏数走（实测 4 并发约 2.3 s / 屏）：超时按要回刷的屏数加（§11 超时一行）
+async function repaintScreens(job: JobRow): Promise<number> {
+  if (job.kind === 'apply_design_system') {
+    const ids = (job.input as { screenIds: 'all' | string[] }).screenIds;
+    const rows = await db.select({ id: schema.screens.id }).from(schema.screens).where(eq(schema.screens.projectId, job.projectId));
+    return ids === 'all' ? rows.length : rows.filter((r) => ids.includes(r.id)).length;
+  }
+  if (job.kind === 'edit_component') {
+    const [comp] = await db.select({ name: schema.components.name }).from(schema.components).where(eq(schema.components.id, (job.input as { componentId: string }).componentId));
+    if (!comp) return 0;
+    return (await db.select({ id: schema.componentUses.screenId }).from(schema.componentUses).where(and(eq(schema.componentUses.projectId, job.projectId), eq(schema.componentUses.name, comp.name)))).length;
+  }
+  return 0;
+}
+
 export async function runJob(jobId: string): Promise<void> {
   const [job] = await db.select().from(schema.generationJobs).where(eq(schema.generationJobs.id, jobId));
   if (!job || job.status !== 'queued' || job.runner !== 'model') return;
@@ -470,7 +503,7 @@ export async function runJob(jobId: string): Promise<void> {
   const device = project.deviceType as DeviceType;
   const tokens = ds.tokens as Tokens;
   const abort = new AbortController();
-  const timeoutMs = timeoutFor({ kind: job.kind, input: job.input } as CreateJobInput);
+  const timeoutMs = timeoutFor({ kind: job.kind, input: job.input } as CreateJobInput, await repaintScreens(claimed));
   const timer = setTimeout(() => abort.abort(new Error('timeout')), timeoutMs);
   modelAborts.set(jobId, abort);
   // 作业输入里带的通道（REQ-CORE-011）；kind=agent 的作业不会走到 worker（runner=agent 不入队）
@@ -485,8 +518,7 @@ export async function runJob(jobId: string): Promise<void> {
   }
   const images = await loadForModel((claimed.input as { imageKeys?: string[] }).imageKeys);
   const assets = await assetsForPrompt(project.id);
-  const shared = await sharedComponentsOf(project.id);
-  const ctx: Ctx = { job: claimed, project, ds, device, tokens, prelude: buildPrelude(tokens), signal: abort.signal, usage: { tokensIn: 0, tokensOut: 0, screens: 0 }, runner, images, assets, shared, produced: [], entryRepair: null };
+  const ctx: Ctx = { job: claimed, project, ds, device, tokens, prelude: buildPrelude(tokens), signal: abort.signal, usage: { tokensIn: 0, tokensOut: 0, screens: 0 }, runner, images, assets, produced: [], entryRepair: null };
   await emitJobEvent(jobId, 'progress', { stage: 'running' });
   let failure: { errorClass: ErrorClass; message: string } | null = null;
   let extraOutput: Record<string, unknown> = {};
@@ -510,6 +542,8 @@ export async function runJob(jobId: string): Promise<void> {
     else if (e instanceof ProviderError) failure = { errorClass: 'provider', message: e.message };
     else { failure = { errorClass: 'system', message: (e as Error).message }; console.error(`[job ${jobId}]`, e); }
   } finally { clearTimeout(timer); modelAborts.delete(jobId); }
+  // 超时中止后没轮到的屏在并发池里直接跳过、不抛错：不在这里补判，作业会带着一半没做的活报 succeeded（取消另有状态复核，见下）
+  if (!failure && abort.signal.aborted) failure = { errorClass: 'timeout', message: `job exceeded ${timeoutMs / 1000}s` };
 
   // 落库前复核取消（§16 竞态：worker vs cancel）
   const [fresh] = await db.select({ status: schema.generationJobs.status }).from(schema.generationJobs).where(eq(schema.generationJobs.id, jobId));

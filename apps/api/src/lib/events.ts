@@ -1,5 +1,5 @@
 import { and, eq, gt, asc } from 'drizzle-orm';
-import { db, query, subscribe, schema } from '../db/client.ts';
+import { db, query, subscribe, onListenReconnect, schema } from '../db/client.ts';
 import type { JobEventType, ProjectEventDto } from '@quilt/core';
 
 // 作业事件（API-CORE-008 SSE）：落表保证可续传（Last-Event-ID），NOTIFY 保证低延迟。
@@ -115,3 +115,10 @@ export async function subscribeProject(projectId: string, fn: ProjectListener): 
   projectListeners.get(projectId)!.add(fn);
   return () => { projectListeners.get(projectId)?.delete(fn); if (projectListeners.get(projectId)?.size === 0) projectListeners.delete(projectId); };
 }
+
+// LISTEN 连接断过又重连上（§16 v0.79）：断开期间的通知不会重放——作业流各自按 seq 从表里补读，项目流推一条 reconnected 让画布整体重取
+onListenReconnect(() => {
+  listeners.forEach((set) => set.forEach((fn) => fn(0)));
+  const e: ProjectEventDto = { type: 'screen_changed', data: { reason: 'reconnected' }, at: new Date().toISOString() };
+  projectListeners.forEach((set) => set.forEach((fn) => fn(e)));
+});

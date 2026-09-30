@@ -96,19 +96,26 @@ export async function deliverAgentJob(jobId: string): Promise<void> {
   const codex = tool === 'codex' ? await findCodexThread(sessionId) : null;
   const session = claude ?? codex;
   if (!session) { await finishAgentJob(claimed, 'failed', { errorClass: 'agent', message: '会话已关闭或不存在，没有投递出去' }); return; }
-  let opened = false;
   try {
     const prompt = await buildPrompt(claimed);
     if (claude) await injectMessage(claude.socketPath, prompt);
-    else if (codex) {
-      await queueCodexMessage(codex.sessionId, prompt);
-      // 线程没在任何 Codex 窗口里打开：消息只会躺在队列里，让桌面版打开它（会切到前台）才会被取走
-      if (!codex.open) { await openCodexThread(codex.sessionId); opened = true; }
-    }
+    else if (codex) await queueCodexMessage(codex.sessionId, prompt);
   } catch (e) { await finishAgentJob(claimed, 'failed', { errorClass: 'agent', message: `投递失败：${(e as Error).message}` }); return; }
+  // 线程没在任何 Codex 窗口里打开：消息只会躺在队列里，让桌面版打开它（会切到前台）才会被取走。
+  // 打不开（只装了 CLI / VS Code 插件）不算投递失败：消息已经在队列里，之后在哪个窗口打开这个线程就由哪个窗口执行，
+  // 作业照常等它收口——标成失败的话，那一轮的回写与收口全被 409 job-finished 挡掉
+  let opened = false; let openError: string | null = null;
+  if (codex && !codex.open) {
+    try { await openCodexThread(codex.sessionId); opened = true; }
+    catch (e) { openError = (e as Error).message; }
+  }
   // Codex 线程没起过名时 name 是标题（首条消息），比 UUID 好认，照用
-  const delivery = { tool, sessionId: session.sessionId, name: session.named || tool === 'codex' ? session.name : session.sessionId, deliveredAt: new Date().toISOString(), ...(tool === 'codex' ? { opened } : {}) };
+  const delivery = { tool, sessionId: session.sessionId, name: session.named || tool === 'codex' ? session.name : session.sessionId, deliveredAt: new Date().toISOString(), ...(tool === 'codex' ? { opened, ...(openError ? { openError } : {}) } : {}) };
   await db.update(schema.generationJobs).set({ output: { delivery } }).where(eq(schema.generationJobs.id, jobId));
+  if (openError) {
+    await db.update(schema.messages).set({ content: `已排进本机 Codex 线程「${delivery.name}」的队列，但没能让 Codex 桌面版打开它：在 Codex 里打开这个线程后它就会执行，做完经 MCP 收口（原因：${openError}）` })
+      .where(and(eq(schema.messages.jobId, jobId), eq(schema.messages.role, 'assistant')));
+  }
   await emitJobEvent(jobId, 'progress', { stage: 'delivered', session: delivery.name });
   arm({ ...claimed, output: { delivery } });
 }

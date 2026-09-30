@@ -55,10 +55,10 @@ export function targetScreenOf(input: CreateJobInput): string | null {
   }
 }
 
-// 作业超时随预估调用数伸缩（REQ-CORE-008）：基数 + 每次调用一分钟，封顶
-export function timeoutFor(input: CreateJobInput): number {
+// 作业超时随预估调用数伸缩（REQ-CORE-008）：基数 + 每次调用一分钟 + 每屏确定性回刷 5 s（回刷 / 改组件逐屏落修订并截图），封顶
+export function timeoutFor(input: CreateJobInput, repaintScreens = 0): number {
   const { calls } = estimateJob(input, 0);
-  return Math.min(config.jobTimeoutMs.max, config.jobTimeoutMs.base + calls * config.jobTimeoutMs.perCall);
+  return Math.min(config.jobTimeoutMs.max, config.jobTimeoutMs.base + calls * config.jobTimeoutMs.perCall + repaintScreens * config.jobTimeoutMs.perScreen);
 }
 
 // regenerate_subtree 创建前校验：qid 必须在当前修订里（TC-EDIT-004 → 404），expectedRevisionId 必须是当前版
@@ -183,9 +183,10 @@ export async function cancelJob(job: JobRow): Promise<JobRow> {
   const [updated] = await db.update(schema.generationJobs).set({ status: 'cancelled', finishedAt: new Date() })
     .where(and(eq(schema.generationJobs.id, job.id), inArray(schema.generationJobs.status, ['queued', 'running']))).returning();
   if (!updated) throw problems.jobFinished();
-  await db.update(schema.messages).set({ content: '已取消' }).where(and(eq(schema.messages.jobId, job.id), eq(schema.messages.role, 'assistant'), eq(schema.messages.content, '')));
+  // 先中止在跑的调用：worker 落库前看的是这个信号，库里已取消、信号还没发的那几步里它照样会写
   if (job.runner === 'agent') agentHooks?.cancel(job.id);
   else modelAborts.get(job.id)?.abort(new Error('cancelled'));
+  await db.update(schema.messages).set({ content: '已取消' }).where(and(eq(schema.messages.jobId, job.id), eq(schema.messages.role, 'assistant'), eq(schema.messages.content, '')));
   // 批注发出去的作业被取消：批注回到「未处理」，不然图钉永远闪「发送中」
   await settleByJob(job.id, false);
   await emitJobEvent(job.id, 'cancelled', {});

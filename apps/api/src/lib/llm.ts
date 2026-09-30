@@ -64,6 +64,8 @@ class AgentSdkLlm implements Llm {
     const { query } = await import('@anthropic-ai/claude-agent-sdk');
     const env: Record<string, string | undefined> = { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: 'quilt-api/0.1.0' };
     delete env.ANTHROPIC_API_KEY;
+    // 对已中止的信号挂监听不会触发：不先判一次，取消 / 超时之后发来的调用会整次跑完、照样消耗订阅额度
+    if (signal?.aborted) throw new ProviderError('agent-sdk: aborted', false);
     const abort = new AbortController();
     signal?.addEventListener('abort', () => abort.abort());
     const t0 = Date.now();
@@ -232,8 +234,12 @@ class OpenAiCompatLlm implements Llm {
 
 class StubLlm implements Llm {
   readonly vision = true;
-  async complete({ prompt, model = config.model }: LlmArgs) {
+  async complete({ system, prompt, model = config.model }: LlmArgs) {
     if (config.llmStub === '503') throw new ProviderError('stub 503', true);
+    // 指令里写 [stub-hold:<毫秒>]（随系统提示或用户提示进来）就先拖这么久再回，且不理会中止信号：
+    // 用例靠它造出「作业在跑的那一阵」与「模型已经在回来的路上时被取消」（TEST.md §3）
+    const hold = Number(/\[stub-hold:(\d+)\]/.exec(`${system}\n${prompt}`)?.[1] ?? 0);
+    if (hold) await new Promise((r) => setTimeout(r, hold));
     const isPlan = prompt.startsWith('App:');
     const text = isPlan
       ? JSON.stringify({ screens: [
@@ -301,7 +307,14 @@ export async function completeWithRetry(args: LlmArgs & { driver?: LlmDriver; sp
       const err = e as ProviderError;
       if (!(err instanceof ProviderError) || !err.retryable || attempt >= delays.length || args.signal?.aborted) throw err;
       onRetry?.(attempt + 1, err);
-      await new Promise((r) => setTimeout(r, delays[attempt]));
+      // 退避可被中止，醒来再判一次：取消或超时落在退避里时不再发下一次调用
+      await new Promise<void>((r) => {
+        if (args.signal?.aborted) { r(); return; }
+        const done = () => { clearTimeout(t); args.signal?.removeEventListener('abort', done); r(); };
+        const t = setTimeout(done, delays[attempt]);
+        args.signal?.addEventListener('abort', done, { once: true });
+      });
+      if (args.signal?.aborted) throw err;
     }
   }
 }

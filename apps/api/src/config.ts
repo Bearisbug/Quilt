@@ -61,8 +61,8 @@ export const config = {
   // §15 容量与限流
   workerConcurrency: Number(env('WORKER_CONCURRENCY', '20')),
   screenConcurrency: Number(env('SCREEN_CONCURRENCY', '4')),
-  // 作业超时随预估调用数伸缩（REQ-CORE-008）：基数 + 每次调用 1 分钟，封顶 30 分钟
-  jobTimeoutMs: { base: 3 * 60_000, perCall: 60_000, max: 30 * 60_000 },
+  // 作业超时随预估调用数伸缩（REQ-CORE-008）：基数 + 每次调用 1 分钟 + 每屏确定性回刷 5 秒，封顶 30 分钟
+  jobTimeoutMs: { base: 3 * 60_000, perCall: 60_000, perScreen: 5_000, max: 30 * 60_000 },
   rateLimitJobsPerMinute: 10,
   maxScreensPerProject: 200,
   maxScreenHtmlBytes: 256 * 1024,

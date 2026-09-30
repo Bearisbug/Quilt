@@ -21,18 +21,22 @@ async function getBrowser(): Promise<Browser> {
 }
 
 // Tailwind Play CDN 与 lucide 都是「脚本跑完才改 DOM / 注样式」，networkidle 只保证请求停了、
-// 不保证它们已经生效：抢在前面截图会拍到无 preflight（<a> 带下划线）、<i data-lucide> 还没换成
-// svg 的半成品。所以等一个确定信号而不是等一个够长的时间。视口内的 <img> 也要等到 complete——
-// 外网占位图（picsum）比脚本和字体都慢，以图为主的瀑布流屏否则会拍成空壳；视口外的懒加载图不等。
+// 不保证它们已经生效：抢在前面截图会拍到无 preflight（<a> 带下划线）的半成品。所以等一个确定信号而不是等一个够长的时间。
+// 图标只要求 lucide 脚本已加载（有图标时），拍之前再换一遍：lucide 不认识的名字会原样留下 <i data-lucide>，
+// 把「页面里不剩 <i>」当条件，模型编出一个不存在的图标名这屏就永远拍不成。
+// 视口内的 <img> 也要等到 complete——外网占位图（picsum）比脚本和字体都慢，以图为主的瀑布流屏否则会拍成空壳；视口外的懒加载图不等。
 const STYLED = `(() => {
   const tw = Array.from(document.styleSheets).some((s) => { try { return Array.from(s.cssRules).some((r) => r.cssText.indexOf('--tw-') >= 0); } catch { return false; } });
-  return tw && document.querySelectorAll('i[data-lucide]').length === 0;
+  return tw && (!!(window.lucide && window.lucide.createIcons) || document.querySelectorAll('i[data-lucide]').length === 0);
 })()`;
+const ICONS = 'window.lucide && window.lucide.createIcons && window.lucide.createIcons()';
 const IMAGES_IN_VIEW = `Array.from(document.images).every((i) => { const b = i.getBoundingClientRect(); return i.complete || b.bottom <= 0 || b.top >= innerHeight; })`;
 async function settle(page: import('playwright').Page, timeoutMs: number) {
   // 样式与图标是硬条件：CDN 慢到超时就抛，让 shotQueue 的重试与 screenshot.retry 补扫，
   // 不能把没有 preflight 的半成品存成缩略图——存下去就是永久的假图
-  await page.waitForFunction(STYLED, { timeout: Math.min(timeoutMs, 5_000) }).catch(() => { throw new Error('页面未就绪：Tailwind CDN 未生效或图标未替换'); });
+  await page.waitForFunction(STYLED, { timeout: Math.min(timeoutMs, 5_000) }).catch(() => { throw new Error('页面未就绪：Tailwind CDN 未生效或图标库未加载'); });
+  // 运行时在 DOMContentLoaded 时换过一遍；这里再换一遍，保证认得的图标都已是 svg（重复执行无害）
+  await page.evaluate(ICONS).catch(() => {});
   // 图片是软条件：外网占位图挂了也得出一张图
   await page.waitForFunction(IMAGES_IN_VIEW, { timeout: 4_000 }).catch(() => {});
   await page.evaluate('document.fonts.ready').catch(() => {});

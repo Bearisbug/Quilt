@@ -798,6 +798,69 @@ await step('TC-EDIT-014', async () => {
   return '批注草稿按元素暂存；记下失败草稿留着、立刻发送不发；存上后只发这一条；改写失败框不关；检查器没存的文案与说明按元素暂存';
 });
 
+// v0.79 作业落地与取消、组件改动（DESIGN §11 running→cancelled、§16 edit_component 两行）：模型回来时作业已取消，子树重生成与改组件都不落；
+// 屏上有作业在跑时改了共享组件，作业落地写进去的是新版组件。桩认指令里的 [stub-hold:<ms>]，让作业停在模型那一步（§3）
+await step('TC-EDIT-019', async () => {
+  const bad: string[] = [];
+  const check = (cond: unknown, msg: string) => { if (!cond) bad.push(msg); };
+  const STUB = { kind: 'model', driver: 'stub', model: 'stub' };
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const post = <T,>(p: string, body: unknown) => apiJson<T>(p, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(body) });
+  const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Landing', '--device', 'mobile', '--screens', '2', '--no-shot');
+  const [s1, s2] = screens.map((s) => s.id);
+  const currentOf = async (sid: string) => (await detail(pid)).screens.find((s) => s.id === sid)!.currentRevisionId;
+  const htmlOf = async (sid: string) => (await revisionHtml(sid, await currentOf(sid))).html;
+  const byJob = async (sid: string, jobId: string) => (await apiJson<{ items: { jobId: string | null }[] }>(`/v1/screens/${sid}/revisions`)).body.items.filter((r) => r.jobId === jobId).length;
+  const comp = async () => (await apiJson<{ components: { id: string; version: number }[] }>(`/v1/projects/${pid}`)).body.components[0];
+  const h1Of = async (sid: string) => /<h1[^>]*data-qid="(q\d+)"/.exec(await htmlOf(sid))?.[1];
+  // 前置：/s1 的底栏提成共享组件 Nav，同步到两屏
+  const navQid = /<nav[^>]*data-qid="(q\d+)"/.exec(await htmlOf(s1))?.[1];
+  const made = await post<{ component: { id: string } }>(`/v1/projects/${pid}/components`, { name: 'Nav', fromScreenId: s1, qid: navQid, applyToScreens: true });
+  expect(made.status === 201, `提取组件 ${made.status}`);
+  const compId = made.body.component.id;
+
+  // 1 子树重生成：模型拖 2.5 s，0.6 s 时取消 → 作业 cancelled，/s2 current 不变、没有这个作业的修订
+  const rev2 = await currentOf(s2);
+  const sub = await post<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { kind: 'regenerate_subtree', input: { screenId: s2, qid: await h1Of(s2), prompt: '[stub-hold:2500] make the title bold', expectedRevisionId: rev2, runner: STUB } });
+  expect(sub.status === 202, `子树重生成 ${sub.status}`);
+  await sleep(600);
+  const cancel1 = await post(`/v1/jobs/${sub.body.job.id}/cancel`, {});
+  await sleep(3500);
+  const subJob = (await apiJson<{ job: { status: string } }>(`/v1/jobs/${sub.body.job.id}`)).body.job;
+  check(cancel1.status === 200 && subJob.status === 'cancelled', `子树重生成取消：cancel ${cancel1.status}，作业 ${subJob.status}`);
+  check((await currentOf(s2)) === rev2 && (await byJob(s2, sub.body.job.id)) === 0, `取消后子树重生成仍落了修订（current ${rev2 === (await currentOf(s2)) ? '未变' : '被换掉'}，本作业修订 ${await byJob(s2, sub.body.job.id)} 条）`);
+
+  // 2 改组件：同样 0.6 s 时取消 → 组件版本不变、两屏 current 不变
+  const before = { v: (await comp()).version, s1: await currentOf(s1), s2: await currentOf(s2) };
+  const ce = await post<{ job: { id: string } }>(`/v1/projects/${pid}/messages`, { content: '[stub-hold:2500] rounder tabs', targetComponentIds: [compId], runner: STUB });
+  expect(ce.status === 202, `改组件 ${ce.status}`);
+  await sleep(600);
+  const cancel2 = await post(`/v1/jobs/${ce.body.job.id}/cancel`, {});
+  await sleep(3500);
+  const after = { v: (await comp()).version, s1: await currentOf(s1), s2: await currentOf(s2) };
+  check(cancel2.status === 200, `改组件取消 ${cancel2.status}`);
+  check(after.v === before.v && after.s1 === before.s1 && after.s2 === before.s2, `取消后改组件仍落了：组件 v${before.v}→v${after.v}，/s1 ${after.s1 === before.s1 ? '未变' : '被回刷'}，/s2 ${after.s2 === before.s2 ? '未变' : '被回刷'}`);
+
+  // 3 /s1 的子树重生成跑着（模型拖 3 s）时 PATCH 组件：回刷跳过 /s1、同步 /s2；作业落地后 /s1 里是新版组件
+  const MARK = 'Mark079';
+  const rev1 = await currentOf(s1);
+  const sub2 = await post<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { kind: 'regenerate_subtree', input: { screenId: s1, qid: await h1Of(s1), prompt: '[stub-hold:3000] make the title bold', expectedRevisionId: rev1, runner: STUB } });
+  expect(sub2.status === 202, `第二次子树重生成 ${sub2.status}`);
+  await sleep(800);
+  const TABS = `<nav class="sticky bottom-0 mt-auto grid grid-cols-2 bg-surface border-t border-outline-variant"><a href="/s1" class="flex flex-col items-center gap-1 py-2 text-xs text-on-surface-variant"><i data-lucide="home" class="w-5 h-5"></i>${MARK}</a><a href="/s2" class="flex flex-col items-center gap-1 py-2 text-xs text-on-surface-variant"><i data-lucide="search" class="w-5 h-5"></i>Find</a></nav>`;
+  const patched = await apiJson<{ applied: string[]; skipped: { screenId: string }[] }>(`/v1/components/${compId}`, { method: 'PATCH', body: JSON.stringify({ html: TABS, expectedVersion: (await comp()).version }) });
+  check(patched.status === 200 && patched.body.skipped?.some((x) => x.screenId === s1) && patched.body.applied?.includes(s2), `PATCH 组件应跳过在跑的 /s1、同步 /s2：${patched.status} ${JSON.stringify(patched.body).slice(0, 200)}`);
+  const done = await waitJob(sub2.body.job.id, 30);
+  const html1 = await htmlOf(s1);
+  const cur1 = (await revisionHtml(s1, await currentOf(s1))).sourceKind;
+  check(done.status === 'succeeded' && cur1 === 'subtree', `第二次子树重生成应成功并成为 /s1 的 current：${done.status} / ${cur1}`);
+  check(html1.includes(MARK), `作业落地后 /s1 的 Nav 仍是旧版（没有 ${MARK}）`);
+  check((await htmlOf(s2)).includes(MARK), `/s2 没有同步到新版组件`);
+
+  if (bad.length) { console.log(`   TC-EDIT-019 全部失败项：\n   - ${bad.join('\n   - ')}`); throw new Error(bad.join('；')); }
+  return '取消后子树重生成与改组件都不落（current、组件版本不变）；作业在跑时改组件，回刷跳过该屏，作业落地用的是新版组件';
+});
+
 await browser.close();
 console.log(`\n=== RUN-${RUN} EDIT ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));
 console.log(results.map((r) => `${r.tc} ${r.result} ${r.note}`).join('\n'));

@@ -3,7 +3,8 @@
 // 它只做 Quilt 会用到的四件事，并把每次调用记进 $QUILT_CODEX_HOME/stub-log.jsonl 供用例断言：
 //   --version                         → 版本号（通道目录的 hint）
 //   queue --thread <id> --message <t> → 记下这条消息，回「Queued message …」（真 codex 的确认句式）；线程 id 以 ffff 结尾时模拟失败
-//   codex://threads/<id>（打开深链接）→ 记下，并建该线程的写锁文件——等于桌面版把它打开了
+//   codex://threads/<id>（打开深链接）→ 记下，并建该线程的写锁文件——等于桌面版把它打开了；
+//                                      线程 id 以 eeee 结尾时模拟本机没装桌面版：记 open-failed、按 macOS `open` 的报错退出 1
 //   exec --json … -                   → 读 stdin，按真 codex 的 JSONL 事件回一段产出；另记下参数与是否带着 API Key
 // 「Codex 窗口」那一侧（读队列、经 MCP 回写、收口）由用例脚本扮演，不在这里。
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -27,6 +28,7 @@ if (args[0] === 'queue') {
 
 if (args[0]?.startsWith('codex://threads/')) {
   const thread = args[0].slice('codex://threads/'.length);
+  if (thread.endsWith('eeee')) { rec({ cmd: 'open-failed', url: args[0], thread }); console.error(`No application knows how to open URL ${args[0]} (Error Domain=NSOSStatusErrorDomain Code=-10814 "kLSApplicationNotFoundErr")`); process.exit(1); }
   rec({ cmd: 'open', url: args[0], thread });
   mkdirSync(path.join(home, 'thread-writer-locks'), { recursive: true });
   writeFileSync(path.join(home, 'thread-writer-locks', `${thread}.lock`), '');

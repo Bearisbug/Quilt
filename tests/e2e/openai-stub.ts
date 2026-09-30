@@ -4,26 +4,29 @@ import { createServer, type Server } from 'node:http';
 // 用它验证的是「通道 → 驱动 → 端点」这条管道，不是模型质量。
 export type StubHit = { model: string; hasImage: boolean; auth: string | undefined; user: string; system: string };
 // holdMs：收到请求后拖这么久再回（TC-CORE-042 要一个在跑一阵子的作业），Key 不对的 401 也一样拖（TC-CORE-045 要画布先认领作业、再收到失败）；
-// 请求照样立刻记进 hits
-export function startOpenAiStub(opts: { port: number; apiKey: string; reply: string | ((hit: StubHit) => string); holdMs?: number }): { server: Server; hits: StubHit[]; url: string; close: () => Promise<void> } {
+// 请求照样立刻记进 hits。给函数就按每次请求定
+// fail：按请求定一个错误状态码（返回 null 照常回），造「一批里有一次调用失败」（TC-CORE-067）
+export function startOpenAiStub(opts: { port: number; apiKey: string; reply: string | ((hit: StubHit) => string); holdMs?: number | ((hit: StubHit) => number); fail?: (hit: StubHit, n: number) => number | null }): { server: Server; hits: StubHit[]; url: string; close: () => Promise<void> } {
   const hits: StubHit[] = [];
   const server = createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
     req.on('end', () => {
       if (req.method !== 'POST' || req.url !== '/v1/chat/completions') { res.writeHead(404); res.end(); return; }
-      if (req.headers.authorization !== `Bearer ${opts.apiKey}`) { setTimeout(() => { res.writeHead(401, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'invalid api key' } })); }, opts.holdMs ?? 0); return; }
+      if (req.headers.authorization !== `Bearer ${opts.apiKey}`) { setTimeout(() => { res.writeHead(401, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'invalid api key' } })); }, typeof opts.holdMs === 'number' ? opts.holdMs : 0); return; }
       const j = JSON.parse(body || '{}') as { model?: string; messages?: { role: string; content: unknown }[] };
       const user = j.messages?.find((m) => m.role === 'user');
       const userText = typeof user?.content === 'string' ? user.content : Array.isArray(user?.content) ? (user!.content as { type: string; text?: string }[]).filter((p) => p.type === 'text').map((p) => p.text ?? '').join('\n') : '';
       const systemText = (j.messages ?? []).filter((m) => m.role === 'system').map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
       const hit: StubHit = { system: systemText, model: j.model ?? '', hasImage: Array.isArray(user?.content) && (user!.content as { type: string }[]).some((p) => p.type === 'image_url'), auth: req.headers.authorization, user: userText };
       hits.push(hit);
+      const status = opts.fail?.(hit, hits.length) ?? null;
       const text = typeof opts.reply === 'function' ? opts.reply(hit) : opts.reply;
       setTimeout(() => {
+        if (status) { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: `stub ${status}` } })); return; }
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ choices: [{ message: { content: text } }], usage: { prompt_tokens: 42, completion_tokens: 7 } }));
-      }, opts.holdMs ?? 0);
+      }, typeof opts.holdMs === 'function' ? opts.holdMs(hit) : opts.holdMs ?? 0);
     });
   });
   server.listen(opts.port, '127.0.0.1');

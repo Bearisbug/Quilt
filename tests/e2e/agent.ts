@@ -258,6 +258,7 @@ await step('TC-AGENT-012', async () => {
   await mkdir(path.join(HOME, 'thread-writer-locks'), { recursive: true });
   const T_OPEN = '01a0d6fc-0000-7000-8000-00000000a001'; const T_CLOSED = '01a0d6fc-0000-7000-8000-00000000a002';
   const T_EXEC = '01a0d6fc-0000-7000-8000-00000000a003'; const T_BROKEN = '01a0d6fc-0000-7000-8000-00000000ffff';
+  const T_NOAPP = '01a0d6fc-0000-7000-8000-00000000eeee'; // 桩打不开它：模拟本机没装 Codex 桌面版
   const db = new DatabaseSync(path.join(HOME, 'state_5.sqlite'));
   db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, title TEXT, cwd TEXT, source TEXT, originator TEXT, thread_source TEXT, archived INTEGER, updated_at_ms INTEGER)');
   const add = db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
@@ -265,6 +266,7 @@ await step('TC-AGENT-012', async () => {
   add.run(T_CLOSED, null, '帮我看看首页', '/Users/me/app', 'vscode', null, 'user', 0, Date.now() - 60_000);
   add.run(T_EXEC, null, '无头 exec', '/tmp', 'exec', 'codex_exec', 'user', 0, Date.now() + 1000);
   add.run(T_BROKEN, '坏线程', '队列写不进', '/tmp', 'cli', 'codex_cli_rs', 'user', 0, Date.now() - 120_000);
+  add.run(T_NOAPP, '终端线程', '只装了 CLI', '/tmp', 'cli', 'codex_cli_rs', 'user', 0, Date.now() - 180_000);
   db.close();
   // 「打开着」= 有进程占着写锁（Quilt 用 lsof 查）：本脚本扮演开着 T_OPEN 的 Codex 窗口，打开它的锁文件不放
   const lockPath = (id: string) => path.join(HOME, 'thread-writer-locks', `${id}.lock`);
@@ -301,7 +303,7 @@ await step('TC-AGENT-012', async () => {
   await sleep(2100);
   const lr = (await apiJson<{ items: { sessionId: string; name: string; named: boolean; open: boolean; app?: string; tool: string }[]; reason?: string }>('/v1/agent/sessions?tool=codex')).body;
   const ids = lr.items.map((t) => t.sessionId);
-  expect(ids.join() === [T_OPEN, T_CLOSED, T_BROKEN].join(), `Codex 线程列表不对（API 是否以同一个 QUILT_CODEX_HOME 启动？）：${JSON.stringify(lr).slice(0, 300)}`);
+  expect(ids.join() === [T_OPEN, T_CLOSED, T_BROKEN, T_NOAPP].join(), `Codex 线程列表不对（API 是否以同一个 QUILT_CODEX_HOME 启动？）：${JSON.stringify(lr).slice(0, 300)}`);
   const [tOpen, tClosed] = lr.items;
   expect(tOpen.named && tOpen.name === '设计稿' && tOpen.open && tOpen.app === 'desktop' && tOpen.tool === 'codex', `打开的线程字段不对：${JSON.stringify(tOpen)}`);
   expect(!tClosed.named && tClosed.name === '帮我看看首页' && !tClosed.open && tClosed.app === 'vscode', `未打开的线程字段不对：${JSON.stringify(tClosed)}`);
@@ -373,6 +375,30 @@ await step('TC-AGENT-012', async () => {
   const bj = await waitJob(broken.body.job.id, 10);
   expect(bj.status === 'failed' && bj.output?.errorClass === 'agent' && /投递失败/.test(bj.output?.message ?? ''), `codex queue 失败应 failed(agent)：${JSON.stringify(bj.output)}`);
 
+  // 6a 本机没有 Codex 桌面版：排进队列成功、打开线程失败 → 不算投递失败，作业仍 running（opened=false、记 openError），
+  //    回执与 agent 面板提示在 Codex 里打开；用户之后打开这个线程（脚本占住它的锁）→ 线程取走消息、回写并收口 → succeeded
+  const noApp = await send('没装桌面版', T_NOAPP);
+  expect(noApp.status === 202, `投给打不开的线程应 202：${noApp.status}`);
+  let openFailed: Rec | undefined;
+  for (let i = 0; i < 40 && !openFailed; i++) { await sleep(250); openFailed = (await stubLog()).find((x) => x.cmd === 'open-failed' && x.thread === T_NOAPP); }
+  expect(openFailed && (await stubLog()).some((x) => x.cmd === 'queue' && x.thread === T_NOAPP), '应先排进队列、再尝试打开线程');
+  await sleep(500);
+  const nj = await jobOf(noApp.body.job.id);
+  const nd = nj.output?.delivery as { opened?: boolean; openError?: string } | undefined;
+  expect(nj.status === 'running' && nd?.opened === false && /No application knows/.test(nd?.openError ?? ''), `打开线程失败后作业应仍 running 并记 openError：${JSON.stringify({ status: nj.status, output: nj.output })}`);
+  const nmsg = (await apiJson<{ items: { role: string; jobId: string | null; content: string }[] }>(`/v1/projects/${r.projectId}/messages`)).body.items.find((m) => m.role === 'assistant' && m.jobId === noApp.body.job.id);
+  expect(nmsg?.content.includes('在 Codex 里打开这个线程'), `回执没提示在 Codex 里打开线程：${nmsg?.content}`);
+  await page.goto(`${WEB}/p/${r.projectId}?panel=agent`);
+  const line = page.locator('[data-testid="agent-job"]').first().getByTestId('agent-line');
+  await line.waitFor({ timeout: 10000 });
+  expect((await line.innerText()).includes('在 Codex 里打开这个线程'), `agent 面板没提示在 Codex 里打开线程：${await line.innerText()}`);
+  await page.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-tc-agent-012-open-failed.png`) });
+  await wf(lockPath(T_NOAPP), '');
+  held.set(T_NOAPP, await fopen(lockPath(T_NOAPP), 'r'));
+  await drain();
+  const nDone = await waitJob(noApp.body.job.id, 20);
+  expect(nDone.status === 'succeeded' && nDone.output?.summary === 'done in eeee', `用户打开线程后排队的消息应执行并收口：${JSON.stringify(nDone)}`);
+
   // 7 记忆：刷新后 Codex 线程仍选中「设计稿」（本机记忆按工具分开）；切回 Claude Code 不带 Codex 的线程 id
   await page.goto(`${WEB}/p/${r.projectId}`);
   await page.getByTestId('session-select').waitFor({ timeout: 10000 });
@@ -419,7 +445,7 @@ await step('TC-AGENT-012', async () => {
   expect((await apiJson<{ tokensIn: number }>('/v1/me/usage')).body.tokensIn >= usage0 + 20000, 'Codex 订阅的用量没有记账');
   await apiJson(`/v1/channels/${ch.body.channel.id}`, { method: 'DELETE' });
   for (const h of held.values()) await h.close();
-  return `列表只含用户线程且标出应用 / 打开与否；打开的线程只 queue、未打开的 queue 后开深链接；回执 / 面板写明 Codex；exec 线程与不存在 400、队列失败 failed(agent)；选择按工具记忆；Codex 订阅通道 exec 参数与记账`;
+  return `列表只含用户线程且标出应用 / 打开与否；打开的线程只 queue、未打开的 queue 后开深链接；回执 / 面板写明 Codex；exec 线程与不存在 400、队列失败 failed(agent)；打不开线程时作业仍 running、提示打开，打开后收口；选择按工具记忆；Codex 订阅通道 exec 参数与记账`;
 });
 
 await browser.close();
