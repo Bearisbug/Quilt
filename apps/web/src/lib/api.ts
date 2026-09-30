@@ -32,9 +32,9 @@ async function call<T>(path: string, { timeoutMs = REQUEST_TIMEOUT_MS, ...init }
 /** 组件建 / 改的返回：applied = 被同步（确定性回刷）的屏，skipped = 没找到对应元素或正忙而跳过的屏 */
 export type ComponentSyncResult = { component: ComponentDto; applied: string[]; skipped: { screenId: string; name: string; reason: string }[] };
 
-// 运行时配置（API-CORE-028）：启动时取一次，预览域地址随打包 / 开发环境变
+// 运行时配置（API-CORE-028）：启动时取一次，预览域地址随打包 / 开发环境变。失败的那次不留着——否则画布页的「重试」拿到的永远是同一个失败
 let configPromise: Promise<ConfigDto> | null = null;
-export const loadConfig = () => (configPromise ??= call<ConfigDto>('/v1/config'));
+export const loadConfig = () => (configPromise ??= call<ConfigDto>('/v1/config').catch((e) => { configPromise = null; throw e; }));
 
 export const api = {
   projects: {
@@ -140,10 +140,33 @@ export const api = {
 };
 
 // SSE：作业事件流（API-CORE-008），断线自动重连并按 Last-Event-ID 续传（EventSource 内建）。
-// 项目级事件（API-CORE-030）：本机会话经 MCP 回写、别处建的作业、截图就绪——画布收到就刷新；EventSource 自带断线重连
-export function subscribeProjectEvents(projectId: string, onEvent: (e: ProjectEventDto) => void): () => void {
-  const es = new EventSource(`/v1/projects/${projectId}/events`);
+// 项目级事件（API-CORE-030）：本机会话经 MCP 回写、别处建的作业、截图就绪——画布收到就刷新。
+// 连接状态（v0.76）：网络错误时 EventSource 自己重连；非 200（代理在 API 重启期间回 502）会让它永久关闭，这里按 1 / 2 / 5 / 10 / 30 s
+// 退避重建，连续 MAX_RETRIES 次失败后停下报 offline。事件不续传：调用方在断过之后重新 open 时要整体重取一次
+export type LiveState = 'open' | 'reconnecting' | 'offline';
+const RETRY_MS = [1000, 2000, 5000, 10000, 30000];
+const MAX_RETRIES = 20;
+export function subscribeProjectEvents(projectId: string, onEvent: (e: ProjectEventDto) => void, onState?: (s: LiveState) => void): () => void {
+  let es: EventSource | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let failures = 0;
+  let stopped = false;
   const handler = (ev: MessageEvent) => { try { onEvent(JSON.parse(ev.data) as ProjectEventDto); } catch { /* ignore */ } };
-  for (const t of ['screen_changed', 'job_changed']) es.addEventListener(t, handler as EventListener);
-  return () => es.close();
+  const connect = () => {
+    const cur = new EventSource(`/v1/projects/${projectId}/events`);
+    es = cur;
+    for (const t of ['screen_changed', 'job_changed']) cur.addEventListener(t, handler as EventListener);
+    cur.onopen = () => { failures = 0; onState?.('open'); };
+    cur.onerror = () => {
+      if (stopped) return;
+      if (cur.readyState !== EventSource.CLOSED) { onState?.('reconnecting'); return; }   // 浏览器自己在重连
+      cur.close();
+      if (failures >= MAX_RETRIES) { onState?.('offline'); return; }
+      onState?.('reconnecting');
+      timer = setTimeout(connect, RETRY_MS[Math.min(failures, RETRY_MS.length - 1)]);
+      failures += 1;
+    };
+  };
+  connect();
+  return () => { stopped = true; clearTimeout(timer); es?.close(); };
 }

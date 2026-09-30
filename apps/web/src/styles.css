@@ -193,6 +193,8 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 /* 工具提示只淡入：它靠 -translate-y-1/2 对齐按钮，位移类动画会覆盖掉这个 transform */
 @keyframes tip-in { from { opacity: 0; } to { opacity: 1; } }
 .tip-in { animation: tip-in var(--duration-fast) var(--ease-out); }
+/* 画布加载胶囊（v0.76）：300 ms 后才淡入——多数项目在那之前就到了，不为它闪一下 */
+.pending-in { animation: tip-in var(--duration-fast) var(--ease-out) 300ms both; }
 
 /* 滚动条：槽位恒定、外观定制（RESP-007 / RESP-015）；导航壳隐藏滚动条但保留滚动（RESP-016） */
 .scroll { overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--color-line-strong) transparent; }
@@ -213,7 +215,7 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .world.moving { will-change: transform; }  /* 只在平移缩放进行中挂，理由见 CanvasView applyTransform */
 /* 平移缩放进行中骨架卡的循环动画暂停：上百张骨架卡同时在动时，动画自身就占满每帧的 GPU 预算，镜头跟不上手 */
-.world.moving .card .skeleton, .world.moving .card .skeleton::before, .world.moving .card .skeleton * { animation-play-state: paused; }
+.world.moving .card .skeleton, .world.moving .card .skeleton::before, .world.moving .card .skeleton *, .world.moving .comp .skeleton::before, .world.moving .comp .skeleton * { animation-play-state: paused; }
 /* 卡片底白是恒定色，不跟工具主题走：这块白属于用户的设计稿，是他们 APP 的画布底，
    不是 Quilt 的外壳（VIS-010 的「确需恒定色」情形）。工具品牌只出现在卡片之外的 chrome 上。 */
 .card { position: absolute; left: 0; top: 0; background: #fff; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); outline: 2px solid transparent; outline-offset: 4px; transition: outline-color var(--duration-fast) var(--ease-out); }
@@ -221,13 +223,16 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 .card.focused { outline-color: var(--color-accent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 18%, transparent), 0 8px 30px rgba(0, 0, 0, 0.45); }
 .card .label { position: absolute; left: 0; top: -28px; color: var(--color-muted); font-size: 12px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .card .label b { color: var(--color-fg); }
-.card img, .card iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.card .shot, .card iframe { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+/* 底层接班（v0.76）：新截图解码完之前透明、叠在旧图上；聚焦的 iframe 就绪前透明、截图垫着，就绪后卡片加 live 把底层藏起 */
+.card .shot.pending, .card iframe.loading { opacity: 0; }
+.card.live .shot, .card.live .skeleton { visibility: hidden; }
 /* 生成中占位：设备线框 + 斜向光带扫过 + 状态标签；多张卡按 animation-delay 错开相位。
    这一层是 Quilt 在替尚未存在的用户界面占位，所以用品牌的浅承载面 Paper→Line 灰阶，
    而不是卡片本身的纯白（那块白属于用户的设计稿）。 */
-.card .skeleton { position: relative; isolation: isolate; width: 100%; height: 100%; overflow: hidden; background: var(--brand-paper); display: flex; flex-direction: column; gap: 14px; padding: 0 16px 0; }
+.card .skeleton, .comp .skeleton { position: relative; isolation: isolate; width: 100%; height: 100%; overflow: hidden; background: var(--brand-paper); display: flex; flex-direction: column; gap: 14px; padding: 0 16px 0; }
 /* 呼吸与扫光只动 opacity / transform：动 background-color、background-position 的话每一帧都要重绘，100 张骨架卡同时在动时 GPU 每帧超预算 */
-.card .skeleton::before { content: ""; position: absolute; inset: 0; z-index: -1; background: color-mix(in srgb, var(--brand-line) 30%, var(--brand-paper)); opacity: 0; animation: sk-breathe 2.4s ease-in-out infinite; animation-delay: inherit; pointer-events: none; }
+.card .skeleton::before, .comp .skeleton::before { content: ""; position: absolute; inset: 0; z-index: -1; background: color-mix(in srgb, var(--brand-line) 30%, var(--brand-paper)); opacity: 0; animation: sk-breathe 2.4s ease-in-out infinite; animation-delay: inherit; pointer-events: none; }
 .card .skeleton .sk { flex: none; border-radius: 10px; background: color-mix(in srgb, var(--brand-line) 55%, var(--brand-paper)); }
 .card .skeleton .sk-appbar { height: 56px; margin: 0 -16px; border-radius: 0; background: color-mix(in srgb, var(--brand-line) 40%, var(--brand-paper)); }
 .card .skeleton .sk-hero { height: 140px; margin-top: 4px; border-radius: 14px; }
@@ -245,7 +250,7 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 .card .skeleton.desktop .sk-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; background: none; }
 .card .skeleton.desktop .sk-grid i { height: 110px; border-radius: 12px; }
 .card .skeleton.desktop .sk-table { min-height: 160px; border-radius: 12px; }
-.card .skeleton .sk-sweep { position: absolute; top: 0; bottom: 0; left: 0; width: 75%; background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.75) 50%, transparent); animation: sk-sweep 1.8s ease-in-out infinite; animation-delay: inherit; }
+.card .skeleton .sk-sweep, .comp .skeleton .sk-sweep { position: absolute; top: 0; bottom: 0; left: 0; width: 75%; background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.75) 50%, transparent); animation: sk-sweep 1.8s ease-in-out infinite; animation-delay: inherit; }
 .card .skeleton .sk-label { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: color-mix(in srgb, var(--brand-ink) 78%, transparent); color: var(--color-on-accent); font-size: 12px; backdrop-filter: blur(6px); white-space: nowrap; }
 .card .skeleton .sk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); animation: sk-pulse 1.2s ease-in-out infinite; }
 @keyframes sk-breathe { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
@@ -260,6 +265,9 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 .card .gesture { position: absolute; inset: 0; cursor: default; }
 .card.dragging .gesture { cursor: grabbing; }
 .card .badge, .comp .badge { position: absolute; right: 8px; top: 8px; background: var(--color-accent); color: var(--color-on-accent); font-size: 11px; padding: 2px 8px; border-radius: 999px; pointer-events: none; }
+/* 聚焦的 iframe 重载后仍等不到就绪（v0.76）：角标换成可点的「加载失败 · 重试」，用警示色与正常角标区分 */
+.card .badge.failed { border: 0; background: var(--color-warn); color: var(--brand-ink); font-weight: 600; cursor: pointer; pointer-events: auto; }
+.card .badge.failed:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 /* 素材瓦片的底色（REQ-CORE-019）：品牌素材有白色版也有深墨版，固定一种底色必然有一半看不见，
    所以按图的平均亮度选底（lib/assetTone.ts）。这三种底都是恒定色而非主题色——它们衬的是用户的品牌资产，
    不是 Quilt 的外壳（VIS-010 的「确需恒定色」情形）。读不出亮度时用棋盘格，那是透明通道的通用指示。 */
@@ -304,7 +312,12 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 .comp.selected { outline-color: var(--color-accent); }
 .comp .label { position: absolute; left: 0; top: -28px; color: var(--color-muted); font-size: 12px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .comp .label b { color: var(--color-fg); }
-.comp iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; pointer-events: none; }
+/* iframe 恒按设备整屏渲染（宽高、平移写在内联样式里），露出哪一块全靠 .comp 的 overflow: hidden 裁：要让标签露到卡片外，得另加一层裁切，不能摘掉它 */
+.comp iframe { position: absolute; left: 0; top: 0; display: block; border: 0; background: #fff; pointer-events: none; opacity: 0; transition: opacity var(--duration-fast) var(--ease-out); }
+/* 尺寸上报之前（v0.76）：iframe 透明，垫屏卡片那一套骨架（浅承载面 + 呼吸 + 扫光），不画白板；上报后 iframe 淡入，
+   骨架等淡入走完再藏（visibility 按时长延后切），中间不露卡片白底 */
+.comp.live iframe { opacity: 1; }
+.comp.live .skeleton { visibility: hidden; transition: visibility 0s linear var(--duration-fast); }
 /* 交互态（REQ-EDIT-006）：手势罩已摘，指针交给 iframe；与屏聚焦同一套外框语言，但镜头不动 */
 .comp.focused { outline-color: var(--color-accent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 18%, transparent), 0 6px 22px rgba(0, 0, 0, 0.4); }
 .comp.focused iframe { pointer-events: auto; }
@@ -328,7 +341,7 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 @keyframes fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .fade-up { animation: fade-up var(--duration-base) var(--ease-out); }
 @media (prefers-reduced-motion: reduce) {
-  .card, .comp, .comp .live-dot, .fade-up, .card .skeleton, .card .skeleton::before, .card .skeleton .sk-sweep, .card .skeleton .sk-dot { transition: none; animation: none; }
+  .card, .comp, .comp .live-dot, .fade-up, .card .skeleton, .card .skeleton::before, .card .skeleton .sk-sweep, .card .skeleton .sk-dot, .comp iframe, .comp .skeleton, .comp .skeleton::before, .comp .skeleton .sk-sweep { transition: none; animation: none; }
   .composer { transition: none; }
   .slide-in-right { animation: fade-up var(--duration-fast) var(--ease-out); }
   /* 少而柔：换词与菜单只保留淡入，去掉位移、缩放与模糊 */
@@ -338,7 +351,7 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 
 /* 叠层屏（REQ-PROTO-005 v0.63）：截图带 alpha，卡片铺 45% 黑，与播放时运行时画的遮罩同值——那是遮罩的示意，不随主题变 */
 .card.overlay { background: rgb(0 0 0 / 0.45); }
-.card.overlay img { background: transparent; }
+.card.overlay .shot { background: transparent; }
 .card .label .chip { display: inline-block; margin-right: 6px; padding: 0 6px; border: 1px solid var(--color-line); border-radius: 999px; font-size: 10px; line-height: 16px; color: var(--color-muted); vertical-align: 1px; }
 
 /* 状态变体胶囊（REQ-CORE-025 v0.62）：聚焦卡内顶部中央一排，压在 iframe 之上。放在角标下一行：

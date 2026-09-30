@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { useParams, useSearchParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Bot, Component, Crosshair, Download, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MessageSquarePlus, Palette, Plus, Search, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
 import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, failureText, missingPagePrompt, type ProjectDetailDto, type MessageDto, type JobDto, type JobEventDto, type ScreenDto, type ComponentDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core';
-import { api, ApiError, loadConfig, subscribeProjectEvents } from '@/lib/api';
+import { api, ApiError, loadConfig, subscribeProjectEvents, type LiveState } from '@/lib/api';
+import { mergeMessages } from '@/lib/messages';
 import { useToast } from '@/lib/toast';
-import { Spinner } from '@/ui/ui';
+import { Button } from '@/ui/ui';
 import { TopNav } from '@/project/TopNav';
 import { ProjectSwitcher } from '@/project/ProjectSwitcher';
 import { SettingsModal } from '@/settings/SettingsModal';
@@ -43,6 +44,11 @@ const CMD = MAC ? '⌘' : 'Ctrl+';
 
 // 新建组件时的占位内容（REQ-EDIT-006）：建完立刻在输入框里描述它，第一句「改组件」就把它写出来
 const NEW_COMPONENT_HTML = '<div class="p-4 text-sm text-on-surface-variant">New component</div>';
+// 签名续取（v0.76）：截图签名至少有效 5 分钟、预览签名至少 10 分钟（API 的 stableExpiry），页面可见时距上次取到详情满 4 分钟就静默重取
+const RENEW_MS = 4 * 60_000;
+
+// 画布区取不到项目时的两种失败（v0.76）；null = 没失败（加载中或已就绪）
+type LoadFailure = { kind: 'not-found' } | { kind: 'failed'; reason: string } | null;
 
 // PAGE-CANVAS：画布 + 对话 + 修订/设计系统/检查器面板（面板状态进 URL，INT-020）
 // 顶栏的缩放百分比：缩放每帧都在变，放进页面 state 的话每一帧整页连同全部卡片重渲染一遍（100 屏时捏合缩放掉帧）。
@@ -59,6 +65,13 @@ function ZoomPct({ store }: { store: ReturnType<typeof zoomStore> }) {
   return <>{useSyncExternalStore(store.subscribe, store.get)}</>;
 }
 
+// 画布页按项目重挂（v0.76）：/p/:projectId 是同一个路由、切项目是客户端导航，不按项目换 key 的话选中、目标、锚点、版数、
+// 聚焦 / 交互态会带进下一个项目，上一个项目在途的详情晚到还会覆盖新项目、把画布卡在加载态。外壳在新页面的第一帧就画出来
+export function CanvasRoute() {
+  const { projectId = '' } = useParams();
+  return <CanvasPage key={projectId} />;
+}
+
 export function CanvasPage() {
   const { projectId = '' } = useParams();
   const [params, setParams] = useSearchParams();
@@ -73,7 +86,10 @@ export function CanvasPage() {
   const [unseenFailures, setUnseenFailures] = useState(0);
   // 预览域地址来自运行时配置（API-CORE-028）：打包后是 127.0.0.1:3101，开发是 preview.localhost:3101
   const [previewOrigin, setPreviewOrigin] = useState<string | null>(null);
-  useEffect(() => { loadConfig().then((c) => setPreviewOrigin(c.previewOrigin)).catch(() => toast('运行时配置加载失败', 'error')); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [configFailed, setConfigFailed] = useState(false);
+  const loadPreviewOrigin = useCallback(() => loadConfig().then((c) => { setConfigFailed(false); setPreviewOrigin(c.previewOrigin); }).catch(() => setConfigFailed(true)), []);
+  useEffect(() => { void loadPreviewOrigin(); }, [loadPreviewOrigin]);
+  const [loadFailure, setLoadFailure] = useState<LoadFailure>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   // 目标标签（REQ-CORE-006）与画布选中是两个状态：选中变化会写进目标，但清空选中（点空白 / Esc）不动目标。
   // 目标只经标签 × 与「清空」减少——发完一条、点空白看结果、追加指令，是最高频的用法，标签一清就会误造一张新屏。
@@ -109,7 +125,7 @@ export function CanvasPage() {
   const composerRef = useRef<ComposerHandle>(null);
   const safeAreaRef = useRef<HTMLDivElement>(null);
   // 生成通道 / 投递会话 / 动词模式三个跨会话偏好（REQ-CORE-011 / REQ-AGENT-003 / REQ-CORE-023）：见 useRunnerPrefs
-  const { runners, runnerId, applyCatalog, onRunnerChange, agentTool, sessionList, sessionId, loadSessions, lists, loadSessionsFor, onSessionChange, sendRunner, modelRunner, mode, onMode, chatRunners, chatRunnerId, chatRunner } = useRunnerPrefs();
+  const { runners, runnersFailed, loadRunners, runnerId, applyCatalog, onRunnerChange, agentTool, sessionList, sessionId, loadSessions, lists, loadSessionsFor, onSessionChange, sendRunner, modelRunner, mode, onMode, chatRunners, chatRunnerId, chatRunner } = useRunnerPrefs();
   const panel = (params.get('panel') as Panel) ?? null;
   const setPanel = useCallback((v: Panel) => setParams((q) => { if (v) q.set('panel', v); else q.delete('panel'); return q; }, { replace: true }), [setParams]);
   // 设置弹层的开关与当前节都在 URL 上（?settings=<节>，INT-020）：刷新保持，旧 /settings 路径重定向到这里；不认识的值回到第一节
@@ -126,7 +142,23 @@ export function CanvasPage() {
   // 组件卡也能选元素（v0.57）：它跑同一套运行时，qid 落在组件自己的 HTML 上
   const inspectMode = (inspectArmed || annotateArmed) && (!!focusedId || !!focusedComponentId);
 
-  const refreshMessages = useCallback(() => api.projects.messages(projectId).then((r) => setMessages(r.items)).catch(() => {}), [projectId]);
+  // 对话记录（v0.76）：请求按发起序号只认最新；快照与本页刚追加、快照里还没有的一轮按 id 合并（见 mergeMessages）。
+  // 首次取不到记成 error、就地给重试，取到过之后的失败保留已有内容
+  const [msgState, setMsgState] = useState<'loading' | 'ok' | 'error'>('loading');
+  const msgSeq = useRef(0);
+  const localRounds = useRef<MessageDto[]>([]);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const refreshMessages = useCallback(() => {
+    const seq = ++msgSeq.current;
+    return api.projects.messages(projectId).then((r) => {
+      if (seq !== msgSeq.current) return;
+      const ids = new Set(r.items.map((m) => m.id));
+      localRounds.current = localRounds.current.filter((m) => !ids.has(m.id));
+      setMessages(mergeMessages(r.items, localRounds.current));
+      setMsgState('ok');
+    }).catch(() => { if (seq === msgSeq.current) setMsgState((st) => (st === 'ok' ? st : 'error')); });
+  }, [projectId]);
   // 进行中作业的终态由 SSE 事件宣告；refresh 负责与后端对账：先剔除已经结束的（事件流与刷新之间的竞态会丢终态），
   // 再认领还没跟踪的（首次加载、MCP / 另一个标签页建的作业）。runner=agent 的作业由本机 agent 面板跟踪，不进这里（ADR-015）。
   // finishedRef 记住已宣告终态的 jobId：早于终态发出、晚于终态返回的那次 GET 还会列着它，没有这道白名单会把死作业重新认领回来
@@ -139,16 +171,28 @@ export function CanvasPage() {
   const beforeRef = useRef(new Map<string, Set<string>>());
   // 刚写出去、服务端还没回声的坐标（拖动与排列）归本地，服务端跟上即出栈——见 positions.ts 的 usePositionDrafts
   const drafts = usePositionDrafts();
-  const refresh = useCallback(async () => {
+  // 详情请求带发起序号：同一项目里两次刷新乱序返回时，旧的不覆盖新的（v0.76）。只丢早于最近一次已应用的回包——
+  // 只认最后发起的那一次的话，事件密集、GET 又慢于防抖间隔时，每个回包到达时都已被更晚的请求作废，详情一直不更新
+  const detailSeq = useRef(0);
+  const appliedSeq = useRef(0);
+  const lastFetch = useRef(0);
+  const hasDetail = useRef(false);
+  // quiet：签名续取、截图失败后的重取这类后台刷新，失败不打扰用户（断线有顶栏提示）
+  const refresh = useCallback(async ({ quiet = false }: { quiet?: boolean } = {}) => {
+    const seq = ++detailSeq.current;
     try {
       const d = await api.projects.get(projectId);
+      if (seq < appliedSeq.current) return d;
+      appliedSeq.current = seq;
+      lastFetch.current = Date.now();
+      hasDetail.current = true;
+      setLoadFailure(null);
       setDetail(drafts.reconcile(d));
       const live = new Set(d.activeJobs.map((j) => j.id));
       for (const id of live) seenRef.current.add(id);
       // 只剔除服务端确认过（某次 GET 列出过）的作业：刚建的作业可能还没进这次 GET 的快照，
       // 无条件剔除会让它的行闪一下又回来，重连的订阅还会从 seq 0 重放一遍
-      // 换项目时上一个项目的作业一律剔除：路由是同一个 /p/:projectId，组件不卸载，否则它会留着行、占着 busy 与造屏名额，Esc 还会取消别的项目的作业
-      const gone = activeJobsRef.current.filter((j) => j.projectId !== projectId || (!live.has(j.id) && seenRef.current.has(j.id)));
+      const gone = activeJobsRef.current.filter((j) => !live.has(j.id) && seenRef.current.has(j.id));
       if (gone.length) {
         const dead = new Set(gone.map((j) => j.id));
         setActiveJobs((prev) => prev.filter((j) => !dead.has(j.id)));
@@ -165,10 +209,28 @@ export function CanvasPage() {
       // 后端不再列出的作业不会再被认领，白名单到此为止——不让它随会话无声长大
       for (const id of finishedRef.current) if (!live.has(id)) finishedRef.current.delete(id);
       return d;
-    } catch (e) { toast(e instanceof ApiError ? e.problem.title : '项目加载失败', 'error'); return null; }
+    } catch (e) {
+      if (seq !== detailSeq.current) return null;
+      // 404 = 项目没了（书签指向已删项目、别的标签页刚删掉）：任何时候都转到「不存在」态，画布撤掉
+      if (e instanceof ApiError && e.status === 404) { hasDetail.current = false; setDetail(null); setLoadFailure({ kind: 'not-found' }); return null; }
+      if (!hasDetail.current) setLoadFailure({ kind: 'failed', reason: e instanceof ApiError ? e.problem.title : '连不上 Quilt 服务' });
+      else if (!quiet) toast(e instanceof ApiError ? e.problem.title : '项目加载失败', 'error');
+      return null;
+    }
   }, [projectId, toast, refreshMessages]);
 
   useEffect(() => { refresh(); refreshMessages(); }, [refresh, refreshMessages]);
+  const retryLoad = () => { setLoadFailure(null); setConfigFailed(false); void loadPreviewOrigin(); void refresh(); if (msgState !== 'ok') { setMsgState('loading'); void refreshMessages(); } };
+  // 签名续取（v0.76）：页面可见时每 30 s 看一次距上次取到详情满没满 RENEW_MS，从后台切回可见时立即看一次（休眠唤醒后计时器也会补跑）
+  useEffect(() => {
+    const check = () => { if (document.visibilityState === 'visible' && hasDetail.current && Date.now() - lastFetch.current >= RENEW_MS) void refresh({ quiet: true }); };
+    const t = window.setInterval(check, 30_000);
+    document.addEventListener('visibilitychange', check);
+    return () => { window.clearInterval(t); document.removeEventListener('visibilitychange', check); };
+  }, [refresh]);
+  // 卡片截图取不到（多半是签名过期）：静默重取，10 s 内至多一次
+  const shotRetryAt = useRef(0);
+  const onShotError = useCallback(() => { if (Date.now() - shotRetryAt.current < 10_000) return; shotRetryAt.current = Date.now(); void refresh({ quiet: true }); }, [refresh]);
   // 浏览器标签页写项目名：多个项目开在不同标签页时靠它分辨
   const projectName = detail?.project.name;
   useEffect(() => { document.title = projectName ? `${projectName} · Quilt` : 'Quilt'; return () => { document.title = 'Quilt'; }; }, [projectName]);
@@ -181,6 +243,20 @@ export function CanvasPage() {
   // 造完自动选中新屏（追加指令直接是改）；设计系统提案成功后弹预览
   const refreshTimer = useRef<number | null>(null);
   const scheduleRefresh = useCallback(() => { if (refreshTimer.current) window.clearTimeout(refreshTimer.current); refreshTimer.current = window.setTimeout(() => { refreshTimer.current = null; refresh(); }, 250); }, [refresh]);
+  useEffect(() => () => { if (refreshTimer.current) window.clearTimeout(refreshTimer.current); }, []);
+  // 项目事件流的连接状态（v0.76）：断开超过 3 s 才在顶栏露出（重连通常 1 s 内完成，不为它闪一下）；放弃重试后给「重连」
+  const [feed, setFeed] = useState<LiveState>('open');
+  const feedBroken = useRef(false);
+  const [feedShown, setFeedShown] = useState(false);
+  const [feedEpoch, setFeedEpoch] = useState(0);
+  useEffect(() => {
+    if (feed === 'open') { setFeedShown(false); return; }
+    if (feed === 'offline') { setFeedShown(true); return; }
+    const t = window.setTimeout(() => setFeedShown(true), 3000);
+    return () => window.clearTimeout(t);
+  }, [feed]);
+  // 别处发起的一轮（另一个标签页、MCP）：收到它的第一条非终态事件而本页消息里还没有这个作业时补取一次消息，每个作业只补一次
+  const askedJobs = useRef(new Set<string>());
   // 项目级事件（API-CORE-030 v0.34）：本机会话经 MCP 回写、别处建的作业、截图就绪都会到这里——刷新项目（聚焦中的屏走热更新），作业终态再刷消息
   // 一个标签页只开这一条长连接（API-CORE-030 / §16 连接预算）：浏览器对同源 HTTP/1.1 只给 6 条并发、
   // 且所有标签页共用，按作业各开一条的话多开两三个项目就把额度占满、普通请求全部排队。
@@ -190,10 +266,16 @@ export function CanvasPage() {
     const p = e.data as { jobId?: string; type?: string; seq?: number; data?: unknown } | undefined;
     if (!p?.jobId || !p.type) return;
     if (['succeeded', 'failed', 'cancelled'].includes(p.type)) refreshMessages();
+    else if (!askedJobs.current.has(p.jobId) && !messagesRef.current.some((m) => m.jobId === p.jobId)) { askedJobs.current.add(p.jobId); refreshMessages(); }
     const job = activeJobsRef.current.find((j) => j.id === p.jobId);
     // 别处建的作业（本机会话投递、另一个标签页发的）本页没跟踪，上面的整体重取已经覆盖
     if (job) onJobEvent.current(job, { type: p.type as JobEventDto['type'], data: p.data ?? {}, seq: p.seq ?? 0, at: e.at });
-  }), [projectId, scheduleRefresh, refreshMessages]);
+  }, (st) => {
+    setFeed(st);
+    // 事件不续传：断过之后重新连上就整体重取一次，补上断线期间丢掉的作业终态、截图就绪与回写
+    if (st !== 'open') { feedBroken.current = true; return; }
+    if (feedBroken.current) { feedBroken.current = false; void refresh({ quiet: true }); void refreshMessages(); }
+  }), [projectId, scheduleRefresh, refreshMessages, refresh, feedEpoch]);
   // 处理器放 ref：闭包每帧刷新，订阅不动
   const onJobEvent = useRef<(job: JobDto, e: JobEventDto) => void>(() => {});
   onJobEvent.current = (job, e) => {
@@ -293,7 +375,10 @@ export function CanvasPage() {
   // 隐藏参数胶囊只跟它那种动词走：出变体 / 补缺失页是造（没有目标屏），补链 / 按新约定重生成要有目标屏；本机会话接不了钉死路由的造
   const pinnedPreset = preset?.kind === 'variant' || preset?.kind === 'missing';
   const livePreset = mode !== 'chat' && preset && pinnedPreset === (targetScreens.length === 0) ? preset : null;
+  // 项目还没到手时发送与工具栏一律不可用，理由随加载 / 失败态写
+  const pendingReason = loadFailure?.kind === 'not-found' ? '这个项目不存在' : loadFailure || configFailed ? '项目没加载出来' : '项目还在加载';
   const blockedReason = useMemo(() => {
+    if (!detail) return pendingReason;
     if (mode === 'chat') return guardJobs.some((j) => j.kind === 'chat') ? CHAT_BUSY : null;
     const targets = targetScreens.slice(0, MAX_TARGETS);
     if (livePreset && pinnedPreset && sendRunner?.kind === 'agent') return '出变体、补缺失页请换一个模型通道，本机会话不接这类作业';
@@ -306,7 +391,7 @@ export function CanvasPage() {
     const hit = targets.filter((s) => busyScreens.has(s.id));
     if (!hit.length) return null;
     return hit.length === 1 ? `「${hit[0].name}」正在改，等这一轮完事` : `选中的 ${hit.length} 屏正在改（含「${hit[0].name}」），等这一轮完事`;
-  }, [targetScreens, targetComponents, anchor, busyScreens, generating, mode, guardJobs, livePreset, pinnedPreset, sendRunner?.kind]);
+  }, [detail, pendingReason, targetScreens, targetComponents, anchor, busyScreens, generating, mode, guardJobs, livePreset, pinnedPreset, sendRunner?.kind]);
   // 在跑作业按创建时间倒序：最新的在最上（Esc 取消的就是它，必须始终可见、不被折进「+N」）；时间相同取后加入的那个
   const runningJobs = useMemo(() => [...activeJobs].reverse().sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [activeJobs]);
   // 进度兜底收在这里：作业刚建、事件还没来时行与折叠横条都要有话说，不能看起来卡住
@@ -338,7 +423,9 @@ export function CanvasPage() {
   };
   // 一轮建好（发送 / 重试）：消息追加进记录；交给本机 agent 的已投递到会话，切到 agent 面板看状态，其余进在跑作业行
   const roundStarted = (r: { userMessage: MessageDto; assistantMessage: MessageDto; job: JobDto }) => {
-    setMessages((m) => [...m, r.userMessage, r.assistantMessage]);
+    // 先记进本地追加：较早发起、晚到的消息快照不会把它抹掉；快照先到、已经带着这一轮的话不再追加（按 id 去重）
+    localRounds.current = [...localRounds.current, r.userMessage, r.assistantMessage];
+    setMessages((m) => (m.some((x) => x.id === r.userMessage.id) ? m : [...m, r.userMessage, r.assistantMessage]));
     setFollowSeq((n) => n + 1);
     if (r.job.runner === 'agent') { refresh(); setPanel('agent'); }
     else trackJob(r.job);
@@ -592,8 +679,10 @@ export function CanvasPage() {
   const blocked = confirmDelete || !!missing || !!proposal || !!settingsSection || newComponentOpen || finderOpen || !!variantFor;
   const closeModals = () => { setConfirmDelete(false); setMissing(null); setProposal(null); setNewComponentOpen(false); setFinderOpen(false); setVariantFor(null); if (settingsSection) setSettings(null); };
   const deletable = (selectedScreens.length > 0 || selectedComponents.length > 0) && !focusedId;
+  // 适配视图：缩到下限仍装不下全部时说一声，不静默裁掉（v0.76）
+  const fitAll = () => { if (canvasApi.current && !canvasApi.current.fitView()) toast(`内容太大，最小缩放也装不下全部，用小地图或找屏（${CMD}K）定位`); };
   const plain: Record<string, (() => void) | undefined> = {
-    KeyF: () => canvasApi.current?.fitView(),
+    KeyF: () => fitAll(),
     KeyL: toggleLinks,
     Delete: deletable ? () => setConfirmDelete(true) : undefined,
     Backspace: deletable ? () => setConfirmDelete(true) : undefined,
@@ -604,7 +693,7 @@ export function CanvasPage() {
     KeyR: selected && !focusedId ? () => setPanel(panel === 'revisions' ? null : 'revisions') : undefined,
     KeyN: toggleAnnotate,
     KeyG: () => canvasApi.current?.createAtCenter(),
-    KeyC: () => setNewComponentOpen(true),
+    KeyC: detail ? () => setNewComponentOpen(true) : undefined,
     KeyS: () => setPanel(panel === 'screens' ? null : 'screens'),
     KeyV: selected && !selected.variantOf && !focusedId ? () => { if (generating) toast(GENERATE_BUSY, 'error'); else setVariantFor(selected); } : undefined,
   };
@@ -645,16 +734,14 @@ export function CanvasPage() {
   // 检查器字段刷成新值；元素真没了（被删 / 子树重生成换了 qid）运行时回 deselect 才清
   useEffect(() => { setElementSel(null); }, [focusedId, focusedComponentId]);
 
-  // detail.project.id !== projectId：切项目是客户端导航，CanvasPage 不卸载、detail 还是上一个项目的数据。
-  // 拿它渲染画布的后果不只是闪一下别人的卡片——CanvasView 的一次性适配会按上一个项目的屏算镜头，
-  // 还把这个算错的镜头存进新项目的 quilt:view 键，此后每次打开都开在那儿（存过就不再适配）。
-  if (!detail || detail.project.id !== projectId || !tokens || !previewOrigin) return <div className="relative h-full"><TopNav floating /><Spinner label="加载项目…" /></div>;
+  // 外壳常驻（v0.76）：顶栏、对话记录、输入框、工具栏在加载与失败时照样画，只有画布区换成加载 / 失败态
+  const ready = !!detail && !!tokens && !!previewOrigin;
+  const failure: LoadFailure = loadFailure ?? (configFailed ? { kind: 'failed', reason: '运行时配置取不到' } : null);
   const jobBlocked = busy ? '有作业进行中，等它完成' : screens.length === 0 ? '还没有屏幕' : false;
-  const screenSize = DEVICE_SIZE[detail.project.deviceType];
 
   const tools: Tool[][] = [
     [
-      { id: 'fit', label: '适配视图', hint: 'F', desc: '缩放画布，把全部屏幕和风格指南卡片一次装进视野', icon: <Maximize2 size={ICON} />, onSelect: () => canvasApi.current?.fitView() },
+      { id: 'fit', label: '适配视图', hint: 'F', desc: '缩放画布，把全部屏幕和风格指南卡片一次装进视野', icon: <Maximize2 size={ICON} />, onSelect: fitAll },
       { id: 'find', label: '找屏', hint: `${CMD}K`, desc: '按名字、路由或用途搜屏与组件，Enter 跳过去并选中', icon: <Search size={ICON} />, testId: 'find-screen', onSelect: () => setFinderOpen(true) },
       { id: 'screens', label: '屏列表', hint: `${ALT}S`, desc: '按画布顺序列出全部屏，可按断链 / 待选候选 / 有偏离 / 正在改筛选，点一行跳过去', icon: <LayoutList size={ICON} />, active: panel === 'screens', testId: 'toggle-screens', onSelect: () => setPanel(panel === 'screens' ? null : 'screens') },
       { id: 'minimap', label: '小地图', desc: '左上角的缩略图：画出全部屏与当前视口，点哪儿镜头就到哪儿', icon: <MapIcon size={ICON} />, active: minimapOn, testId: 'toggle-minimap', onSelect: toggleMinimap },
@@ -677,7 +764,7 @@ export function CanvasPage() {
       { id: 'revisions', label: '修订', hint: `${ALT}R`, desc: '这一屏的历史版本与候选，可回溯到任意一版（修订链是单屏概念，只在恰好选中一屏时可用）', icon: <History size={ICON} />, active: panel === 'revisions', onSelect: () => setPanel(panel === 'revisions' ? null : 'revisions') } satisfies Tool,
       { id: 'variant', label: '出变体', hint: `${ALT}V`, desc: '给这一屏出一个状态变体（空态、出错、未登录…）：同路由同布局，只改状态那部分；播放时可切换', icon: <SquareStack size={ICON} />, testId: 'new-variant', unavailable: selected.variantOf ? '选它的默认屏再出变体' : generating ? GENERATE_BUSY : false, onSelect: () => setVariantFor(selected) } satisfies Tool,
       { id: 'presentation', label: selected.presentation === 'overlay' ? '设为整屏' : '设为叠层', desc: selected.presentation === 'overlay' ? '现在是叠层屏：播放时压在来处那一屏上。改回整屏后跳转时换掉整个画面' : '把它当弹层 / 底部抽屉：播放时压在来处那一屏上，点遮罩或后退关掉。只改呈现方式，不重生成', icon: <Layers size={ICON} />, testId: 'toggle-presentation', active: selected.presentation === 'overlay', onSelect: () => void togglePresentation() } satisfies Tool,
-      { id: 'exemplar', label: detail.project.exemplarScreenId === selected.id ? '样板屏' : '设为样板', desc: '生成和修改时都以样板屏为风格参照（密度、间距、组件用法）', icon: <Star size={ICON} />, testId: 'set-exemplar', active: detail.project.exemplarScreenId === selected.id, unavailable: detail.project.exemplarScreenId === selected.id ? '这一屏已经是样板屏' : !selected.currentRevisionId ? '这一屏还没生成完' : false, onSelect: setExemplar } satisfies Tool,
+      { id: 'exemplar', label: detail?.project.exemplarScreenId === selected.id ? '样板屏' : '设为样板', desc: '生成和修改时都以样板屏为风格参照（密度、间距、组件用法）', icon: <Star size={ICON} />, testId: 'set-exemplar', active: detail?.project.exemplarScreenId === selected.id, unavailable: detail?.project.exemplarScreenId === selected.id ? '这一屏已经是样板屏' : !selected.currentRevisionId ? '这一屏还没生成完' : false, onSelect: setExemplar } satisfies Tool,
     ] : []),
     { id: 'delete', label: selectedComponents.length ? `删除 ${selectedScreens.length + selectedComponents.length} 项` : selectedScreens.length > 1 ? `删除 ${selectedScreens.length} 屏` : '删除', hint: 'Del', desc: selectedComponents.length ? '删掉选中的屏（连同修订历史）与组件；组件在屏里已展开的那份留着，只是不再跟着改' : '删掉选中的屏及其修订历史，指向它们的链接会变成断链', icon: <Trash2 size={ICON} />, onSelect: () => setConfirmDelete(true) },
   ]);
@@ -690,8 +777,8 @@ export function CanvasPage() {
     { id: 'exit', label: '退出交互', hint: 'Esc', desc: '结束屏内交互，回到画布', icon: <X size={ICON} />, onSelect: () => { setFocusedId(null); setFocusedComponentId(null); } },
   ]);
 
-  const panelBody =
-    panel === 'revisions' && selected ? <RevisionPanel screen={selected} onClose={() => setPanel(null)} onRestored={refresh} />
+  const panelBody = !detail ? null
+    : panel === 'revisions' && selected ? <RevisionPanel screen={selected} onClose={() => setPanel(null)} onRestored={refresh} />
     : panel === 'design' ? <DesignPanel ds={detail.designSystem} project={detail.project} screens={screens} assets={detail.assets} busy={busy} onClose={() => setPanel(null)} onSaved={refresh} onApplyAll={applyDesignSystem} onPropose={(i) => propose(i)} />
     : panel === 'screens' ? <ScreensPanel screens={screens} links={detail.links} busy={busyScreens} onPick={(id) => reveal({ kind: 'screen', id })} onClose={() => setPanel(null)} />
     : panel === 'agent' ? <AgentJobsPanel projectId={projectId} screens={screens} runners={runners} onClose={() => setPanel(null)} onChanged={refresh} />
@@ -705,13 +792,12 @@ export function CanvasPage() {
       {/* 可用区探针：四边跟着浮层占位的 CSS 变量走，画布只负责测量它，避免两处各写一套数 */}
       <div ref={safeAreaRef} aria-hidden="true" data-testid="safe-area" className="pointer-events-none absolute bottom-[var(--chrome-bottom)] left-[var(--chrome-left)] right-[var(--chrome-right)] top-[var(--chrome-top)]" />
       <div className="absolute inset-0">
+        {ready && detail && tokens && previewOrigin ? (
           <CanvasView
-            // 换项目就换一张画布：视图位置是按项目记的（quilt:view:<id>），不重挂会把上一个项目的镜头带过来
-            key={projectId}
             projectId={projectId} safeAreaRef={safeAreaRef}
             projectName={detail.project.name} tokens={tokens} palette={detail.designSystem.palette} colorMode={detail.designSystem.colorMode} assets={detail.assets} screens={screens} links={detail.links} previewOrigin={previewOrigin}
             selectedIds={selectedIds} focusedId={focusedId} styleGuideSelected={panel === 'design'} inspectMode={inspectMode} annotateMode={annotateMode} armed={inspectArmed ? 'inspect' : annotateArmed ? 'annotate' : null} showLinks={showLinks}
-            anchor={anchor} screenSize={screenSize} exemplarScreenId={detail.project.exemplarScreenId}
+            anchor={anchor} screenSize={DEVICE_SIZE[detail.project.deviceType]} exemplarScreenId={detail.project.exemplarScreenId}
             onSelect={(id, additive) => { setSelectedId(id, additive); if (!id && panel === 'revisions') setPanel(null); }}
             onSelectMany={(ids, compIds, additive) => { setSelectedIds((prev) => (additive ? [...new Set([...prev, ...ids])] : ids)); setSelectedComponentIds((prev) => (additive ? [...new Set([...prev, ...compIds])] : compIds)); }}
             onSelectStyleGuide={() => { setSelectedIds([]); setSelectedComponentIds([]); setPanel('design'); }}
@@ -737,18 +823,28 @@ export function CanvasPage() {
             registerApi={(a) => { canvasApi.current = a; }}
             minimap={minimapOn}
             onShown={setShownScreenId}
-          navStack={navStack} setNavStack={setNavStack}
-        />
+            navStack={navStack} setNavStack={setNavStack}
+            onStale={() => refresh({ quiet: true })} onShotError={onShotError}
+            onPreviewError={(s) => toast(`「${s.name}」这一屏没取到，稍后再试一次`, 'error')}
+          />
+        ) : <CanvasPending failure={failure} onRetry={retryLoad} />}
       </div>
       {/* 多选排列条（REQ-CORE-018）：选中 ≥ 2 屏且没聚焦时出现在画布顶部中央；候选就地展开时让位。排版与键盘在 ArrangeBar，算位在 arrange.ts，落库在 positions.ts */}
       {selectedScreens.length >= 2 && !focusedId && !inspectArmed && !annotateArmed && !candidates && <ArrangeBar count={selectedScreens.length} yieldToPanel={!!panelBody} onArrange={(k) => void arrange(k, selectedScreens)} />}
       <TopNav floating right={<>
-        <span className="shrink-0 whitespace-nowrap text-xs text-muted tabular-nums" data-testid="stat">{screens.length} 屏 · <ZoomPct store={zoomStat} />%</span>
+        {feedShown && feed !== 'open' && (
+          <span role="status" data-testid="live-status" className="min-w-0 truncate whitespace-nowrap rounded-full border border-warn/60 px-2 py-0.5 text-[11px] text-warn">
+            实时更新已断开 · {feed === 'offline'
+              ? <button type="button" onClick={() => { setFeed('reconnecting'); setFeedEpoch((n) => n + 1); }} className="underline underline-offset-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">重连</button>
+              : '重连中'}
+          </span>
+        )}
+        {detail && <span className="shrink-0 whitespace-nowrap text-xs text-muted tabular-nums" data-testid="stat">{screens.length} 屏 · <ZoomPct store={zoomStat} />%</span>}
         <button ref={settingsBtnRef} type="button" data-testid="open-settings" aria-haspopup="dialog" aria-expanded={!!settingsSection} onClick={() => setSettings('usage')}
           className="shrink-0 whitespace-nowrap rounded-md px-1.5 py-1 text-xs text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">设置</button>
       </>}>
-        <ProjectSwitcher current={detail.project} onRenamed={(id) => { if (id === projectId) refresh(); }} />
-        <span className="shrink-0 whitespace-nowrap rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">{detail.project.deviceType === 'mobile' ? '手机' : '桌面'}</span>
+        <ProjectSwitcher current={detail?.project ?? null} placeholder={failure?.kind === 'not-found' ? '项目不存在' : failure ? '项目没加载出来' : '加载中…'} onRenamed={(id) => { if (id === projectId) refresh(); }} />
+        {detail && <span className="shrink-0 whitespace-nowrap rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">{detail.project.deviceType === 'mobile' ? '手机' : '桌面'}</span>}
         {(selectedScreens.length > 0 || selectedComponents.length > 0) && !focusedId && (
           <span className="ml-1 min-w-0 truncate whitespace-nowrap text-xs text-muted" data-testid="selection-stat">
             已选 {selectedScreens.length === 0
@@ -760,7 +856,9 @@ export function CanvasPage() {
       </TopNav>
       {settingsSection && <SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} returnTo={settingsBtnRef} onCatalog={applyCatalog} />}
       <ChatDock messages={messages} progress={progress} status={jobStatus} collapsed={chatCollapsed} onToggle={() => { if (chatCollapsed) setUnseenFailures(0); toggleChat(); }} onRemember={rememberConvention} busy={busy}
-        onRetry={(u) => void retryRound(u)} onEdit={(u) => void editRound(u)} runningJobIds={runningJobIds} retrying={retrying} followSeq={followSeq} failed={unseenFailures} />
+        onRetry={(u) => void retryRound(u)} onEdit={(u) => void editRound(u)} runningJobIds={runningJobIds} retrying={retrying} followSeq={followSeq} failed={unseenFailures}
+        // 项目不存在时消息自然也取不到：那不是「没加载出来」，画布区已经说明了
+        loadState={msgState === 'ok' || loadFailure?.kind === 'not-found' ? undefined : msgState} onReload={() => { setMsgState('loading'); void refreshMessages(); }} />
       <Composer
         handle={composerRef} safeAreaRef={safeAreaRef} running={running} blockedReason={blockedReason} targets={targetScreens} totalScreens={screens.length} anchor={anchor} maxTargets={MAX_TARGETS}
         componentTargets={targetComponents}
@@ -772,15 +870,16 @@ export function CanvasPage() {
         onClearTargets={() => { setTargetIds([]); setSelectedIds([]); setTargetComponentIds([]); setSelectedComponentIds([]); setAnchor(null); setPreset(null); }}
         preset={livePreset ? presetView(livePreset, screens, Math.min(targetScreens.length, MAX_TARGETS), versions) : null} onRemovePreset={() => setPreset(null)}
         mode={mode} onMode={onMode}
-        runners={mode === 'chat' ? chatRunners : runners} runnerId={mode === 'chat' ? chatRunnerId : runnerId} onRunnerChange={onRunnerChange}
+        runners={mode === 'chat' ? chatRunners : runners} runnersFailed={runnersFailed} onReloadRunners={() => void loadRunners()} runnerId={mode === 'chat' ? chatRunnerId : runnerId} onRunnerChange={onRunnerChange}
         sessions={sessionList.items} sessionsReason={sessionList.reason} sessionTool={agentTool} sessionId={sessionId} onSessionChange={onSessionChange} onSessionsOpen={loadSessions}
         hidden={!composerVisible} onResize={setComposerH}
       />
-      <CanvasToolbar groups={tools} />
+      {/* 项目没到手时只留三个本机开关可用，其余写明为什么用不了 */}
+      <CanvasToolbar groups={ready ? tools : tools.map((g) => g.map((t) => (['composer', 'minimap', 'links'].includes(t.id) ? t : { ...t, unavailable: pendingReason })))} />
       {panelBody && <div key={panel} className="chrome slide-in-right absolute bottom-4 right-[var(--rail-w)] top-16 z-20 flex w-[var(--panel-w)] flex-col overflow-hidden rounded-xl">{panelBody}</div>}
-      {proposal && <ProposalDialog proposal={proposal} ds={detail.designSystem} busy={busy} onConfirm={confirmProposal} onClose={() => setProposal(null)} />}
+      {proposal && detail && <ProposalDialog proposal={proposal} ds={detail.designSystem} busy={busy} onConfirm={confirmProposal} onClose={() => setProposal(null)} />}
       {newComponentOpen && <NewComponentDialog onCreate={createComponent} onClose={() => setNewComponentOpen(false)} />}
-      {finderOpen && <ScreenFinder screens={screens} components={components} links={detail.links} busy={busyScreens} onPick={(pick) => { setFinderOpen(false); reveal(pick); }} onClose={() => setFinderOpen(false)} />}
+      {finderOpen && detail && <ScreenFinder screens={screens} components={components} links={detail.links} busy={busyScreens} onPick={(pick) => { setFinderOpen(false); reveal(pick); }} onClose={() => setFinderOpen(false)} />}
       {variantFor && <VariantDialog base={variantFor} onCreate={createVariant} onClose={() => setVariantFor(null)} />}
       {confirmDelete && (selectedScreens.length > 0 || selectedComponents.length > 0) && <DeleteDialog screens={selectedScreens} components={selectedComponents} selected={selected} variantCount={screens.filter((s) => s.variantOf && selectedIds.includes(s.variantOf) && !selectedIds.includes(s.id)).length} onConfirm={onDelete} onClose={() => setConfirmDelete(false)} />}
       {missing && <MissingDialog missing={missing} busyReason={generating ? GENERATE_BUSY : false} onGenerate={generateMissing} onClose={() => setMissing(null)} />}
@@ -788,3 +887,30 @@ export function CanvasPage() {
   );
 }
 
+// 画布区的加载 / 失败态（v0.76）：外壳照常，只有这一块换。加载中是空画布加一枚状态胶囊（300 ms 后才显形，快的时候不闪）；
+// 失败写明发生了什么与下一步（IA-009）：项目不存在 → 回到最近的项目；其余 → 重试。
+// 摆在可用区（与画布的 safe-area 探针同一组 CSS 变量）中央、层级压过对话记录：窄视口下对话记录盖在画布上，出口不能被它挡住
+function CanvasPending({ failure, onRetry }: { failure: LoadFailure; onRetry: () => void }) {
+  const navigate = useNavigate();
+  return (
+    <div className="viewport" data-testid="canvas-pending" data-state={failure?.kind ?? 'loading'}>
+      <div className="pointer-events-none absolute bottom-[var(--chrome-bottom)] left-[var(--chrome-left)] right-[var(--chrome-right)] top-[var(--chrome-top)] z-[25] grid place-items-center p-4">
+      {!failure ? (
+        <div role="status" className="pending-in chrome flex items-center gap-2 rounded-full px-3.5 py-2 text-xs text-muted">
+          <span className="size-3.5 animate-spin rounded-full border-2 border-muted border-r-transparent motion-reduce:animate-none" aria-hidden="true" />加载项目…
+        </div>
+      ) : (
+        <div role="alert" className="pointer-events-auto fade-up chrome w-[min(24rem,100%)] rounded-xl p-4">
+          <p className="text-sm font-semibold text-fg">{failure.kind === 'not-found' ? '这个项目不存在或已被删除' : '项目没加载出来'}</p>
+          <p className="mt-1 text-xs text-muted leading-cn">{failure.kind === 'not-found' ? '可能在别的标签页里删掉了，或者链接里的项目 id 不对。' : `${failure.reason}。确认 Quilt 还在运行，然后重试。`}</p>
+          <div className="mt-3">
+            {failure.kind === 'not-found'
+              ? <Button variant="primary" size="sm" onClick={() => navigate('/')}>回到最近的项目</Button>
+              : <Button variant="primary" size="sm" onClick={onRetry}>重试</Button>}
+          </div>
+        </div>
+      )}
+      </div>
+    </div>
+  );
+}

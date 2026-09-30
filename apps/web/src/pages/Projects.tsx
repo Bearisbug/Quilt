@@ -1,4 +1,5 @@
-import { EmptyState } from '@/ui/ui';
+import { useRouteError } from 'react-router';
+import { Button, EmptyState } from '@/ui/ui';
 import { TopNav } from '@/project/TopNav';
 import { BrandSymbol } from '@/ui/BrandMark';
 import { CreateProjectDialog } from '@/project/CreateProjectDialog';
@@ -15,6 +16,21 @@ export function FirstProjectPage() {
         <EmptyState title="还没有项目" hint="新建一个项目，用一句话描述你的 APP，Quilt 会生成整套屏幕摆到画布上。" />
       </main>
       <CreateProjectDialog />
+    </div>
+  );
+}
+
+// 根路径取项目列表失败（v0.76）：API 没起来、网络断了。中文说明 + 重试，不落到路由库的英文默认错误页
+export function RootError() {
+  const error = useRouteError();
+  const detail = error instanceof Error ? error.message : '';
+  return (
+    <div className="flex h-full flex-col">
+      <TopNav />
+      <main className="flex flex-1 flex-col items-center justify-center p-6">
+        <EmptyState title="没连上 Quilt 服务" hint={`取项目列表失败${detail ? `（${detail}）` : ''}。确认 Quilt 还在运行（启动它的终端没有关掉），然后重试。`}
+          action={<Button variant="primary" onClick={() => window.location.reload()}>重试</Button>} />
+      </main>
     </div>
   );
 }

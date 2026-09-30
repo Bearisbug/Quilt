@@ -48,6 +48,9 @@ export type ComposerProps = {
   onRemovePreset: () => void;
   /** 生成通道（REQ-CORE-011）：这一轮由谁来做；聊天模式下父组件只传 agent-sdk 通道（REQ-CORE-023） */
   runners: RunnerOptionDto[];
+  /** 通道清单没取到（v0.76）：通道位写明并给重试，不当成空 */
+  runnersFailed?: boolean;
+  onReloadRunners?: () => void;
   runnerId: string;
   onRunnerChange: (id: string) => void;
   /** 本机 agent（REQ-AGENT-003 v0.34 / v0.68）：通道是「交给本机 Claude Code / Codex」时还要选投给哪个会话；列表打开时由父组件刷新，null = 还没取到；
@@ -224,7 +227,7 @@ export function Composer(p: ComposerProps) {
 
   const uploading = shots.some((s) => !s.id);
   // 冲突之外挡住发送的本地原因：按 Enter 被它们挡住时写在冲突理由同一行，原因消失即撤（REQ-CORE-020 v0.74）
-  const localReason = uploading ? '参考图还在上传' : !sessionOk ? '先选要投递的会话' : !chatChannelOk ? '先添加「本机 Claude 订阅」通道' : null;
+  const localReason = uploading ? '参考图还在上传' : !sessionOk ? '先选要投递的会话' : !chatChannelOk ? (p.runnersFailed ? '通道清单没加载出来，先重试' : '先添加「本机 Claude 订阅」通道') : null;
   const [nudged, setNudged] = useState(false);
   useEffect(() => { if (!localReason) setNudged(false); }, [localReason]);
   const shownReason = p.blockedReason ?? (nudged ? localReason : null);
@@ -413,8 +416,12 @@ export function Composer(p: ComposerProps) {
           {/* 动词段控（REQ-CORE-023）：造 / 改（动词由目标决定）与聊天（范围由助手定）并列；选择是个人偏好，父组件跨会话记忆 */}
           <Segmented label="动词：造 / 改，或聊天" testId="mode" value={p.mode} options={[{ value: 'design', label: '造 / 改' }, { value: 'chat', label: '聊天' }]} onChange={p.onMode} />
           {/* 通道选择（REQ-CORE-011）。清单来自服务端，只含标识与显示名；聊天模式只列 agent-sdk 通道，一条都没有就就地写明去哪加（INT-013） */}
-          {p.runners.length > 0 && <RunnerSelect runners={p.runners} value={p.runnerId} onChange={p.onRunnerChange} />}
-          {chat && !chatChannelOk && (
+          {p.runnersFailed ? (
+            <button type="button" data-testid="runners-failed" onClick={p.onReloadRunners} className="min-w-0 truncate rounded-md px-1.5 py-1 text-xs text-warn transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">
+              通道清单没加载出来 · 重试
+            </button>
+          ) : p.runners.length > 0 && <RunnerSelect runners={p.runners} value={p.runnerId} onChange={p.onRunnerChange} />}
+          {chat && !chatChannelOk && !p.runnersFailed && (
             <button type="button" data-testid="chat-no-channel" onClick={() => navigate('?settings=runners')} className="min-w-0 truncate rounded-md px-1.5 py-1 text-xs text-warn transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">
               聊天需要「本机 Claude 订阅」通道，去设置页添加
             </button>

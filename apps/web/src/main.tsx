@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider, redirect } from 'react-router';
 import { api } from '@/lib/api';
 import { ToastProvider } from '@/lib/toast';
-import { FirstProjectPage } from '@/pages/Projects';
-import { CanvasPage } from '@/pages/Canvas';
+import { FirstProjectPage, RootError } from '@/pages/Projects';
+import { CanvasRoute } from '@/pages/Canvas';
 import './styles.css';
 
 // 画布即主界面（§13 导航 v0.28 / v0.32 本地版无登录）：直接进最近更新的项目；一个项目都没有才落到 PAGE-FIRST
@@ -15,9 +15,9 @@ async function latestProjectId(): Promise<string | null> {
 }
 
 const router = createBrowserRouter([
-  { path: '/', loader: async () => { const id = await latestProjectId(); return id ? redirect(`/p/${id}`) : null; }, element: <FirstProjectPage /> },
+  { path: '/', loader: async () => { const id = await latestProjectId(); return id ? redirect(`/p/${id}`) : null; }, element: <FirstProjectPage />, errorElement: <RootError /> },
   { path: '/projects', loader: () => redirect('/') },
-  { path: '/p/:projectId', element: <CanvasPage /> },
+  { path: '/p/:projectId', element: <CanvasRoute /> },
   // 旧的设置页路径：设置现在是画布上的弹层。从某个画布页点进来的（loader 跑的时候地址栏还是原页面）留在那个项目里，
   // 直接打开的去最近更新的项目；没有项目就回 /
   { path: '/settings', loader: async () => {

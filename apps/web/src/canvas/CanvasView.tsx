@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { XYPanZoom, PanOnScrollMode, getViewportForBounds, type PanZoomInstance, type Viewport } from '@xyflow/system';
 import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type AnnotationDto, type ComponentDto } from '@quilt/core';
 import { StyleGuideCard, STYLE_GUIDE_SIZE, styleGuideSize } from '@/canvas/StyleGuideCard';
@@ -79,24 +79,45 @@ export type CanvasProps = {
   onShown?: (screenId: string | null) => void;
   navStack: string[];
   setNavStack: (f: (s: string[]) => string[]) => void;
+  /** 手里的签名可能过期了（v0.76）：静默重取项目详情，返回新详情（取不到为 null）；聚焦 iframe 等不到就绪、屏内取页失败时用 */
+  onStale?: () => Promise<{ screens: ScreenDto[] } | null>;
+  /** 卡片截图加载失败（多半是签名过期）：父页节流后静默重取 */
+  onShotError?: () => void;
+  /** 屏内跳转 / 切变体 / 后退重摆 / 热更新取不到目标屏（重取签名后仍失败）：父页 toast 说明 */
+  onPreviewError?: (screen: ScreenDto) => void;
 };
 
 // 画布对外 API（Canvas.tsx 经 registerApi 取）：reveal 把一张卡摆到可用区中央（找屏 / 屏列表用），panTo 平移镜头中心到世界坐标（小地图用），
 // onView 订阅视图变换（每帧都在变，不经 props）
 export type CanvasApi = {
-  fitView: () => void; goBack: () => void; highlight: (qid: string | null) => void; focus: (id: string) => void; resetToOwn: () => void; createAtCenter: () => void; markDone: (qids: string[]) => void;
+  /** false = 缩到下限 MIN_ZOOM 仍装不下全部 */
+  fitView: () => boolean; goBack: () => void; highlight: (qid: string | null) => void; focus: (id: string) => void; resetToOwn: () => void; createAtCenter: () => void; markDone: (qids: string[]) => void;
   reveal: (id: string) => void; panTo: (x: number, y: number) => void; onView: (cb: (v: ViewInfo) => void) => () => void;
 };
 
 const STYLE_GUIDE_POS = { x: -(STYLE_GUIDE_SIZE.w + 80), y: 0 };
-// 存下来的镜头要按当前数据校验再用（INT-019）：缩放超出 panzoom 的 [0.1, 2] 或存进去的是 NaN / 旧格式，
+// 缩放下限（v0.76）：25 张桌面屏横排约 34000 px，下限取 0.1 的话适配视图有 6 屏整张在视口外。
+// 适配视图、画布与屏内捏合、存储镜头校验都用它
+const MIN_ZOOM = 0.02;
+// 组件卡尺寸没记过时的紧凑占位高度（v0.76）：按设备整屏占位的话，每次加载都是一块 844 高的白板
+const COMP_PLACEHOLDER_H = 64;
+// 存下来的镜头要按当前数据校验再用（INT-019）：缩放超出 panzoom 的 [MIN_ZOOM, 2] 或存进去的是 NaN / 旧格式，
 // 一律当没存过回默认，别把画布恢复成一片空白或卡在够不着的倍率上。
 function readView(key: string): Viewport | null {
   try {
     const v = JSON.parse(localStorage.getItem(key) ?? 'null') as Viewport | null;
     if (!v || ![v.x, v.y, v.zoom].every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
-    return v.zoom >= 0.1 && v.zoom <= 2 ? v : null;
+    return v.zoom >= MIN_ZOOM && v.zoom <= 2 ? v : null;
   } catch { return null; }
+}
+// 组件卡量到的框按项目记在本机（quilt:comp-size:<projectId>，v0.76）：刷新、切项目回来首帧就是真实尺寸，不会从占位跳到终值。
+// 框是根元素在设备整屏视口里的位置与尺寸：卡片取 w×h，iframe 平移 (−x, −y) 让根元素对齐卡片左上角
+type CompBox = { x: number; y: number; w: number; h: number };
+function readCompSizes(key: string): Record<string, CompBox> {
+  try {
+    const m = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, CompBox>;
+    return Object.fromEntries(Object.entries(m).filter(([, v]) => v && [v.x, v.y, v.w, v.h].every((n) => typeof n === 'number' && Number.isFinite(n)) && v.w > 0 && v.h > 0));
+  } catch { return {}; }
 }
 const omit = <T,>(m: Record<string, T>, ids: string[]) => { const rest = { ...m }; for (const id of ids) delete rest[id]; return rest; };
 
@@ -113,6 +134,10 @@ export function CanvasView(p: CanvasProps) {
   viewKeyRef.current = viewKey;
   const [savedView] = useState<Viewport | null>(() => readView(viewKey));
   const vp = useRef<Viewport>(savedView ?? { x: 80, y: 80, zoom: 0.5 });
+  // 自动适配（首帧、首批屏到达、组件尺寸首次量完）施加的变换不落盘、不算用户动过镜头（v0.76）：与手动一样落盘的话，
+  // 按未量尺寸算出的镜头会被当成用户摆好的存下来，此后每次打开都停在那儿。touched = 用户摆过镜头（存过的也算），之后不再自动适配
+  const autoView = useRef(false);
+  const touched = useRef(!!savedView);
   const [initialWorldStyle] = useState<CSSProperties>(() => ({
     transform: `translate(${vp.current.x}px, ${vp.current.y}px) scale(${vp.current.zoom})`,
   }));
@@ -123,10 +148,16 @@ export function CanvasView(p: CanvasProps) {
   const [panReady, setPanReady] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [dragPos, setDragPos] = useState<Record<string, { x: number; y: number }>>({});
-  // 共享组件卡（REQ-EDIT-006）：拖动中的位置与量到的尺寸。尺寸由预览页量根元素后上报（quilt:component-size）；
-  // 没上报前按整个设备尺寸渲染——h-dvh 这类按视口算高度的组件（Sidebar）得先在全高 iframe 里量一次才准
+  // 共享组件卡（REQ-EDIT-006）：拖动中的位置与量到的框。框由预览页量根元素后上报（quilt:component-size），量到即记进本机；
+  // 首帧用记住的框，没记过的用紧凑占位（v0.76）。iframe 始终按整个设备尺寸渲染、由卡片裁切：h-dvh、h-[50vh]、w-1/2 这类
+  // 按视口或父宽定尺寸的组件只有在整屏视口里量才准；视口跟着卡片缩的话，它们每上报一次再缩一截，一路缩到下限
   const [compDrag, setCompDrag] = useState<Record<string, { x: number; y: number }>>({});
-  const [compSize, setCompSize] = useState<Record<string, { w: number; h: number }>>({});
+  const compKey = `quilt:comp-size:${p.projectId}`;
+  const [compSize, setCompSize] = useState<Record<string, CompBox>>(() => readCompSizes(compKey));
+  // 本次挂载里已上报过尺寸的组件：上报前卡片里是骨架、iframe 透明（样式还没到齐，画出来是白底或没排版的字）
+  const [compLive, setCompLive] = useState<ReadonlySet<string>>(() => new Set());
+  // 首帧按占位算了适配（有组件没记过尺寸）：尺寸到齐后补一次
+  const measureFit = useRef(!savedView && p.components.some((c) => !compSize[c.id]));
   const compFrames = useRef(new Map<string, HTMLIFrameElement>());
   const [iframeReady, setIframeReady] = useState(false);
   // 重挂 iframe 用：从交互态切到选择元素态时，要把屏内导航过的 DOM 丢掉、回到这张卡片自己的那一屏
@@ -134,19 +165,37 @@ export function CanvasView(p: CanvasProps) {
   // 聚焦期间钉住 iframe 的 src：previewUrl 是签名 URL，每次 refresh 都会换一串新签名，
   // src 一变 iframe 就静默重载、回到 interact 模式，选择元素/批注态当场失效（且丢掉屏内滚动位置）。
   const [focusedSrc, setFocusedSrc] = useState<string | null>(null);
+  // iframe 这一次实际加载的是哪一版（v0.76）：钉 src 时一并记下，就绪后作为热更新的基线——取「就绪那一刻的当前修订」的话，
+  // 加载期间落地的新修订会被直接当成已显示，屏里停在旧版、检查器却按新版改
+  const pinned = useRef<{ id: string; rev: string | null } | null>(null);
   useEffect(() => { if (!p.focusedId) { setIframeReady(false); setFocusedSrc(null); } }, [p.focusedId]);
   useEffect(() => {
     if (!p.focusedId || focusedSrc) return;
     const cur = p.screens.find((x) => x.id === p.focusedId);
-    if (cur?.previewUrl) setFocusedSrc(cur.previewUrl);
+    if (cur?.previewUrl) { pinned.current = { id: cur.id, rev: cur.currentRevisionId }; setFocusedSrc(cur.previewUrl); }
   }, [p.focusedId, p.screens, focusedSrc]);
+  // 聚焦 iframe 的就绪看门（v0.76）：load 之后 2 s 还没收到 quilt:ready，多半是签名过期（里面是 403 JSON，父页读不到状态码）——
+  // 静默重取签名、换新地址重载一次；仍不行就在角标上给「重试」
+  const readyRef = useRef(false);
+  readyRef.current = iframeReady;
+  const frameRetried = useRef(false);
+  const [frameFailed, setFrameFailed] = useState(false);
+  const readyTimer = useRef<number | null>(null);
+  useEffect(() => { frameRetried.current = false; setFrameFailed(false); return () => { if (readyTimer.current) clearTimeout(readyTimer.current); }; }, [p.focusedId]);
 
   // 父组件每次渲染都会传入新的回调；XYPanZoom 实例与 transform 回调必须稳定，否则实例被反复重建、transition 被打断
   const propsRef = useRef(p);
   propsRef.current = p;
   const pos = useCallback((s: ScreenDto) => dragPos[s.id] ?? { x: s.x, y: s.y }, [dragPos]);
   const compPos = useCallback((c: ComponentDto) => compDrag[c.id] ?? { x: c.x, y: c.y }, [compDrag]);
-  const compBox = useCallback((c: ComponentDto) => compSize[c.id] ?? { w: p.screenSize.w, h: p.screenSize.h }, [compSize, p.screenSize.w, p.screenSize.h]);
+  // 卡片此刻画出来的尺寸：适配视图、小地图、框选、找屏跳转都按它算——没上报时按设备整屏算的话，框到的是一张 844 高的卡。
+  // 只给宽高：调用处与卡片位置展开在一起，框里的 x / y 是根元素在 iframe 里的偏移，混进去就把卡片位置盖掉了
+  const compBox = useCallback((c: ComponentDto) => { const b = compSize[c.id]; return b ? { w: b.w, h: b.h } : { w: p.screenSize.w, h: COMP_PLACEHOLDER_H }; }, [compSize, p.screenSize.w]);
+  // 量到的框落盘：只留当前还在的组件
+  useEffect(() => {
+    const ids = new Set(p.components.map((c) => c.id));
+    try { localStorage.setItem(compKey, JSON.stringify(Object.fromEntries(Object.entries(compSize).filter(([id]) => ids.has(id))))); } catch { /* 无痕模式写不了 */ }
+  }, [compSize, p.components, compKey]);
   const byId = useMemo(() => Object.fromEntries(p.screens.map((s) => [s.id, s])), [p.screens]);
   const selectedCompSet = useMemo(() => new Set(p.selectedComponentIds), [p.selectedComponentIds]);
   const focused = p.focusedId ? byId[p.focusedId] : null;
@@ -197,6 +246,13 @@ export function CanvasView(p: CanvasProps) {
     if (node) cb({ ...vp.current, w: node.clientWidth, h: node.clientHeight });
     return () => { viewSubs.current.delete(cb); };
   }, []);
+  const scheduleSave = useCallback(() => {
+    touched.current = true;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      try { localStorage.setItem(viewKeyRef.current, JSON.stringify(vp.current)); } catch { /* 无痕模式写不了 */ }
+    }, 300);
+  }, []);
   const applyTransform = useCallback((v: Viewport) => {
     vp.current = v;
     const world = worldRef.current;
@@ -209,11 +265,8 @@ export function CanvasView(p: CanvasProps) {
     candRef.current?.style.setProperty('--zoom', String(v.zoom));
     propsRef.current.onStat?.({ zoom: v.zoom });
     if (viewSubs.current.size) { const node = viewportRef.current; const info = { ...v, w: node?.clientWidth ?? 0, h: node?.clientHeight ?? 0 }; for (const cb of viewSubs.current) cb(info); }
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => {
-      try { localStorage.setItem(viewKeyRef.current, JSON.stringify(vp.current)); } catch { /* 无痕模式写不了 */ }
-    }, 300);
-  }, []);
+    if (!autoView.current) scheduleSave();
+  }, [scheduleSave]);
   // 防抖窗口里离开就把这一段丢了：触控板惯性滚动能持续几百毫秒，松手立刻刷新 / 切项目，
   // 丢的不是最后一点而是整段平移（起点还是上一次落盘的位置）。卸载与 pagehide 都补写一次。
   const flushView = useCallback(() => {
@@ -240,12 +293,17 @@ export function CanvasView(p: CanvasProps) {
 
   useEffect(() => {
     const node = viewportRef.current!;
-    const inst = XYPanZoom({ domNode: node, minZoom: 0.1, maxZoom: 2, viewport: vp.current, translateExtent: [[-Infinity, -Infinity], [Infinity, Infinity]], onDraggingChange: setDragging });
+    // 用户手势开始（滚轮、捏合、空格拖拽带着原始事件；程序化的 setViewport 没有）：打断进行中的自动适配，这一段要落盘
+    const inst = XYPanZoom({ domNode: node, minZoom: MIN_ZOOM, maxZoom: 2, viewport: vp.current, translateExtent: [[-Infinity, -Infinity], [Infinity, Infinity]], onDraggingChange: setDragging,
+      onPanZoomStart: (ev) => { if (ev) { autoView.current = false; scheduleSave(); } } });
     panZoom.current = inst;
     updatePanZoom();
-    applyTransform(vp.current);
+    // 首帧镜头要么是记住的、要么是自动适配出来的，都不是这一次手摆的：不落盘
+    autoView.current = true; applyTransform(vp.current); autoView.current = false;
     return () => inst.destroy();
-  }, [applyTransform, updatePanZoom]);
+  }, [applyTransform, updatePanZoom, scheduleSave]);
+  // 用户动作带来的镜头移动（适配视图、找屏跳转、小地图、聚焦推镜头、屏内捏合）：先撤掉自动适配标记，否则被它打断的那段自动适配会让这一次也不落盘
+  const moveTo = useCallback((v: Viewport, opts?: { duration?: number }) => { autoView.current = false; void panZoom.current?.setViewport(v, opts); }, []);
 
   // 可用区 = 画布减去四周浮层的占位；几何由 CSS 变量驱动的探针元素给出，这里只测不算
   const safeArea = useCallback(() => {
@@ -256,22 +314,36 @@ export function CanvasView(p: CanvasProps) {
     return { x: r.left - nr.left, y: r.top - nr.top, w: Math.max(240, r.width), h: Math.max(240, r.height) };
   }, []);
 
-  const fitView = useCallback(() => {
-    const node = viewportRef.current;
-    if (!node) return;
+  // 装下全部屏、组件与风格指南卡的镜头；fits = 缩到 MIN_ZOOM 装不装得下
+  const fitTarget = useCallback((): { v: Viewport; fits: boolean } | null => {
+    if (!viewportRef.current) return null;
     const rects = [...p.screens.map((s) => ({ ...pos(s), w: s.width, h: s.height })), ...p.components.map((c) => ({ ...compPos(c), ...compBox(c) })), { ...STYLE_GUIDE_POS, ...styleGuideSize(p.assets?.length ?? 0) }];
     const x0 = Math.min(...rects.map((r) => r.x)); const y0 = Math.min(...rects.map((r) => r.y)) - 40;
     const x1 = Math.max(...rects.map((r) => r.x + r.w)); const y1 = Math.max(...rects.map((r) => r.y + r.h));
     const a = safeArea();
-    const v = getViewportForBounds({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 + 40 }, a.w, a.h, 0.1, 1.5, 0.08);
-    panZoom.current?.setViewport({ x: v.x + a.x, y: v.y + a.y, zoom: v.zoom }, { duration: 300 });
+    const b = { x: x0, y: y0, width: x1 - x0, height: y1 - y0 + 40 };
+    const v = getViewportForBounds(b, a.w, a.h, MIN_ZOOM, 1.5, 0.08);
+    return { v: { x: v.x + a.x, y: v.y + a.y, zoom: v.zoom }, fits: b.width * v.zoom <= a.w + 1 && b.height * v.zoom <= a.h + 1 };
   }, [p.screens, p.components, p.assets?.length, pos, compPos, compBox, safeArea]);
+  const fitView = useCallback(() => {
+    const t = fitTarget();
+    if (t) moveTo(t.v, { duration: 300 });
+    return t?.fits ?? true;
+  }, [fitTarget, moveTo]);
+  // 自动适配：变换照常施加，只是不落盘（见 autoView）；用户手势打断时由 onPanZoomStart 撤标记
+  const autoFit = (duration: number) => {
+    const t = fitTarget(); const pz = panZoom.current;
+    if (!t || !pz) return;
+    autoView.current = true;
+    void pz.setViewport(t.v, { duration }).then(() => { autoView.current = false; });
+    if (!duration) autoView.current = false;
+  };
 
-  // 组件预览页量完根元素就上报尺寸：只认本画布里某张组件卡的 iframe 发来的（按 source 对号），钳到设备尺寸以内
+  // 组件预览页量完根元素就上报它的框：只认本画布里某张组件卡的 iframe 发来的（按 source 对号），钳到设备视口以内
   useEffect(() => {
     const onSize = (e: MessageEvent) => {
       if (e.origin !== propsRef.current.previewOrigin) return;
-      const d = e.data as { type?: string; w?: number; h?: number } | null;
+      const d = e.data as { type?: string; x?: number; y?: number; w?: number; h?: number } | null;
       if (!d || d.type !== 'quilt:component-size') return;
       let id: string | null = null;
       for (const [cid, frame] of compFrames.current) if (frame.contentWindow === e.source) { id = cid; break; }
@@ -279,23 +351,42 @@ export function CanvasView(p: CanvasProps) {
       const max = propsRef.current.screenSize;
       const w = Math.min(max.w, Math.max(48, Math.ceil(Number(d.w) || 0)));
       const h = Math.min(max.h, Math.max(32, Math.ceil(Number(d.h) || 0)));
-      setCompSize((m) => (m[id]?.w === w && m[id]?.h === h ? m : { ...m, [id]: { w, h } }));
+      const x = Math.min(max.w - w, Math.max(0, Math.floor(Number(d.x) || 0)));
+      const y = Math.min(max.h - h, Math.max(0, Math.floor(Number(d.y) || 0)));
+      setCompSize((m) => { const o = m[id]; return o?.x === x && o?.y === y && o?.w === w && o?.h === h ? m : { ...m, [id]: { x, y, w, h } }; });
+      setCompLive((s) => (s.has(id!) ? s : new Set(s).add(id!)));
     };
     window.addEventListener('message', onSize);
     return () => window.removeEventListener('message', onSize);
   }, []);
 
   const focusCardRef = useRef<(id: string) => void>(() => {});
-  const fitViewRef = useRef(fitView);
-  fitViewRef.current = fitView;
+  const autoFitRef = useRef(autoFit);
+  autoFitRef.current = autoFit;
   const fitOnce = useRef(false);
-  // 两次一次性适配，都延后到下一 tick（挂载同 tick 内的 setViewport 会被 d3-zoom 初始化打断，M0 实证）：
-  // ① 挂载即适配，否则空项目的风格指南卡片停在世界坐标负半轴、被挤出视口左缘够不着；
-  // ② 首批屏幕到达后再适配一次。
-  // **这个项目存过镜头就一次都不做**：适配是带 300 ms 动画的，做了就等于当着用户的面把镜头从他离开的位置
-  // 推走再推回来。想重新适配有工具栏的「适配视图」（F）——那是 INT-019 要求的重置入口。
-  useEffect(() => { if (savedView) return; const t = setTimeout(() => fitViewRef.current(), 0); return () => clearTimeout(t); }, [savedView]);
-  useEffect(() => { if (savedView || fitOnce.current || !p.screens.length) return; fitOnce.current = true; setTimeout(() => fitViewRef.current(), 0); }, [p.screens.length, savedView]);
+  // 三次一次性适配，都不落盘（v0.76）：
+  // ① 没存过镜头时首帧就是适配视图：布局阶段同步算好写进世界层，panzoom 随后以它为初值建起来（等 panzoom 建好再适配的话，会先画一帧默认镜头再滑 300 ms）。
+  //    空项目也要做，否则风格指南卡片停在世界坐标负半轴、被挤出视口左缘够不着；挂载时已有的屏算进了这一次。
+  // ② 空项目的首批屏到达后再适配一次（带动画，内容是那一刻才出现的；延后一 tick：同 tick 内的 setViewport 会被 d3-zoom 初始化打断，M0 实证）。
+  // ③ 首帧按占位算的组件尺寸都量到了，补一次不带动画的适配。
+  // **存过镜头、或这次打开后动过镜头就一次都不做**：那等于当着用户的面把镜头从他摆好的位置推走。
+  // 想重新适配有工具栏的「适配视图」（F）——那是 INT-019 要求的重置入口。
+  useLayoutEffect(() => {
+    if (savedView) return;
+    const t = fitTarget();
+    if (!t) return;
+    vp.current = t.v;
+    if (worldRef.current) worldRef.current.style.transform = `translate(${t.v.x}px, ${t.v.y}px) scale(${t.v.zoom})`;
+    if (p.screens.length) fitOnce.current = true;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (touched.current || fitOnce.current || !p.screens.length) return; fitOnce.current = true; setTimeout(() => autoFitRef.current(300), 0); }, [p.screens.length]);
+  useEffect(() => {
+    if (!measureFit.current) return;
+    if (touched.current) { measureFit.current = false; return; }
+    if (!p.components.every((c) => compLive.has(c.id))) return;
+    measureFit.current = false;
+    autoFitRef.current(0);
+  }, [compLive, p.components]);
 
   // 聚焦：镜头推到该屏 1:1 居中；清空选区（M0 实证）
   const focusCard = useCallback((id: string) => {
@@ -314,11 +405,12 @@ export function CanvasView(p: CanvasProps) {
     window.getSelection()?.removeAllRanges();
     setIframeReady(false);
     landed.current = null;  // 换屏或重挂之后，还在等上一份文档换完的重摆作废
+    pinned.current = { id, rev: s.currentRevisionId };
     setFocusedSrc(s.previewUrl);
     p.onFocus(id);
     p.setNavStack(() => []);
-    setTimeout(() => panZoom.current?.setViewport({ x: a.x + (a.w - s.width * zoom) / 2 - q.x * zoom, y: a.y + top - q.y * zoom, zoom }, { duration: 250 }), 0);
-  }, [byId, pos, p, safeArea]);
+    setTimeout(() => moveTo({ x: a.x + (a.w - s.width * zoom) / 2 - q.x * zoom, y: a.y + top - q.y * zoom, zoom }, { duration: 250 }), 0);
+  }, [byId, pos, p, safeArea, moveTo]);
 
   focusCardRef.current = focusCard;
 
@@ -329,16 +421,28 @@ export function CanvasView(p: CanvasProps) {
   const [shownId, setShownId] = useState<string | null>(p.focusedId);
   useEffect(() => { setShownId(p.focusedId); }, [p.focusedId]);
   useEffect(() => { p.onShown?.(shownId); }, [shownId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const htmlOf = (s: ScreenDto) => (s.previewUrl ? fetch(s.previewUrl).then((r) => r.text()) : Promise.resolve(null));
+  // 取目标屏的 HTML（屏内跳转、切变体、后退重摆、热更新）：检查响应状态——同源可读的错误体不能当屏 swap 进去；
+  // 失败（签名过期时预览域的 403 不带 CORS 头，这里拿到的是网络错误）先静默重取签名再取一次，仍失败抛给调用方（v0.76）
+  const htmlOf = useCallback(async (s: ScreenDto): Promise<string | null> => {
+    if (!s.previewUrl) return null;
+    const get = async (url: string) => { const r = await fetch(url); if (!r.ok) throw new Error(`preview ${r.status}`); return r.text(); };
+    try { return await get(s.previewUrl); }
+    catch {
+      const fresh = (await propsRef.current.onStale?.())?.screens.find((x) => x.id === s.id)?.previewUrl;
+      if (!fresh) throw new Error('preview unavailable');
+      return get(fresh);
+    }
+  }, []);
   // 叠层屏（v0.63 REQ-PROTO-005）：跳到 overlay 屏压一层（quilt:overlay），不换 DOM；跳到 push 屏整份换（运行时先清叠层）
   const swapTo = useCallback(async (target: ScreenDto) => {
-    const html = await htmlOf(target);
+    let html: string | null;
+    try { html = await htmlOf(target); } catch { propsRef.current.onPreviewError?.(target); return; }
     if (html === null) return;
     const msg: ParentToPreview = target.presentation === 'overlay' ? { type: 'quilt:overlay', html, route: target.route } : { type: 'quilt:swap', html, route: target.route };
     iframeRef.current?.contentWindow?.postMessage(msg, p.previewOrigin);
     setShownId(target.id);
     p.setNavStack((s) => [...s, target.route]);
-  }, [p]);
+  }, [p, htmlOf]);
   // 按一条导航栈把 iframe 重新摆出来：栈里最靠上的整屏（没有就是卡片自己）换进去，它上面的叠层逐层压回去。
   // 后退穿过叠层、叠层关闭链接都走这里——只发一条 overlay-close 的话，底下那一屏若是后来才换进来的就对不上了。
   // 叠层要等整屏换完（quilt:swapped，整份重写时是新文档的 quilt:ready）再发：整份重写期间 iframe 里没有任何监听，发过去就丢了
@@ -349,19 +453,25 @@ export function CanvasView(p: CanvasProps) {
     while (j >= 0 && baseByRoute(stack[j])?.presentation === 'overlay') j--;
     const base = j >= 0 ? baseByRoute(stack[j]) : focused;
     if (!base) return;
-    const baseHtml = await htmlOf(base);
+    let baseHtml: string | null;
+    try { baseHtml = await htmlOf(base); } catch { propsRef.current.onPreviewError?.(base); return; }
     if (baseHtml === null) return;
     await new Promise<void>((done) => { landed.current = done; postToPreview({ type: 'quilt:swap', html: baseHtml, route: base.route }); });
     let top = base;
-    for (const route of stack.slice(j + 1)) {
-      const o = baseByRoute(route); const html = o && await htmlOf(o);
+    // 某一层取不到就停在它下面那层：导航栈只留真的摆出来的
+    let shownStack = stack;
+    for (let k = j + 1; k < stack.length; k++) {
+      const route = stack[k];
+      const o = baseByRoute(route);
+      let html: string | null = null;
+      if (o) { try { html = await htmlOf(o); } catch { propsRef.current.onPreviewError?.(o); shownStack = stack.slice(0, k); break; } }
       if (!o || !html) continue;
       postToPreview({ type: 'quilt:overlay', html, route });
       top = o;
     }
     setShownId(top.id);
-    p.setNavStack(() => stack);
-  }, [focused, p, baseByRoute]); // eslint-disable-line react-hooks/exhaustive-deps
+    p.setNavStack(() => shownStack);
+  }, [focused, p, baseByRoute, htmlOf]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const goBack = useCallback(() => {
     if (!focused || p.navStack.length === 0) return;
@@ -385,6 +495,29 @@ export function CanvasView(p: CanvasProps) {
   // 清空后由下面的 effect 用「当前这一轮的 props」重新钉住——这里直接读 propsRef 会拿到上一轮的
   // previewUrl（调用方常常是 await refresh() 之后紧接着调，state 还没落到下一次渲染），于是重载出旧修订
   const resetToOwn = useCallback(() => { setIframeReady(false); landed.current = null; setFocusedSrc(null); setReloadKey((k) => k + 1); propsRef.current.setNavStack(() => []); setShownId(propsRef.current.focusedId); }, []);
+  // 签名过期导致 iframe 等不到就绪：重取详情，用新签名的地址重挂（钉住的修订随之换成详情里的当前版）
+  const reloadFresh = useCallback(async () => {
+    const id = propsRef.current.focusedId;
+    if (!id) return;
+    const d = await propsRef.current.onStale?.();
+    const fresh = (d?.screens ?? propsRef.current.screens).find((x) => x.id === id);
+    if (!fresh?.previewUrl || propsRef.current.focusedId !== id) return;
+    pinned.current = { id, rev: fresh.currentRevisionId };
+    landed.current = null;
+    setIframeReady(false); setFocusedSrc(fresh.previewUrl); setReloadKey((k) => k + 1);
+    propsRef.current.setNavStack(() => []); setShownId(id);
+  }, []);
+  const onFrameLoad = () => {
+    if (readyTimer.current) clearTimeout(readyTimer.current);
+    readyTimer.current = window.setTimeout(() => {
+      readyTimer.current = null;
+      if (readyRef.current) return;
+      if (frameRetried.current) { setFrameFailed(true); return; }
+      frameRetried.current = true;
+      void reloadFresh();
+    }, 2000);
+  };
+  const retryFrame = () => { setFrameFailed(false); frameRetried.current = true; void reloadFresh(); };
   // 工具栏 / ⌥G 走这里：把可见区中心当作锚点落点，等价于在那里双击
   const createAtCenter = useCallback(() => {
     const node = viewportRef.current;
@@ -440,7 +573,8 @@ export function CanvasView(p: CanvasProps) {
   const pendingReselect = useRef<string | null>(null);
   useEffect(() => {
     if (!p.focusedId || !iframeReady || !shownId) { baseline.current = null; return; }
-    const base = baseline.current;
+    const base = baseline.current ?? pinned.current;
+    pinned.current = null;
     baseline.current = { id: shownId, rev: shownRev };
     shownRevs.current.set(shownId, shownRev);
     const cur = shownRef.current;
@@ -448,14 +582,14 @@ export function CanvasView(p: CanvasProps) {
     let stale = false;
     // 正显示的是一层叠层：只换这一层，底下那一屏不动（swap 会把叠层全清掉、让它独占整页）
     const asLayer = cur.presentation === 'overlay' && propsRef.current.navStack.length > 0;
-    fetch(cur.previewUrl).then((r) => r.text()).then((html) => {
-      if (stale) return;
+    htmlOf(cur).then((html) => {
+      if (stale || html === null) return;
       pendingReselect.current = propsRef.current.selectedQid;
       if (asLayer) { postToPreview({ type: 'quilt:overlay-close' }); postToPreview({ type: 'quilt:overlay', html, route: cur.route }); }
       else postToPreview({ type: 'quilt:swap', html, route: cur.route, keepScroll: true });
-    }).catch(() => {});
+    }).catch(() => { if (!stale) propsRef.current.onPreviewError?.(cur); });
     return () => { stale = true; };
-  }, [p.focusedId, iframeReady, shownId, shownRev, postToPreview]);
+  }, [p.focusedId, iframeReady, shownId, shownRev, postToPreview, htmlOf]);
   // 屏内标记：正显示的屏上有哪些 qid 在被改。作业结束 qid 离开集合 → 记为待「已更新」，等紧随其后的热更新换完 DOM 再打上；
   // 1.5 s 内没等到热更新（失败 / 取消）就作罢，只把「修改中」撤掉
   const workingQids = useMemo(() => p.workingSubtrees.filter((w) => w.screenId === shownId).map((w) => w.qid), [p.workingSubtrees, shownId]);
@@ -491,31 +625,33 @@ export function CanvasView(p: CanvasProps) {
   // panTo：镜头中心平移到世界坐标（缩放不变）；reveal：把一张卡（屏或组件）摆到可用区中央，缩放取「装得下」与 1:1 的较小者（REQ-CORE-024）
   const panTo = useCallback((x: number, y: number) => {
     const a = safeArea(); const z = vp.current.zoom;
-    panZoom.current?.setViewport({ x: a.x + a.w / 2 - x * z, y: a.y + a.h / 2 - y * z, zoom: z }, { duration: 200 });
-  }, [safeArea]);
+    moveTo({ x: a.x + a.w / 2 - x * z, y: a.y + a.h / 2 - y * z, zoom: z }, { duration: 200 });
+  }, [safeArea, moveTo]);
   // 小地图拖视口框：直接设平移量（缩放不变、不带动画），拖动全程 1:1 跟手
-  const moveView = useCallback((x: number, y: number) => { panZoom.current?.setViewport({ x, y, zoom: vp.current.zoom }); }, []);
+  const moveView = useCallback((x: number, y: number) => { moveTo({ x, y, zoom: vp.current.zoom }); }, [moveTo]);
   const reveal = useCallback((id: string) => {
     const s = byId[id]; const c = propsRef.current.components.find((x) => x.id === id);
     const rect = s ? { ...pos(s), w: s.width, h: s.height } : c ? { ...compPos(c), ...compBox(c) } : null;
     if (!rect) return;
     const a = safeArea();
     const zoom = Math.max(0.1, Math.min(1, (a.w - 80) / rect.w, (a.h - 80) / rect.h));
-    panZoom.current?.setViewport({ x: a.x + (a.w - rect.w * zoom) / 2 - rect.x * zoom, y: a.y + (a.h - rect.h * zoom) / 2 - rect.y * zoom, zoom }, { duration: 250 });
-  }, [byId, pos, compPos, compBox, safeArea]);
+    moveTo({ x: a.x + (a.w - rect.w * zoom) / 2 - rect.x * zoom, y: a.y + (a.h - rect.h * zoom) / 2 - rect.y * zoom, zoom }, { duration: 250 });
+  }, [byId, pos, compPos, compBox, safeArea, moveTo]);
   useEffect(() => { propsRef.current.registerApi?.({ fitView, goBack, highlight, focus: focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView }); }, [fitView, goBack, highlight, focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView]);
   // 切状态变体（v0.62）：同一 iframe 换成该变体的当前修订，镜头不动、导航栈不动；选中的元素属于换掉的那份 DOM，清空。
   // 正显示的是一层叠层时只换这一层，底下那一屏留着（与热更新的叠层分支同理）
   const swapVariant = useCallback(async (id: string) => {
     const target = byId[id];
-    if (!target?.previewUrl) return;
-    const html = await fetch(target.previewUrl).then((r) => r.text());
+    if (!target) return;
+    let html: string | null;
+    try { html = await htmlOf(target); } catch { propsRef.current.onPreviewError?.(target); return; }
+    if (html === null) return;
     pendingReselect.current = null;
     propsRef.current.onElementSelect(null);
     if (target.presentation === 'overlay' && propsRef.current.navStack.length > 0) { postToPreview({ type: 'quilt:overlay-close' }); postToPreview({ type: 'quilt:overlay', html, route: target.route }); }
     else postToPreview({ type: 'quilt:swap', html, route: target.route, keepScroll: true });
     setShownId(target.id);
-  }, [byId, postToPreview]);
+  }, [byId, postToPreview, htmlOf]);
   // 小地图的矩形：屏、组件、风格指南卡
   const miniRects = useMemo<MiniRect[]>(() => [
     ...p.screens.map((s) => ({ id: s.id, kind: 'screen' as const, ...pos(s), w: s.width, h: s.height })),
@@ -563,7 +699,7 @@ export function CanvasView(p: CanvasProps) {
       if (e.origin !== p.previewOrigin || !focused || e.source !== iframeRef.current?.contentWindow || !isPreviewMessage(e.data)) return;
       const msg = e.data;
       if (msg.type === 'quilt:ready' || msg.type === 'quilt:swapped') { landed.current?.(); landed.current = null; }
-      if (msg.type === 'quilt:ready') { setIframeReady(true); postToPreview({ type: 'quilt:mode', mode: propsRef.current.inspectMode ? 'inspect' : 'interact' }); reselectAfterSwap(); }
+      if (msg.type === 'quilt:ready') { readyRef.current = true; frameRetried.current = false; setFrameFailed(false); setIframeReady(true); postToPreview({ type: 'quilt:mode', mode: propsRef.current.inspectMode ? 'inspect' : 'interact' }); reselectAfterSwap(); }
       if (msg.type === 'quilt:swapped') reselectAfterSwap();
       if (msg.type === 'quilt:select') p.onElementSelect({ qid: msg.qid, tag: msg.tag, text: msg.text, classes: msg.classes, href: msg.href ?? null, component: msg.component ?? null, rect: msg.rect });
       if (msg.type === 'quilt:deselect') p.onElementSelect(null);
@@ -589,14 +725,14 @@ export function CanvasView(p: CanvasProps) {
         if (!node || !frame) return;
         const v = vp.current; const nr = node.getBoundingClientRect(); const fr = frame.getBoundingClientRect();
         const px = fr.left - nr.left + msg.x * v.zoom; const py = fr.top - nr.top + msg.y * v.zoom;
-        const zoom = Math.min(2, Math.max(0.1, v.zoom * Math.pow(2, -msg.deltaY * 0.02)));
+        const zoom = Math.min(2, Math.max(MIN_ZOOM, v.zoom * Math.pow(2, -msg.deltaY * 0.02)));
         const k = zoom / v.zoom;
-        panZoom.current?.setViewport({ x: px - (px - v.x) * k, y: py - (py - v.y) * k, zoom });
+        moveTo({ x: px - (px - v.x) * k, y: py - (py - v.y) * k, zoom });
       }
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [focused, p, swapTo, goBack, reselectAfterSwap, collapseCandidates, baseByRoute]);
+  }, [focused, p, swapTo, goBack, reselectAfterSwap, collapseCandidates, baseByRoute, moveTo]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -773,6 +909,7 @@ export function CanvasView(p: CanvasProps) {
         {p.screens.map((s, idx) => {
           const q = pos(s);
           const isFocused = p.focusedId === s.id;
+          const live = isFocused && !!s.previewUrl;
           const dangling = danglingBySource.get(s.id);
           const working = p.workingSubtrees.some((w) => w.screenId === s.id);
           const desktop = s.width > 600;
@@ -781,23 +918,17 @@ export function CanvasView(p: CanvasProps) {
           return (
             <Fragment key={s.id}>
             {stacked && [2, 1].map((k) => <div key={k} className="cand-ghost" aria-hidden="true" style={{ width: s.width, height: s.height, transform: `translate(${q.x + 14 * k}px, ${q.y + 10 * k}px)`, opacity: 1 - 0.25 * k }} />)}
-            <div data-testid="screen-card" data-route={s.route} data-variant={s.variantOf ? 'true' : undefined} data-presentation={s.presentation} className={`card${s.presentation === 'overlay' ? ' overlay' : ''}${(marquee ? hitSet.has(s.id) || (marquee.additive && selectedSet.has(s.id)) : selectedSet.has(s.id)) ? ' selected' : ''}${isFocused ? ' focused' : ''}${dragPos[s.id] ? ' dragging' : ''}`} style={{ width: s.width, height: s.height, transform: `translate(${q.x}px, ${q.y}px)` }}>
+            <div data-testid="screen-card" data-route={s.route} data-variant={s.variantOf ? 'true' : undefined} data-presentation={s.presentation} className={`card${s.presentation === 'overlay' ? ' overlay' : ''}${(marquee ? hitSet.has(s.id) || (marquee.additive && selectedSet.has(s.id)) : selectedSet.has(s.id)) ? ' selected' : ''}${isFocused ? ' focused' : ''}${live && iframeReady ? ' live' : ''}${dragPos[s.id] ? ' dragging' : ''}`} style={{ width: s.width, height: s.height, transform: `translate(${q.x}px, ${q.y}px)` }}>
               <div className="label">{s.variantOf && <span className="chip">变体</span>}{s.presentation === 'overlay' && <span className="chip">叠层</span>}<b>{s.name}</b> {s.route}{p.exemplarScreenId === s.id ? ' · 样板' : ''}{variantCount.get(s.id) ? ` · ${variantCount.get(s.id)} 个变体` : ''}{s.deviations ? ` · ${s.deviations} 处偏离` : ''}</div>
-              {isFocused && s.previewUrl ? (
-                <iframe key={reloadKey} ref={iframeRef} className="nowheel nopan" src={focusedSrc ?? s.previewUrl} title={s.name} sandbox="allow-scripts allow-same-origin allow-forms" />
-              ) : s.screenshotUrl ? (
-                <img src={s.screenshotUrl} width={s.width} height={s.height} loading="lazy" decoding="async" alt={s.name} draggable={false} />
+              {/* 截图（或骨架）始终垫在底下（v0.76）：聚焦时 iframe 盖在上面、收到 quilt:ready 前透明，就绪才接班（卡片加 live，底层藏起）——
+                  双击即撤掉截图的话，iframe 加载的 1 s 多里整张卡是白的，深色屏黑→白→黑 */}
+              {s.screenshotUrl ? (
+                <CardShot url={s.screenshotUrl} width={s.width} height={s.height} alt={s.name} onError={p.onShotError}
+                  fallback={<CardSkeleton desktop={desktop} delay={(idx % 6) * -230} />} />
               ) : (
-                <div className={`skeleton${desktop ? ' desktop' : ''}`} style={{ animationDelay: `${(idx % 6) * -230}ms` }} role="img" aria-label={s.currentRevisionId ? '截图生成中' : '生成中'}>
-                  {desktop ? (
-                    <><div className="sk sk-side" /><div className="sk sk-topbar" /><div className="sk sk-title" /><div className="sk sk-grid"><i /><i /><i /></div><div className="sk sk-table" /></>
-                  ) : (
-                    <><div className="sk sk-appbar" /><div className="sk sk-hero" /><div className="sk sk-line" /><div className="sk sk-line short" /><div className="sk sk-card" /><div className="sk sk-card" /><div className="sk sk-cta" /><div className="sk sk-tabbar"><i /><i /><i /><i /></div></>
-                  )}
-                  <div className="sk-sweep" />
-                  <div className="sk-label"><span className="sk-dot" />{s.currentRevisionId ? '截图中' : '生成中'}</div>
-                </div>
+                <CardSkeleton desktop={desktop} delay={(idx % 6) * -230} status={s.currentRevisionId ? '截图中' : '生成中'} />
               )}
+              {live && <iframe key={reloadKey} ref={iframeRef} className={`nowheel nopan${iframeReady ? '' : ' loading'}`} src={focusedSrc ?? s.previewUrl!} title={s.name} sandbox="allow-scripts allow-same-origin allow-forms" onLoad={onFrameLoad} />}
               {/* 同一张卡同时有未结清候选时错开一行：两者右上同位、同底色同尺寸，叠在一起会把角标整块盖住 */}
               {!isFocused && working && <span className={`working${s.pendingCandidates ? ' below' : ''}`} data-testid="card-working">局部修改中…</span>}
               {!isFocused && <div className="gesture nopan" onPointerDown={(ev) => startDrag(ev, 'screen', s.id)} onDoubleClick={(ev) => { ev.stopPropagation(); focusCard(s.id); }} />}
@@ -811,7 +942,9 @@ export function CanvasView(p: CanvasProps) {
                   ))}
                 </div>
               )}
-              {isFocused && <div className="badge">{!iframeReady ? '加载中' : p.annotateMode ? '批注中' : p.inspectMode ? '选择元素中' : '交互中'} · {p.navStack.length ? p.navStack[p.navStack.length - 1] : s.route}{iframeReady ? (p.inspectMode ? ' · 点屏里的元素' : ` · 选元素按 ${INSPECT_KEY}`) : ''}</div>}
+              {isFocused && frameFailed && !iframeReady ? (
+                <button type="button" className="badge failed nopan" data-testid="frame-retry" onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); retryFrame(); }}>加载失败 · 重试</button>
+              ) : isFocused && <div className="badge">{!iframeReady ? '加载中' : p.annotateMode ? '批注中' : p.inspectMode ? '选择元素中' : '交互中'} · {p.navStack.length ? p.navStack[p.navStack.length - 1] : s.route}{iframeReady ? (p.inspectMode ? ' · 点屏里的元素' : ` · 选元素按 ${INSPECT_KEY}`) : ''}</div>}
               {annoByScreen.get(s.id)?.map((a, i) => {
                 const clamped = a.rect.y + a.rect.h / 2 > s.height - 12;
                 return (
@@ -848,14 +981,18 @@ export function CanvasView(p: CanvasProps) {
             iframe 与聚焦屏同样带 allow-same-origin：尺寸上报要按 origin 认，纯 allow-scripts 的沙箱 origin 是 "null" 对不上 */}
         {p.components.map((c) => {
           const q = compPos(c); const box = compBox(c);
+          const at = compSize[c.id]; const ready = compLive.has(c.id);
           const compFocused = p.focusedComponentId;
           const selected = marquee ? compHitSet.has(c.id) || (marquee.additive && selectedCompSet.has(c.id)) : selectedCompSet.has(c.id);
           return (
-            <div key={c.id} data-testid="component-card" data-name={c.name} className={`comp${selected ? ' selected' : ''}${compFocused === c.id ? ' focused' : ''}${compDrag[c.id] ? ' dragging' : ''}`} style={{ width: box.w, height: box.h, transform: `translate(${q.x}px, ${q.y}px)` }}>
+            <div key={c.id} data-testid="component-card" data-name={c.name} data-ready={ready || undefined} className={`comp${ready ? ' live' : ''}${selected ? ' selected' : ''}${compFocused === c.id ? ' focused' : ''}${compDrag[c.id] ? ' dragging' : ''}`} style={{ width: box.w, height: box.h, transform: `translate(${q.x}px, ${q.y}px)` }}>
               <div className="label"><b>{c.name}</b> · 用于 {c.usedBy.length} 屏</div>
+              {/* 上报尺寸前：屏卡片那一套骨架垫着、iframe 透明，上报后 iframe 淡入（v0.76）。iframe 恒按整个设备渲染、平移到根元素左上角，由卡片裁切 */}
+              <div className="skeleton" aria-hidden="true"><div className="sk-sweep" /></div>
               <iframe
                 ref={(el) => { if (el) compFrames.current.set(c.id, el); else compFrames.current.delete(c.id); }}
                 className="nowheel nopan" src={c.previewUrl} title={c.name} sandbox="allow-scripts allow-same-origin"
+                style={{ width: p.screenSize.w, height: p.screenSize.h, transform: at ? `translate(${-at.x}px, ${-at.y}px)` : undefined }}
               />
               {/* 交互态（与屏一致：双击进、Esc 出）。这层手势罩摘掉，指针才落得到 iframe 上；
                   **镜头不动**——组件卡是按自身内容尺寸渲染的、本来就是 1:1，没有屏那种「推到 1:1 居中」的理由，
@@ -886,5 +1023,44 @@ export function CanvasView(p: CanvasProps) {
         />
       )}
     </div>
+  );
+}
+
+// 屏卡片的占位：设备线框 + 光带；status 给了就是「截图中 / 生成中」这类状态标签（没有截图时），没给就是截图还在下载
+function CardSkeleton({ desktop, delay, status }: { desktop: boolean; delay: number; status?: string }) {
+  return (
+    <div className={`skeleton${desktop ? ' desktop' : ''}`} style={{ animationDelay: `${delay}ms` }} role="img" aria-label={status === '生成中' ? '生成中' : status ? '截图生成中' : '截图加载中'}>
+      {desktop ? (
+        <><div className="sk sk-side" /><div className="sk sk-topbar" /><div className="sk sk-title" /><div className="sk sk-grid"><i /><i /><i /></div><div className="sk sk-table" /></>
+      ) : (
+        <><div className="sk sk-appbar" /><div className="sk sk-hero" /><div className="sk sk-line" /><div className="sk sk-line short" /><div className="sk sk-card" /><div className="sk sk-card" /><div className="sk sk-cta" /><div className="sk sk-tabbar"><i /><i /><i /><i /></div></>
+      )}
+      <div className="sk-sweep" />
+      {status && <div className="sk-label"><span className="sk-dot" />{status}</div>}
+    </div>
+  );
+}
+
+// 卡片截图（v0.76）：截图地址变了（出新截图、签名换窗口）时新图叠在旧图上、透明，解码完成才接班；没有旧图时 fallback（骨架）留到那一刻——
+// decoding=async 的图解码前那几帧画的是卡片白底，深色屏会闪一下白。仍是 loading=lazy：只有进了视野的卡才取图。
+// 取图失败（多半是签名过期）交给父页静默重取签名，旧图或骨架留着
+function CardShot({ url, width, height, alt, fallback, onError }: { url: string; width: number; height: number; alt: string; fallback: ReactNode; onError?: () => void }) {
+  const [shown, setShown] = useState<string | null>(null);
+  // 已经完成的图不会再触发 onLoad（缓存命中可能早于事件挂上，PERF-009）：挂上时再查一次 complete
+  const settle = (img: HTMLImageElement | null, src: string) => {
+    if (!img || !img.complete || img.naturalWidth === 0) return;
+    void img.decode().catch(() => {}).then(() => setShown(src));
+  };
+  const layers = !shown || shown === url ? [url] : [shown, url];
+  return (
+    <>
+      {!shown && fallback}
+      {layers.map((src) => src === shown ? (
+        <img key={src} src={src} className="shot" width={width} height={height} decoding="async" alt={alt} draggable={false} />
+      ) : (
+        <img key={src} src={src} className="shot pending" width={width} height={height} loading="lazy" decoding="async" alt="" draggable={false}
+          ref={(el) => settle(el, src)} onLoad={(e) => settle(e.currentTarget, src)} onError={onError} />
+      ))}
+    </>
   );
 }

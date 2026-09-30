@@ -1269,13 +1269,75 @@ await step('TC-CORE-011', async () => {
   const r = await fetch(expired.replace('preview.localhost', '127.0.0.1'), { headers: { Host: await previewHost() } });
   expect(r.status === 403, `过期签名返回 ${r.status}`);
   expect((await r.json()).type === '/errors/preview-token-invalid', 'type');
-  await page.goto(`${WEB}/p/${focusProject}`);
-  await page.locator('[data-testid="screen-card"] img').first().waitFor();
-  // 前端每次进入项目都重取签名（API-CORE-004），聚焦即用新签名
-  await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').dblclick();
-  await page.frameLocator('.card.focused iframe').locator('#toggle').waitFor({ timeout: 15000 });
-  await page.keyboard.press('Escape');
-  return '过期签名 403；重取后加载成功';
+  // 页面手里的签名过期（v0.76）：详情第一次回包里 /s1 的截图与预览地址换成过期的，之后的回包照常
+  const detailPath = `/v1/projects/${focusProject}`;
+  let stale: 'shot' | 'preview' | null = null;
+  let gets = 0;
+  const onReq = (req: import('playwright').Request) => { if (req.method() === 'GET' && new URL(req.url()).pathname === detailPath) gets += 1; };
+  page.on('request', onReq);
+  await page.route(`**${detailPath}`, async (route) => {
+    if (!stale || route.request().method() !== 'GET') return route.fallback();
+    const kind = stale; stale = null;
+    const res = await route.fetch();
+    const d = (await res.json()) as { screens: { id: string; screenshotUrl: string | null; previewUrl: string | null }[] };
+    for (const x of d.screens) if (x.id === focusScreens[0].id) {
+      if (kind === 'shot' && x.screenshotUrl) x.screenshotUrl = x.screenshotUrl.replace(/exp=\d+/, 'exp=1000000000');
+      if (kind === 'preview') x.previewUrl = expired;
+    }
+    await route.fulfill({ response: res, json: d });
+  });
+  try {
+    // 2 卡片截图取不到（403）：静默重取详情，换上新签名的图
+    await page.goto('about:blank');   // 上一页可能还有在途的详情请求，别让它吃掉这次改写
+    stale = 'shot'; gets = 0;
+    await page.goto(`${WEB}/p/${focusProject}`);
+    const card = page.locator('[data-testid="screen-card"][data-route="/s1"]');
+    await eventually(async () => expect(await card.locator('img').evaluateAll((els) => els.some((i) => (i as HTMLImageElement).complete && (i as HTMLImageElement).naturalWidth > 0 && !(i as HTMLImageElement).src.includes('exp=1000000000'))), `过期截图没换回来（详情 GET ${gets} 次）`), 8000);
+    expect(gets >= 2, `截图失败后没有重取详情（GET ${gets} 次）`);
+    // 3 聚焦时预览签名过期：iframe 读不到状态码，2 s 等不到就绪 → 重取签名重载，不露出 403 JSON
+    await page.goto('about:blank');
+    stale = 'preview'; gets = 0;
+    await page.goto(`${WEB}/p/${focusProject}`);
+    await card.locator('img').first().waitFor({ timeout: 15000 });
+    await card.locator('.gesture').dblclick();
+    const fl = page.frameLocator('.card.focused iframe');
+    await fl.locator('#toggle').waitFor({ timeout: 30000 });   // 2 s 看门 + 重取 + 重载，重载还要等预览文档里的 CDN
+    const src = await page.locator('.card.focused iframe').getAttribute('src');
+    expect(src !== expired && gets >= 2, `没有换签名重载：src 仍是过期的=${src === expired}，详情 GET ${gets} 次`);
+    await page.locator('.card.focused .badge', { hasText: '交互中' }).waitFor({ timeout: 5000 });
+    // 4 屏内跳转取页失败：toast 说明、角标不动、不抛未捕获异常；只失败一次时先重取签名再试就能跳过去
+    const errorsBefore = consoleErrors.length;
+    const toS2 = new RegExp(`/p/${focusProject}/${focusScreens[1].id}\\?`);
+    await page.route(toS2, (route) => route.abort());
+    // 在 iframe 里派发点击而不是按坐标点：整套跑到这里时视口可能被前面的用例改成 900 高，聚焦缩放不是 1:1，坐标点击会偏（§3）
+    const clickS2 = () => fl.locator('a[href="/s2"]').last().evaluate((a) => (a as HTMLElement).click());
+    await clickS2();
+    await page.getByText('这一屏没取到').first().waitFor({ timeout: 8000 });
+    expect((await page.locator('.card.focused .badge').innerText()).includes('/s1'), `取页失败后角标变了：${await page.locator('.card.focused .badge').innerText()}`);
+    await page.unroute(toS2);
+    let failOnce = true;
+    await page.route(toS2, (route) => { if (failOnce) { failOnce = false; return route.abort(); } return route.continue(); });
+    await clickS2();
+    await page.locator('.card.focused .badge', { hasText: '/s2' }).waitFor({ timeout: 8000 });
+    await page.unroute(toS2);
+    expect(consoleErrors.length === errorsBefore, `取页失败抛了未捕获异常：${consoleErrors.slice(errorsBefore).join(' | ')}`);
+    await page.keyboard.press('Escape');
+  } finally { await page.unroute(`**${detailPath}`); page.off('request', onReq); }
+  // 5 页面可见时每 4 分钟静默重取一次详情（假时钟快进）
+  const c2 = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  try {
+    const p2 = await c2.newPage();
+    await p2.clock.install();
+    let n = 0;
+    p2.on('request', (req) => { if (req.method() === 'GET' && new URL(req.url()).pathname === detailPath) n += 1; });
+    await p2.goto(`${WEB}/p/${focusProject}`);
+    await p2.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+    await p2.waitForTimeout(1000);
+    const n0 = n;
+    await p2.clock.fastForward('04:30');
+    await eventually(() => expect(n > n0, `快进 4.5 分钟后没有重取详情（GET ${n0} → ${n}）`), 5000);
+  } finally { await c2.close(); }
+  return '截图 403 → 静默重取换图；预览 403 → 重取签名重载；取页失败 toast 且先重取再试；4 分钟续签';
 });
 
 // v0.33 聚焦态热更新：正显示的屏出了新修订，不退出交互就换进 iframe（不重挂、滚动位置保持）；<head> 变了（回刷）整份重写

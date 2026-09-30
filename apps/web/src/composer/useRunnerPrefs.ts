@@ -23,7 +23,10 @@ export function useRunnerPrefs() {
     setRunners(items);
     setRunnerId((cur) => (cur && items.some((x) => x.id === cur && x.available) ? cur : defaultId));
   }, []);
-  useEffect(() => { api.runners().then((r) => applyCatalog(r.items, r.default)).catch(() => {}); }, [applyCatalog]);
+  // 取不到清单要说出来（v0.76）：当成空的话通道选择器整块消失，用户不知道通道去哪了
+  const [runnersFailed, setRunnersFailed] = useState(false);
+  const loadRunners = useCallback(() => api.runners().then((r) => { setRunnersFailed(false); applyCatalog(r.items, r.default); }).catch(() => setRunnersFailed(true)), [applyCatalog]);
+  useEffect(() => { void loadRunners(); }, [loadRunners]);
   // 空值不落（同 onSessionChange）：切「聊天」再切回「造 / 改」时通道清单换批，Radix Select 隐藏的原生 <select> 在那一帧回报 ''，
   // 照写会把选中的通道清掉、下一轮静默走默认通道（v0.74）
   const onRunnerChange = (id: string) => { if (!id) return; setRunnerId(id); try { localStorage.setItem(RUNNER_KEY, id); } catch { /* 无痕模式写不了 */ } };
@@ -58,5 +61,5 @@ export function useRunnerPrefs() {
   const chatRunners = useMemo(() => runners.filter((r) => r.channelKind === 'agent-sdk'), [runners]);
   const chatRunnerId = chatRunners.some((r) => r.id === runnerId && r.available) ? runnerId : chatRunners.find((r) => r.available)?.id ?? '';
   const chatRunner = chatRunners.find((r) => r.id === chatRunnerId)?.runner;
-  return { runners, runnerId, applyCatalog, onRunnerChange, runner, agentTool, sessionList, sessionId, loadSessions, lists, loadSessionsFor, onSessionChange, sendRunner, modelRunner, mode, onMode, chatRunners, chatRunnerId, chatRunner };
+  return { runners, runnersFailed, loadRunners, runnerId, applyCatalog, onRunnerChange, runner, agentTool, sessionList, sessionId, loadSessions, lists, loadSessionsFor, onSessionChange, sendRunner, modelRunner, mode, onMode, chatRunners, chatRunnerId, chatRunner };
 }

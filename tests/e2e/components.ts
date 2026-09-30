@@ -114,17 +114,22 @@ await step('TC-EDIT-012', async () => {
   const card = page.locator('[data-testid="component-card"][data-name="TabBar"]');
   await card.waitFor({ timeout: 15000 });
   expect((await card.locator('.label').innerText()).includes('用于 3 屏'), `卡片标签不对：${await card.locator('.label').innerText()}`);
-  // 等预览页报了尺寸（卡片从整屏高缩到导航栏高）再框选，否则框到的是一张 844 高的卡
-  await page.waitForFunction(() => { const el = document.querySelector('[data-testid="component-card"][data-name="TabBar"]') as HTMLElement | null; return !!el && el.getBoundingClientRect().height < 200; }, null, { timeout: 15000 });
-  // 7a 组件卡预览里背景模糊一律关掉（v0.73）：给根元素加上 backdrop-blur-xl，Tailwind 生成规则后计算值仍是 none
+  // 等预览页报了尺寸（卡片带上 data-ready）再量再框选（v0.76：上报前是紧凑占位加骨架）
+  await page.locator('[data-testid="component-card"][data-name="TabBar"][data-ready]').waitFor({ timeout: 15000 });
+  // 7a 组件卡预览关背景模糊（v0.73，v0.76 收窄）：根元素与文档流里的后代关掉；absolute 层压在组件自己的图片上，保留模糊
   const cardFrame = (await card.locator('iframe').elementHandle())!.contentFrame();
   const backdrop = await (await cardFrame)!.evaluate(async () => {
     const root = document.querySelector('[data-component]') as HTMLElement;
     root.classList.add('backdrop-blur-xl');
+    root.insertAdjacentHTML('beforeend', '<div id="bf-flow" class="backdrop-blur-md bg-white/30">in flow</div><div class="relative h-10"><div class="h-10 bg-gradient-to-r from-black to-white"></div><div id="bf-over" class="absolute inset-x-0 bottom-0 backdrop-blur-md bg-white/30">over image</div></div>');
     await new Promise((r) => setTimeout(r, 300));
-    return getComputedStyle(root).backdropFilter;
+    // 不写具名的内部函数：tsx 会给它包一层 __name(...)，页面侧没有这个名字
+    const out = Object.fromEntries((['root', 'bf-flow', 'bf-over'] as const).map((id) => { const el = id === 'root' ? root : document.getElementById(id); return [id.replace('bf-', ''), el ? getComputedStyle(el).backdropFilter : 'missing']; })) as { root: string; flow: string; over: string };
+    document.getElementById('bf-flow')?.remove(); document.getElementById('bf-over')?.parentElement?.remove(); root.classList.remove('backdrop-blur-xl');
+    return out;
   });
-  expect(backdrop === 'none', `组件卡预览里背景模糊没关掉：${backdrop}`);
+  expect(backdrop.root === 'none' && backdrop.flow === 'none', `组件卡预览里根元素 / 文档流里的背景模糊没关掉：${JSON.stringify(backdrop)}`);
+  expect(backdrop.over !== 'none' && backdrop.over.includes('blur'), `压在组件自己内容上的 absolute 层被关了模糊：${JSON.stringify(backdrop)}`);
   await page.keyboard.press('f');
   await page.waitForTimeout(500);
   const box = (await card.boundingBox())!;

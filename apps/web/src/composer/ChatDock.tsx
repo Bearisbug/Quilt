@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Copy, Pencil, RotateCcw } from 'lucide-react';
 import type { JobKind, MessageDto } from '@quilt/core';
 import { Wordmark } from '@/ui/BrandMark';
-import { IconButton } from '@/ui/ui';
+import { Button, IconButton } from '@/ui/ui';
 import { useToast } from '@/lib/toast';
 import { ImageViewer } from './ImageViewer';
 
@@ -30,6 +30,9 @@ export type ChatDockProps = {
   followSeq: number;
   /** 折叠期间失败了几轮（v0.74）：横条上标出，展开即由父组件清零 */
   failed: number;
+  /** 对话记录还没取到（loading）或取不到（error）：两种都不当成空，不写「0 条」、不出空态示例（v0.76） */
+  loadState?: 'loading' | 'error';
+  onReload?: () => void;
 };
 
 // 对话记录（REQ-CORE-006，v0.34 挪到左下角）：底部对齐、从下往上长，头部一整条可点——上拉展开、下收折叠；
@@ -71,7 +74,7 @@ export function ChatDock(p: ChatDockProps) {
       >
         <span className="flex min-w-0 items-baseline gap-2">
           <span className="text-sm font-semibold">对话</span>
-          <span className="truncate text-xs text-muted">{p.collapsed && p.status ? p.status : `${p.messages.length} 条`}</span>
+          <span className="truncate text-xs text-muted">{p.collapsed && p.status ? p.status : p.loadState === 'error' ? '没加载出来' : p.loadState === 'loading' ? '加载中…' : `${p.messages.length} 条`}</span>
           {/* 折叠期间有作业失败：toast 几秒就走，横条上留一枚标记直到展开（v0.74） */}
           {p.collapsed && p.failed > 0 && <span data-testid="chat-failed" className="shrink-0 self-center rounded-full bg-danger/10 px-1.5 py-px text-[11px] font-medium text-danger">{p.failed} 轮失败</span>}
         </span>
@@ -80,7 +83,20 @@ export function ChatDock(p: ChatDockProps) {
       {!p.collapsed && (
         <>
           <div ref={listRef} onScroll={onScroll} className="scroll fade-up min-h-0 max-h-[min(28rem,calc(100dvh-12rem))] flex-1 space-y-3 border-t border-line p-3" role="log" aria-live="polite">
-            {p.messages.length === 0 && (
+            {p.loadState === 'loading' && p.messages.length === 0 && (
+              <div className="space-y-3" aria-busy="true" aria-label="正在加载对话">
+                <div className="ml-5 h-12 animate-pulse rounded-xl bg-accent/10 motion-reduce:animate-none" />
+                <div className="mr-5 h-16 animate-pulse rounded-xl bg-panel-2 motion-reduce:animate-none" />
+              </div>
+            )}
+            {p.loadState === 'error' && (
+              <div role="alert" className="rounded-lg border border-dashed border-warn/60 p-3 text-xs text-muted">
+                <p className="font-medium text-fg">对话没加载出来</p>
+                <p className="mt-1">连不上 Quilt 服务或请求中途断了；记录还在，重试一次就能取回来。</p>
+                <Button size="sm" className="mt-2" onClick={p.onReload}>重试</Button>
+              </div>
+            )}
+            {p.messages.length === 0 && !p.loadState && (
               <div className="rounded-lg border border-dashed border-line p-3 text-xs text-muted">
                 <p className="font-medium text-fg">试试这样描述：</p>
                 <p className="mt-1">「做一个宠物社交 APP：分享宠物照片、关注其他宠物、附近约玩、和主人聊天、管理宠物资料」</p>

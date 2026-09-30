@@ -212,7 +212,7 @@ projectRoutes.delete('/v1/projects/:projectId', async (c) => {
 });
 
 // API-CORE-030（v0.34）：项目级事件流——本机会话经 MCP 回写、别处建的作业、截图就绪都从这里通知画布。
-// 不落表不续传：事件只是「有变化」的提示，画布收到就整体刷新；断线由 EventSource 自己重连
+// 不落表不续传：事件只是「有变化」的提示，画布收到就整体刷新；断线后画布重连，每次重连成功再整体重取一次补上断线期间的变化
 projectRoutes.get('/v1/projects/:projectId/events', async (c) => {
   const user = requireUser(c);
   const project = await ownedProject(user.id, c.req.param('projectId'));
@@ -221,6 +221,8 @@ projectRoutes.get('/v1/projects/:projectId/events', async (c) => {
     const queue: ProjectEventDto[] = [];
     const unsubscribe = await subscribeProject(project.id, (e) => { queue.push(e); });
     stream.onAbort(() => { open = false; unsubscribe(); });
+    // 先写一行注释：经 Vite 代理时响应头要等第一次写才发出去，不写的话 EventSource 的 open 要等第一个 ping（15 s）
+    await stream.write(': open\n\n');
     let idle = 0;
     while (open) {
       await stream.sleep(250);

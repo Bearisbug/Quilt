@@ -286,17 +286,22 @@ export async function deleteComponent(ownerId: string, componentId: string): Pro
   await db.delete(schema.componentUses).where(and(eq(schema.componentUses.projectId, component.projectId), eq(schema.componentUses.name, component.name)));
 }
 
-// 预览域 /c/：只渲染这一个组件，加载后把根元素尺寸报给父页，画布卡片按它定大小
+// 预览域 /c/：只渲染这一个组件，加载后把根元素在视口里的框报给父页，画布卡片按它定大小、按它的左上角裁切；
+// 之后根元素尺寸一变再报（交互态里组件自己的状态改了高度）。父页始终按设备整屏给这个视口，持续上报不会反过来改变根元素
 export function componentPreviewDocument(row: Row, prelude: string): string {
   const { document } = parseHTML(`<!doctype html><html><body>${row.html}</body></html>`);
   const root = document.body.firstElementChild;
   root?.setAttribute('data-component', row.name);
   const body = root?.outerHTML ?? row.html;
-  const measure = `<script>window.addEventListener('load',function(){var r=document.querySelector('[data-component]');if(!r)return;var b=r.getBoundingClientRect();parent.postMessage({type:'quilt:component-size',componentId:${JSON.stringify(row.id)},w:Math.ceil(b.width),h:Math.ceil(b.height)},'*');});</script>`;
+  // 等 load（Tailwind CDN、图标、字体都到齐）才量第一次：更早量到的是半成品尺寸，卡片会先按它画再跳
+  const measure = `<script>window.addEventListener('load',function(){var r=document.querySelector('[data-component]');if(!r)return;var send=function(){var b=r.getBoundingClientRect();parent.postMessage({type:'quilt:component-size',componentId:${JSON.stringify(row.id)},x:Math.floor(b.left),y:Math.floor(b.top),w:Math.ceil(b.width),h:Math.ceil(b.height)},'*');};if(window.ResizeObserver)new ResizeObserver(send).observe(r,{box:'border-box'});else send();});</script>`;
   // 告诉预览运行时「这是组件不是屏」：组件里的链接一律惰性，不劫持、不上报（v0.55）
   const isComponent = '<script>window.__quiltComponent = true;</script>';
   // 关掉背景模糊（v0.73）：组件卡在画布缩放不是 100% 时也可交互，浏览器只重画悬停处那一小块时，块里的背景模糊会取到块外的透明像素，
-  // 画出一片往外渐暗的灰影；卡片里组件背后只有纯色底，关掉画面不变。屏进交互态会推到 1:1，不需要这一条
-  const noBackdrop = '<style>[data-component], [data-component] * { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }</style>';
+  // 画出一片往外渐暗的灰影。只关根元素与文档流里的后代——它们背后是纯色底，关掉画面不变；组件内部 absolute / fixed / sticky 的层
+  // 连同子树不关：它们压在组件自己的内容（图片、渐变）上，关掉就与屏里不一样了，代价是这类层在非 100% 缩放下悬停仍可能出灰影。
+  // 屏进交互态会推到 1:1，不需要这一条
+  const overlay = ':is(.absolute, .fixed, .sticky)';
+  const noBackdrop = `<style>[data-component], [data-component] *:not([data-component] ${overlay}, [data-component] ${overlay} *) { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }</style>`;
   return `<!doctype html>\n<html lang="en">\n<head>\n${prelude}\n${isComponent}\n${noBackdrop}\n<title>${row.name}</title>\n</head>\n<body>\n<div class="flex flex-col">${body}</div>\n${measure}\n</body>\n</html>\n`;
 }

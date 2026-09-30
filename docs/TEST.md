@@ -10,7 +10,7 @@
 | Owner | @bug |
 | 关联设计文档 | `docs/DESIGN.md` |
 | 被测系统 | `~/Documents/Projects/Quilt`（Web 画布 + API/MCP 服务 + Worker + 预览域服务） |
-| 最后更新 | 2026-10-01（设计文档 v0.75） |
+| 最后更新 | 2026-10-01（设计文档 v0.76） |
 
 变更记录（登用例增改，不登执行轮次）：
 
@@ -18,6 +18,7 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-09-30 | 设计文档 v0.76（画布加载与数据新鲜度）：新增 §4「CORE · 画布加载与数据新鲜度」`TC-CORE-050`~`056`（组件卡首帧与首次适配——含按视口 / 父宽定尺寸与根元素 `fixed` 的组件、量完不再变、根元素对准卡片左上角；适配视图缩放下限；聚焦过渡 / 热更新基线 / 截图换图；项目事件流断线重连与事件密集时详情慢回包仍前进；加载失败与外壳常驻；切项目不串状态；对话记录一致性），执行脚本 `tests/e2e/load.ts`（`e2e:load`）；`TC-CORE-011` 改为真把页面手里的签名换成过期的（此前脚本只验「进项目会重取」），增截图过期、屏内取页失败、4 分钟续签三步；`TC-EDIT-012` 第 7a 步扩为三处断言（根元素与文档流里的后代关模糊、压在组件自身内容上的 absolute 层保留），等尺寸上报改看 `data-ready`；单测增 `web/messages` | @bug |
 | 2026-10-01 | 设计文档 v0.75（安全边界）：`TC-CORE-031` 第 5 步建项目带打包画布的 `Origin`、增伪造 `Host` 403 的断言；新增 `TC-CORE-060`（伪造 `Host` / 跨站与 `null` 的 `Origin` 一律 403，画布 origin、回环写法、MCP 客户端照常，另用无头 Edge 模拟 DNS 重绑后的同源 fetch 与跨站表单）与 `TC-CORE-061`（同一张屏的脚本在截图渲染、导出抽 CSS、对象地址、预览域 iframe 四处往本机 API 写，库里一条都不能多；截图与预览里探针为绿；`htmlUrl` 与导出地址是附件、下载文件名为 `<id>.html`）；§2「不测」的安全渗透一行改写；§3 单测清单加 `api/origin` | @bug |
 | 2026-10-01 | 设计文档 v0.74（对话轮次与输入框的缺陷回写 13 条）：新增 `TC-CORE-043`（「修改」还原完整参数：锚点 + 组件的造屏轮、出变体 / 补缺失页 / 补链 / 按新约定重生成的胶囊与同类作业、附加要求的拼接与反解、`/messages` 三种 400）、`TC-CORE-044`（对话记录贴底才跟随、重试在途锁、预览按图定位）、`TC-CORE-045`（失败文案、折叠横条失败标记、toast 位置）、`TC-CORE-046`（通道不被模式切换冲掉、`Esc` 清草稿可撤销、贴图批量与上限、`Enter` 被挡写理由、在途输入保留）；`TC-CORE-006` 第 2 步增失败文案断言，脚本把这一轮改走 stub；`tests/e2e/openai-stub.ts` 的 `holdMs` 对 401 也生效；单测增 `tests/unit/core/failure.test.ts`，提示词底稿的拼接反解与胶囊还原各一条 | @bug |
 | 2026-09-27 | 设计文档 v0.73（组件卡预览关掉背景模糊）：`TC-EDIT-012` 增第 7a 步（组件卡 iframe 里给根元素加 `backdrop-blur-xl` 后计算值仍为 `none`）。原现象（非 100% 缩放下交互态悬停出现灰影）只在有头浏览器里出现，无头截图整帧重画、复现不出来，由用户在自己的浏览器里确认 | @bug |
@@ -63,10 +64,10 @@
 - 本机 Codex（`REQ-AGENT-003` / `REQ-CORE-013` v0.68，`ADR-020`）：`TC-AGENT-012` 用**假 Codex**验整条链——API 以 `QUILT_CODEX_HOME=/tmp/quilt-e2e-codex`、`QUILT_CODEX_BIN` 与 `QUILT_CODEX_OPENER` 都指向 `tests/e2e/codex-stub.mjs` 启动（另设 `OPENAI_API_KEY=sk-must-not-reach-codex`，验驱动会把它去掉），测试脚本也以同一个 `QUILT_CODEX_HOME` 运行（未设时登记「跳过」）。脚本自建假线程库（`state_5.sqlite`）；桩只记下 `queue` / 深链接 / `exec` 调用并回放 `exec` 的 JSONL（验证用的最小请求故意拖 18 s，与真 codex 冷启动相当，超过前端普通请求的 15 s 上限）；「Codex 窗口」一侧由脚本扮演——占住写锁文件表示线程打开着，读桩记下的队列消息、经 MCP 回写并收口。作业创建限流 10 次 / 分钟（§15），脚本在 `TC-AGENT-009` 之后先等过限流窗口再跑 012。`TC-AGENT-013`（真实 Codex）要本机 `codex` 已用 ChatGPT 登录、开着 Codex 桌面版，并临时把 Codex 的 `quilt` MCP 指到测试 API（`codex mcp add quilt --url http://127.0.0.1:3200/mcp` 加 `default_tools_approval_mode = "approve"`，测完改回 3100）；终端会话在伪终端里起 TUI（脚本替它回答终端能力探测与目录信任确认，只写进该伪终端，不动真实键盘鼠标）。
 - 聊天模式（`REQ-CORE-023` v0.45）：`TC-CORE-039` 要本机 `claude` 已登录——脚本经 API 建一条 `agent-sdk` 通道并探测通过后才发真实回合（模型 `CHAT_MODEL`，缺省 `claude-sonnet-5`；一轮 1～5 分钟，按订阅额度计费）；`LIVE_LLM=0` 只跑通道校验与串行守卫。SDK 会话文件落在 `~/.claude/projects/` 下按 `$dataDir/chat` 编码的目录，测试库与开发库共用该目录、会话 id 各自记在项目上，互不干扰。
 - MCP 与画布同面（`REQ-AGENT-002` v0.51）：`TC-AGENT-011` 由 `pnpm --filter @quilt/tests e2e:mcp` 执行，纯 MCP / REST、不开浏览器，要求 API 以 `LLM_DRIVER=stub` 启动（脚本先查 `/v1/health`，不是 stub 就退出）。为了不占用 3100 上的开发实例，可另起一套：`API_PORT=3200 PREVIEW_PORT=3201 API_ORIGIN=http://localhost:3200 PREVIEW_ORIGIN=http://preview.localhost:3201 DATABASE_URL=postgres://quilt:quilt@127.0.0.1:5439/quilt_test LLM_DRIVER=stub LLM_STUB= pnpm --filter @quilt/api dev`，脚本侧 `QUILT_E2E_API=http://localhost:3200 DATABASE_URL=…quilt_test`（种子脚本走同一个 `DATABASE_URL`）。`PREVIEW_ORIGIN` 必须一起改：`.env` 里写死的 3101 会让素材 URL 与截图渲染都打到开发实例的预览域。**浏览器用例也能在这套上跑**（v0.60 起）：先 `pnpm --filter @quilt/web build`，起 API 时再加 `WEB_DIST=$PWD/apps/web/dist WEB_ORIGIN=http://localhost:3200`（打包形态：API 同端口托管前端；`WEB_ORIGIN` 不改的话预览域的 `frame-ancestors` 还写着 6688，聚焦的 iframe 会整张拒载），脚本侧再加 `QUILT_E2E_WEB=http://localhost:3200`。
-- 单测（v0.60）：`pnpm test` 在 `tests/unit` 用 `node:test` 跑 `packages/core` 与前端纯函数的单测（不起库、不起浏览器，约 0.5 s）。TEST.md 不为单测逐条建 TC——测试文件名即覆盖范围（`core/inject`、`core/components`、`core/outline`、`core/lint`、`core/tokens`、`core/contract`、`web/arrange`、`web/jobs`、`api/codex`、`api/agentSdk`、`api/origin`），失败按「单测轮」登记。
+- 单测（v0.60）：`pnpm test` 在 `tests/unit` 用 `node:test` 跑 `packages/core` 与前端纯函数的单测（不起库、不起浏览器，约 0.5 s）。TEST.md 不为单测逐条建 TC——测试文件名即覆盖范围（`core/inject`、`core/components`、`core/outline`、`core/lint`、`core/tokens`、`core/contract`、`web/arrange`、`web/jobs`、`web/messages`、`api/codex`、`api/agentSdk`、`api/origin`），失败按「单测轮」登记。
 - LLM 故障注入：`LLM_STUB=503 pnpm dev` 让所有调用返回 503；`LLM_STUB=fixture` 回放固定 HTML（需要确定性时使用，用例中显式注明）。真实调用会消耗额度，每条用例后置不做特殊清理。
 - 工具：浏览器（自动化遵循运行环境既有约定：Playwright 驱动本机 Edge；帧率用页面内 rAF 计数 + `longtask` PerformanceObserver 采样；**在预览 iframe（跨域）内点击元素前必须先让画布处于该屏 1:1 聚焦态**——Playwright 不感知外层 CSS transform 缩放，非 1:1 下点击坐标会偏；键盘快捷键在焦点位于 iframe 内时由预览运行时转发，测试可直接对页面按键）；curl（不带凭据）；`pnpm mcp:call <tool> '<json>'` / `--resource <uri>` / `--list`（MCP 调用脚本，打印工具返回）。
-- 执行脚本：`tests/e2e/core.ts`（CORE）、`proto.ts`、`edit.ts`、`agent.ts`、`install.ts`（`TC-CORE-031`）、`smoke.ts`（开发冒烟）；环境变量 `RUN=轮次`、`ONLY=用例子集`、`LIVE_LLM=0` 跳过真实生成。各套件串行执行，不并行——每套开头的 `pnpm seed` 会清掉另一套正在用的数据。
+- 执行脚本：`tests/e2e/core.ts`（CORE）、`load.ts`（v0.76 画布加载与数据新鲜度 `TC-CORE-050`~`056`）、`proto.ts`、`edit.ts`、`agent.ts`、`install.ts`（`TC-CORE-031`）、`smoke.ts`（开发冒烟）；环境变量 `RUN=轮次`、`ONLY=用例子集`、`LIVE_LLM=0` 跳过真实生成。各套件串行执行，不并行——每套开头的 `pnpm seed` 会清掉另一套正在用的数据。
 - 证据目录：`docs/test-runs/`（截图按 `run-NNN-tc-<域>-NNN.png`、响应体按 `.json` 命名；文中引用以项目根为基准）。
 
 ## 4. 用例库
@@ -533,12 +534,15 @@
 
 #### `TC-CORE-011` 预览签名过期后自动恢复 — 对应 `REQ-CORE-005` · 级别: 边缘 · 执行者: 皆可
 
-前置：同 `TC-CORE-010` 的项目；`pnpm seed:preview-token --screen <第 1 屏> --expired` 得到过期 URL；打开画布并在浏览器内把该屏的预览 URL 替换为过期 URL（Playwright 路由改写或手工在 devtools 中修改）。
+前置：同 `TC-CORE-010` 的项目；`pnpm seed:preview-token --screen <第 1 屏> --expired` 得到过期预览 URL；把第 1 屏截图 URL 的 `exp=` 改成过去的时间，得到过期截图 URL。第 2、3 步用 Playwright 路由改写**页面拿到的第一次**详情回包（之后的回包照常），相当于页面手里的签名在停留期间过期。
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
-| 1 | 直接 curl 过期 URL | HTTP 403，`type` 为 `/errors/preview-token-invalid` |
-| 2 | 双击第 1 屏 | 前端在 2 s 内重新请求 `GET /v1/projects/<id>` 取新签名，iframe 用新 URL 加载成功，屏内内容可见，无错误弹窗 |
+| 1 | 直接 curl 过期预览 URL | HTTP 403，`type` 为 `/errors/preview-token-invalid` |
+| 2 | 打开画布，第一次详情回包里 /s1 的 `screenshotUrl` 换成过期截图 URL（v0.76） | 截图 403 后页面静默重取详情（10 s 内至多一次），8 s 内 /s1 卡片换上新签名的截图（`naturalWidth > 0`）；不出现破图、不弹错误提示 |
+| 3 | 重新打开，第一次详情回包里 /s1 的 `previewUrl` 换成过期预览 URL；双击 /s1 | iframe 里是 403 JSON、等不到就绪——`load` 后 2 s 页面重取详情，用新签名重载；卡片期间一直显示截图（iframe 透明），不露出 403 JSON；最终 `#toggle` 可见、角标「交互中」、iframe `src` 不再是过期那条 |
+| 4 | 交互中让父页取 /s2 预览文档的请求一律失败（路由 abort），点屏里去 /s2 的链接；再改成只失败第一次、又点一次（v0.76 屏内取页） | 第一次：toast「「Screen 2」这一屏没取到，稍后再试一次」，角标仍是 /s1，页面没有未捕获异常；第二次：先重取签名再取一次，跳到 /s2（角标 /s2） |
+| 5 | 另开一个装了假时钟的上下文打开同一项目，快进 4 分 30 秒（v0.76 签名续取） | 5 s 内页面静默重取一次详情（页面可见、距上次取到详情满 4 分钟） |
 
 后置：无。
 
@@ -714,6 +718,101 @@
 | 4 | curl `GET /v1/projects/<id>/app-map` | `nodes` 中不含风格指南卡片 |
 
 后置：无。
+
+### CORE · 画布加载与数据新鲜度
+
+v0.76 起，执行脚本 `tests/e2e/load.ts`（`pnpm --filter @quilt/tests e2e:load`，`ONLY` / `RUN` 同其他套件）。全部走 stub：输入框发出的一轮经路由把通道改成 `{kind:"model",driver:"stub"}`（种子按 `.env` 建的缺省通道是真实 Gemini）；`TC-CORE-056` 第 2 步用 `openai-stub`（端口 3993，拖 8 s 才回）造一个跑着的作业。
+
+#### `TC-CORE-050` 组件卡首帧尺寸与首次适配 — 对应 `REQ-EDIT-006`、`REQ-CORE-004`（v0.76）· 级别: 回归 · 执行者: AI
+
+前置：`pnpm seed:project --name Comps --device mobile --screens 0 --no-shot`，再经 `POST /v1/projects/{id}/components` 建七个组件，各自 `PATCH` 摆开：Header Tab（`h-[60px]`）、Bottom Bar（`h-[100px]`）、Side Rail（`h-dvh w-64`）、Half Sheet（`h-[50vh]`）、Half Pane（`w-1/2 h-20`）、Long List（`max-h-[60vh] overflow-auto`，40 行）、Dock（根元素 `fixed bottom-0 inset-x-0 h-14`）——后五个按视口 / 父宽定尺寸或贴视口底，终值按设备 390×844 算：256×844、390×422、195×80、390×507、390×56；全新浏览器上下文（本机没存过这个项目的镜头与组件尺寸）；路由把组件预览文档 `/c/…` 推迟 1.5 s 回，拉长「上报之前」那一段；页面内 rAF 逐帧采样七张组件卡的宽高、iframe 是否可见、世界层 `transform`。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 打开项目，等七张卡量到终值（宽高各差 ≤ 2 px），再等 1.2 s | 全程没有整屏高的卡：每张卡的高度从不超过 max(终值, 64)（没记过尺寸时是 64 高的紧凑占位，不是 844 高的白板）；iframe 还透明的每一帧，卡片里都是屏卡片那一套骨架（`.skeleton` + 扫光 `.sk-sweep`，可见）；iframe 可见的每一帧卡片都已是终值；量到终值后最后一帧仍是终值（iframe 视口恒为设备整屏，上报不会反过来缩小根元素：`h-[50vh]` 不会 422 → 211 → … → 32）；每张卡里组件根元素的左上角与卡片左上角重合（差 ≤ 2 px，按画布缩放换算），Dock 这种贴视口底的组件同样露在卡片里 |
+| 2 | 读 `localStorage` 的 `quilt:view:<id>`；看采样到的世界层 `transform` | 自动适配没有写 `quilt:view`；首帧不是默认镜头 `translate(80px, 80px) scale(0.5)`，全程至多两个取值（首帧适配 + 尺寸量完后补的一次，都不带动画） |
+| 3 | 按 `F` | 缩放与第 2 步最后那个自动适配的缩放差 < 0.01（自动适配按真实尺寸算） |
+| 4 | 读 `quilt:comp-size:<id>`；刷新页面，重新逐帧采样 | 七个组件的框都记在本机；刷新后每张卡从第一帧起就是终值、一帧都不变，量完 1.2 s 后仍是终值；镜头一帧都不动（第 3 步按过 `F`，存下的镜头原样恢复） |
+
+后置：无。
+
+#### `TC-CORE-051` 适配视图装得下大项目 — 对应 `REQ-CORE-004`（v0.76）· 级别: 回归 · 执行者: AI
+
+前置：`pnpm seed:project --name Wide --device desktop --screens 25 --no-shot`（25 张 1280×800 桌面屏横排，约 34000 px 宽）；视口 1440×1000。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 打开项目，按 `F`，量每张屏卡与可用区探针（`data-testid=safe-area`）的矩形 | 25/25 张完整落在可用区里（缩放低于 0.1，下限 0.02）；没有「最小缩放也装不下」的 toast |
+| 2 | 刷新 | 镜头与第 1 步一致（低于 0.1 的缩放照样被当作合法镜头恢复） |
+| 3 | `pnpm seed:project --name Huge --device desktop --screens 45 --no-shot`（约 61000 px 宽），打开后按 `F` | 缩放停在下限 0.02，toast「内容太大，最小缩放也装不下全部，用小地图或找屏（⌘K）定位」 |
+
+后置：无。
+
+#### `TC-CORE-052` 聚焦过渡、热更新基线与截图换图 — 对应 `REQ-CORE-005`、`REQ-CORE-004`（v0.76）· 级别: 回归 · 执行者: AI
+
+前置：`pnpm seed:project --name Focus52 --device mobile --screens 2`；路由拦住 /s1 的预览文档（只拦 `document` 类型，也就是聚焦时那次 iframe 导航）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 预览文档推迟 1.2 s 回；逐帧采样 /s1 卡片后双击它，等角标「交互中」 | 角标「加载中」的每一帧，卡片上都有一张解码完成、可见的截图，iframe 透明（不出现白板）；就绪后 iframe 接班、截图藏起 |
+| 2 | `Esc`；把预览文档扣住再双击 /s1；趁它在加载，用 `POST /v1/screens/{s1}/elements/{toggle 的 qid}` 把文案改成「新版本」，等页面取回带新修订的详情后再放行文档 | iframe 先加载聚焦时钉住的旧版，就绪后立即热更新：`#toggle` 在 30 s 内变成「新版本」（此前停在旧版） |
+| 3 | `Esc`；路由把之后详情回包里 /s2 的截图 URL 追加一个服务端不认的参数 `&roll=1`、这类对象请求推迟 800 ms；直改 /s1 触发一次项目事件与整体重取；逐帧看 /s2 卡片 | /s2 换上新地址的截图；换图期间每一帧卡片上都有一张解码完成的可见图（新图透明叠在旧图上、解码完才接班），没有空档 |
+
+后置：无。
+
+#### `TC-CORE-053` 项目事件流断线重连 — 对应 `REQ-CORE-005`（`API-CORE-030`，v0.76）· 级别: 回归 · 执行者: AI
+
+前置：`pnpm seed:project --name Live --device mobile --screens 1 --no-shot`；路由接管 `/v1/projects/{id}/events`：第 1 条回 200 的空事件流（`retry: 300`，连上就断，EventSource 自己重连）；第 2~4 条回 `502 text/plain`（Vite 代理在 API 重启期间的回包，EventSource 会永久关闭）；第 5 条起放行。记下每条事件流请求与详情、消息 GET 的时刻。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 打开项目 | 断开超过 3 s 时顶栏出现 `live-status`「实时更新已断开 · 重连中」 |
+| 2 | 等 20 s | 第 2 条 502 之后页面按 1 / 2 / 5 s 退避自己重建连接，第 5 条连上（此前停在第 2 条、永久断开） |
+| 3 | 看第 5 条之后的请求与顶栏 | 第 5 条连上后重取了一次项目详情与消息列表；断线提示撤掉 |
+| 4 | 新开一页打开同一项目：路由让事件流每次回一条 `screen_changed` 就断（`retry: 300`，约 0.3 s 重连一次）、详情 GET 推迟 900 ms 回并把项目名改成「Tick <序号>」；每 100 ms 读一次标签页标题，持续 6 s | 6 s 里标签页标题至少换过 3 个「Tick …」（详情 GET 慢于 250 ms 防抖、每个回包到达时都已有更晚的请求发出，只丢早于最近已应用的回包，详情照样前进；只认最后发起的那一次时 39 次 GET 应用 0 次） |
+
+后置：无。
+
+#### `TC-CORE-054` 加载失败与外壳常驻 — 对应 `REQ-CORE-009`、`REQ-CORE-011`（v0.76）· 级别: 回归 · 执行者: AI
+
+前置：`pnpm seed:project --name Shell --device mobile --screens 2 --messages 2 --no-shot`。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 打开 `/p/11111111-2222-4333-8444-555555555555`（不存在的项目） | 画布区（`canvas-pending`）写「这个项目不存在或已被删除」并给「回到最近的项目」；顶栏项目切换器照常在；点按钮落到另一个项目的画布 |
+| 2 | 路由让该项目详情 GET 回 `502`，打开 | 画布区写「项目没加载出来」+ 原因 +「重试」；撤掉路由点「重试」→ 卡片出来 |
+| 3 | 路由让 `/v1/config` 失败，刷新 | 同一个失败态；撤掉路由点「重试」→ 重取配置、卡片出来（失败的那次不被缓存） |
+| 4 | 路由让 `GET /v1/projects` 失败，打开 `/` | 中文错误页「没连上 Quilt 服务」+「重试」，不是路由库的英文默认错误页；撤掉路由点「重试」→ 落到 `/p/…` |
+| 5 | 详情 GET 推迟 1.5 s，打开 | 加载期间画布区是 `canvas-pending`，顶栏项目切换器、对话记录、输入框、工具栏都在；随后卡片出来 |
+| 6 | 路由让消息列表 GET 失败，刷新 | 对话记录里写「对话没加载出来」+「重试」，头部不写「0 条」、不出空态示例；撤掉路由点「重试」→ 2 条消息出来 |
+| 7 | 路由让 `GET /v1/runners` 失败，刷新 | 输入框通道位是 `runners-failed`「通道清单没加载出来 · 重试」；撤掉路由点它 → 通道选择器（`runner-select`）出来 |
+| 8 | 新开一页打开项目，rAF 逐帧读画布底色（根元素背景，透明时取 body 的，1.5 s） | 每一帧都是 `rgb(14, 23, 37)`（`#0E1725`），不出现透明（浏览器深色默认底 `#121212`）。缺陷只在开发形态出现（样式表由脚本注入，刷新后约 0.5 s 才生效）；打包形态下样式表在 head 里阻塞首帧，这一步恒过 |
+
+后置：无。
+
+#### `TC-CORE-055` 切项目不串状态 — 对应 `REQ-CORE-009`、`REQ-CORE-014`、`REQ-CORE-005`（v0.76）· 级别: 回归 · 执行者: AI
+
+前置：`pnpm seed:project --name Alpha --device mobile --screens 2 --messages 2` 与 `pnpm seed:project --name Bravo --device mobile --screens 3 --no-shot`；打开 Alpha。切项目一律经顶栏项目切换器（客户端导航）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | Alpha 里 `⌥G` 放锚点、版数选「2 版」，切到 Bravo | Bravo 里没有「新屏 · 此处」标签与锚点幽灵框，版数是「1 版」 |
+| 2 | 切回 Alpha，双击 /s1 进交互（输入框自动收起），再切到 Bravo | Bravo 里输入框显示、没有聚焦的卡 |
+| 3 | 切回 Alpha；路由把之后的 Alpha 详情 GET 拖 2.5 s；直改 Alpha 的 /s2，等页面因项目事件发出 Alpha 的详情 GET，趁它在途切到 Bravo，等 4 s | 画布仍是 Bravo 的 3 张卡、没有加载态、标签页标题是「Bravo · Quilt」（晚到的 Alpha 详情落在已卸载的页面上，被丢弃） |
+| 4 | 切回 Alpha 并确认对话里有 Alpha 的消息；路由把 Bravo 的消息 GET 拖 1.2 s，切到 Bravo，每 50 ms 看一次对话记录（顶栏切换器还写着 Alpha 的旧页面帧不算） | Bravo 的页面从第一帧起对话里不出现 Alpha 的消息（加载中是骨架） |
+
+后置：无。
+
+#### `TC-CORE-056` 对话记录一致性 — 对应 `REQ-CORE-006`、`REQ-CORE-020`（v0.76）· 级别: 回归 · 执行者: AI
+
+前置：`pnpm seed:project --name Talk --device mobile --screens 2 --no-shot`；打开项目、展开对话记录。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 路由开始扣住所有消息列表 GET（先向服务端取回快照再扣）；经 API 建一个 stub 通道的 `edit_screens`（/s2）作业，等它结束、页面发出消息 GET；此时点 /s1、在输入框发「唯一的一轮 42」，POST 返回后停止扣留，再按原顺序放行扣住的 GET | 发出的一轮出现在对话里；放行那些较早发起的旧快照之后它仍在、只出现 1 次（此前被旧快照覆盖掉，要等作业结束的下一次刷新才回来） |
+| 2 | 经 API 以慢桩通道（拖 8 s）对 /s1 发一轮「别处发起的一轮」（等价于另一个标签页或 MCP 发起） | 4 s 内这一轮出现在本页对话记录里，此时作业仍是 queued / running（此前要等作业结束才出现）；随后取消该作业 |
+
+后置：删除慢桩通道。
 
 ### CORE · 安装与运行
 
@@ -1067,7 +1166,7 @@
 | 5 | `PATCH /v1/components/{cid}` 带 `name:"BottomNav"`、`expectedVersion:2` | `200`、`version=3`、`applied` 恰为 /s2、/s3；两屏 HTML 里实例根变为 `data-component="BottomNav"`，/s1（已脱离）`currentRevisionId` 不变 |
 | 6 | `DELETE /v1/components/{cid}` | `204`；三屏 `currentRevisionId` 都不变，/s2 HTML 里仍有 `data-component="BottomNav"`（已展开的留着）；详情 `components` 为空 |
 | 7 | 重新按步骤 1 提取（名 `TabBar`）；打开 `/p/{id}` | 画布出现 `component-card`（`data-name="TabBar"`），标签含「用于 3 屏」；在空白处框选到它 → 目标区出现 `component-chip`「组件 · TabBar」、动词行含「改组件「TabBar」」且无 `count-group` / `versions-group`；`⌘E` 点 /s1 进选择元素态，点 nav 里一个 tab → 检查器出现 `el-component-lock`（含「共享组件「TabBar」」）与 `el-edit-component`、`el-detach`，无 `#el-text`；点 `el-edit-component` → 目标区只剩「组件 · TabBar」、输入框获得焦点；工具栏 `new-component`（`⌥C`）填名 `Footer` 确认 → `component-card` 数变 2、目标区为「组件 · Footer」 |
-| 7a | 卡片报完尺寸后，在组件卡 iframe 里给根元素加 `backdrop-blur-xl` 类，等 300 ms 读计算样式（v0.73） | `backdrop-filter` 为 `none`（组件预览文档关掉了背景模糊，Tailwind 生成的规则压不过它） |
+| 7a | 卡片报完尺寸（`data-ready`）后，在组件卡 iframe 里给根元素加 `backdrop-blur-xl` 类，再往根里插一个文档流里的 `backdrop-blur-md` 层、一个压在渐变块上的 `absolute backdrop-blur-md` 层，等 300 ms 读计算样式（v0.73，v0.76 收窄范围） | 根元素与文档流里那层的 `backdrop-filter` 为 `none`（组件预览文档关掉了它们的背景模糊，Tailwind 生成的规则压不过它）；absolute 那层是 `blur(…)`——它背后是组件自己的内容，关掉就与屏里不一样 |
 | 8 | （真实 LLM）目标为 `TabBar` 组件，输入框发「把第二个 tab 的文案改成 Search，其他都别动」 | `POST messages` 带 `targetComponentIds=[cid]`，作业 `kind=edit_component`；在跑作业行写「改组件「TabBar」」；作业成功后组件 `version+1`、`summary` 含 `Search`，用它的每一屏各出一条 `sourceKind=component`、`jobId=本作业` 的新修订且 HTML 含 `Search`；助手消息以「已更新组件「TabBar」」开头并写「同步 N 屏」 |
 | 9 | 双击画布上的组件卡；按 `Esc`（v0.53 组件卡可交互） | 双击前后世界层 `.world` 的 `transform` **完全一致**（组件进交互不动镜头，与屏的「推到 1:1 居中」不同）；卡片带 `focused`、手势罩 `.gesture` 已移除、iframe 的 `pointer-events` 为 `auto`（组件里的按钮点得动）、右上出现呼吸绿点（`.live-dot`，`aria-label="交互中"`，8 px、`sk-pulse` 动画，不透明度在变）；此时双击一张屏卡进交互，组件的 `focused` 自动退掉（两态互斥）；`Esc` 退出交互态（焦点在组件 iframe 内按也有效）。再往组件里塞一个 `href="#"` 的链接并点它（v0.55 链接惰性）：不出现任何 toast、iframe 也不跳走 |
 | 10 | 目标为该组件，发「顶部一级频道导航：关注 / 推荐 / 附近 / 活动，默认选中「推荐」，点任意一条要真切换」；产出按组件预览文档渲染后点第 3 条（v0.54 组件交互契约） | 产出通过 `validateComponentHtml`（单根、无 `<script>`）；HTML 里每条是 `<label>` 且首个孩子是 `type="radio" class="peer sr-only"`、`name` 带组件名前缀，选中态全部写成 `peer-checked:` 变体、默认值只在 `checked` 上（**没有任何一条把选中样式硬编码进 class**），焦点环走 `peer-focus-visible:`，条目带 `data-slot` / `data-part`；渲染后点第 3 条：该条 `input.checked` 为 true、字重与字号升到选中档、indicator `opacity` 为 1，原选中项三项同时回落；容器高度前后一致（选中态变粗变大不得顶高）|
@@ -1291,6 +1390,13 @@
 | RUN-136 | 2026-10-01 | 同 RUN-134 | AI(Claude Code) | `TC-CORE-031`（打包形态，第 5 步本版加了来源断言）；隔离栈停掉让出 3410 / 3411。再把 `apps/api`、`packages/core` 临时 `git stash` 回 c537fd5 跑同一用例对照 | 失败 1/1，修复前同现：冷启动打出「首次运行：已初始化」后进程以退出码 13 退出，没走到本版新增的断言；换回 c537fd5 的服务端代码结果相同（见明细） |
 | RUN-137 | 2026-10-01 | 同 RUN-134 | AI(Claude Code) | 开发形态实测（§3 仓库内开发：Vite 代理 `/v1`）：隔离 API 以 `WEB_ORIGIN=http://localhost:3412` 起，临时 Vite 配置（端口 3412、代理 `/v1` 到 3410、`changeOrigin: false`、沿用 `host: true`）起画布；无头 Edge 分别从 `localhost:3412`、`127.0.0.1:3412`、局域网 `192.168.1.22:3412` 打开，先经代理确认背后是 `quilt_test`，再页内 `POST /v1/projects` | 通过：`localhost` 与 `127.0.0.1` 两个入口画布正常加载、页面加载时的 `/v1` 请求全 200、建项目 201（`run-137-devform.png`）；局域网入口 `/v1` 请求全部 403（§15 的决定）。验证完临时 Vite 配置已删、Vite 与这套 API 已停，隔离栈按原参数重启 |
 | RUN-138 | 2026-10-01 | 未提交工作树（v0.75 审查修复：`install.ts` 伪造 `Host` 改走 `node:http`；设计文档 `REQ-AGENT-001` 与 §10 开头段对齐 `ADR-016` v0.75 修订；`/v1/objects` 的 HTML 附件带文件名；`TC-CORE-060` 追溯改挂 `REQ-AGENT-002`） | AI(Claude Code) | 审查修复轮：`TC-CORE-060` / `061`（061 第 3 步新增下载文件名断言，先在临时去掉文件名的服务端上跑、再在修复后跑）；`TC-CORE-031` 第 5 步那段伪造 `Host` 的请求原样对隔离栈（打包形态，3410）单独执行；单测；typecheck。同一隔离栈，`LIVE_LLM=0` | 通过 2/2（060、061；061 在去掉文件名的服务端上失败 1 项，预期，见明细）。031 第 5 步的请求：`node:http` 伪造 `Host` 得 403，同一请求用 `fetch` 得 200（undici 丢掉 `Host`，原脚本那条断言修对了代码也会失败），不伪造得 200；完整 `TC-CORE-031` 未重跑——冷启动退出码 13 走不到第 5 步（RUN-136，§7）。单测 44/44，typecheck 通过 |
+| RUN-139 | 2026-09-30 | `c537fd5` 构建（修复前的前端 dist 与 API） | AI(Claude Code) | 复现轮：新增 `TC-CORE-050`~`056` 与改写后的 `TC-CORE-011` 先在修复前的实现上跑（011 第 3~5 步、052 第 2~3 步前面的断言会先挡住，用去掉前序断言的副本各跑一次）；`TC-EDIT-012` 第 7a 步的新断言用独立脚本按组件预览文档复现。隔离栈 3430 / 3431 + `feb_quilt_test` + stub + 打包形态 | 按预期全部失败，失败点即缺陷本身：050「Header Tab 加载途中出现过 844 高的卡」；051「适配视图后只有 7/25 屏完整落在可用区（scale 0.1）」；052 第 1 步「加载中 306 帧里 306 帧卡片上没有截图」、第 2 步「iframe 里仍是旧版 Follow」、第 3 步「换图 477 帧里有 48 帧没有解码好的图」；053「断线超过 3 s 没有提示，事件流只连了 2 条」；054「不存在的项目 8 s 内没有说明」；055「A 的锚点 / 版数带进了 B：anchor 1、版数不是 1」；056「较早发起的消息 GET 晚到后这一轮出现 0 次」；011 第 2 步「过期截图没换回来（详情 GET 1 次）」、第 3 步 10 s 内等不到 `#toggle`（iframe 里是 403 JSON）、第 4 步 8 s 内没有 toast、第 5 步「快进 4.5 分钟后详情 GET 1 → 1」；7a：压在组件自己渐变上的 absolute 毛玻璃层 `backdrop-filter` 为 `none` |
+| RUN-140 | 2026-09-30 | 未提交工作树（设计文档 v0.76：画布加载与数据新鲜度） | AI(Claude Code) | 修复后局部轮：`TC-CORE-050`~`056`、`TC-CORE-010` / `011`、`TC-EDIT-012`；单测轮；浏览器实测（加载中 / 项目不存在 / 加载失败 / 事件流断线 / 对话与通道清单失败 / 组件骨架 / 聚焦失败角标 / 根路径错误页，1440×900 与 390×844，console 与未捕获异常 0 条）；深色屏 CDP 逐帧像素对照（同一脚本先换上 `c537fd5` 构建的 dist 跑、再换回）；经临时 Vite 代理（3432 → 3430）量项目事件流首字节。同一隔离栈 | 首跑 2/7（`load.ts`）失败 5 条均为脚本问题（见明细），改脚本后 `TC-CORE-050`~`056` 7/7、`TC-CORE-010` / `011` 2/2、`TC-EDIT-012` 1/1 通过；单测 41/41，typecheck 通过。像素：深色屏双击进屏，修复前 25 帧里 15 帧中心三点全为 255 白（207 ms～4.4 s），修复后 23 帧 0 帧白；截图换 URL 两个构建的无头录屏都只出 1 帧、无白帧（无头下复现不出，靠 052 第 3 步的逐帧 DOM 断言）。事件流经 Vite 代理首字节 0.012 s（修复前审计实测 15.12 s）。画面：窄视口下失败说明压在对话记录之上、出口可点；顶栏断线提示在 390 宽时截断成「实时更新已断开 · …」、不撑破顶栏 |
+| RUN-141 | 2026-09-30 | 同 RUN-140 | AI(Claude Code) | 回归轮：CORE / PROTO / EDIT / CHAT 四套整套（`LIVE_LLM=0`），同一隔离栈；本机 1 分钟负载 5～10，另两条修复道的 e2e 与本轮按锁轮流 | CORE 通过 26/36（待人工 / 跳过 2）· 失败 8；PROTO 10/12；EDIT 7/11；CHAT 1/1。失败归类：需真实模型 6（`TC-CORE-005` / `012`、`TC-PROTO-004` / `009`、`TC-EDIT-003` / `008`）、环境 1（`TC-CORE-027`）、§7 遗留 1（`TC-CORE-023`）、整套顺序下偶发 1（`TC-CORE-029`）、HEAD 同现 4（`TC-CORE-035` / `037`、`TC-EDIT-002` / `006`）、脚本 1（`TC-CORE-011`，见明细） |
+| RUN-142 | 2026-09-30 | 同 RUN-140 | AI(Claude Code) | 复测轮：`TC-CORE-023` → `029` → `010` → `011` → `037` 连跑（023 先把视口改成 900 高，复现整套里 011 的前置）；`TC-CORE-051` 增第 3 步后重跑；`TC-CORE-037` 另在 `c537fd5` 构建上跑一次对照 | `TC-CORE-029` / `010` / `011` / `051` 通过；`TC-CORE-023` 失败（§7 遗留）；`TC-CORE-037` 失败在「第二次打开切换器后点重命名键」30 s 超时，`c537fd5` 构建上同一步同样失败 |
+| RUN-143 | 2026-10-01 | `e6abae7` 构建（v0.76 首版的前端 dist 与 API） | AI(Claude Code) | 复现轮：扩写后的 `TC-CORE-050`（新增 Half Sheet / Half Pane / Long List / Dock 四个按视口 / 父宽定尺寸或根元素 `fixed` 的组件，新增「量完不再变」「根元素对准卡片左上角」两条断言）、`TC-CORE-053` 新增第 4 步；开发形态（临时 Vite 3432，`/v1` 代理到 3430）用临时脚本量刷新后 1.5 s 内的画布底色（rAF 读计算背景 + CDP 录屏取中心像素），各 3 次。隔离栈 3430 / 3431 + `feb_quilt_test` + stub + 打包形态 | 按预期失败：050「组件卡没量到终值」——Half Sheet 390×33、Half Pane 48×80、Long List 390×32（终值 390×422 / 195×80 / 390×507）：尺寸已知时 iframe 视口等于卡片，上报 → 卡片缩 → 视口缩 → 根元素再缩，一路缩到 48×32 的下限；Header Tab / Bottom Bar / Side Rail / Dock 正常。053 第 4 步「6 s 里发了 39 次详情 GET，页面只应用了 0 次」。开发形态底色：3 次刷新里根元素与 body 的背景前 335～470 ms 都是透明（显示为浏览器深色默认底），其中 1 次录屏抓到 69 ms 时中心像素 `#121212` |
+| RUN-144 | 2026-10-01 | 未提交工作树（v0.76 审查修复：组件卡 iframe 视口固定为设备整屏、按根元素的框平移裁切；详情回包只丢早于最近已应用的；`index.html` 内联画布底色） | AI(Claude Code) | 修复后局部轮：`load.ts` 整套 `TC-CORE-050`~`056`；`TC-CORE-054` 另在开发形态（同一临时 Vite）跑一次；`TC-EDIT-012`（`LIVE_LLM=0`）；单测轮；浏览器实测（Half Sheet / Half Pane / Long List / Glass Dock——根元素 `fixed bottom-0`、子层毛玻璃压在渐变上，1440×900 与 390×844，骨架期截图，Long List 交互态里滚动）；开发形态底色临时脚本复测 3 次。同一隔离栈 | `load.ts` 7/7、开发形态 `TC-CORE-054` 1/1、`TC-EDIT-012` 1/1 通过；单测 41/41，typecheck 通过。050：7 张卡量完 1.2 s 不再变、根元素都对准卡片左上角，自动适配 0.406 ≈ 按 F 0.406，刷新后一帧不变；053 第 4 步：39 次慢详情 GET 应用 27 次；054 第 8 步：打包形态 91 帧、开发形态 79 帧底色都是 `#0E1725`。浏览器实测：卡片 390×422 / 195×80 / 390×507 / 390×64，Glass Dock 的 iframe 平移 (0, −780)、底栏露在卡片里；卡片右下角外 10 px 命中的是画布、不是 iframe；Long List 交互态里滚到 200，卡片仍是 507 高；本机缓存按组件 id 记 `{x, y, w, h}`；两个视口 console 各 4 条 warning，都是预览文档里 Tailwind CDN 的既有提示，未捕获异常 0。开发形态底色 3 次刷新都从第一帧起是 `rgb(14, 23, 37)`。证据 `docs/test-runs/run-144-comp-skeleton.png`、`run-144-comp-cards.png`、`run-144-comp-cards-390.png`、`run-144-tc-core-050.png` 等 |
+| RUN-145 | 2026-10-01 | 同 RUN-144 | AI(Claude Code) | 回归轮：CORE / EDIT / PROTO 三套整套（`LIVE_LLM=0`），同一隔离栈；详情请求的丢弃规则改过，画布上所有「事件 → 重取详情」的路径都受影响 | CORE 通过 27/36（待人工 1 · 跳过 1）· 失败 7；EDIT 7/11；PROTO 10/12。失败全在基线内、与 RUN-141 同一批：需真实模型 6（`TC-CORE-005` / `012`、`TC-PROTO-004` / `009`、`TC-EDIT-003` / `008`）、环境 1（`TC-CORE-027`）、§7 遗留 1（`TC-CORE-023`）、整套顺序下偶发 1（`TC-CORE-029`，前序 `TC-CORE-025` 记住了本机会话通道）、HEAD 同现 4（`TC-CORE-035` / `037`、`TC-EDIT-002` / `006`）。RUN-141 整套里失败过一次的 `TC-CORE-011`、审查时整套里失败过一次的 `TC-CORE-032` 本轮都通过 |
 | RUN-114 | 2026-09-23 | 未提交工作树（设计文档 v0.65：审查缺陷回写） | AI(Claude Code) | 单测轮 34/34；e2e 局部轮：`TC-AGENT-011`（含新增 7c / 8a）、`TC-AGENT-003` / `004`；`TC-PROTO-001` / `012`（含新增 5～6b）；`TC-CORE-007` / `010` / `011` / `018` / `023` / `034` / `036` / `040` / `041`（含新增断言）；`TC-EDIT-001` / `005` / `007` / `012`。隔离栈 3200 / 3201 + `quilt_test` + stub + 打包形态，逐套串行 | 通过 18/19 · 失败 1（`TC-CORE-023`，与 RUN-112 同一步、HEAD 同现，判环境） |
 | RUN-113 | 2026-09-23 | 未提交工作树（设计文档 v0.64：MCP 写屏改小步——`patch_screen` / `append_upload`、`get_screen` 只给 body） | AI(Claude Code) | 局部轮（`REQ-AGENT-002` → `TC-AGENT-011` 全部步骤含新增 7b；`get_screen` 口径变化波及的 `TC-AGENT-003` / `004`）。隔离环境 3200 / 3201 + `quilt_test` + stub，纯 MCP / API，未托管前端 | 通过 2/3 · 失败 1（`TC-AGENT-003`：MCP 部分——`get_screen` 只给 body、截图就绪——已过，随后打开浏览器页 `locator.waitFor` 超时：本栈没托管前端，判环境） |
 | RUN-112 | 2026-09-23 | 未提交工作树（设计文档 v0.60 工程底座 + v0.61 找屏与总览 + v0.62 状态变体 + v0.63 叠层屏） | AI(Claude Code) | 单测轮 `pnpm test` 31/31；e2e 局部轮（新增 `TC-CORE-040` / `041`、`TC-PROTO-012`；重构影响面：`TC-CORE-003` / `007` / `012` / `018` / `023` / `034` / `036`、`TC-EDIT-001` / `005`、`TC-AGENT-001` / `003` / `004` / `011`）。隔离环境：3200 / 3201 + `quilt_test` + stub 驱动 + 打包形态（`WEB_DIST` + `WEB_ORIGIN=3200`，§3），3100 / 5173 归另一会话 | 通过 15/17 · 失败 1（`TC-CORE-023`，HEAD 同现、判环境）· 未跑 1（`TC-EDIT-008` 需真实模型）· 跳过 / 待人工 2（`TC-AGENT-009` / `010`） |
@@ -1352,6 +1458,14 @@
 
 | 轮次 | 用例 | 结果 | 现象 / 证据 | 跟进 |
 | --- | --- | --- | --- | --- |
+| RUN-140 | TC-CORE-050 | 失败 → 通过 | 「Header Tab 加载途中出现过 64 高的卡（终值 60）」：断言写成「不超过终值」，没算上没记过尺寸时 64 高的紧凑占位——占位本身是设计要的 | 脚本更正：上限改为 max(终值, 64)，守的是「不出现 844 的整屏白板」；另加「iframe 透明的帧里骨架可见」一条 |
+| RUN-140 | TC-CORE-052 | 失败 → 通过 | 第 3 步「新地址的截图没换上」、第 1 步 10 s 内等不到「交互中」：同一时段 `curl` 量 `cdn.tailwindcss.com` 6.7～9.7 s，预览文档要等它才就绪；另一屏出截图后的项目事件实测 6 s 才到。实现未改，单跑时通过 | 脚本更正：这几处等待放宽到 30 s 并注明原因 |
+| RUN-140 | TC-CORE-054 | 失败 → 通过 | `getByText('项目没加载出来')` 命中 4 处（画布区说明、顶栏切换器占位、输入框不可用理由、工具栏提示）；「对话没加载出来」同时命中对话记录头部 | 脚本更正：限定在 `canvas-pending` 与对话记录的 `role=alert` 里找 |
+| RUN-140 | TC-CORE-055 | 失败 → 通过 | 第 3 步「B 的顶栏下显示了 A 的对话：0ms」：点完切换器立刻采样，那一帧还是旧页面 | 脚本更正：等地址变成 B，并跳过顶栏切换器仍写着 Alpha 的帧（旧页面未换下）；改后 16 次采样 0 次串显 |
+| RUN-140 | TC-CORE-056 | 失败 → 通过 | 「另一个作业结束后没有取消息」：条件写死 `succeeded`，stub 通道的这次改屏以 `failed` 收口，终态照样触发了消息 GET | 脚本更正：终态认 `succeeded` / `failed`；扣留改为扣住一个时间窗里的全部消息 GET，按原顺序放行 |
+| RUN-141 | TC-CORE-011 | 失败 → 通过 | 整套里第 4 步 8 s 内没等到 toast，单跑通过：前序用例把视口改成 1440×900，聚焦缩放 91%，Playwright 按坐标点 iframe 里的链接点偏了（§3 已写明非 1:1 下坐标会偏） | 脚本更正：改为在 iframe 里对链接派发 `click()`；RUN-142 按「023 → 011」复现同一视口后通过 |
+| RUN-141 | TC-CORE-029 | 偶发 | 「无目标时动词行应为「造 1 屏 · 自动摆放」：造屏 · 交给本机会话」：前序 `TC-CORE-025` 在本机记住了本机 Claude Code 通道 | RUN-142 不带 025 连跑通过；与 RUN-115 起登记的顺序依赖同一类 |
+| RUN-141 / 142 | TC-CORE-037 | 失败 | 第 5 步第二次打开项目切换器后点「重命名」键 30 s 超时（第 1～4 步改名、标签页标题都已通过） | 本版改过 `ProjectSwitcher`（`current` 可为空），所以在 `c537fd5` 构建上单跑对照：同一步同样超时，与 RUN-115 / 117 的「HEAD 同现」一致，不归本版 |
 | RUN-133 | TC-CORE-060 | 失败（预期） | 第一次执行时脚本用 `fetch` 带伪造的 `Host`，而 Node 的 fetch（undici）会丢掉自定义 `Host`（本机 `node:http` 小服务实测收到的是 `127.0.0.1:34999`），那次的 200 证明不了缺陷；脚本改走 `node:http` 后在修复前代码上重跑，伪造 `Host` 读项目 200、返回全部项目。此前 `curl --noproxy '*' -H 'Host: rebind.attacker.example:3410'` 对 `/v1/projects` 与 `/mcp` 也都 200 | 缺陷复现成立；脚本已更正 |
 | RUN-133 | TC-CORE-061 | 失败（预期） | 两次执行都复现了截图、导出、对象地址三处写入。第一次（写请求在解析中途发出）预览 iframe 那一步没写进库，此前同一分钟里已建出 7 个作业，作业创建限流（10 次 / 分钟）可能挡下了它，未查；第二次（写请求挪到 `load` 之后）预览表单写入「csrf-061 form http://preview.localhost:3411」，与审计复现一致 | — |
 | RUN-134 | TC-CORE-060 | 失败 → 通过 | 首跑第 1 步 200：同 RUN-133 的 `fetch` 丢 `Host` | 脚本更正（`node:http`）后通过 |

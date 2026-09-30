@@ -15,7 +15,8 @@ import { ConfirmDialog } from '@/ui/modal';
 const NEW_ID = '__new_project__';
 const ITEM_CLS = 'group relative flex cursor-pointer select-none items-center gap-2 rounded-md px-2.5 py-2 text-sm text-muted outline-none data-[highlighted]:bg-panel-2 data-[highlighted]:text-fg data-[state=checked]:text-fg data-[disabled]:pointer-events-none data-[disabled]:opacity-40';
 
-export function ProjectSwitcher({ current, onRenamed }: { current: ProjectDto; onRenamed?: (id: string, name: string) => void }) {
+// current = null（v0.76）：画布页的项目还在加载或取不到，切换器照常可用（它是加载失败时的出口之一），触发器写 placeholder
+export function ProjectSwitcher({ current, placeholder = '选择项目', onRenamed }: { current: ProjectDto | null; placeholder?: string; onRenamed?: (id: string, name: string) => void }) {
   const navigate = useNavigate();
   const toast = useToast();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -36,7 +37,7 @@ export function ProjectSwitcher({ current, onRenamed }: { current: ProjectDto; o
     finally { setLoading(false); }
   };
   // 列表未到手时至少有当前项：Radix 靠它渲染选中态，触发器也不会闪成占位符
-  const list = items && items.some((p) => p.id === current.id) ? items : [current, ...(items ?? []).filter((p) => p.id !== current.id)];
+  const list = !current ? items ?? [] : items && items.some((p) => p.id === current.id) ? items : [current, ...(items ?? []).filter((p) => p.id !== current.id)];
 
   useEffect(() => { if (!open) setRenaming(null); }, [open]);
   const askDelete = (p: ProjectDto) => { setOpen(false); setDeleting(p); };
@@ -56,7 +57,7 @@ export function ProjectSwitcher({ current, onRenamed }: { current: ProjectDto; o
       toast(`已删除「${p.name}」`);
       setDeleting(null);
       setItems((cur) => cur?.filter((x) => x.id !== p.id) ?? null);
-      if (p.id === current.id) navigate('/');   // 删的是当前项目：回到最近更新的那个（一个不剩就是 PAGE-FIRST）
+      if (p.id === current?.id) navigate('/');   // 删的是当前项目：回到最近更新的那个（一个不剩就是 PAGE-FIRST）
     } catch (e) {
       toast(e instanceof ApiError && e.type === '/errors/project-busy' ? '项目有进行中的作业，先取消或等它完成' : '删除失败', 'error');
       setDeleting(null);
@@ -65,10 +66,10 @@ export function ProjectSwitcher({ current, onRenamed }: { current: ProjectDto; o
 
   return (
     <>
-      <Select.Root open={open} onOpenChange={(o) => { setOpen(o); if (o) void load(); }} value={current.id} onValueChange={(v) => { if (v === NEW_ID) setCreating(true); else if (v !== current.id) navigate(`/p/${v}`); }}>
-        <Select.Trigger ref={triggerRef} data-testid="project-switcher" aria-haspopup="listbox" aria-label={`项目：${current.name}，切换项目`}
+      <Select.Root open={open} onOpenChange={(o) => { setOpen(o); if (o) void load(); }} value={current?.id ?? ''} onValueChange={(v) => { if (v === NEW_ID) setCreating(true); else if (v !== current?.id) navigate(`/p/${v}`); }}>
+        <Select.Trigger ref={triggerRef} data-testid="project-switcher" aria-haspopup="listbox" aria-label={current ? `项目：${current.name}，切换项目` : `${placeholder}，切换项目`}
           className="group flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-fg transition-colors duration-[var(--duration-fast)] hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-accent data-[state=open]:bg-panel-2">
-          <span className="truncate">{current.name}</span>
+          <span className={current ? 'truncate' : 'truncate text-muted'}>{current?.name ?? placeholder}</span>
           <Select.Icon className="flex shrink-0 text-muted transition-transform duration-[var(--duration-base)] ease-out group-data-[state=open]:rotate-180"><ChevronDown size={14} aria-hidden="true" /></Select.Icon>
         </Select.Trigger>
         <Select.Portal>
