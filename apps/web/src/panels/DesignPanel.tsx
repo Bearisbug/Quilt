@@ -214,8 +214,8 @@ export function DesignPanel({ ds, project, screens, assets, busy, onClose, onSav
 // 不回刷就只有以后新造的屏会变。这一问必须是弹层：面板内插一条会把用户刚点的「保存」挤走（RESP-010），
 // 面板滚到底时插在下方的那一问也可能不在视野里
 function ApplyAllDialog({ count, returnTo, fallback, onConfirm, onClose }: { count: number; returnTo: React.RefObject<HTMLButtonElement | null>; fallback: React.RefObject<HTMLButtonElement | null>; onConfirm: () => void; onClose: () => void }) {
-  // 关掉时焦点回「保存」；但保存成功后它已变成原生 disabled，focus 会静默失败、焦点掉到 body
-  // （之后按 Esc 会被画布接走去取消作业），所以兜底给「回刷所有屏」——此刻它恰好可点
+  // 关掉时焦点回「保存」；但保存成功后它已变成原生 disabled，focus 会静默失败、焦点掉到 body，
+  // 所以兜底给「回刷所有屏」——此刻它恰好可点
   const ref = useModal<HTMLDivElement>(onClose, returnTo, fallback);
   return (
     <Overlay onClose={onClose}>

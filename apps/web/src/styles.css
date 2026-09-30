@@ -225,8 +225,8 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) tran
    把它程序化滚动（scroll-into-view），而画布的平移缩放全在 .world 的 transform 上、对这段 scrollLeft 一无所知，
    屏幕→世界的换算（双击放锚点、框选命中）随之整体偏掉 */
 .viewport { position: relative; overflow: clip; height: 100%; user-select: none; cursor: default; background-color: var(--color-canvas); background-image: radial-gradient(var(--color-line) 1px, transparent 1px); background-size: 24px 24px; background-repeat: repeat; }
-.viewport.pan-ready, .viewport.pan-ready .card .gesture { cursor: grab; }
-.viewport.dragging { cursor: grabbing; }
+.viewport.pan-ready, .viewport.pan-ready .card .gesture, .viewport.pan-ready .styleguide { cursor: grab; }
+.viewport.dragging, .viewport.dragging .card .gesture, .viewport.dragging .styleguide { cursor: grabbing; }
 /* 选择元素 / 批注模式已开、尚未进任何一屏：光标提示「点一屏进去」 */
 .viewport.armed { cursor: crosshair; }
 .viewport.armed .card .gesture { cursor: crosshair; }
@@ -235,8 +235,11 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) tran
 /* 平移缩放进行中骨架卡的循环动画暂停：上百张骨架卡同时在动时，动画自身就占满每帧的 GPU 预算，镜头跟不上手 */
 .world.moving .card .skeleton, .world.moving .card .skeleton::before, .world.moving .card .skeleton *, .world.moving .comp .skeleton::before, .world.moving .comp .skeleton * { animation-play-state: paused; }
 /* 卡片底白是恒定色，不跟工具主题走：这块白属于用户的设计稿，是他们 APP 的画布底，
-   不是 Quilt 的外壳（VIS-010 的「确需恒定色」情形）。工具品牌只出现在卡片之外的 chrome 上。 */
-.card { position: absolute; left: 0; top: 0; background: #fff; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); outline: 2px solid transparent; outline-offset: 4px; transition: outline-color var(--duration-fast) var(--ease-out); }
+   不是 Quilt 的外壳（VIS-010 的「确需恒定色」情形）。工具品牌只出现在卡片之外的 chrome 上。
+   选中描边按 --canvas-zoom 反算（v0.80，世界层在平移缩放停下时写一次）：屏幕上始终约 2 px，10% 缩放下不会细到看不见 */
+.card { position: absolute; left: 0; top: 0; background: #fff; border-radius: 14px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); outline: calc(2px / var(--canvas-zoom, 1)) solid transparent; outline-offset: calc(4px / var(--canvas-zoom, 1)); transition: outline-color var(--duration-fast) var(--ease-out); }
+/* 圆角裁切只包截图 / 骨架 / iframe 这一层（v0.80）：裁整张卡的话，画在卡片上方的标签一起被裁掉 */
+.card-clip { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; }
 .card.selected { outline-color: var(--color-accent); }
 .card.focused { outline-color: var(--color-accent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 18%, transparent), 0 8px 30px rgba(0, 0, 0, 0.45); }
 .card .label { position: absolute; left: 0; top: -28px; color: var(--color-muted); font-size: 12px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
@@ -280,7 +283,9 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) tran
 .world .edges path { fill: none; stroke: var(--color-accent); stroke-width: 2.5; stroke-linecap: round; opacity: 0.85; }
 .world .edges marker path { fill: var(--color-accent); stroke: none; opacity: 1; }
 .world .edge-count { position: absolute; left: 0; top: 0; width: 28px; height: 22px; border-radius: 11px; background: var(--color-accent); color: var(--color-on-accent); font-size: 13px; font-weight: 600; line-height: 22px; text-align: center; pointer-events: none; font-variant-numeric: tabular-nums; }
-.card .gesture { position: absolute; inset: 0; cursor: default; }
+.card .gesture { position: absolute; inset: 0; border-radius: inherit; cursor: default; }
+/* 卡片的键盘焦点环（v0.80）：雾蓝、外扩到选中描边之外，两层分得开；宽度同样按 --canvas-zoom 反算 */
+.card .gesture:focus-visible, .comp .gesture:focus-visible { outline: calc(2px / var(--canvas-zoom, 1)) solid var(--color-accent-strong); outline-offset: calc(8px / var(--canvas-zoom, 1)); }
 .card.dragging .gesture { cursor: grabbing; }
 .card .badge, .comp .badge { position: absolute; right: 8px; top: 8px; background: var(--color-accent); color: var(--color-on-accent); font-size: 11px; padding: 2px 8px; border-radius: 999px; pointer-events: none; }
 /* 聚焦的 iframe 重载后仍等不到就绪（v0.76）：角标换成可点的「加载失败 · 重试」，用警示色与正常角标区分 */
@@ -322,15 +327,16 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) tran
 .card .working { position: absolute; right: 8px; top: 8px; z-index: 2; background: var(--color-accent); color: var(--color-on-accent); font-size: 11px; padding: 2px 8px; border-radius: 999px; pointer-events: none; }
 /* 同一张卡还挂着候选角标时错开一行：两者同位同色同尺寸，拉 z-index 只会换成谁盖谁 */
 .card .working.below { top: 34px; }
-.styleguide { position: absolute; left: 0; top: 0; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); outline: 2px solid transparent; outline-offset: 4px; cursor: pointer; }
+.styleguide { position: absolute; left: 0; top: 0; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); outline: calc(2px / var(--canvas-zoom, 1)) solid transparent; outline-offset: calc(4px / var(--canvas-zoom, 1)); cursor: pointer; }
 .styleguide.selected { outline-color: var(--color-accent); }
+.styleguide:focus-visible { outline-color: var(--color-accent-strong); outline-offset: calc(8px / var(--canvas-zoom, 1)); }
 /* 共享组件卡（REQ-EDIT-006）：与屏卡片同一套选中 outline（单层高亮，INT-015），白底是用户设计稿的底；
    里面是活 iframe 但不接指针——拖拽 / 选中全走盖在上面的 .gesture，与屏卡片一致 */
-.comp { position: absolute; left: 0; top: 0; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4); outline: 2px solid transparent; outline-offset: 4px; transition: outline-color var(--duration-fast) var(--ease-out); }
+.comp { position: absolute; left: 0; top: 0; background: #fff; border-radius: 10px; box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4); outline: calc(2px / var(--canvas-zoom, 1)) solid transparent; outline-offset: calc(4px / var(--canvas-zoom, 1)); transition: outline-color var(--duration-fast) var(--ease-out); }
 .comp.selected { outline-color: var(--color-accent); }
 .comp .label { position: absolute; left: 0; top: -28px; color: var(--color-muted); font-size: 12px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .comp .label b { color: var(--color-fg); }
-/* iframe 恒按设备整屏渲染（宽高、平移写在内联样式里），露出哪一块全靠 .comp 的 overflow: hidden 裁：要让标签露到卡片外，得另加一层裁切，不能摘掉它 */
+/* iframe 恒按设备整屏渲染（宽高、平移写在内联样式里），露出哪一块全靠卡片里那层 .card-clip 裁 */
 .comp iframe { position: absolute; left: 0; top: 0; display: block; border: 0; background: #fff; pointer-events: none; opacity: 0; transition: opacity var(--duration-fast) var(--ease-out); }
 /* 尺寸上报之前（v0.76）：iframe 透明，垫屏卡片那一套骨架（浅承载面 + 呼吸 + 扫光），不画白板；上报后 iframe 淡入，
    骨架等淡入走完再藏（visibility 按时长延后切），中间不露卡片白底 */
@@ -343,9 +349,10 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) tran
    避开 0.2 Hz 那档前庭不适区；reduced-motion 下只留常亮的点（下面统一关动画） */
 .comp .live-dot { position: absolute; right: 8px; top: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 22%, transparent); animation: sk-pulse 1.2s ease-in-out infinite; }
 
-.comp .gesture { position: absolute; inset: 0; cursor: default; }
+.comp .gesture { position: absolute; inset: 0; border-radius: inherit; cursor: default; }
 .comp.dragging .gesture { cursor: grabbing; }
 .viewport.pan-ready .comp .gesture { cursor: grab; }
+.viewport.dragging .comp .gesture { cursor: grabbing; }
 .dangling-edge { position: absolute; left: 0; top: 0; pointer-events: none; }
 /* 批注气泡（REQ-EDIT-004）：画在卡片层、坐标是批注时记下的屏文档坐标，随世界层一起缩放。
    pointer-events 单独打开——卡片其余部分被 .gesture 覆盖着做拖拽。 */
@@ -353,7 +360,9 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) tran
 .card .anno-pin:hover { background: var(--color-accent-strong); }
 .card .anno-pin.sending { background: var(--color-warn); color: var(--brand-ink); }
 
-/* 框选（屏幕坐标系，不随世界层缩放） */
+/* 框选（屏幕坐标系，不随世界层缩放）。框选、拖卡片、拖小地图视口框期间画布里的 iframe 不接指针，否则指针一进跨源 iframe 父页就收不到 move / up（v0.80）。
+   标记用 data 属性、不能用 class：视口的 className 由 React 管，拖动中它一变（如按下空格加 pan-ready）就整串重写、手加的 class 被冲掉 */
+.viewport[data-pointer-drag] iframe { pointer-events: none !important; }
 .marquee { position: absolute; pointer-events: none; border: 1px solid var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, transparent); border-radius: 2px; }
 
 @keyframes fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }

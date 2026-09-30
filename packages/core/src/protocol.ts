@@ -3,12 +3,13 @@ export type PreviewToParent =
   | { type: 'quilt:ready'; title: string }
   | { type: 'quilt:navigate'; href: string }
   | { type: 'quilt:swapped'; route: string; title: string }
-    // 焦点在预览文档里时画布快捷键收不到，由运行时转发：Esc / Alt+← / ⌘E / ⌘/（code 用物理键，与父页的键位表一致）
+    // 焦点在预览文档里时画布快捷键收不到，由运行时转发：Esc / Alt+← / ⌘E / ⌘/ / ⌘K / ⌥ + 字母（code 用物理键，与父页的键位表一致）
   | { type: 'quilt:key'; key: string; code?: string; altKey: boolean; metaKey?: boolean; ctrlKey?: boolean }
   | { type: 'quilt:dead' }
     // 叠层屏（v0.63 REQ-PROTO-005）：点了遮罩要关最上一层——由父页决定（它管导航栈），运行时只报
   | { type: 'quilt:overlay-dismiss' }
-  | { type: 'quilt:wheel'; deltaY: number; x: number; y: number }
+    // 捏合（ctrl+wheel）；pan = 组件预览里落在没有可滚区域处的普通滚轮（v0.80），父页平移画布
+  | { type: 'quilt:wheel'; deltaY: number; x: number; y: number; deltaX?: number; pan?: boolean }
     // rect 为屏文档坐标（含滚动偏移），与 fullPage:false 的截图同一坐标系，供画布层画批注气泡（REQ-EDIT-004 / ADR-003）
     // component：元素所在的共享组件名（自身或祖先带 data-component，REQ-EDIT-006），检查器据此挡住直改、给「改组件 / 脱离共享」
   | { type: 'quilt:select'; qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number } }

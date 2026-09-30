@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
-import { ArrowLeft, Bot, Component, Crosshair, Download, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MessageSquarePlus, Palette, Plus, Search, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
+import { ArrowLeft, Bot, Component, Crosshair, Download, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MessageSquarePlus, MousePointerClick, Palette, Plus, Search, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
 import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, failureText, missingPagePrompt, type ProjectDetailDto, type MessageDto, type JobDto, type JobEventDto, type ScreenDto, type ComponentDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core';
 import { api, ApiError, loadConfig, subscribeProjectEvents, type LiveState } from '@/lib/api';
 import { mergeMessages } from '@/lib/messages';
@@ -158,8 +158,8 @@ export function CanvasPage() {
   const inspectArmed = panel === 'inspect';
   const annotateArmed = panel === 'annotate';
   const annotateMode = annotateArmed && !!focusedId;
-  // 组件卡也能选元素（v0.57）：它跑同一套运行时，qid 落在组件自己的 HTML 上
-  const inspectMode = (inspectArmed || annotateArmed) && (!!focusedId || !!focusedComponentId);
+  // 组件卡也能选元素（v0.57）：它跑同一套运行时，qid 落在组件自己的 HTML 上；批注不对组件开放（v0.80），批注模式下组件卡只是交互态
+  const inspectMode = ((inspectArmed || annotateArmed) && !!focusedId) || (inspectArmed && !!focusedComponentId);
 
   // 对话记录（v0.76）：请求按发起序号只认最新；快照与本页刚追加、快照里还没有的一轮按 id 合并（见 mergeMessages）。
   // 首次取不到记成 error、就地给重试，取到过之后的失败保留已有内容
@@ -672,6 +672,8 @@ export function CanvasPage() {
   // 批注（REQ-EDIT-004）：入口与选择元素同源——选中一屏或已聚焦都能进
   const toggleAnnotate = () => {
     if (annotateArmed) { setPanel(null); setFocusedId(null); return; }
+    // 组件卡不开放批注（REQ-EDIT-006）：先退出组件交互态，批注模式照开，点一屏进去
+    if (focusedComponentId) { setFocusedComponentId(null); setPanel('annotate'); toast('共享组件不能批注，点任意一屏开始批注'); return; }
     if (focusedId) { if (navStack.length) canvasApi.current?.resetToOwn(); setPanel('annotate'); return; }
     if (selected) { canvasApi.current?.focus(selected.id); setPanel('annotate'); return; }
     setPanel('annotate');
@@ -716,8 +718,11 @@ export function CanvasPage() {
   const deletable = (selectedScreens.length > 0 || selectedComponents.length > 0) && !focusedId;
   // 适配视图：缩到下限仍装不下全部时说一声，不静默裁掉（v0.76）
   const fitAll = () => { if (canvasApi.current && !canvasApi.current.fitView()) toast(`内容太大，最小缩放也装不下全部，用小地图或找屏（${CMD}K）定位`); };
+  // 恰好选中一屏（或只选了一个组件）时 Enter 进入交互（v0.80）：双击的键盘等价入口，iframe 就绪后焦点移进去
+  const enterTarget = focusedId || focusedComponentId ? null : selected ?? (selectedScreens.length === 0 && selectedComponents.length === 1 ? selectedComponents[0] : null);
   const plain: Record<string, (() => void) | undefined> = {
     KeyF: () => fitAll(),
+    Enter: enterTarget ? () => canvasApi.current?.enter(enterTarget.id) : undefined,
     KeyL: toggleLinks,
     Delete: deletable ? () => setConfirmDelete(true) : undefined,
     Backspace: deletable ? () => setConfirmDelete(true) : undefined,
@@ -736,17 +741,35 @@ export function CanvasPage() {
   const busy = activeJobs.length > 0;
   // 对话记录里「重试」要知道最后一轮还在不在跑：本页跟踪的作业 + 服务端列出的（含交给本机 agent 的）
   const runningJobIds = useMemo(() => new Set([...activeJobs, ...(detail?.activeJobs ?? [])].map((j) => j.id)), [activeJobs, detail?.activeJobs]);
-  const keyState = { plain, alted, toggleInspect, toggleComposer, undoPos, blocked, closeModals, openFinder: () => setFinderOpen(true), expanded: !!candidates, focused: !!focusedId, busy, cancel: cancelNewest, selectAll: () => setSelectedIds(screens.map((x) => x.id)) };
+  const keyState = {
+    plain, alted, toggleInspect, toggleComposer, undoPos, blocked, closeModals, openFinder: () => setFinderOpen(true), expanded: !!candidates, busy, cancel: cancelNewest,
+    focused: !!focusedId || !!focusedComponentId, exitFocus: () => { setFocusedId(null); setFocusedComponentId(null); },
+    panel: !!panel, closePanel: () => setPanel(null),
+    selection: selectedIds.length > 0 || selectedComponentIds.length > 0, clearSelection: () => { setSelectedIds([]); setSelectedComponentIds([]); },
+    // ⌘A 全选屏与共享组件卡（组件卡与屏一样进选中集合，REQ-EDIT-006）
+    selectAll: () => { setSelectedIds(screens.map((x) => x.id)); setSelectedComponentIds(components.map((c) => c.id)); },
+  };
   const keyRef = useRef(keyState);
   keyRef.current = keyState;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Esc 由近及远：有弹窗先关弹窗；否则聚焦态交给画布退出聚焦；否则取消进行中的作业
+      // Esc 由近及远、每次只关一层（DESIGN §13）：弹窗 → 编辑控件只失焦 → 候选 → 聚焦 → 面板 / 模式 → 选中 → 取消最新作业。
+      // 取消作业不可撤销，只能是最后一层：面板、待命模式、选中不在链上时，按 Esc 想关面板或失焦，结果把在跑作业取消了
       if (e.key === 'Escape') {
+        // 下拉、菜单这类控件自己接住的 Esc（关层时 preventDefault）不再往外走
+        if (e.defaultPrevented) return;
+        const k = keyRef.current;
         // 弹层自己的 Esc 只在焦点落在弹层内时生效（useModal）；点过一个随即禁用的按钮后焦点会掉到 body，这里兜底关掉
-        if (keyRef.current.blocked) { keyRef.current.closeModals(); return; }
-        if (keyRef.current.expanded) { setCandidates(null); return; }
-        if (!keyRef.current.focused && keyRef.current.busy) { e.preventDefault(); keyRef.current.cancel(); return; }
+        if (k.blocked) { k.closeModals(); return; }
+        // 面板里的输入框（检查器、批注、设计系统……）只失焦，草稿留着；底部输入框自己处理 Esc 并拦下冒泡
+        const field = (e.target as HTMLElement | null)?.closest<HTMLElement>('input, textarea, select, [contenteditable]');
+        if (field) { field.blur(); return; }
+        if (k.expanded) { setCandidates(null); return; }
+        if (k.focused) { k.exitFocus(); return; }
+        if (k.panel) { k.closePanel(); return; }
+        if (k.selection) { k.clearSelection(); return; }
+        if (k.busy) { e.preventDefault(); k.cancel(); }
+        return;
       }
       // ⌘/ 收起 / 显示输入框：正打着字想看画布时也要能按，所以放在「输入框内不吃快捷键」那道门之前
       if ((e.metaKey || e.ctrlKey) && e.code === 'Slash') { e.preventDefault(); if (!keyRef.current.blocked) keyRef.current.toggleComposer(); return; }
@@ -760,6 +783,8 @@ export function CanvasPage() {
       // ⌘Z 只撤销画布位置（拖动 / 对齐 / 等距）：屏内容的历史在修订树里，是另一套语义
       if (mod && e.code === 'KeyZ' && !e.shiftKey) { e.preventDefault(); if (!k.blocked) void k.undoPos(); return; }
       if (mod || k.blocked) return;
+      // Enter 只在焦点不在任何控件上时进入交互：按钮、链接、卡片上的 Enter 各有各的激活
+      if (e.code === 'Enter' && e.target !== document.body) return;
       const run = e.altKey ? k.alted[e.code] : !e.shiftKey ? k.plain[e.code] : undefined;
       if (run) { e.preventDefault(); run(); }
     };
@@ -794,8 +819,12 @@ export function CanvasPage() {
       { id: 'agent', label: '本机 agent', hint: `${ALT}T`, desc: '交给本机 Claude Code / Codex 的作业列表：投递到哪个会话、状态、取消。派活入口在输入框的通道下拉与会话下拉', icon: <Bot size={ICON} />, active: panel === 'agent', onSelect: () => setPanel(panel === 'agent' ? null : 'agent') },
     ],
   ];
+  // 进入 / 退出交互是上下文组第一格的同一个工具（v0.80）：id 不变、按钮不重挂——在这一格上连点是进去再出来，焦点也一直留在这一格。
+  // 拆成两个工具的话，退出后同一位置换成「出变体」（再点一下就开出变体弹层），被点的按钮卸载、焦点掉到 body
+  const interact = (on: boolean, onSelect: () => void): Tool => ({ id: 'interact', label: on ? '退出交互' : '进入交互', hint: on ? 'Esc' : 'Enter', desc: on ? '结束屏内交互，回到画布' : '在卡片里直接操作这一屏：点按、滚动、填表、屏内跳转。双击卡片同样进入，Esc 退出', icon: on ? <X size={ICON} /> : <MousePointerClick size={ICON} />, testId: 'toggle-interact', onSelect });
   if (selectedScreens.length > 0 && !focusedId) tools.push([
     ...(selected ? [
+      interact(false, () => canvasApi.current?.focus(selected.id)),
       { id: 'revisions', label: '修订', hint: `${ALT}R`, desc: '这一屏的历史版本与候选，可回溯到任意一版（修订链是单屏概念，只在恰好选中一屏时可用）', icon: <History size={ICON} />, active: panel === 'revisions', onSelect: () => setPanel(panel === 'revisions' ? null : 'revisions') } satisfies Tool,
       { id: 'variant', label: '出变体', hint: `${ALT}V`, desc: '给这一屏出一个状态变体（空态、出错、未登录…）：同路由同布局，只改状态那部分；播放时可切换', icon: <SquareStack size={ICON} />, testId: 'new-variant', unavailable: selected.variantOf ? '选它的默认屏再出变体' : generating ? GENERATE_BUSY : false, onSelect: () => setVariantFor(selected) } satisfies Tool,
       { id: 'presentation', label: selected.presentation === 'overlay' ? '设为整屏' : '设为叠层', desc: selected.presentation === 'overlay' ? '现在是叠层屏：播放时压在来处那一屏上。改回整屏后跳转时换掉整个画面' : '把它当弹层 / 底部抽屉：播放时压在来处那一屏上，点遮罩或后退关掉。只改呈现方式，不重生成', icon: <Layers size={ICON} />, testId: 'toggle-presentation', active: selected.presentation === 'overlay', onSelect: () => void togglePresentation() } satisfies Tool,
@@ -808,8 +837,8 @@ export function CanvasPage() {
     { id: 'delete-component', label: selectedComponents.length > 1 ? `删除 ${selectedComponents.length} 个组件` : '删除组件', hint: 'Del', desc: '删掉组件；屏里已经展开的那份留着，只是不再跟着改', icon: <Trash2 size={ICON} />, testId: 'delete-component', onSelect: () => setConfirmDelete(true) },
   ]);
   if (focused) tools.push([
+    interact(true, () => { setFocusedId(null); setFocusedComponentId(null); }),
     { id: 'back', label: '后退', hint: 'Alt+←', desc: '退回屏内上一次跳转之前', icon: <ArrowLeft size={ICON} />, unavailable: navStack.length === 0 && '还没有在这一屏里跳转过', onSelect: () => canvasApi.current?.goBack() },
-    { id: 'exit', label: '退出交互', hint: 'Esc', desc: '结束屏内交互，回到画布', icon: <X size={ICON} />, onSelect: () => { setFocusedId(null); setFocusedComponentId(null); } },
   ]);
 
   const panelBody = !detail ? null
@@ -827,46 +856,7 @@ export function CanvasPage() {
       {/* 可用区探针：四边跟着浮层占位的 CSS 变量走，画布只负责测量它，避免两处各写一套数 */}
       <div ref={safeAreaRef} aria-hidden="true" data-testid="safe-area" className="pointer-events-none absolute bottom-[var(--chrome-bottom)] left-[var(--chrome-left)] right-[var(--chrome-right)] top-[var(--chrome-top)]" />
       <div ref={laneRef} aria-hidden="true" data-testid="composer-lane" className="pointer-events-none absolute bottom-0 left-[var(--composer-left)] right-[var(--chrome-right)] h-0" />
-      <div className="absolute inset-0">
-        {ready && detail && tokens && previewOrigin ? (
-          <CanvasView
-            projectId={projectId} safeAreaRef={safeAreaRef}
-            projectName={detail.project.name} tokens={tokens} palette={detail.designSystem.palette} colorMode={detail.designSystem.colorMode} assets={detail.assets} screens={screens} links={detail.links} previewOrigin={previewOrigin}
-            selectedIds={selectedIds} focusedId={focusedId} styleGuideSelected={panel === 'design'} inspectMode={inspectMode} annotateMode={annotateMode} armed={inspectArmed ? 'inspect' : annotateArmed ? 'annotate' : null} showLinks={showLinks}
-            anchor={anchor} screenSize={DEVICE_SIZE[detail.project.deviceType]} exemplarScreenId={detail.project.exemplarScreenId}
-            onSelect={setSelectedId}
-            onSelectMany={(ids, compIds, additive) => { setSelectedIds((prev) => (additive ? [...new Set([...prev, ...ids])] : ids)); setSelectedComponentIds((prev) => (additive ? [...new Set([...prev, ...compIds])] : compIds)); }}
-            onSelectStyleGuide={() => { setSelectedIds([]); setSelectedComponentIds([]); setPanel('design'); }}
-            onFocus={(id) => { setFocusedId(id); if (id) { setFocusedComponentId(null); setSelectedIds([id]); setSelectedComponentIds([]); } }}
-            focusedComponentId={focusedComponentId}
-            onFocusComponent={(id) => { setFocusedComponentId(id); if (id) { setFocusedId(null); setSelectedComponentIds([id]); setSelectedIds([]); } }}
-            onMove={onMove}
-            components={components} selectedComponentIds={selectedComponentIds} onSelectComponent={setSelectedComponentId}
-            onNavigateMissing={(fromScreenId, href) => setMissing({ fromScreenId, hrefs: [href] })}
-            onDanglingClick={(screenId, hrefs) => setMissing({ fromScreenId: screenId, hrefs })}
-            onDeadLink={() => toast('这个交互还没有设计；想让它跳转，用「选择元素」给它连线')}
-            onShortcut={(code) => { if (blocked) return; if (code === 'KeyE') toggleInspect(); else if (code === 'Slash') toggleComposer(); else if (code === 'KeyK') setFinderOpen(true); }}
-            onAnchor={placeAnchor}
-            onCandidates={(jobId, screenId) => setCandidates((c) => (c?.screenId === screenId ? null : { jobId, screenId }))}
-            candidateStack={candidates && screens.some((s) => s.id === candidates.screenId) ? { screenId: candidates.screenId, node: <CandidateStack jobId={candidates.jobId} screen={screens.find((s) => s.id === candidates.screenId)!} onClose={() => setCandidates(null)} onAdopted={async () => { await refresh(); setCandidates(null); }} /> } : null}
-            onElementSelect={(sel) => { setElementSel(sel); canvasApi.current?.highlight(sel?.qid ?? null); }}
-            // sel 里带 component（REQ-EDIT-006）：检查器据此挡直改、批注面板据此挡批注
-            selectedQid={elementSel?.qid ?? null}
-            workingSubtrees={workingSubtrees}
-            annotations={annotations}
-            onAnnotationClick={(id) => { const a = annotations.find((x) => x.id === id); if (a) { canvasApi.current?.focus(a.screenId); setPanel('annotate'); } }}
-            onStat={(s) => zoomStat.set(s.zoom)}
-            registerApi={(a) => { canvasApi.current = a; }}
-            minimap={minimapOn}
-            onShown={setShownScreenId}
-            navStack={navStack} setNavStack={setNavStack}
-            onStale={() => refresh({ quiet: true })} onShotError={onShotError}
-            onPreviewError={(s) => toast(`「${s.name}」这一屏没取到，稍后再试一次`, 'error')}
-          />
-        ) : <CanvasPending failure={failure} onRetry={retryLoad} />}
-      </div>
-      {/* 多选排列条（REQ-CORE-018）：选中 ≥ 2 屏且没聚焦时出现在画布顶部中央；候选就地展开时让位。排版与键盘在 ArrangeBar，算位在 arrange.ts，落库在 positions.ts */}
-      {selectedScreens.length >= 2 && !focusedId && !inspectArmed && !annotateArmed && !candidates && <ArrangeBar count={selectedScreens.length} yieldToPanel={!!panelBody} onArrange={(k) => void arrange(k, selectedScreens)} />}
+      {/* 顶栏在 DOM 里排在画布之前（v0.80）：Tab 序从项目切换器开始。层级靠 z-index，不靠 DOM 顺序 */}
       <TopNav floating right={<>
         {feedShown && feed !== 'open' && (
           <span role="status" data-testid="live-status" className="min-w-0 truncate whitespace-nowrap rounded-full border border-warn/60 px-2 py-0.5 text-[11px] text-warn">
@@ -890,6 +880,46 @@ export function CanvasPage() {
           </span>
         )}
       </TopNav>
+      <div className="absolute inset-0">
+        {ready && detail && tokens && previewOrigin ? (
+          <CanvasView
+            projectId={projectId} safeAreaRef={safeAreaRef}
+            projectName={detail.project.name} tokens={tokens} palette={detail.designSystem.palette} colorMode={detail.designSystem.colorMode} assets={detail.assets} screens={screens} links={detail.links} previewOrigin={previewOrigin}
+            selectedIds={selectedIds} focusedId={focusedId} styleGuideSelected={panel === 'design'} inspectMode={inspectMode} annotateMode={annotateMode} armed={inspectArmed ? 'inspect' : annotateArmed ? 'annotate' : null} showLinks={showLinks}
+            anchor={anchor} screenSize={DEVICE_SIZE[detail.project.deviceType]} exemplarScreenId={detail.project.exemplarScreenId}
+            onSelect={setSelectedId}
+            onSelectMany={(ids, compIds, additive) => { setSelectedIds((prev) => (additive ? [...new Set([...prev, ...ids])] : ids)); setSelectedComponentIds((prev) => (additive ? [...new Set([...prev, ...compIds])] : compIds)); }}
+            onSelectStyleGuide={() => { setSelectedIds([]); setSelectedComponentIds([]); setPanel('design'); }}
+            onFocus={(id) => { setFocusedId(id); if (id) { setFocusedComponentId(null); setSelectedIds([id]); setSelectedComponentIds([]); } }}
+            focusedComponentId={focusedComponentId}
+            onFocusComponent={(id) => { setFocusedComponentId(id); if (id) { setFocusedId(null); setSelectedComponentIds([id]); setSelectedIds([]); } }}
+            onMove={onMove}
+            components={components} selectedComponentIds={selectedComponentIds} onSelectComponent={setSelectedComponentId}
+            onNavigateMissing={(fromScreenId, href) => setMissing({ fromScreenId, hrefs: [href] })}
+            onDanglingClick={(screenId, hrefs) => setMissing({ fromScreenId: screenId, hrefs })}
+            onDeadLink={() => toast('这个交互还没有设计；想让它跳转，用「选择元素」给它连线')}
+            onShortcut={(code, alt) => { if (blocked) return; if (alt) alted[code]?.(); else if (code === 'KeyE') toggleInspect(); else if (code === 'Slash') toggleComposer(); else if (code === 'KeyK') setFinderOpen(true); }}
+            onAnchor={placeAnchor}
+            onCandidates={(jobId, screenId) => setCandidates((c) => (c?.screenId === screenId ? null : { jobId, screenId }))}
+            candidateStack={candidates && screens.some((s) => s.id === candidates.screenId) ? { screenId: candidates.screenId, node: <CandidateStack jobId={candidates.jobId} screen={screens.find((s) => s.id === candidates.screenId)!} onClose={() => setCandidates(null)} onAdopted={async () => { await refresh(); setCandidates(null); }} /> } : null}
+            onElementSelect={(sel) => { setElementSel(sel); canvasApi.current?.highlight(sel?.qid ?? null); }}
+            // sel 里带 component（REQ-EDIT-006）：检查器据此挡直改、批注面板据此挡批注
+            selectedQid={elementSel?.qid ?? null}
+            workingSubtrees={workingSubtrees}
+            annotations={annotations}
+            onAnnotationClick={(id) => { const a = annotations.find((x) => x.id === id); if (a) { canvasApi.current?.focus(a.screenId); setPanel('annotate'); } }}
+            onStat={(s) => zoomStat.set(s.zoom)}
+            registerApi={(a) => { canvasApi.current = a; }}
+            minimap={minimapOn}
+            onShown={setShownScreenId}
+            navStack={navStack} setNavStack={setNavStack}
+            onStale={() => refresh({ quiet: true })} onShotError={onShotError}
+            onPreviewError={(s) => toast(`「${s.name}」这一屏没取到，稍后再试一次`, 'error')}
+          />
+        ) : <CanvasPending failure={failure} onRetry={retryLoad} />}
+      </div>
+      {/* 多选排列条（REQ-CORE-018）：选中 ≥ 2 屏且没聚焦时出现在画布顶部中央；候选就地展开时让位。排版与键盘在 ArrangeBar，算位在 arrange.ts，落库在 positions.ts */}
+      {selectedScreens.length >= 2 && !focusedId && !inspectArmed && !annotateArmed && !candidates && <ArrangeBar count={selectedScreens.length} yieldToPanel={!!panelBody} onArrange={(k) => void arrange(k, selectedScreens)} />}
       {settingsSection && <SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} returnTo={settingsBtnRef} onCatalog={applyCatalog} />}
       <ChatDock messages={messages} progress={progress} status={jobStatus} collapsed={chatCollapsed} onToggle={() => { if (chatCollapsed) setUnseenFailures(0); toggleChat(); }} onRemember={rememberConvention} busy={busy}
         onRetry={(u) => void retryRound(u)} onEdit={(u) => void editRound(u)} runningJobIds={runningJobIds} retrying={retrying} followSeq={followSeq} failed={unseenFailures}

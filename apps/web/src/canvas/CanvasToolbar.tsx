@@ -70,7 +70,8 @@ export function CanvasToolbar({ groups }: { groups: Tool[][] }) {
     // 内边距放在滚动列里而不是药丸上：滚动容器会裁掉越界的绘制，首尾按钮的焦点环（外扩 4 px）在边上被切掉一截；
     // scroll-padding 同值，键盘移到首尾时滚动也把焦点环留在可见区里。
     // z-30 高于右侧滑出面板（z-20）：提示画在工具栏这一层里、向左展开正好落在面板上，同层的话被后渲染的面板整块盖住
-    <div ref={wrapRef} className="chrome absolute right-3 top-1/2 z-30 flex max-h-[calc(100%-7rem)] -translate-y-1/2 flex-col rounded-full p-0.5">
+    // 顶端固定在顶栏下方（v0.80，与右侧滑出面板同一上沿）：上下文组只在末尾增减，垂直居中的话选中一屏全部按钮上移 61 px，用户正要点的按钮被挪走
+    <div ref={wrapRef} className="chrome absolute right-3 top-16 z-30 flex max-h-[calc(100%-7rem)] flex-col rounded-full p-0.5">
       <div ref={railRef} data-fade={fade || undefined} className="rail flex min-h-0 scroll-py-1 flex-col items-center gap-0.5 p-1" role="toolbar" aria-orientation="vertical" aria-label="画布工具" onKeyDown={onKeyDown}>
         {groups.map((group, gi) => (
           <Fragment key={gi}>

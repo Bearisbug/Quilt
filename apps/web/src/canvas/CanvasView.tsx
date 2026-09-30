@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { XYPanZoom, PanOnScrollMode, getViewportForBounds, type PanZoomInstance, type Viewport } from '@xyflow/system';
 import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type AnnotationDto, type ComponentDto } from '@quilt/core';
 import { StyleGuideCard, STYLE_GUIDE_SIZE, styleGuideSize } from '@/canvas/StyleGuideCard';
@@ -36,8 +36,8 @@ export type CanvasProps = {
   onNavigateMissing: (fromScreenId: string, href: string) => void;
   onDanglingClick: (screenId: string, hrefs: string[]) => void;
   onDeadLink: () => void;
-  /** 焦点在预览文档里时运行时转发来的 ⌘ 组合键（e.code），父页按自己的键位表处理 */
-  onShortcut?: (code: string) => void;
+  /** 焦点在预览文档里时运行时转发来的 ⌘ 组合键与 ⌥ + 字母（e.code；alt = ⌥ 组合），父页按自己的键位表处理 */
+  onShortcut?: (code: string, alt?: boolean) => void;
   /** 双击画布空白处放锚点（REQ-CORE-014）：world 是落点的画布坐标（新屏中心） */
   onAnchor?: (world: { x: number; y: number }) => void;
   /** 已放下的锚点（幽灵框画在世界层，尺寸 = 设备形态） */
@@ -92,6 +92,8 @@ export type CanvasProps = {
 export type CanvasApi = {
   /** false = 缩到下限 MIN_ZOOM 仍装不下全部 */
   fitView: () => boolean; goBack: () => void; highlight: (qid: string | null) => void; focus: (id: string) => void; resetToOwn: () => void; createAtCenter: () => void; markDone: (qids: string[]) => void;
+  /** 键盘进入交互（屏或组件卡，v0.80）：就绪后焦点移进 iframe，退出后焦点回到这张卡 */
+  enter: (id: string) => void;
   reveal: (id: string) => void; panTo: (x: number, y: number) => void; onView: (cb: (v: ViewInfo) => void) => () => void;
 };
 
@@ -120,6 +122,10 @@ function readCompSizes(key: string): Record<string, CompBox> {
   } catch { return {}; }
 }
 const omit = <T,>(m: Record<string, T>, ids: string[]) => { const rest = { ...m }; for (const id of ids) delete rest[id]; return rest; };
+// 系统「减少动态效果」下镜头移动一律直接到位（v0.80，MOTION-004）：适配视图、自动适配、聚焦推镜头、找屏跳转、小地图点击
+const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+// 滚轮平移速度：画布上的滚轮（panzoom）与交互态组件卡转发来的滚轮（v0.80）同一个值
+const WHEEL_PAN_SPEED = 0.5;
 
 // 无限画布（ADR-002 / ADR-006）：截图卡片 + 单聚焦活 iframe；世界层 transform 由 @xyflow/system 驱动。
 export function CanvasView(p: CanvasProps) {
@@ -140,7 +146,8 @@ export function CanvasView(p: CanvasProps) {
   const touched = useRef(!!savedView);
   const [initialWorldStyle] = useState<CSSProperties>(() => ({
     transform: `translate(${vp.current.x}px, ${vp.current.y}px) scale(${vp.current.zoom})`,
-  }));
+    '--canvas-zoom': String(vp.current.zoom),
+  } as CSSProperties));
   // 候选展开层的操作胶囊按 1/zoom 反向缩放，--zoom 只写在它那一层：写在世界层上的话每帧都让全部卡片重算样式（100 屏时缩放掉帧）
   const candRef = useRef<HTMLDivElement | null>(null);
   const spaceDown = useRef(false);
@@ -260,7 +267,8 @@ export function CanvasView(p: CanvasProps) {
       world.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
       world.classList.add('moving');
       if (movingTimer.current) clearTimeout(movingTimer.current);
-      movingTimer.current = window.setTimeout(() => { world.classList.remove('moving'); movingTimer.current = null; }, 200);
+      // 停下时顺手写 --canvas-zoom（v0.80）：选中描边与卡片焦点环按它保持屏幕像素宽度。逐帧写的话每帧全部卡片重算样式
+      movingTimer.current = window.setTimeout(() => { world.classList.remove('moving'); world.style.setProperty('--canvas-zoom', String(vp.current.zoom)); movingTimer.current = null; }, 200);
     }
     candRef.current?.style.setProperty('--zoom', String(v.zoom));
     propsRef.current.onStat?.({ zoom: v.zoom });
@@ -284,7 +292,7 @@ export function CanvasView(p: CanvasProps) {
     panZoom.current?.update({
       noWheelClassName: 'nowheel', noPanClassName: 'nopan', preventScrolling: true,
       // 空白处拖拽留给框选，平移走滚轮 / 触控板 / 空格+拖拽
-      panOnScroll: true, panOnScrollMode: PanOnScrollMode.Free, panOnScrollSpeed: 0.5, panOnDrag: spaceDown.current,
+      panOnScroll: true, panOnScrollMode: PanOnScrollMode.Free, panOnScrollSpeed: WHEEL_PAN_SPEED, panOnDrag: spaceDown.current,
       panActivationKeyPressed: spaceDown.current, userSelectionActive: false,
       zoomOnPinch: true, zoomOnScroll: false, zoomOnDoubleClick: false, zoomActivationKeyPressed: false,
       lib: 'react', onTransformChange: ([x, y, zoom]) => applyTransform({ x, y, zoom }), connectionInProgress: false, paneClickDistance: 0,
@@ -303,7 +311,7 @@ export function CanvasView(p: CanvasProps) {
     return () => inst.destroy();
   }, [applyTransform, updatePanZoom, scheduleSave]);
   // 用户动作带来的镜头移动（适配视图、找屏跳转、小地图、聚焦推镜头、屏内捏合）：先撤掉自动适配标记，否则被它打断的那段自动适配会让这一次也不落盘
-  const moveTo = useCallback((v: Viewport, opts?: { duration?: number }) => { autoView.current = false; void panZoom.current?.setViewport(v, opts); }, []);
+  const moveTo = useCallback((v: Viewport, opts?: { duration?: number }) => { autoView.current = false; void panZoom.current?.setViewport(v, opts?.duration && reducedMotion() ? { duration: 0 } : opts); }, []);
 
   // 可用区 = 画布减去四周浮层的占位；几何由 CSS 变量驱动的探针元素给出，这里只测不算
   const safeArea = useCallback(() => {
@@ -331,9 +339,10 @@ export function CanvasView(p: CanvasProps) {
     return t?.fits ?? true;
   }, [fitTarget, moveTo]);
   // 自动适配：变换照常施加，只是不落盘（见 autoView）；用户手势打断时由 onPanZoomStart 撤标记
-  const autoFit = (duration: number) => {
+  const autoFit = (ms: number) => {
     const t = fitTarget(); const pz = panZoom.current;
     if (!t || !pz) return;
+    const duration = reducedMotion() ? 0 : ms;
     autoView.current = true;
     void pz.setViewport(t.v, { duration }).then(() => { autoView.current = false; });
     if (!duration) autoView.current = false;
@@ -376,7 +385,7 @@ export function CanvasView(p: CanvasProps) {
     const t = fitTarget();
     if (!t) return;
     vp.current = t.v;
-    if (worldRef.current) worldRef.current.style.transform = `translate(${t.v.x}px, ${t.v.y}px) scale(${t.v.zoom})`;
+    if (worldRef.current) { worldRef.current.style.transform = `translate(${t.v.x}px, ${t.v.y}px) scale(${t.v.zoom})`; worldRef.current.style.setProperty('--canvas-zoom', String(t.v.zoom)); }
     if (p.screens.length) fitOnce.current = true;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (touched.current || fitOnce.current || !p.screens.length) return; fitOnce.current = true; setTimeout(() => autoFitRef.current(300), 0); }, [p.screens.length]);
@@ -629,15 +638,48 @@ export function CanvasView(p: CanvasProps) {
   }, [safeArea, moveTo]);
   // 小地图拖视口框：直接设平移量（缩放不变、不带动画），拖动全程 1:1 跟手
   const moveView = useCallback((x: number, y: number) => { moveTo({ x, y, zoom: vp.current.zoom }); }, [moveTo]);
-  const reveal = useCallback((id: string) => {
+  // 一张卡（屏或组件）此刻画出来的世界矩形
+  const cardRect = useCallback((id: string) => {
     const s = byId[id]; const c = propsRef.current.components.find((x) => x.id === id);
-    const rect = s ? { ...pos(s), w: s.width, h: s.height } : c ? { ...compPos(c), ...compBox(c) } : null;
+    return s ? { ...pos(s), w: s.width, h: s.height } : c ? { ...compPos(c), ...compBox(c) } : null;
+  }, [byId, pos, compPos, compBox]);
+  const reveal = useCallback((id: string) => {
+    const rect = cardRect(id);
     if (!rect) return;
     const a = safeArea();
     const zoom = Math.max(0.1, Math.min(1, (a.w - 80) / rect.w, (a.h - 80) / rect.h));
     moveTo({ x: a.x + (a.w - rect.w * zoom) / 2 - rect.x * zoom, y: a.y + (a.h - rect.h * zoom) / 2 - rect.y * zoom, zoom }, { duration: 250 });
-  }, [byId, pos, compPos, compBox, safeArea, moveTo]);
-  useEffect(() => { propsRef.current.registerApi?.({ fitView, goBack, highlight, focus: focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView }); }, [fitView, goBack, highlight, focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView]);
+  }, [cardRect, safeArea, moveTo]);
+  // 键盘把焦点移到一张卡上（v0.80）：它不完整在可用区里就把镜头中心平移过去（缩放不变）——视口只裁不滚，焦点落在视口外等于消失。
+  // 键盘触发不带动画（MOTION-010）：连按方向键时上一段平移还没走完，按半路的镜头判断下一张在不在视野里会判错
+  const ensureVisible = useCallback((r: { x: number; y: number; w: number; h: number }) => {
+    const v = vp.current; const a = safeArea();
+    const sx = v.x + r.x * v.zoom; const sy = v.y + r.y * v.zoom;
+    if (sx >= a.x && sy >= a.y && sx + r.w * v.zoom <= a.x + a.w && sy + r.h * v.zoom <= a.y + a.h) return;
+    moveTo({ x: a.x + a.w / 2 - (r.x + r.w / 2) * v.zoom, y: a.y + a.h / 2 - (r.y + r.h / 2) * v.zoom, zoom: v.zoom });
+  }, [safeArea, moveTo]);
+  // 键盘进入交互（v0.80）：记下是哪张卡——屏的 iframe 就绪、组件卡进了交互态就把焦点移进 iframe，退出后还给这张卡（A11Y-013）
+  const kbEntered = useRef<string | null>(null);
+  const kbFocusPending = useRef(false);
+  const enterByKey = useCallback((id: string) => {
+    const s = byId[id];
+    if (s ? !s.previewUrl : !propsRef.current.components.some((c) => c.id === id)) return;
+    kbEntered.current = id;
+    if (s) { kbFocusPending.current = true; focusCard(id); } else propsRef.current.onFocusComponent?.(id);
+  }, [byId, focusCard]);
+  useEffect(() => {
+    const id = kbEntered.current;
+    if (!id) return;
+    if (p.focusedComponentId === id) { compFrames.current.get(id)?.focus(); return; }
+    if (p.focusedId === id) return;   // 屏的 iframe 就绪时再把焦点移进去（quilt:ready）
+    kbEntered.current = null; kbFocusPending.current = false;
+    if (p.focusedId || p.focusedComponentId) return;   // 换进了别的卡：不动焦点
+    // 焦点已被放到别处（点了输入框、面板）就不抢；屏退出后 iframe 卸载，焦点在 body；组件卡的 iframe 常驻，焦点还在它上面
+    const a = document.activeElement;
+    if (a && a !== document.body && a !== compFrames.current.get(id)) return;
+    requestAnimationFrame(() => gestures.current.get(id)?.focus({ preventScroll: true }));
+  }, [p.focusedId, p.focusedComponentId]);
+  useEffect(() => { propsRef.current.registerApi?.({ fitView, goBack, highlight, focus: focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView, enter: enterByKey }); }, [fitView, goBack, highlight, focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView, enterByKey]);
   // 切状态变体（v0.62）：同一 iframe 换成该变体的当前修订，镜头不动、导航栈不动；选中的元素属于换掉的那份 DOM，清空。
   // 正显示的是一层叠层时只换这一层，底下那一屏留着（与热更新的叠层分支同理）
   const swapVariant = useCallback(async (id: string) => {
@@ -666,6 +708,20 @@ export function CanvasView(p: CanvasProps) {
     if (s?.pendingCandidates) onCandidates(s.pendingCandidates.jobId, s.id);
   }, []);
 
+  // iframe 里转发来的滚轮（ADR-003）：捏合换算成画布坐标后围绕指针缩放（系数同 d3-zoom 的 ctrl+wheel）；
+  // pan = 组件文档里指针下没有可滚区域的普通滚轮（v0.80），按画布滚轮的速度平移
+  const frameWheel = useCallback((frame: HTMLIFrameElement | null | undefined, msg: { deltaY: number; deltaX?: number; x: number; y: number; pan?: boolean }) => {
+    const node = viewportRef.current;
+    if (!node || !frame) return;
+    const v = vp.current;
+    if (msg.pan) { moveTo({ x: v.x - (msg.deltaX ?? 0) * WHEEL_PAN_SPEED, y: v.y - msg.deltaY * WHEEL_PAN_SPEED, zoom: v.zoom }); return; }
+    const nr = node.getBoundingClientRect(); const fr = frame.getBoundingClientRect();
+    const px = fr.left - nr.left + msg.x * v.zoom; const py = fr.top - nr.top + msg.y * v.zoom;
+    const zoom = Math.min(2, Math.max(MIN_ZOOM, v.zoom * Math.pow(2, -msg.deltaY * 0.02)));
+    const k = zoom / v.zoom;
+    moveTo({ x: px - (px - v.x) * k, y: py - (py - v.y) * k, zoom });
+  }, [moveTo]);
+
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       // 唯一从候选格接的一条消息：焦点一进格子（格子可滚动、可填表），父页 window 的 keydown 就收不到了，
@@ -690,8 +746,11 @@ export function CanvasView(p: CanvasProps) {
           // ⌘E / ⌘/ 同屏一样转发给父页的键位表：不转发的话焦点一落进组件 iframe，按 ⌘E 就是死键——
           // 模式退不掉，选中框与「tag · qid」标签留在卡片上（组件卡的 iframe 常驻，不像屏那样退出即卸载）
           if ((m.metaKey || m.ctrlKey) && m.code) { p.onShortcut?.(m.code); return; }
+          if (m.altKey && m.code) p.onShortcut?.(m.code, true);
           return;
         }
+        // 交互态组件卡上的捏合与滚轮（v0.80）：与屏同一条 quilt:wheel，按这张卡的 iframe 换算
+        if (m.type === 'quilt:wheel') { frameWheel(compFrames.current.get(p.focusedComponentId), m); return; }
         if (m.type === 'quilt:select') { p.onElementSelect({ qid: m.qid, tag: m.tag, text: m.text, classes: m.classes, href: m.href ?? null, component: m.component ?? null, rect: m.rect }); return; }
         if (m.type === 'quilt:deselect') { p.onElementSelect(null); return; }
       }
@@ -699,7 +758,10 @@ export function CanvasView(p: CanvasProps) {
       if (e.origin !== p.previewOrigin || !focused || e.source !== iframeRef.current?.contentWindow || !isPreviewMessage(e.data)) return;
       const msg = e.data;
       if (msg.type === 'quilt:ready' || msg.type === 'quilt:swapped') { landed.current?.(); landed.current = null; }
-      if (msg.type === 'quilt:ready') { readyRef.current = true; frameRetried.current = false; setFrameFailed(false); setIframeReady(true); postToPreview({ type: 'quilt:mode', mode: propsRef.current.inspectMode ? 'inspect' : 'interact' }); reselectAfterSwap(); }
+      if (msg.type === 'quilt:ready') {
+        readyRef.current = true; frameRetried.current = false; setFrameFailed(false); setIframeReady(true); postToPreview({ type: 'quilt:mode', mode: propsRef.current.inspectMode ? 'inspect' : 'interact' }); reselectAfterSwap();
+        if (kbFocusPending.current) { kbFocusPending.current = false; iframeRef.current?.focus(); }
+      }
       if (msg.type === 'quilt:swapped') reselectAfterSwap();
       if (msg.type === 'quilt:select') p.onElementSelect({ qid: msg.qid, tag: msg.tag, text: msg.text, classes: msg.classes, href: msg.href ?? null, component: msg.component ?? null, rect: msg.rect });
       if (msg.type === 'quilt:deselect') p.onElementSelect(null);
@@ -717,22 +779,14 @@ export function CanvasView(p: CanvasProps) {
         if (msg.key === 'Escape') p.onFocus(null);
         else if (msg.key === 'ArrowLeft' && msg.altKey) goBack();
         else if ((msg.metaKey || msg.ctrlKey) && msg.code) p.onShortcut?.(msg.code);  // ⌘E / ⌘/：键位表在 Canvas.tsx
+        else if (msg.altKey && msg.code) p.onShortcut?.(msg.code, true);  // ⌥N / ⌥D……（v0.80）
       }
       if (msg.type === 'quilt:dead') p.onDeadLink();
-      if (msg.type === 'quilt:wheel') {
-        // iframe 内的捏合：换算成画布坐标后围绕指针缩放（系数同 d3-zoom 的 ctrl+wheel）
-        const node = viewportRef.current; const frame = iframeRef.current;
-        if (!node || !frame) return;
-        const v = vp.current; const nr = node.getBoundingClientRect(); const fr = frame.getBoundingClientRect();
-        const px = fr.left - nr.left + msg.x * v.zoom; const py = fr.top - nr.top + msg.y * v.zoom;
-        const zoom = Math.min(2, Math.max(MIN_ZOOM, v.zoom * Math.pow(2, -msg.deltaY * 0.02)));
-        const k = zoom / v.zoom;
-        moveTo({ x: px - (px - v.x) * k, y: py - (py - v.y) * k, zoom });
-      }
+      if (msg.type === 'quilt:wheel') frameWheel(iframeRef.current, msg);
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [focused, p, swapTo, goBack, reselectAfterSwap, collapseCandidates, baseByRoute, moveTo]);
+  }, [focused, p, swapTo, goBack, reselectAfterSwap, collapseCandidates, baseByRoute, frameWheel]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -741,11 +795,6 @@ export function CanvasView(p: CanvasProps) {
       // 空格在按钮、链接、下拉、选项上是「激活」，不是平移——只在画布或页面空处按下时才进入平移就绪
       const control = target?.closest('button, a[href], summary, [role=button], [role=option], [role=checkbox], [role=radio], [role=switch], [role=tab], [role=menuitem]');
       if (e.code === 'Space' && !e.repeat && !typing && !control) { spaceDown.current = true; setPanReady(true); updatePanZoom(); e.preventDefault(); }
-      if (e.key === 'Escape') {
-        // 面板里的输入框（批注、检查器）按 Esc 先失焦，草稿留着；再按一次才退出聚焦。输入框是 Composer 的例外——它自己处理 Esc
-        if (typing && !target?.closest('form.composer')) { target?.blur(); return; }
-        p.onFocus(null); p.onFocusComponent?.(null);
-      }
       if (e.altKey && e.key === 'ArrowLeft' && !typing) { e.preventDefault(); goBack(); }
     };
     const up = (e: KeyboardEvent) => { if (e.code === 'Space') { spaceDown.current = false; setPanReady(false); updatePanZoom(); } };
@@ -753,7 +802,37 @@ export function CanvasView(p: CanvasProps) {
     const pinch = (e: WheelEvent) => { if (e.ctrlKey) e.preventDefault(); };
     window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('wheel', pinch, { passive: false });
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('wheel', pinch); };
-  }, [goBack, p, updatePanZoom]);
+  }, [goBack, updatePanZoom]);
+
+  // 卡片的键盘停靠点（v0.80，INT-002）：屏卡与组件卡在 Tab 序里只占一个停靠点（默认选中的那张，没有选中时阅读顺序第一张），
+  // 方向键按阅读顺序（y 再 x）移动、Home / End 到两端；Enter 进入交互，空格选中（Shift / ⌘ 加选去选）
+  const order = useMemo(() => [...p.screens.map((s) => ({ id: s.id, x: s.x, y: s.y })), ...p.components.map((c) => ({ id: c.id, x: c.x, y: c.y }))].sort((a, b) => a.y - b.y || a.x - b.x), [p.screens, p.components]);
+  const [rove, setRove] = useState<string | null>(null);
+  const tabStop = order.some((o) => o.id === rove) ? rove : p.selectedIds[0] ?? p.selectedComponentIds[0] ?? order[0]?.id ?? null;
+  const gestures = useRef(new Map<string, HTMLElement>());
+  // 鼠标点卡片不把焦点留在卡片上，焦点照旧回到页面：卡片只是键盘停靠点，鼠标点过之后按住空格仍要是平移、Delete / F 这些单键照常
+  const keepPointerFocus = (e: ReactMouseEvent) => { e.preventDefault(); (document.activeElement as HTMLElement | null)?.blur(); };
+  const onCardFocus = (id: string) => {
+    setRove(id);
+    const r = cardRect(id);
+    if (r) ensureVisible(r);
+  };
+  const onCardKey = (e: ReactKeyboardEvent<HTMLElement>, kind: 'screen' | 'component', id: string) => {
+    if (e.key === ' ') {
+      e.preventDefault();
+      const add = e.shiftKey || e.metaKey || e.ctrlKey;
+      if (kind === 'screen') p.onSelect(id, add); else p.onSelectComponent(id, add);
+      return;
+    }
+    if (e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); enterByKey(id); return; }
+    const i = order.findIndex((o) => o.id === id);
+    const to = ({ ArrowRight: i + 1, ArrowDown: i + 1, ArrowLeft: i - 1, ArrowUp: i - 1, Home: 0, End: order.length - 1 } as Record<string, number | undefined>)[e.key];
+    if (to === undefined || !order.length) return;
+    e.preventDefault();
+    gestures.current.get(order[(to + order.length) % order.length].id)?.focus({ preventScroll: true });
+  };
+  const gestureRef = (id: string) => (el: HTMLDivElement | null) => { if (el) gestures.current.set(id, el); else gestures.current.delete(id); };
 
   // 框选（MOTION-017 同一套手势纪律）：空白处按下拖出选框，与选框相交的屏即选中；
   // 没越过迟滞就当普通单击处理——清空选择。
@@ -786,6 +865,9 @@ export function CanvasView(p: CanvasProps) {
       if (ev.buttons === 0) { finish(ev); return; }
       const x1 = ev.clientX - nr.left; const y1 = ev.clientY - nr.top;
       if (!moved && Math.hypot(x1 - x0, y1 - y0) < 10) return;
+      // 拖动期间画布里的 iframe 不接指针（v0.80，拖卡片、拖小地图视口框同理）：指针一进跨源 iframe，父页就收不到 move / up——
+      // 拖过交互态组件卡、聚焦屏、候选格时选框冻住、松手后残留。setPointerCapture 管不到跨源 iframe（Edge 实测照样丢）
+      if (!moved) node.toggleAttribute('data-pointer-drag', true);
       moved = true;
       setMarquee({ x0, y0, x1, y1, additive });
       const hit = hitsIn(x1, y1);
@@ -794,6 +876,7 @@ export function CanvasView(p: CanvasProps) {
     const finish = (ev: PointerEvent) => {
       if (ev.pointerId !== e.pointerId) return;
       window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', finish); window.removeEventListener('pointercancel', finish);
+      node.toggleAttribute('data-pointer-drag', false);
       setMarquee(null); setMarqueeHits({ screens: [], comps: [] });
       if (!moved) { propsRef.current.onSelect(null); return; }
       const hit = hitsIn(ev.clientX - nr.left, ev.clientY - nr.top);
@@ -818,7 +901,8 @@ export function CanvasView(p: CanvasProps) {
   // 多选批量移动（v0.47）：拖动集合按「按下的卡片在不在选中集合里」定——在则选中的屏与组件整组一起走，不在只拖它自己。
   // 所以按在已选中的卡片上不能一按就换选择（那会把整组收成一张、组拖不起来），松手没拖过才收成只选它；Shift / ⌘ 仍是按下即加选 / 去选。
   const startDrag = (e: ReactPointerEvent, kind: 'screen' | 'component', id: string) => {
-    if (e.button !== 0) return;
+    // 按住空格是平移（v0.80）：不接住，交给 panzoom——平移就绪时手势层不带 nopan
+    if (e.button !== 0 || spaceDown.current) return;
     e.stopPropagation();
     const cur = propsRef.current;
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
@@ -842,6 +926,7 @@ export function CanvasView(p: CanvasProps) {
       if (ev.buttons === 0) { finish(ev); return; }
       const dx = ev.clientX - start.x; const dy = ev.clientY - start.y;
       if (!moved && Math.hypot(dx, dy) < 10) return;
+      if (!moved) viewportRef.current?.toggleAttribute('data-pointer-drag', true);   // 拖过 iframe 时照样跟手，见框选
       moved = true;
       const z = vp.current.zoom;
       offset = { x: Math.round(dx / z), y: Math.round(dy / z) };
@@ -851,6 +936,7 @@ export function CanvasView(p: CanvasProps) {
     const finish = (ev: PointerEvent) => {
       if (ev.pointerId !== e.pointerId) return;
       el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', finish); el.removeEventListener('pointercancel', finish);
+      viewportRef.current?.toggleAttribute('data-pointer-drag', false);
       if (moved) {
         // 先把终点交给父页写进详情，再撤掉本地覆盖：同一个事件里的两次 setState 合成一帧，不会闪回旧位置（MOTION-026）
         propsRef.current.onMove(shifted(screens), shifted(comps));
@@ -897,7 +983,11 @@ export function CanvasView(p: CanvasProps) {
             return <span key={`${e.from}>${e.to}`} className="edge-count" aria-hidden="true" style={{ transform: `translate(${mx - 14}px, ${my - 11}px)` }}>{e.count}</span>;
           })}
         </>)}
-        <div className={`styleguide nopan${p.styleGuideSelected ? ' selected' : ''}`} style={{ transform: `translate(${STYLE_GUIDE_POS.x}px, ${STYLE_GUIDE_POS.y}px)` }} onPointerDown={(e) => { e.stopPropagation(); p.onSelectStyleGuide(); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); p.onSelectStyleGuide(); } }} role="button" tabIndex={0} aria-label="风格指南">
+        {/* 按住空格时从风格指南卡上起手同样是平移（v0.80）：不带 nopan、不接住按下；获焦（只会来自键盘）时镜头把它摆进可用区 */}
+        <div className={`styleguide${panReady ? '' : ' nopan'}${p.styleGuideSelected ? ' selected' : ''}`} style={{ transform: `translate(${STYLE_GUIDE_POS.x}px, ${STYLE_GUIDE_POS.y}px)` }}
+          onPointerDown={(e) => { if (spaceDown.current) return; e.stopPropagation(); p.onSelectStyleGuide(); }} onMouseDown={keepPointerFocus}
+          onFocus={() => ensureVisible({ ...STYLE_GUIDE_POS, ...styleGuideSize(p.assets?.length ?? 0) })}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); p.onSelectStyleGuide(); } }} role="button" tabIndex={0} aria-label="风格指南">
           <StyleGuideCard tokens={p.tokens} name={p.projectName} palette={p.palette} colorMode={p.colorMode} assets={p.assets} />
         </div>
         {/* 锚点（REQ-CORE-014）：新屏落点的幽灵框，尺寸 = 设备形态；只是标记，不可拖不可点 */}
@@ -920,18 +1010,23 @@ export function CanvasView(p: CanvasProps) {
             {stacked && [2, 1].map((k) => <div key={k} className="cand-ghost" aria-hidden="true" style={{ width: s.width, height: s.height, transform: `translate(${q.x + 14 * k}px, ${q.y + 10 * k}px)`, opacity: 1 - 0.25 * k }} />)}
             <div data-testid="screen-card" data-route={s.route} data-variant={s.variantOf ? 'true' : undefined} data-presentation={s.presentation} className={`card${s.presentation === 'overlay' ? ' overlay' : ''}${(marquee ? hitSet.has(s.id) || (marquee.additive && selectedSet.has(s.id)) : selectedSet.has(s.id)) ? ' selected' : ''}${isFocused ? ' focused' : ''}${live && iframeReady ? ' live' : ''}${dragPos[s.id] ? ' dragging' : ''}`} style={{ width: s.width, height: s.height, transform: `translate(${q.x}px, ${q.y}px)` }}>
               <div className="label">{s.variantOf && <span className="chip">变体</span>}{s.presentation === 'overlay' && <span className="chip">叠层</span>}<b>{s.name}</b> {s.route}{p.exemplarScreenId === s.id ? ' · 样板' : ''}{variantCount.get(s.id) ? ` · ${variantCount.get(s.id)} 个变体` : ''}{s.deviations ? ` · ${s.deviations} 处偏离` : ''}</div>
-              {/* 截图（或骨架）始终垫在底下（v0.76）：聚焦时 iframe 盖在上面、收到 quilt:ready 前透明，就绪才接班（卡片加 live，底层藏起）——
-                  双击即撤掉截图的话，iframe 加载的 1 s 多里整张卡是白的，深色屏黑→白→黑 */}
-              {s.screenshotUrl ? (
-                <CardShot url={s.screenshotUrl} width={s.width} height={s.height} alt={s.name} onError={p.onShotError}
-                  fallback={<CardSkeleton desktop={desktop} delay={(idx % 6) * -230} />} />
-              ) : (
-                <CardSkeleton desktop={desktop} delay={(idx % 6) * -230} status={s.currentRevisionId ? '截图中' : '生成中'} />
-              )}
-              {live && <iframe key={reloadKey} ref={iframeRef} className={`nowheel nopan${iframeReady ? '' : ' loading'}`} src={focusedSrc ?? s.previewUrl!} title={s.name} sandbox="allow-scripts allow-same-origin allow-forms" onLoad={onFrameLoad} />}
+              {/* 圆角裁切只包截图 / 骨架 / iframe 这一层（v0.80）：裁整张卡的话，画在卡片上方的标签一起被裁掉 */}
+              <div className="card-clip">
+                {/* 截图（或骨架）始终垫在底下（v0.76）：聚焦时 iframe 盖在上面、收到 quilt:ready 前透明，就绪才接班（卡片加 live，底层藏起）——
+                    双击即撤掉截图的话，iframe 加载的 1 s 多里整张卡是白的，深色屏黑→白→黑 */}
+                {s.screenshotUrl ? (
+                  <CardShot url={s.screenshotUrl} width={s.width} height={s.height} alt={s.name} onError={p.onShotError}
+                    fallback={<CardSkeleton desktop={desktop} delay={(idx % 6) * -230} />} />
+                ) : (
+                  <CardSkeleton desktop={desktop} delay={(idx % 6) * -230} status={s.currentRevisionId ? '截图中' : '生成中'} />
+                )}
+                {live && <iframe key={reloadKey} ref={iframeRef} className={`nowheel nopan${iframeReady ? '' : ' loading'}`} src={focusedSrc ?? s.previewUrl!} title={s.name} sandbox="allow-scripts allow-same-origin allow-forms" onLoad={onFrameLoad} />}
+              </div>
               {/* 同一张卡同时有未结清候选时错开一行：两者右上同位、同底色同尺寸，叠在一起会把角标整块盖住 */}
               {!isFocused && working && <span className={`working${s.pendingCandidates ? ' below' : ''}`} data-testid="card-working">局部修改中…</span>}
-              {!isFocused && <div className="gesture nopan" onPointerDown={(ev) => startDrag(ev, 'screen', s.id)} onDoubleClick={(ev) => { ev.stopPropagation(); focusCard(s.id); }} />}
+              {!isFocused && <div ref={gestureRef(s.id)} className={`gesture${panReady ? '' : ' nopan'}`} role="button" tabIndex={tabStop === s.id ? 0 : -1} aria-label={`${s.name} ${s.route}`}
+                onFocus={() => onCardFocus(s.id)} onKeyDown={(ev) => onCardKey(ev, 'screen', s.id)} onMouseDown={keepPointerFocus}
+                onPointerDown={(ev) => startDrag(ev, 'screen', s.id)} onDoubleClick={(ev) => { ev.stopPropagation(); focusCard(s.id); }} />}
               {/* 状态变体（REQ-CORE-025 v0.62）：聚焦的屏所在家族 ≥ 2 时卡内顶部中央出一排胶囊，点即同 iframe 换成那一份。
                   放卡内而不是卡上方：聚焦把卡顶贴到可用区上沿，卡上方那 32 px 正压在顶栏底下（RUN-112 实测点不到） */}
               {isFocused && iframeReady && family.length >= 2 && (
@@ -988,16 +1083,20 @@ export function CanvasView(p: CanvasProps) {
             <div key={c.id} data-testid="component-card" data-name={c.name} data-ready={ready || undefined} className={`comp${ready ? ' live' : ''}${selected ? ' selected' : ''}${compFocused === c.id ? ' focused' : ''}${compDrag[c.id] ? ' dragging' : ''}`} style={{ width: box.w, height: box.h, transform: `translate(${q.x}px, ${q.y}px)` }}>
               <div className="label"><b>{c.name}</b> · 用于 {c.usedBy.length} 屏</div>
               {/* 上报尺寸前：屏卡片那一套骨架垫着、iframe 透明，上报后 iframe 淡入（v0.76）。iframe 恒按整个设备渲染、平移到根元素左上角，由卡片裁切 */}
-              <div className="skeleton" aria-hidden="true"><div className="sk-sweep" /></div>
-              <iframe
-                ref={(el) => { if (el) compFrames.current.set(c.id, el); else compFrames.current.delete(c.id); }}
-                className="nowheel nopan" src={c.previewUrl} title={c.name} sandbox="allow-scripts allow-same-origin"
-                style={{ width: p.screenSize.w, height: p.screenSize.h, transform: at ? `translate(${-at.x}px, ${-at.y}px)` : undefined }}
-              />
+              <div className="card-clip">
+                <div className="skeleton" aria-hidden="true"><div className="sk-sweep" /></div>
+                <iframe
+                  ref={(el) => { if (el) compFrames.current.set(c.id, el); else compFrames.current.delete(c.id); }}
+                  className="nowheel nopan" src={c.previewUrl} title={c.name} sandbox="allow-scripts allow-same-origin"
+                  style={{ width: p.screenSize.w, height: p.screenSize.h, transform: at ? `translate(${-at.x}px, ${-at.y}px)` : undefined }}
+                />
+              </div>
               {/* 交互态（与屏一致：双击进、Esc 出）。这层手势罩摘掉，指针才落得到 iframe 上；
                   **镜头不动**——组件卡是按自身内容尺寸渲染的、本来就是 1:1，没有屏那种「推到 1:1 居中」的理由，
                   为看一眼组件把整块画布推走反而丢了上下文（屏那条见 REQ-CORE-005） */}
-              {compFocused !== c.id && <div className="gesture nopan" onPointerDown={(ev) => startDrag(ev, 'component', c.id)} onDoubleClick={(ev) => { ev.stopPropagation(); p.onFocusComponent?.(c.id); }} />}
+              {compFocused !== c.id && <div ref={gestureRef(c.id)} className={`gesture${panReady ? '' : ' nopan'}`} role="button" tabIndex={tabStop === c.id ? 0 : -1} aria-label={`组件 ${c.name}`}
+                onFocus={() => onCardFocus(c.id)} onKeyDown={(ev) => onCardKey(ev, 'component', c.id)} onMouseDown={keepPointerFocus}
+                onPointerDown={(ev) => startDrag(ev, 'component', c.id)} onDoubleClick={(ev) => { ev.stopPropagation(); p.onFocusComponent?.(c.id); }} />}
               {/* 交互态只用一个呼吸绿点：组件名已经写在卡片标签上，角标再重复一遍就是拿走卡片右上一整条。
                   不是纯靠颜色表态——名字给了读屏，卡片本身还有强调色外框（A11Y-001） */}
               {compFocused === c.id && <span className="live-dot" role="status" aria-label="交互中" title="交互中" />}
@@ -1011,9 +1110,10 @@ export function CanvasView(p: CanvasProps) {
           </div>
         )}
       </div>
-      {p.armed && !p.focusedId && (
-        <div className="pointer-events-none absolute left-1/2 top-16 z-10 -translate-x-1/2 rounded-full border border-accent/50 bg-accent/15 px-3 py-1 text-xs text-fg" data-testid="armed-hint">
-          {p.armed === 'annotate' ? '批注模式：点任意一屏开始' : '选择元素模式：点任意一屏开始'}
+      {/* 待命提示压在卡片上也得读得出（v0.80）：chrome 材质——透明强调色底（15%）压在白卡上对比度只有约 1.1:1；组件卡在交互态时不显示 */}
+      {p.armed && !p.focusedId && !p.focusedComponentId && (
+        <div className="chrome pointer-events-none absolute left-1/2 top-16 z-10 -translate-x-1/2 rounded-full px-3 py-1 text-xs text-fg" data-testid="armed-hint">
+          {p.armed === 'annotate' ? '批注模式：点任意一屏开始' : '选择元素模式：点任意一屏开始'} · Esc 退出
         </div>
       )}
       {marquee && (

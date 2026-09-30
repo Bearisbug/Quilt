@@ -71,9 +71,25 @@ export const RUNTIME_JS = String.raw`(function () {
     if (href.charAt(0) === '/') { e.preventDefault(); snapshotForms(); send({ type: 'quilt:navigate', href: href }); }
     else if (href === '#') { e.preventDefault(); send({ type: 'quilt:dead' }); }
   });
-  // 触控板捏合（ctrl+wheel）落在 iframe 里时画布收不到，浏览器会把整页放大；截住并转发给父页做画布缩放
+  // 指针下有没有能朝这个方向滚的区域（元素或文档本身）
+  function canScroll(el, dx, dy) {
+    for (var n = el && el.nodeType === 1 ? el : el && el.parentElement; n; n = n.parentElement) {
+      var cs = getComputedStyle(n);
+      if (dy && /(auto|scroll)/.test(cs.overflowY) && (dy > 0 ? n.scrollTop + n.clientHeight < n.scrollHeight - 1 : n.scrollTop > 0)) return true;
+      if (dx && /(auto|scroll)/.test(cs.overflowX) && (dx > 0 ? n.scrollLeft + n.clientWidth < n.scrollWidth - 1 : n.scrollLeft > 0)) return true;
+    }
+    var d = document.scrollingElement;
+    return !!d && ((dy > 0 && d.scrollTop + innerHeight < d.scrollHeight - 1) || (dy < 0 && d.scrollTop > 0) || (dx > 0 && d.scrollLeft + innerWidth < d.scrollWidth - 1) || (dx < 0 && d.scrollLeft > 0));
+  }
+  // 触控板捏合（ctrl+wheel）落在 iframe 里时画布收不到，浏览器会把整页放大；截住并转发给父页做画布缩放。
+  // 组件预览（v0.80）：普通滚轮落在没有可滚区域的地方时同样转发（pan），父页平移画布——组件卡按内容定高，交互态下卡片区域原本是死区
   document.addEventListener('wheel', function (e) {
-    if (!e.ctrlKey) return;
+    if (!e.ctrlKey) {
+      if (!window.__quiltComponent || canScroll(e.target, e.deltaX, e.deltaY)) return;
+      e.preventDefault();
+      send({ type: 'quilt:wheel', pan: true, deltaX: e.deltaX, deltaY: e.deltaY, x: e.clientX, y: e.clientY });
+      return;
+    }
     e.preventDefault();
     send({ type: 'quilt:wheel', deltaY: e.deltaY, x: e.clientX, y: e.clientY });
   }, { passive: false });
@@ -83,10 +99,12 @@ export const RUNTIME_JS = String.raw`(function () {
     var action = e.target && e.target.getAttribute ? (e.target.getAttribute('action') || '') : '';
     if (action.charAt(0) === '/') { snapshotForms(); send({ type: 'quilt:navigate', href: action }); }
   }, true);
-  // 画布级快捷键在预览文档里按下时转发给父页：Esc 退出、Alt+← 后退、⌘E 选择元素、⌘/ 输入框、⌘K 找屏
+  // 画布级快捷键在预览文档里按下时转发给父页：Esc 退出、Alt+← 后退、⌘E 选择元素、⌘/ 输入框、⌘K 找屏，
+  // ⌥ + 字母（⌥N 批注、⌥D 设计系统……，v0.80）只在焦点不在可编辑元素上时——macOS 下它们在输入框里是打特殊字符的
   document.addEventListener('keydown', function (e) {
     var mod = e.metaKey || e.ctrlKey;
-    if (e.key === 'Escape' || (e.altKey && e.key === 'ArrowLeft') || (mod && (e.code === 'KeyE' || e.code === 'Slash' || e.code === 'KeyK'))) {
+    var editable = e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable]');
+    if (e.key === 'Escape' || (e.altKey && e.key === 'ArrowLeft') || (mod && (e.code === 'KeyE' || e.code === 'Slash' || e.code === 'KeyK')) || (e.altKey && !mod && /^Key[A-Z]$/.test(e.code) && !editable)) {
       e.preventDefault();
       send({ type: 'quilt:key', key: e.key, code: e.code, altKey: e.altKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey });
     }

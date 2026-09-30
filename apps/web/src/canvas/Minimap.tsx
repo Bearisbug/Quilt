@@ -32,9 +32,12 @@ export function Minimap({ rects, onView, onPanTo, onMoveView }: {
   const rectsRef = useRef(rects);
   rectsRef.current = rects;
   // 拖视口框期间外接框冻结：它把视口框也算在内，视口一移出内容区外接框就跟着变大、比例跟着变，
-  // 按实时外接框换算的话同一个指针位置对应的世界坐标一直在漂，镜头会自己越跑越远
-  const drag = useRef<{ box: Box; mx: number; my: number; vx: number; vy: number; zoom: number } | null>(null);
-  const box = useCallback(() => drag.current?.box ?? boxOf(view.current ? [...rectsRef.current, worldView(view.current)] : rectsRef.current), []);
+  // 按实时外接框换算的话同一个指针位置对应的世界坐标一直在漂，镜头会自己越跑越远。
+  // 松手后仍用冻结的那个，直到下一次别的镜头变化或卡片变化（v0.80）：松手就按新视口重算的话，整幅小地图一步重新缩放、框跳走；
+  // 卡片变了（新屏落地、卡片挪动）不重算的话，冻结的外接框装不下它，画出小地图外
+  const drag = useRef<{ mx: number; my: number; vx: number; vy: number; zoom: number } | null>(null);
+  const frozen = useRef<Box | null>(null);
+  const box = useCallback(() => frozen.current ?? boxOf(view.current ? [...rectsRef.current, worldView(view.current)] : rectsRef.current), []);
 
   const draw = useCallback(() => {
     const el = ref.current; const ctx = el?.getContext('2d');
@@ -66,10 +69,10 @@ export function Minimap({ rects, onView, onPanTo, onMoveView }: {
 
   useEffect(() => {
     let raf = 0;
-    const off = onView((v) => { view.current = v; if (!raf) raf = requestAnimationFrame(() => { raf = 0; draw(); }); });
+    const off = onView((v) => { if (!drag.current) frozen.current = null; view.current = v; if (!raf) raf = requestAnimationFrame(() => { raf = 0; draw(); }); });
     return () => { off(); if (raf) cancelAnimationFrame(raf); };
   }, [onView, draw]);
-  useEffect(() => { draw(); }, [rects, draw]);
+  useEffect(() => { if (!drag.current) frozen.current = null; draw(); }, [rects, draw]);
 
   const at = (e: ReactPointerEvent<HTMLCanvasElement>) => { const r = ref.current!.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top] as const; };
   // 点空白处镜头平移到那一点（缩放不变）；按在视口框上是抓住它拖：从抓住的那一点起按位移 1:1 平移，框不跳到指针下（MOTION-017）。
@@ -83,23 +86,33 @@ export function Minimap({ rects, onView, onPanTo, onMoveView }: {
     const inFrame = mx >= fx && mx <= fx + wv.w * b.scale && my >= fy && my <= fy + wv.h * b.scale;
     if (!inFrame) { onPanTo(b.x0 + (mx - PAD - b.ox) / b.scale, b.y0 + (my - PAD - b.oy) / b.scale); return; }
     ref.current?.setPointerCapture(e.pointerId);
-    drag.current = { box: b, mx, my, vx: v.x, vy: v.y, zoom: v.zoom };
+    // 拖动期间画布里的 iframe 不接指针（v0.80）：指针移出小地图、经过候选格的活 iframe 时照样跟手（见 CanvasView 框选）
+    ref.current?.closest('.viewport')?.toggleAttribute('data-pointer-drag', true);
+    frozen.current = b;
+    drag.current = { mx, my, vx: v.x, vy: v.y, zoom: v.zoom };
   };
+  const endDrag = () => { drag.current = null; ref.current?.closest('.viewport')?.toggleAttribute('data-pointer-drag', false); draw(); };
   const onMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     const d = drag.current;
     // 指针在视口框上是抓手、在空白处是十字：抓得住的地方要看得出来
     if (!d) { const v = view.current; if (v && ref.current) { const [mx, my] = at(e); const b = box(); const wv = worldView(v); const [fx, fy] = toMini(b, wv.x, wv.y); ref.current.style.cursor = mx >= fx && mx <= fx + wv.w * b.scale && my >= fy && my <= fy + wv.h * b.scale ? 'grab' : ''; } return; }
     // 松开发生在捕获丢失的地方时收不到 pointerup：没按键就当拖完了（MOTION-028）
-    if (e.buttons === 0) { drag.current = null; return; }
+    if (e.buttons === 0) { endDrag(); return; }
     const [mx, my] = at(e);
-    onMoveView(d.vx - ((mx - d.mx) / d.box.scale) * d.zoom, d.vy - ((my - d.my) / d.box.scale) * d.zoom);
+    const b = box(); const v = view.current!;
+    // 视口框限在小地图之内（v0.80）：按冻结的外接框把框的世界矩形夹在小地图四边以内，拖到边上就停
+    const clamp = (n: number, lo: number, hi: number) => Math.min(Math.max(n, lo), Math.max(lo, hi));
+    const x0 = b.x0 - (PAD + b.ox) / b.scale; const y0 = b.y0 - (PAD + b.oy) / b.scale;
+    const wx = clamp(-d.vx / d.zoom + (mx - d.mx) / b.scale, x0, x0 + W / b.scale - v.w / d.zoom);
+    const wy = clamp(-d.vy / d.zoom + (my - d.my) / b.scale, y0, y0 + H / b.scale - v.h / d.zoom);
+    onMoveView(-wx * d.zoom, -wy * d.zoom);
   };
   const screens = rects.filter((r) => r.kind === 'screen').length;
   return (
     <canvas ref={ref} className="minimap chrome nopan nowheel" style={{ width: W, height: H }} role="img" aria-label={`小地图：${screens} 屏，点击平移画布、拖视口框移动视图`} data-testid="minimap" data-screens={screens}
       onPointerDown={onDown} onPointerMove={onMove}
-      onPointerUp={(e) => { if (ref.current?.hasPointerCapture(e.pointerId)) ref.current.releasePointerCapture(e.pointerId); drag.current = null; draw(); }}
-      onPointerCancel={() => { drag.current = null; draw(); }}
+      onPointerUp={(e) => { if (ref.current?.hasPointerCapture(e.pointerId)) ref.current.releasePointerCapture(e.pointerId); endDrag(); }}
+      onPointerCancel={endDrag}
       onDoubleClick={(e) => e.stopPropagation()} />
   );
 }
