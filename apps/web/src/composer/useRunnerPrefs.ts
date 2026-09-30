@@ -24,7 +24,9 @@ export function useRunnerPrefs() {
     setRunnerId((cur) => (cur && items.some((x) => x.id === cur && x.available) ? cur : defaultId));
   }, []);
   useEffect(() => { api.runners().then((r) => applyCatalog(r.items, r.default)).catch(() => {}); }, [applyCatalog]);
-  const onRunnerChange = (id: string) => { setRunnerId(id); try { localStorage.setItem(RUNNER_KEY, id); } catch { /* 无痕模式写不了 */ } };
+  // 空值不落（同 onSessionChange）：切「聊天」再切回「造 / 改」时通道清单换批，Radix Select 隐藏的原生 <select> 在那一帧回报 ''，
+  // 照写会把选中的通道清掉、下一轮静默走默认通道（v0.74）
+  const onRunnerChange = (id: string) => { if (!id) return; setRunnerId(id); try { localStorage.setItem(RUNNER_KEY, id); } catch { /* 无痕模式写不了 */ } };
   const runner = runners.find((r) => r.id === runnerId)?.runner;
   const agentTool = runner?.kind === 'agent' ? runner.tool : null;
   // 投递会话（REQ-AGENT-003 v0.34 / v0.68）：通道是本机 agent 时还要选投给哪个会话，选择按工具跨会话记忆（INT-007 / INT-021）；

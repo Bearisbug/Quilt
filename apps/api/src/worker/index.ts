@@ -5,7 +5,7 @@ import { jobQueue, shotQueue } from '../services/jobs.ts';
 import { emitJobEvent, emitProjectEvent } from '../lib/events.ts';
 import { storage, objectKeys } from '../lib/storage.ts';
 import { screenshotHtml } from '../lib/screenshot.ts';
-import { DEVICE_SIZE, type DeviceType } from '@quilt/core';
+import { DEVICE_SIZE, failureText, type DeviceType, type JobKind } from '@quilt/core';
 import { runJob } from './pipeline.ts';
 import { startAgentDelivery } from './agentDelivery.ts';
 import { settleByJob } from '../services/annotations.ts';
@@ -60,9 +60,9 @@ export async function retryScreenshots(): Promise<number> {
 async function recoverJobs() {
   const stale = await db.update(schema.generationJobs)
     .set({ status: 'failed', finishedAt: new Date(), output: sql`coalesce(${schema.generationJobs.output}, '{}'::jsonb) || '{"errorClass":"system","message":"Quilt 重启时作业未完成"}'::jsonb` })
-    .where(and(eq(schema.generationJobs.status, 'running'), eq(schema.generationJobs.runner, 'model'))).returning({ id: schema.generationJobs.id });
+    .where(and(eq(schema.generationJobs.status, 'running'), eq(schema.generationJobs.runner, 'model'))).returning({ id: schema.generationJobs.id, kind: schema.generationJobs.kind });
   for (const r of stale) {
-    await db.update(schema.messages).set({ content: '生成失败（system）：Quilt 重启时作业未完成' }).where(and(eq(schema.messages.jobId, r.id), eq(schema.messages.role, 'assistant'), eq(schema.messages.content, '')));
+    await db.update(schema.messages).set({ content: failureText(r.kind as JobKind, 'system', 'Quilt 重启时作业未完成') }).where(and(eq(schema.messages.jobId, r.id), eq(schema.messages.role, 'assistant'), eq(schema.messages.content, '')));
     await emitJobEvent(r.id, 'failed', { errorClass: 'system', message: 'Quilt 重启时作业未完成' }).catch(() => {});
     await settleByJob(r.id, false);
   }

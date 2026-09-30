@@ -24,6 +24,12 @@ export type ChatDockProps = {
   onEdit?: (user: MessageDto) => void;
   /** 在排队或在跑的作业：最后一轮的作业还在其中时「重试」置灰 */
   runningJobIds: ReadonlySet<string>;
+  /** 重试请求在途（v0.74）：点下到响应回来之前「重试」置灰转圈 */
+  retrying: boolean;
+  /** 自己发出 / 重试了一轮就加一：列表不在底部也滚到底（v0.74） */
+  followSeq: number;
+  /** 折叠期间失败了几轮（v0.74）：横条上标出，展开即由父组件清零 */
+  failed: number;
 };
 
 // 对话记录（REQ-CORE-006，v0.34 挪到左下角）：底部对齐、从下往上长，头部一整条可点——上拉展开、下收折叠；
@@ -31,10 +37,20 @@ export type ChatDockProps = {
 export function ChatDock(p: ChatDockProps) {
   const toast = useToast();
   const listRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [p.messages.length, p.progress, p.collapsed]);
-  // 大图预览（REQ-CORE-026）：整个对话已加载的参考图按时间排成一组；关闭后焦点回到点开它的那张缩略图
+  // 滚动跟随（INT-008 v0.74）：列表停在底部时跟随新消息与进度；往上翻看时被动更新不动它。自己发出 / 重试的一轮、展开时滚到底
+  const stuck = useRef(true);
+  const toBottom = () => listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  useEffect(() => { if (stuck.current) toBottom(); }, [p.messages, p.progress]);
+  useEffect(() => { stuck.current = true; toBottom(); }, [p.followSeq, p.collapsed]);
+  const onScroll = () => { const el = listRef.current; if (el) stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24; };
+  // 大图预览（REQ-CORE-026）：整个对话已加载的参考图按时间排成一组；关闭后焦点回到点开它的那张缩略图。
+  // 按「哪条消息的哪张图」记当前图（v0.74）：列表变了（最近 100 条的窗口滑过、新消息进来）序号跟着变、图不换；这张图不在已加载的对话里了就关闭并说明
   const gallery = useMemo(() => p.messages.flatMap((m) => m.attachments.map((a) => ({ id: a.id, url: a.url, caption: m.content.slice(0, 40), messageId: m.id }))), [p.messages]);
-  const [viewerAt, setViewerAt] = useState<number | null>(null);
+  const [viewing, setViewing] = useState<{ messageId: string; id: string } | null>(null);
+  const viewerAt = viewing ? gallery.findIndex((g) => g.messageId === viewing.messageId && g.id === viewing.id) : -1;
+  useEffect(() => {
+    if (viewing && viewerAt < 0) { setViewing(null); toast('这张参考图所在的消息已不在已加载的对话里，预览已关闭'); }
+  }, [viewing, viewerAt, toast]);
   const openerRef = useRef<HTMLElement | null>(null);
   // 最后一轮 = 最后一条带作业的用户消息与同一作业的助手消息；只有输入框能发出的四类作业可重试 / 修改
   const round = useMemo(() => {
@@ -50,18 +66,20 @@ export function ChatDock(p: ChatDockProps) {
   return (
     <aside className="chat-dock chrome absolute left-3 z-20 flex w-[var(--dock-w)] flex-col overflow-hidden rounded-xl" aria-label="对话记录" data-testid="chat-dock" data-state={p.collapsed ? 'collapsed' : 'open'}>
       <button
-        type="button" aria-expanded={!p.collapsed} aria-label={p.collapsed ? '展开对话记录' : '折叠对话记录'} onClick={p.onToggle}
+        type="button" aria-expanded={!p.collapsed} aria-label={p.collapsed ? `展开对话记录${p.failed ? `（${p.failed} 轮失败）` : ''}` : '折叠对话记录'} onClick={p.onToggle}
         className="flex h-11 w-full shrink-0 items-center justify-between gap-2 px-3 text-left transition-colors duration-[var(--duration-fast)] hover:bg-panel-2/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
       >
         <span className="flex min-w-0 items-baseline gap-2">
           <span className="text-sm font-semibold">对话</span>
           <span className="truncate text-xs text-muted">{p.collapsed && p.status ? p.status : `${p.messages.length} 条`}</span>
+          {/* 折叠期间有作业失败：toast 几秒就走，横条上留一枚标记直到展开（v0.74） */}
+          {p.collapsed && p.failed > 0 && <span data-testid="chat-failed" className="shrink-0 self-center rounded-full bg-danger/10 px-1.5 py-px text-[11px] font-medium text-danger">{p.failed} 轮失败</span>}
         </span>
         {p.collapsed ? <ChevronUp size={16} className="shrink-0 text-muted" aria-hidden="true" /> : <ChevronDown size={16} className="shrink-0 text-muted" aria-hidden="true" />}
       </button>
       {!p.collapsed && (
         <>
-          <div ref={listRef} className="scroll fade-up min-h-0 max-h-[min(28rem,calc(100dvh-12rem))] flex-1 space-y-3 border-t border-line p-3" role="log" aria-live="polite">
+          <div ref={listRef} onScroll={onScroll} className="scroll fade-up min-h-0 max-h-[min(28rem,calc(100dvh-12rem))] flex-1 space-y-3 border-t border-line p-3" role="log" aria-live="polite">
             {p.messages.length === 0 && (
               <div className="rounded-lg border border-dashed border-line p-3 text-xs text-muted">
                 <p className="font-medium text-fg">试试这样描述：</p>
@@ -81,8 +99,10 @@ export function ChatDock(p: ChatDockProps) {
                       <IconButton label="修改" desc="把这一轮的文字、参考图与目标填回输入框，改完再发" size="xs" tip="bottom-end" data-testid="msg-edit" onClick={() => p.onEdit!(m)}><Pencil size={14} aria-hidden="true" /></IconButton>
                     )}
                     {m.id === round?.assistant?.id && p.onRetry && (
-                      <IconButton label="重试" desc="用原来的文字、参考图与目标再发一轮，通道用输入框当前选的" size="xs" tip="bottom-end" data-testid="msg-retry"
-                        unavailable={p.runningJobIds.has(round.user.jobId!) && '这一轮还在跑，等它结束再重试'} onClick={() => p.onRetry!(round.user)}><RotateCcw size={14} aria-hidden="true" /></IconButton>
+                      <IconButton label="重试" desc="用原来的文字、参考图与目标再发一轮，通道用输入框当前选的" size="xs" tip="bottom-end" data-testid="msg-retry" aria-busy={p.retrying || undefined}
+                        unavailable={p.retrying ? '正在重试…' : p.runningJobIds.has(round.user.jobId!) && '这一轮还在跑，等它结束再重试'} onClick={() => p.onRetry!(round.user)}>
+                        {p.retrying ? <span className="size-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" /> : <RotateCcw size={14} aria-hidden="true" />}
+                      </IconButton>
                     )}
                   </div>
                 )}
@@ -95,7 +115,7 @@ export function ChatDock(p: ChatDockProps) {
                         <li key={a.id}>
                           <button type="button" aria-label={`查看参考图 ${at + 1} / ${gallery.length}`} data-testid="message-attachment-open"
                             className="block rounded-md transition-opacity duration-[var(--duration-fast)] hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                            onClick={(e) => { openerRef.current = e.currentTarget; setViewerAt(at); }}>
+                            onClick={(e) => { openerRef.current = e.currentTarget; setViewing({ messageId: m.id, id: a.id }); }}>
                             <img
                               src={a.url} alt="" data-testid="message-attachment"
                               className="size-14 rounded-md border border-line object-cover"
@@ -127,7 +147,7 @@ export function ChatDock(p: ChatDockProps) {
           </p>
         </>
       )}
-      {viewerAt !== null && gallery[viewerAt] && <ImageViewer images={gallery} start={viewerAt} returnTo={openerRef} onClose={() => setViewerAt(null)} />}
+      {viewing && viewerAt >= 0 && <ImageViewer images={gallery} index={viewerAt} onIndex={(i) => setViewing({ messageId: gallery[i].messageId, id: gallery[i].id })} returnTo={openerRef} onClose={() => setViewing(null)} />}
     </aside>
   );
 }

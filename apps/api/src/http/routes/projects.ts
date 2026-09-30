@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { and, eq, desc, asc, lt, inArray, isNull } from 'drizzle-orm';
-import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, createProjectSchema, createJobSchema, createMessageSchema, retryMessageSchema, createAttachmentSchema, updateProjectSchema, cursorQuerySchema, listJobsQuerySchema, type MessageDto, type LinkDto, type CreateJobInput, type JobKind, type ProjectEventDto, type Runner, createPresetSchema, applyPresetSchema } from '@quilt/core';
+import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, ROUND_PRESET_PROMPTS, missingPagePrompt, variantPrompt, presetPrompt, presetNote, createProjectSchema, createJobSchema, createMessageSchema, retryMessageSchema, createAttachmentSchema, updateProjectSchema, cursorQuerySchema, listJobsQuerySchema, type MessageDto, type LinkDto, type CreateJobInput, type JobKind, type ProjectEventDto, type Runner, createPresetSchema, applyPresetSchema } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
 import { parseBody, parseQuery, requireUser, type Env } from '../app.ts';
 import { createProject, deleteProject, getProjectDetail, listProjects, ownedProject, updateProject, projectDto, designSystemDto, jobDto } from '../../services/projects.ts';
@@ -71,14 +71,21 @@ projectRoutes.patch('/v1/projects/:projectId', async (c) => {
 });
 
 // API-CORE-006。非对话发起的作业也写进对话记录，让回刷/导出/局部重生成/懒生成在面板里有可见反馈。
+// 系统拼的提示词后面接了「修改」时写的附加要求（REQ-CORE-026 v0.74），描述里一并写出
+const withNote = (note: string | null, sep: string) => (note ? `${sep}${note}` : '');
 function describeJob(input: CreateJobInput): string | null {
   switch (input.kind) {
-    case 'generate': return input.input.variantOf ? `出「${input.input.variantName}」状态变体：${input.input.prompt}` : input.input.route ? `生成缺失的页面 ${input.input.route}` : `新建${input.input.count === 'auto' ? '一组屏' : input.input.count > 1 ? ` ${input.input.count} 屏` : '一屏'}${input.input.versions > 1 ? `（${input.input.versions} 版候选）` : ''}：${input.input.prompt}`;
+    case 'generate': return input.input.variantOf ? `出「${input.input.variantName}」状态变体：${input.input.prompt}` : input.input.route ? `生成缺失的页面 ${input.input.route}${withNote(presetNote(input.input.prompt, missingPagePrompt(input.input.route)), '：')}` : `新建${input.input.count === 'auto' ? '一组屏' : input.input.count > 1 ? ` ${input.input.count} 屏` : '一屏'}${input.input.versions > 1 ? `（${input.input.versions} 版候选）` : ''}：${input.input.prompt}`;
     case 'regenerate_subtree': return `重生成选中区域：${input.input.prompt}`;
     case 'apply_design_system': return input.input.screenIds === 'all' ? '把最新设计系统回刷到所有屏' : `把最新设计系统回刷到 ${input.input.screenIds.length} 屏`;
     case 'propose_design_system': return `提炼设计系统约定：${input.input.instruction}`;
     case 'export_prototype': return '导出单文件原型';
-    case 'edit_screens': return input.input.prompt === LINK_REPAIR_PROMPT ? `补链：把 ${input.input.screenIds.length} 屏的按钮 / 表单连上路由` : input.input.prompt === CONVENTIONS_REGENERATE_PROMPT ? `按新约定重生成 ${input.input.screenIds.length} 屏` : input.input.prompt;
+    case 'edit_screens': {
+      const n = input.input.screenIds.length;
+      const link = presetNote(input.input.prompt, LINK_REPAIR_PROMPT);
+      const conv = presetNote(input.input.prompt, CONVENTIONS_REGENERATE_PROMPT);
+      return link !== null ? `补链：把 ${n} 屏的按钮 / 表单连上路由${withNote(link, '。附加要求：')}` : conv !== null ? `按新约定重生成 ${n} 屏${withNote(conv, '。附加要求：')}` : input.input.prompt;
+    }
     case 'chat': return input.input.prompt;
     case 'edit_component': return `改组件：${input.input.prompt}`;
     default: return null;
@@ -112,7 +119,14 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
     const mine = await db.select({ id: schema.components.id }).from(schema.components).where(and(eq(schema.components.projectId, project.id), inArray(schema.components.id, compTargets)));
     if (mine.length !== compTargets.length) throw problems.validation([{ path: 'targetComponentIds', message: '有组件不属于这个项目或已被删除' }]);
   }
-  const editComponent = !!compTargets && !targets && !body.anchor;
+  // 「修改」还原的隐藏参数（REQ-CORE-026 v0.74）：出变体 / 补缺失页是钉死路由的造，补链 / 按新约定重生成是改；聊天时忽略
+  const chat = body.mode === 'chat';
+  const pinned = !chat && !!(body.variantOf || body.route);
+  const preset = chat ? undefined : body.preset;
+  if (pinned && targets) throw problems.validation([{ path: 'targetScreenIds', message: '出变体 / 补缺失页是造屏，不能同时带目标屏' }]);
+  if (!chat && body.variantOf && body.route) throw problems.validation([{ path: 'route', message: '出变体与补缺失页不能同时给' }]);
+  if (preset && (!targets || pinned)) throw problems.validation([{ path: 'targetScreenIds', message: '补链 / 按新约定重生成要带目标屏' }]);
+  const editComponent = !!compTargets && !targets && !body.anchor && !pinned;
   if (editComponent && compTargets!.length !== 1) throw problems.validation([{ path: 'targetComponentIds', message: '一次只能改一个组件' }]);
   // 改组件只走模型通道：它是一次调用 + 确定性回刷，没有「投递到会话再收口」这条路
   if (editComponent && body.runner?.kind === 'agent') throw problems.validation([{ path: 'runner', message: '改组件请换一个模型通道，本机会话不接这类作业' }]);
@@ -134,11 +148,17 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
     : editComponent
     ? { kind: 'edit_component', input: { componentId: compTargets![0], prompt: body.content, runner, imageKeys } }
     : targets
-    ? { kind: 'edit_screens', input: { prompt: body.content, screenIds: targets, versions, runner, imageKeys, componentIds } }
+    ? { kind: 'edit_screens', input: { prompt: preset ? presetPrompt(ROUND_PRESET_PROMPTS[preset], body.content) : body.content, screenIds: targets, versions, runner, imageKeys, componentIds } }
+    : body.variantOf
+    ? { kind: 'generate', input: { prompt: body.content || variantPrompt(body.variantName!), count: 1, versions, variantOf: body.variantOf, variantName: body.variantName, runner, imageKeys, componentIds } }
+    : body.route
+    ? { kind: 'generate', input: { prompt: presetPrompt(missingPagePrompt(body.route), body.content), count: 1, versions, route: body.route, fromScreenId: body.fromScreenId, runner, imageKeys, componentIds } }
     : { kind: 'generate', input: { prompt: body.content, count: body.count ?? (screenCount === 0 ? 'auto' : 1), versions, anchor: body.anchor, runner, imageKeys, componentIds } };
+  // 带隐藏参数的轮次，消息正文按 API-CORE-006 的口径写成描述（正文是提示词还是附加要求，由作业输入反解）
+  const content = pinned || preset ? describeJob(input)! : body.content;
   // 通道选「交给本机 Claude Code」（REQ-CORE-011 / ADR-015 v0.34）：同样是作业（runner=agent），由 agentDelivery 投递到选中的会话，
   // 不入 worker 队列、不记 LLM 用量；助手消息在会话收口（quilt.finish_job）时回填。
-  const [res, status] = await startRound(c, user, project.id, input, runner, { content: body.content, attachments }, targets);
+  const [res, status] = await startRound(c, user, project.id, input, runner, { content, attachments }, targets);
   return c.json(res, status);
 });
 

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import type { ScreenDto, ComponentDto } from '@quilt/core';
+import { variantPrompt, type ScreenDto, type ComponentDto } from '@quilt/core';
 import { ApiError } from '@/lib/api';
 import { Button, Input, Textarea } from '@/ui/ui';
 import { Overlay, useModal } from '@/ui/modal';
@@ -109,7 +109,7 @@ export function VariantDialog({ base, onCreate, onClose }: { base: ScreenDto; on
     if (!n) { setError('给这个状态起个名字'); return; }
     if (n.length > 20) { setError('状态名最多 20 个字符'); return; }
     setPending(true);
-    try { await onCreate(n, prompt.trim() || `The ${n} state`); }
+    try { await onCreate(n, prompt.trim() || variantPrompt(n)); }
     catch (err) { setError(err instanceof ApiError ? err.problem.title : '创建失败'); }
     finally { setPending(false); }
   };

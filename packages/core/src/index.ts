@@ -11,3 +11,4 @@ export * from './components.ts';
 export * from './contract.ts';
 export * from './schemas.ts';
 export * from './export.ts';
+export * from './failure.ts';

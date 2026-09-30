@@ -21,7 +21,7 @@ import {
   type ProjectAsset, type SharedComponent,
   OVERLAY_SCREEN_NOTE, screenSystemPrompt, planSystemPrompt, planUserPrompt, planOneScreenSystemPrompt, planOneScreenUserPrompt, screenUserPrompt, editUserPrompt, subtreeUserPrompt, linkRepairPrompt,
   proposeDesignSystemSystemPrompt, proposeDesignSystemUserPrompt, parseConventions, REFERENCE_IMAGE_NOTE, FONT_FAMILIES, RADIUS_SCALES, MAX_CONVENTIONS,
-  DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput,
+  DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput, type JobKind, failureText,
 } from '@quilt/core';
 
 let lucideCache: string | null = null;
@@ -531,7 +531,7 @@ export async function runJob(jobId: string): Promise<void> {
     const entryNote = ctx.entryRepair ? `；已把「${ctx.entryRepair.name}」接到新屏${ctx.entryRepair.added.length ? `（${ctx.entryRepair.added.join('、')}）` : ''}` : '';
     const proposal = extraOutput.proposal as DesignProposalDto | undefined;
     const content = failure
-      ? `${job.kind === 'chat' ? '回答失败' : '生成失败'}（${failure.errorClass}）：${failure.message}${ctx.produced.length ? `；已保留 ${ctx.produced.length} 屏` : ''}`
+      ? failureText(job.kind as JobKind, failure.errorClass, failure.message, screenIds.length)
       // 聊天回执就是助手最后一段文字；它只动手没说话时至少报出改了哪几屏
       : job.kind === 'chat' ? ((extraOutput.reply as string | undefined) || (screens.length ? `已更新 ${screens.length} 屏：${names}` : '（助手没有回话）'))
       : job.kind === 'export_prototype' ? '原型已导出'

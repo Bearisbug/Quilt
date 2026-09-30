@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Bot, Component, Crosshair, Download, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MessageSquarePlus, Palette, Plus, Search, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
-import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, type ProjectDetailDto, type MessageDto, type JobDto, type JobEventDto, type ScreenDto, type ComponentDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core';
+import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, failureText, missingPagePrompt, type ProjectDetailDto, type MessageDto, type JobDto, type JobEventDto, type ScreenDto, type ComponentDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core';
 import { api, ApiError, loadConfig, subscribeProjectEvents } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Spinner } from '@/ui/ui';
@@ -20,7 +20,7 @@ import { useComposerChrome } from '@/composer/useComposerChrome';
 import { CandidateStack } from '@/canvas/CandidateStack';
 import { ArrangeBar } from '@/canvas/ArrangeBar';
 import { usePositionDrafts, usePositionUndo } from '@/canvas/positions';
-import { coveredScreens, jobLabel, type JobInput } from '@/canvas/jobs';
+import { coveredScreens, jobLabel, roundPreset, presetView, presetBody, type JobInput, type RoundPreset } from '@/canvas/jobs';
 import { DeleteDialog, MissingDialog, NewComponentDialog, VariantDialog } from '@/canvas/dialogs';
 import { RevisionPanel } from '@/panels/RevisionPanel';
 import { DesignPanel } from '@/panels/DesignPanel';
@@ -68,6 +68,9 @@ export function CanvasPage() {
   // 在跑作业是一组（REQ-CORE-020）：后端允许并行，前端跟踪全部非 agent 作业，进度按 jobId 分别记
   const [activeJobs, setActiveJobs] = useState<JobDto[]>([]);
   const [progress, setProgress] = useState<Record<string, string>>({});
+  // 对话记录（v0.74）：自己发出 / 重试一轮就加一，让列表不在底部也滚到底；折叠期间失败了几轮，展开即清
+  const [followSeq, setFollowSeq] = useState(0);
+  const [unseenFailures, setUnseenFailures] = useState(0);
   // 预览域地址来自运行时配置（API-CORE-028）：打包后是 127.0.0.1:3101，开发是 preview.localhost:3101
   const [previewOrigin, setPreviewOrigin] = useState<string | null>(null);
   useEffect(() => { loadConfig().then((c) => setPreviewOrigin(c.previewOrigin)).catch(() => toast('运行时配置加载失败', 'error')); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -86,6 +89,8 @@ export function CanvasPage() {
   const [variantFor, setVariantFor] = useState<ScreenDto | null>(null);
   // 锚点（REQ-CORE-014）：双击空白放下，是「造 · 此处」；点选任何一屏（改）就让位
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
+  // 「修改」还原的系统代发轮次的隐藏参数（REQ-CORE-026 v0.74）：与锚点同一条让位规则——点选屏 / 组件、放锚点都把它换掉
+  const [preset, setPreset] = useState<RoundPreset | null>(null);
   const [count, setCount] = useState<ScreenCount>(1);
   const [versions, setVersions] = useState(1);
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -208,7 +213,10 @@ export function CanvasPage() {
       setActiveJobs((prev) => prev.filter((j) => j.id !== job.id));
       setProgress((m) => { const next = { ...m }; delete next[job.id]; return next; });
       refresh(); refreshMessages();
-      if (e.type === 'failed') toast(`${job.kind === 'chat' ? '回答失败' : '生成失败'}：${d.message ?? d.errorClass ?? ''}`, 'error');
+      if (e.type === 'failed') {
+        toast(failureText(job.kind, d.errorClass as string | undefined, d.message as string | undefined), 'error');
+        if (chatCollapsed) setUnseenFailures((n) => n + 1);
+      }
       if (e.type === 'succeeded' && job.kind === 'export_prototype') { toast('原型已导出，开始下载'); window.location.assign(api.exportUrl(job.id)); }
       if (e.type === 'succeeded' && job.kind === 'generate') {
         const fresh = ((d.screenIds as string[] | undefined) ?? []).filter((id) => !before.has(id));
@@ -226,8 +234,8 @@ export function CanvasPage() {
     }
   };
   // 选中变化 → 写进目标并清掉锚点（选中即改）；清空选中不动目标
-  useEffect(() => { if (selectedIds.length) { setTargetIds(selectedIds); setAnchor(null); } }, [selectedIds]);
-  useEffect(() => { if (selectedComponentIds.length) { setTargetComponentIds(selectedComponentIds); setAnchor(null); } }, [selectedComponentIds]);
+  useEffect(() => { if (selectedIds.length) { setTargetIds(selectedIds); setAnchor(null); setPreset(null); } }, [selectedIds]);
+  useEffect(() => { if (selectedComponentIds.length) { setTargetComponentIds(selectedComponentIds); setAnchor(null); setPreset(null); } }, [selectedComponentIds]);
   // 屏数档位的默认值（REQ-CORE-003）：空项目默认「自动」（规划器定 4–6 屏主流程），有屏之后默认 1；只在空 ↔ 非空切换时重置
   const empty = !!detail && screens.length === 0;
   useEffect(() => { if (detail) setCount(empty ? 'auto' : 1); }, [detail?.project.id, empty]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -282,10 +290,14 @@ export function CanvasPage() {
   // 发送前的冲突预判：没有目标 = 造，撞在跑的 generate；有目标 = 改，撞目标屏的占用。其余组合一律放行，后端 409 是最终判据
   // 聊天：一个项目一条会话，只撞在跑的 chat（REQ-CORE-023）
   // 只有组件没有屏也没有锚点 = 改组件（REQ-EDIT-006）：一次一个，且不撞同一组件在跑的 edit_component
+  // 隐藏参数胶囊只跟它那种动词走：出变体 / 补缺失页是造（没有目标屏），补链 / 按新约定重生成要有目标屏；本机会话接不了钉死路由的造
+  const pinnedPreset = preset?.kind === 'variant' || preset?.kind === 'missing';
+  const livePreset = mode !== 'chat' && preset && pinnedPreset === (targetScreens.length === 0) ? preset : null;
   const blockedReason = useMemo(() => {
     if (mode === 'chat') return guardJobs.some((j) => j.kind === 'chat') ? CHAT_BUSY : null;
     const targets = targetScreens.slice(0, MAX_TARGETS);
-    if (!targets.length && !anchor && targetComponents.length) {
+    if (livePreset && pinnedPreset && sendRunner?.kind === 'agent') return '出变体、补缺失页请换一个模型通道，本机会话不接这类作业';
+    if (!targets.length && !anchor && !livePreset && targetComponents.length) {
       if (targetComponents.length > 1) return '一次只能改一个组件，其余先从目标里去掉';
       const c = targetComponents[0];
       return guardJobs.some((j) => j.kind === 'edit_component' && (j.input as JobInput).componentId === c.id) ? `「${c.name}」正在改，等这一轮完事` : null;
@@ -294,7 +306,7 @@ export function CanvasPage() {
     const hit = targets.filter((s) => busyScreens.has(s.id));
     if (!hit.length) return null;
     return hit.length === 1 ? `「${hit[0].name}」正在改，等这一轮完事` : `选中的 ${hit.length} 屏正在改（含「${hit[0].name}」），等这一轮完事`;
-  }, [targetScreens, targetComponents, anchor, busyScreens, generating, mode, guardJobs]);
+  }, [targetScreens, targetComponents, anchor, busyScreens, generating, mode, guardJobs, livePreset, pinnedPreset, sendRunner?.kind]);
   // 在跑作业按创建时间倒序：最新的在最上（Esc 取消的就是它，必须始终可见、不被折进「+N」）；时间相同取后加入的那个
   const runningJobs = useMemo(() => [...activeJobs].reverse().sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [activeJobs]);
   // 进度兜底收在这里：作业刚建、事件还没来时行与折叠横条都要有话说，不能看起来卡住
@@ -327,33 +339,47 @@ export function CanvasPage() {
   // 一轮建好（发送 / 重试）：消息追加进记录；交给本机 agent 的已投递到会话，切到 agent 面板看状态，其余进在跑作业行
   const roundStarted = (r: { userMessage: MessageDto; assistantMessage: MessageDto; job: JobDto }) => {
     setMessages((m) => [...m, r.userMessage, r.assistantMessage]);
+    setFollowSeq((n) => n + 1);
     if (r.job.runner === 'agent') { refresh(); setPanel('agent'); }
     else trackJob(r.job);
   };
-  // 最后一轮的重试 / 修改（REQ-CORE-026）。重试由服务端复制原作业输入（API-CORE-034），这里只给通道：输入框此刻选的那条，聊天轮用聊天通道
+  // 最后一轮的重试 / 修改（REQ-CORE-026）。重试由服务端复制原作业输入（API-CORE-034），这里只给通道：输入框此刻选的那条，聊天轮用聊天通道。
+  // 在途锁（v0.74）：ref 挡住同一帧里的连点（state 要到下一次渲染才生效），state 给按钮置灰转圈
+  const retryingRef = useRef(false);
+  const [retrying, setRetrying] = useState(false);
   const retryRound = async (user: MessageDto) => {
+    if (retryingRef.current) return;
+    retryingRef.current = true; setRetrying(true);
     try { roundStarted(await api.projects.retry(projectId, user.id, user.jobKind === 'chat' ? chatRunner : sendRunner)); }
     catch (e) {
       if (e instanceof ApiError && e.type === '/errors/job-not-finished') toast('这一轮还在跑，等它结束再重试', 'error');
       else if (e instanceof ApiError && e.type === '/errors/validation') toast((e.problem as { errors?: { message: string }[] }).errors?.[0]?.message ?? e.problem.title, 'error');
       else handleJobError(e, '重试失败');
-    }
+    } finally { retryingRef.current = false; setRetrying(false); }
   };
-  // 修改：这一轮的文字、参考图、目标、动词与档位原样填回输入框（替换现有草稿），不改写历史；已被删掉的屏 / 组件不填、说一声
+  // 修改：这一轮的文字、参考图、目标、动词与档位原样填回输入框（替换现有草稿），不改写历史；已被删掉的屏 / 组件不填、说一声。
+  // 只写输入框的目标、不动画布选中：写选中会触发上面「选中即改」的 effect，把刚填回的锚点与胶囊清掉（v0.74）。
+  // 系统代发的轮次（出变体 / 补缺失页 / 补链 / 按新约定重生成）的隐藏参数还原成胶囊，正文按作业输入反解（REQ-CORE-026 v0.74）
   const editRound = async (user: MessageDto) => {
     let job: JobDto;
     try { job = (await api.jobs.get(user.jobId!)).job; } catch { toast('读取这一轮失败', 'error'); return; }
-    const input = job.input as { screenIds?: string[]; componentIds?: string[]; componentId?: string; count?: ScreenCount; versions?: number; anchor?: { x: number; y: number } };
-    const screenIds = (input.screenIds ?? []).filter((id) => screens.some((s) => s.id === id));
+    const input = job.input as JobInput & { anchor?: { x: number; y: number } };
+    const screenIds = ((input.screenIds as string[] | undefined) ?? []).filter((id) => screens.some((s) => s.id === id));
     const compIds = (input.componentId ? [input.componentId] : input.componentIds ?? []).filter((id) => components.some((c) => c.id === id));
-    const lost = (input.screenIds?.length ?? 0) - screenIds.length + ((input.componentId ? 1 : input.componentIds?.length ?? 0) - compIds.length);
+    const alive = (id: string | undefined) => !!id && screens.some((s) => s.id === id);
+    const restored = roundPreset(job);
+    const r = restored?.preset;
+    // 变体的默认屏已被删掉：变体出不成，按丢了一个目标算；缺失页的来源屏只是参考，丢了就不带
+    const baseGone = r?.kind === 'variant' && !alive(r.variantOf);
+    const lost = (input.screenIds?.length ?? 0) - screenIds.length + ((input.componentId ? 1 : input.componentIds?.length ?? 0) - compIds.length) + (baseGone ? 1 : 0);
     onMode(job.kind === 'chat' ? 'chat' : 'design');
-    setSelectedIds(screenIds); setTargetIds(screenIds);
-    setSelectedComponentIds(compIds); setTargetComponentIds(compIds);
+    setSelectedIds([]); setTargetIds(screenIds);
+    setSelectedComponentIds([]); setTargetComponentIds(compIds);
     setAnchor(job.kind === 'generate' ? input.anchor ?? null : null);
+    setPreset(!r || baseGone ? null : r.kind === 'missing' && !alive(r.fromScreenId) ? { ...r, fromScreenId: undefined } : r);
     if (input.count !== undefined) setCount(input.count);
     if (input.versions !== undefined) setVersions(input.versions);
-    composerRef.current?.load({ text: user.content, images: user.attachments.map((a) => ({ id: a.id, url: a.url })) });
+    composerRef.current?.load({ text: restored && !baseGone ? restored.text : user.content, images: user.attachments.map((a) => ({ id: a.id, url: a.url })) });
     showComposer();
     if (lost > 0) toast(`这一轮有 ${lost} 个目标已被删除，没有填回`);
   };
@@ -368,9 +394,10 @@ export function CanvasPage() {
     try {
       const r = await api.projects.send(projectId, chat
         ? { content, mode: 'chat', targetScreenIds: targets, runner: chatRunner, attachmentIds: attachmentIds.length ? attachmentIds : undefined }
-        : { content, targetScreenIds: targets, targetComponentIds: compTargets, count: targets ? undefined : count, versions, anchor: targets ? undefined : anchor ?? undefined, runner: sendRunner, attachmentIds: attachmentIds.length ? attachmentIds : undefined });
+        : { content, targetScreenIds: targets, targetComponentIds: compTargets, count: targets || livePreset ? undefined : count, versions, anchor: targets || livePreset ? undefined : anchor ?? undefined, runner: sendRunner, attachmentIds: attachmentIds.length ? attachmentIds : undefined, ...(livePreset ? presetBody(livePreset) : {}) });
       roundStarted(r);
       if (!targets && !chat) setAnchor(null);
+      if (livePreset) setPreset(null);
       return true;
     } catch (e) {
       // 记住的会话在发送前关掉了：说清楚并重取列表，下拉会回到「选择会话」
@@ -444,13 +471,13 @@ export function CanvasPage() {
   // REQ-PROTO-003：懒生成 = 钉死路由的 generate
   const generateMissing = async (fromScreenId: string, route: string) => {
     setMissing(null);
-    const job = await startJob({ kind: 'generate', input: { prompt: `Screen for route ${route}`, count: 1, versions: 1, route, fromScreenId, runner: modelRunner } }, '生成失败');
+    const job = await startJob({ kind: 'generate', input: { prompt: missingPagePrompt(route), count: 1, versions: 1, route, fromScreenId, runner: modelRunner } }, '生成失败');
     if (job) toast(`正在生成 ${route}`);
   };
   // REQ-CORE-014：双击空白 / ⌥G 放锚点，然后聚焦输入框；锚点让屏目标让位（造）
   const placeAnchor = (world: { x: number; y: number }) => {
     if (generating) { toast(GENERATE_BUSY, 'error'); return; }
-    setAnchor(world); setSelectedIds([]); setTargetIds([]);
+    setAnchor(world); setSelectedIds([]); setTargetIds([]); setPreset(null);
     showComposer();
   };
   const exportPrototype = () => startJob({ kind: 'export_prototype', input: {} }, '导出失败');
@@ -732,8 +759,8 @@ export function CanvasPage() {
         )}
       </TopNav>
       {settingsSection && <SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} returnTo={settingsBtnRef} onCatalog={applyCatalog} />}
-      <ChatDock messages={messages} progress={progress} status={jobStatus} collapsed={chatCollapsed} onToggle={toggleChat} onRemember={rememberConvention} busy={busy}
-        onRetry={(u) => void retryRound(u)} onEdit={(u) => void editRound(u)} runningJobIds={runningJobIds} />
+      <ChatDock messages={messages} progress={progress} status={jobStatus} collapsed={chatCollapsed} onToggle={() => { if (chatCollapsed) setUnseenFailures(0); toggleChat(); }} onRemember={rememberConvention} busy={busy}
+        onRetry={(u) => void retryRound(u)} onEdit={(u) => void editRound(u)} runningJobIds={runningJobIds} retrying={retrying} followSeq={followSeq} failed={unseenFailures} />
       <Composer
         handle={composerRef} safeAreaRef={safeAreaRef} running={running} blockedReason={blockedReason} targets={targetScreens} totalScreens={screens.length} anchor={anchor} maxTargets={MAX_TARGETS}
         componentTargets={targetComponents}
@@ -742,7 +769,8 @@ export function CanvasPage() {
         onSend={onSend} onCancelJob={(id) => void cancelJob(id)} onUploadImage={(file) => api.projects.uploadImage(projectId, file)} onError={(m) => toast(m, 'error')}
         onRemoveTarget={(id) => { setTargetIds((prev) => prev.filter((x) => x !== id)); setSelectedIds((prev) => prev.filter((x) => x !== id)); }}
         onRemoveAnchor={() => setAnchor(null)}
-        onClearTargets={() => { setTargetIds([]); setSelectedIds([]); setTargetComponentIds([]); setSelectedComponentIds([]); setAnchor(null); }}
+        onClearTargets={() => { setTargetIds([]); setSelectedIds([]); setTargetComponentIds([]); setSelectedComponentIds([]); setAnchor(null); setPreset(null); }}
+        preset={livePreset ? presetView(livePreset, screens, Math.min(targetScreens.length, MAX_TARGETS), versions) : null} onRemovePreset={() => setPreset(null)}
         mode={mode} onMode={onMode}
         runners={mode === 'chat' ? chatRunners : runners} runnerId={mode === 'chat' ? chatRunnerId : runnerId} onRunnerChange={onRunnerChange}
         sessions={sessionList.items} sessionsReason={sessionList.reason} sessionTool={agentTool} sessionId={sessionId} onSessionChange={onSessionChange} onSessionsOpen={loadSessions}

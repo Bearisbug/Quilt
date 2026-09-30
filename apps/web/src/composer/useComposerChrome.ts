@@ -19,5 +19,11 @@ export function useComposerChrome(focusedId: string | null, composerRef: RefObje
   // 输入框实际高度 → 画布安全区底部占位（--chrome-bottom = 高度 + 16px 底距 + 16px 间隙）；收起时不设，让样式表的 1rem 生效
   const [composerH, setComposerH] = useState<number | null>(null);
   const shellStyle = composerVisible && composerH ? ({ '--chrome-bottom': `${Math.round(composerH) + 32}px` } as CSSProperties) : undefined;
+  // toast 浮在输入框上方（v0.74）：toast 挂在根上，读不到外壳上的 --chrome-bottom，同一个数另写到 <html> 上
+  useEffect(() => {
+    const root = document.documentElement.style;
+    if (composerVisible && composerH) root.setProperty('--toast-bottom', `${Math.round(composerH) + 32}px`);
+    return () => { root.removeProperty('--toast-bottom'); };
+  }, [composerVisible, composerH]);
   return { chatCollapsed, toggleChat, composerVisible, showComposer, toggleComposer, composerH, setComposerH, shellStyle };
 }

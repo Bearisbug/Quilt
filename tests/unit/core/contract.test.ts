@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseConventions, withConventions, estimateJob, type CreateJobInput } from '@quilt/core';
+import { parseConventions, withConventions, estimateJob, presetPrompt, presetNote, missingPagePrompt, variantPrompt, ROUND_PRESET_PROMPTS, LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, type CreateJobInput } from '@quilt/core';
 
 test('parseConventions / withConventions 往返：追加、替换、清空、只吃到下一节', () => {
   const md = '# D\n\nintro\n\n## 组件\n- x\n';
@@ -29,4 +29,18 @@ test('estimateJob：造 / 改 / 局部 / 聊天 / 改组件 / 回刷', () => {
 
 test('estimateJob：造变体按钉死路由算（1 屏、不占规划）', () => {
   assert.deepEqual(estimateJob({ kind: 'generate', input: { prompt: 'p', count: 'auto', versions: 2, variantOf: 'x', variantName: '空态' } } as unknown as CreateJobInput, 10), { calls: 4, screens: 2 });
+});
+
+test('系统代发轮次的提示词底稿与附加要求（REQ-CORE-026 v0.74）：拼接与反解往返', () => {
+  assert.equal(presetPrompt(LINK_REPAIR_PROMPT, ''), LINK_REPAIR_PROMPT, '留空 = 与重试同一份提示词');
+  assert.equal(presetPrompt(LINK_REPAIR_PROMPT, '  '), LINK_REPAIR_PROMPT);
+  const p = presetPrompt(CONVENTIONS_REGENERATE_PROMPT, ' 标题用衬线字体 ');
+  assert.equal(p, `${CONVENTIONS_REGENERATE_PROMPT}\n\nADDITIONAL REQUIREMENTS FROM THE USER: 标题用衬线字体`);
+  assert.equal(presetNote(p, CONVENTIONS_REGENERATE_PROMPT), '标题用衬线字体');
+  assert.equal(presetNote(LINK_REPAIR_PROMPT, LINK_REPAIR_PROMPT), '');
+  assert.equal(presetNote(p, LINK_REPAIR_PROMPT), null, '不是这份底稿');
+  assert.equal(presetNote('随便一句话', missingPagePrompt('/help')), null);
+  assert.equal(presetNote(presetPrompt(missingPagePrompt('/help'), '带搜索'), missingPagePrompt('/help')), '带搜索');
+  assert.equal(ROUND_PRESET_PROMPTS.link_repair, LINK_REPAIR_PROMPT);
+  assert.equal(variantPrompt('空态'), 'The 空态 state');
 });

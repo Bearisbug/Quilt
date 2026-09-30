@@ -1,4 +1,4 @@
-import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, LinkDto, ElementOp, AnnotationDto, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto } from '@quilt/core';
+import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, LinkDto, ElementOp, AnnotationDto, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, RoundPresetKind } from '@quilt/core';
 
 // API 客户端：同源 /v1（开发时 Vite 代理 → API；打包后 API 进程自己托管前端），错误统一为 ApiError（RFC 9457 信封）。
 // v0.32 本地版没有登录：所有请求都是默认用户。
@@ -46,7 +46,8 @@ export const api = {
     // 动词由目标决定（API-CORE-010）：有 targetScreenIds 是改，没有是造；count / versions / anchor 是造改共用的档位。
     // mode="chat"（REQ-CORE-023）：交给助手定范围，targetScreenIds 只是上下文提示
     // targetComponentIds（REQ-EDIT-006）：只有组件没有屏 = 改这个组件；与屏 / 锚点同发 = 它们的完整 HTML 进上下文
-    send: (id: string, body: { content: string; mode?: 'chat'; targetScreenIds?: string[]; targetComponentIds?: string[]; count?: ScreenCount; versions?: number; anchor?: { x: number; y: number }; runner?: Runner; attachmentIds?: string[] }) =>
+    // variantOf / variantName / route / fromScreenId / preset（REQ-CORE-026 v0.74）：「修改」还原的系统代发轮次，建同一类作业
+    send: (id: string, body: { content: string; mode?: 'chat'; targetScreenIds?: string[]; targetComponentIds?: string[]; count?: ScreenCount; versions?: number; anchor?: { x: number; y: number }; runner?: Runner; attachmentIds?: string[]; variantOf?: string; variantName?: string; route?: string; fromScreenId?: string; preset?: RoundPresetKind }) =>
       call<{ userMessage: MessageDto; assistantMessage: MessageDto; job: JobDto }>(`/v1/projects/${id}/messages`, { method: 'POST', body: JSON.stringify(body), idempotencyKey: crypto.randomUUID() }),
     // 重试一轮（API-CORE-034）：服务端复制原作业输入，只换通道
     retry: (id: string, messageId: string, runner?: Runner) =>

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { DEVICE_TYPES, PRESENTATIONS, type Presentation } from './device.ts';
 import { TOKEN_COLOR_KEYS } from './tokens.ts';
 import { COMPONENT_NAME_RE, MAX_COMPONENT_HTML_BYTES } from './components.ts';
+import { ROUND_PRESETS } from './contract.ts';
 
 // 契约 schema（§8 / §9 / §24）：服务端校验与前端类型的唯一出处。
 // v0.31：三种 generate 合一（整组 / 单屏 / 懒生成都是 `generate`）；历史行里的旧 kind 只读保留
@@ -134,7 +135,8 @@ export function estimateJob(input: CreateJobInput, allScreens: number): { calls:
 }
 
 export const createMessageSchema = z.object({
-  content: z.string().trim().min(1).max(8000),
+  // 正文只在带「修改」还原的隐藏参数时可空（见下）
+  content: z.string().trim().max(8000),
   // 聊天（REQ-CORE-023 v0.45）：mode="chat" 时不看目标，targetScreenIds 转成上下文提示，count / versions / anchor 忽略
   mode: z.enum(['chat']).optional(),
   targetScreenIds: z.array(z.uuid()).max(20).optional(),
@@ -146,7 +148,15 @@ export const createMessageSchema = z.object({
   anchor: anchorSchema.optional(),
   runner: runnerSchema.optional(),
   attachmentIds: z.array(z.uuid()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
-});
+  // 「修改」还原的隐藏参数（REQ-CORE-026 v0.74）：出变体 / 补缺失页是钉死路由的造，补链 / 按新约定重生成是改、提示词由服务端拼。
+  // 带了它们时 content 可空；写了字，变体就是它的提示词，其余作为附加要求接在固定提示词之后
+  variantOf: z.uuid().optional(),
+  variantName: variantNameSchema.optional(),
+  route: routeSchema.optional(),
+  fromScreenId: z.uuid().optional(),
+  preset: z.enum(ROUND_PRESETS).optional(),
+}).refine((v) => !!v.variantOf === !!v.variantName, { path: ['variantName'], message: 'variantOf 与 variantName 要一起给' })
+  .refine((v) => v.content.length > 0 || (v.mode !== 'chat' && !!(v.variantOf || v.route || v.preset)), { path: ['content'], message: '先写点什么' });
 // 重试一轮（REQ-CORE-026 v0.72 / API-CORE-034）：只换通道，其余照原作业
 export const retryMessageSchema = z.object({ runner: runnerSchema.optional() });
 

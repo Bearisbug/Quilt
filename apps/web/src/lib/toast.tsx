@@ -15,9 +15,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex flex-col items-center gap-2" aria-live="polite">
+      {/* 画布页的输入框在底部正中：底边让到它上方（--toast-bottom 由画布页写在 <html> 上，见 useComposerChrome），单条限宽、长文案换行 */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-[var(--toast-bottom,1.5rem)] z-50 flex flex-col items-center gap-2 px-4" aria-live="polite">
         {items.map((t) => (
-          <div key={t.id} className={`fade-up rounded-md border px-3.5 py-2 text-sm shadow-lg ${t.kind === 'error' ? 'border-danger bg-panel text-fg' : 'border-line bg-panel text-fg'}`}>{t.text}</div>
+          <div key={t.id} className={`fade-up max-w-[28rem] rounded-md border px-3.5 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] shadow-lg ${t.kind === 'error' ? 'border-danger bg-panel text-fg' : 'border-line bg-panel text-fg'}`}>{t.text}</div>
         ))}
       </div>
     </Ctx.Provider>

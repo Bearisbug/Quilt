@@ -10,7 +10,7 @@
 | Owner | @bug |
 | 关联设计文档 | `docs/DESIGN.md` |
 | 被测系统 | `~/Documents/Projects/Quilt`（Web 画布 + API/MCP 服务 + Worker + 预览域服务） |
-| 最后更新 | 2026-09-23 |
+| 最后更新 | 2026-10-01（设计文档 v0.74） |
 
 变更记录（登用例增改，不登执行轮次）：
 
@@ -18,6 +18,7 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-10-01 | 设计文档 v0.74（对话轮次与输入框的缺陷回写 13 条）：新增 `TC-CORE-043`（「修改」还原完整参数：锚点 + 组件的造屏轮、出变体 / 补缺失页 / 补链 / 按新约定重生成的胶囊与同类作业、附加要求的拼接与反解、`/messages` 三种 400）、`TC-CORE-044`（对话记录贴底才跟随、重试在途锁、预览按图定位）、`TC-CORE-045`（失败文案、折叠横条失败标记、toast 位置）、`TC-CORE-046`（通道不被模式切换冲掉、`Esc` 清草稿可撤销、贴图批量与上限、`Enter` 被挡写理由、在途输入保留）；`TC-CORE-006` 第 2 步增失败文案断言，脚本把这一轮改走 stub；`tests/e2e/openai-stub.ts` 的 `holdMs` 对 401 也生效；单测增 `tests/unit/core/failure.test.ts`，提示词底稿的拼接反解与胶囊还原各一条 | @bug |
 | 2026-09-27 | 设计文档 v0.73（组件卡预览关掉背景模糊）：`TC-EDIT-012` 增第 7a 步（组件卡 iframe 里给根元素加 `backdrop-blur-xl` 后计算值仍为 `none`）。原现象（非 100% 缩放下交互态悬停出现灰影）只在有头浏览器里出现，无头截图整帧重画、复现不出来，由用户在自己的浏览器里确认 | @bug |
 | 2026-09-27 | 设计文档 v0.72（对话记录：参考图预览，消息复制 / 重试 / 修改）：新增 `TC-CORE-042`（大图预览的切换 / 到头停住 / 关闭与焦点归还、操作条显隐与归属、复制、重试只换通道且跑着时置灰与 409、修改填回、接口 404 / 400）；`tests/e2e/openai-stub.ts` 增 `holdMs`（拖一阵再回，造一个在跑的作业） | @bug |
 | 2026-09-25 | 设计文档 v0.70（工具栏滚动 / Codex 调用隔离）：`TC-CORE-023` 增第 3b 步（1440×600 下工具栏在列内滚动、滚动条不可见、渐隐方向随滚动、`End` 后末项可见且焦点环不被裁）；`TC-AGENT-012` 第 8 步增 `--ignore-user-config` / `--ignore-rules` 与「不许调工具」前置说明的断言 | @bug |
@@ -201,12 +202,12 @@
 
 #### `TC-CORE-006` 供应商持续故障导致作业失败且已产出屏保留 — 对应 `REQ-CORE-003` · 级别: 回归 · 执行者: 皆可
 
-前置：以 `LLM_STUB=503 pnpm dev:worker` 重启 worker；打开空项目 `Demo Desktop`。
+前置：以 `LLM_STUB=503 pnpm dev:worker` 重启 worker；打开空项目 `Demo Desktop`。脚本 `tests/e2e/core-stub.ts` 把这一轮的 `runner` 改成 stub 再发（种子按 `.env` 建的 Gemini 通道是缺省，不改就打到真实模型、碰不到 503 桩）。
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
 | 1 | 发送「做一个记账网站」 | 作业创建成功（202） |
-| 2 | 等待至多 60 s | 助手消息显示失败原因并提供「重试」按钮；作业事件流收到 `failed`；curl `GET /v1/jobs/<id>` 返回 `status=failed`、`output.errorClass=provider` |
+| 2 | 等待至多 60 s | 助手消息显示失败原因并提供「重试」按钮——正文以「造屏失败：模型服务暂时不可用（HTTP 503）」开头、给出下一步（「重试」或换通道）、不含原始报文 `stub 503`（v0.74 §14）；作业事件流收到 `failed`；curl `GET /v1/jobs/<id>` 返回 `status=failed`、`output.errorClass=provider` |
 | 3 | 查看 worker 日志 | 对该作业的 LLM 调用共 3 次（首次 + 2 次退避重试） |
 | 4 | 恢复 worker（去掉 `LLM_STUB`），点「重试」 | 新作业创建，完成后画布出现屏幕 |
 
@@ -456,6 +457,59 @@
 | 7 | 新作业还在跑时悬停它的助手消息；同时对新用户消息 `POST …/messages/{id}/retry` | 「重试」`aria-disabled=true`；接口 `409 /errors/job-not-finished`；作业跑完成功、桩收到带图的请求，「重试」恢复可用 |
 | 8 | 点最后一轮用户消息的「修改」 | 输入框正文 = 这一轮原文、带回 2 张参考图、目标标签是 /s2 一枚、动词行是「改」，焦点在输入框 |
 | 9 | 对一条助手消息 `POST …/retry`；`POST jobs kind=export_prototype` 跑完后对它那条用户消息 `POST …/retry` | 前者 `404`；后者 `400 /errors/validation`、`path=messageId`；画布上不再有「重试」「修改」（最后一轮是导出） |
+
+#### `TC-CORE-043` 「修改」还原完整参数 — 对应 `REQ-CORE-026`（v0.74）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：`pnpm seed:project --name Rounds --device mobile --screens 2`；经接口建组件「AuditTab」；API 以 stub 驱动。浏览器里输入框发出的 `POST …/messages` 与 `…/retry` 一律拦下、把 `runner` 换成 `{kind:"model",driver:"stub",model:"stub"}` 再放行并记下原始请求体（种子按 `.env` 建的 Gemini 通道是缺省，不拦会打到真实模型）。经接口发的轮次显式走 stub。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 接口：`POST …/messages` 分别发 `{content:""、targetScreenIds:[s1]}`、`{content:""、preset:"link_repair"}`、`{content:"x"、variantOf:s1、variantName:"Empty"、targetScreenIds:[s2]}` | 三个都 `400 /errors/validation`，`path` 依次是 `content`、`targetScreenIds`、`targetScreenIds` |
+| 2 | 接口发一轮 `{content:"做一个设置页，用这条 tab", targetComponentIds:[AuditTab], anchor:{x:3000,y:200}, count:2}` 并等它跑完；打开画布，对这一轮点「修改」 | 输入框正文是原话；锚点胶囊 1 枚、组件胶囊 1 枚；表单 `data-verb=create`、动词行含「此处」 |
+| 3 | 直接按 `Enter` | 请求体带 `anchor` 与 `targetComponentIds`、不带 `targetScreenIds`；新作业 `kind=generate`、`input.anchor` 与 `input.componentIds` 都在（不是改组件） |
+| 4 | 接口建出变体作业（`POST jobs kind=generate`，`variantOf=s1`、`variantName=Loading`、`prompt="spinner while loading"`），跑完后点「修改」 | `preset-chip` 文字含「Screen 1」与「Loading」；正文是「spinner while loading」；动词行含「出变体」，屏数档位不在，没有目标屏胶囊 |
+| 5 | 正文改成「spinner and skeleton rows」按 `Enter` | 请求体带 `variantOf=s1`、`variantName=Loading`；新作业仍是 s1 的 Loading 变体、提示词是新正文；用户消息正文「出「Loading」状态变体：spinner and skeleton rows」；作业成功，胶囊收起 |
+| 6 | 接口建懒生成作业（`route=/audit-help`、`fromScreenId=s1`、`prompt="Screen for route /audit-help"`），跑完后删掉它造的屏，再点「修改」 | 胶囊含「/audit-help」；正文为空、发送键不置灰 |
+| 7 | 写「顶部带搜索框」按 `Enter` | 请求体带 `route`、`fromScreenId`；新作业钉死 `/audit-help`，提示词 = `Screen for route /audit-help` + `\n\nADDITIONAL REQUIREMENTS FROM THE USER: 顶部带搜索框`；用户消息「生成缺失的页面 /audit-help：顶部带搜索框」；作业成功 |
+| 8 | 接口建补链作业（`edit_screens`，`prompt=LINK_REPAIR_PROMPT`、`screenIds=[s1,s2]`），跑完后点「修改」 | 胶囊「补链」、目标屏胶囊 2 枚、正文为空、动词行「补链 2 屏」 |
+| 9 | 正文留空按 `Enter` | 请求体 `preset=link_repair`、`content=""`；新作业的提示词与原作业逐字相同（= 重试）、目标两屏；用户消息「补链：把 2 屏的按钮 / 表单连上路由」 |
+| 10 | 接口建按新约定重生成作业（`prompt=CONVENTIONS_REGENERATE_PROMPT`、`screenIds=[s2]`），「修改」后写「标题用衬线字体」发送；跑完后再点「修改」 | 新作业提示词 = 固定指令 + 附加要求；用户消息「按新约定重生成 1 屏。附加要求：标题用衬线字体」；再修改时正文反解回「标题用衬线字体」、胶囊还在 |
+| 11 | 点胶囊的 ×；再「修改」一次，适配视图后点选第 7 步造出的「Audit Help」卡片 | × 后胶囊消失、动词行以「改 1 屏」开头；点选屏后胶囊让位、目标换成 Audit Help |
+
+#### `TC-CORE-044` 对话记录：贴底才跟随、重试在途锁、预览按图定位 — 对应 `REQ-CORE-026`、`PAGE-CANVAS`（v0.74）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：`pnpm seed:project --name Scroll --device mobile --screens 2 --messages 30`（30 条没有作业的文字消息，撑出滚动）；经接口发两轮带图改屏（各 1 张），都跑完；起一个收到请求 4 s 后才回的 OpenAI 兼容桩并建一条指向它的通道；输入框发出的写请求同 `TC-CORE-043` 拦下改走 stub。打开项目，对话记录展开。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 看对话记录；用滚轮把它翻到顶；接口经慢通道对 s1 发一轮，等它跑完、回执进对话 | 打开时在底部；在跑作业行带着进度（「正在…」）出现过；整个过程里列表 `scrollTop` 的最大值 < 4（进度与新消息都没把它拽走） |
+| 2 | 点选 s2，输入框写一句按 `Enter` | 列表滚到底 |
+| 3 | 把重试请求拖 1.5 s；同一帧里对最后一轮的「重试」连点三次；300 ms 后看按钮 | 按钮 `aria-disabled=true`、`aria-busy=true`、图标换成转圈；只发出 1 个重试请求 |
+| 4 | 把 `GET …/messages?limit=100` 的响应改成不含带第 1 张图的那轮（模拟窗口滑过）；点第 2 张缩略图打开预览，接口发一轮触发对话重取 | 预览还开着，标题序号从「2 / N」变成「1 / N−1」，大图路径不变；页面没崩（没有「Unexpected Application Error」） |
+| 5 | 再把带第 2 张图的那轮也去掉，接口再发一轮 | 预览关闭，toast 含「预览已关闭」；对话记录照常 |
+
+#### `TC-CORE-045` 作业失败的呈现 — 对应 `REQ-CORE-020`、§14 作业失败文案、`PAGE-CANVAS`（v0.74）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：`pnpm seed:project --name Fails --device mobile --screens 2`；经接口建组件「AuditBar」；起一个 OpenAI 兼容桩（每个回应拖 1.5 s；Key 不对回 401，Key 对时改组件回两个根元素），建两条通道：「坏 Key 通道」（Key 错）、「两根通道」（Key 对）；输入框发出的写请求拦下、`runner` 换成用例指定的通道。打开项目，把对话记录折叠。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 通道指到坏 Key 通道；点选 s1，写「改成深色」按 `Enter` | toast 以「改屏失败」开头、含「HTTP 401」与「设置」、不含 `{` `}`、`openai-compatible`、`provider`、`invalid api key`；toast 下沿在输入框上沿之上，宽度 ≤ 28rem |
+| 2 | 看折叠横条；等 toast 消失；展开对话记录 | 横条上有 `chat-failed`「1 轮失败」，toast 消失后仍在；展开后消失；最后一条助手回执是同一句可读文案 |
+| 3 | 通道指到两根通道；清空目标，按 `F`，点组件卡「AuditBar」，写「改成三个 tab」按 `Enter` | toast 以「改组件失败」开头，含「根元素」与「重试」，不出现「生成失败」 |
+
+#### `TC-CORE-046` 输入框：通道、Esc 撤销、贴图、被挡的理由、在途输入 — 对应 `REQ-CORE-006`、`REQ-CORE-012`、`REQ-CORE-020`、`REQ-CORE-023`（v0.74）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：`pnpm seed:project --name Composer --device mobile --screens 2`；建一条指向本地 OpenAI 兼容桩的「Stub 通道 46」并验证通过；建一条本机 Claude 订阅通道「本机 Claude 46」，只在浏览器读到的 `GET /v1/runners` 响应里把它标成可用（不真的验证，本用例也不发聊天）；输入框发出的写请求同 `TC-CORE-043` 拦下改走 stub；`POST …/attachments` 按步骤拖延。打开项目，动词段控在「造 / 改」。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 通道选「Stub 通道 46」；点「聊天」；点回「造 / 改」 | 聊天时通道显示「本机 Claude 46」；切回后通道触发器 `data-value` 与 `localStorage["quilt:runner"]` 都还是 Stub 通道 46 |
+| 2 | 在输入框键入一段话，按 `Esc`，再按 `⌘Z`（`Ctrl+Z`） | `Esc` 后为空；`⌘Z` 后原话回来 |
+| 3 | 上传拖 2.5 s；一次贴入 3 张 PNG，300 ms 后看；再贴 3 张 | 第一次贴完立刻 3 张缩略图、3 个「上传中…」；第二次当场提示「一条消息最多 4 张参考图」，缩略图共 4 张 |
+| 4 | 写「照这几张图改」按 `Enter`（图还在传）；等上传完 | 发送键上方 `send-blocked-reason` 写「参考图还在上传」，没有发出请求；传完这一行消失 |
+| 5 | 只留 1 张图，点选 s1；发送请求拖 1.5 s，按 `Enter` 后在途期间补打「 再补一句」并再贴 1 张图 | 发出的请求正文是「照这几张图改」、1 张图；成功后输入框剩「再补一句」、缩略图剩新贴的 1 张 |
+| 6 | 本机有 `claude` 时：去掉图、清空目标，通道选「交给本机 Claude Code」（会话下拉保持「选择会话」），写一句按 `Enter` | `send-blocked-reason` 写「先选要投递的会话」，没有发出请求（本机没有 `claude` 时本步跳过并在备注写明） |
 
 ### CORE · 聚焦交互
 
@@ -1199,6 +1253,11 @@
 | RUN-125 | 2026-09-27 | 未提交工作树（设计文档 v0.71：本机 Claude 订阅 SDK 升级，API 报错不再当成产出） | AI(Claude Code) | 复现 + 修复轮：用户失败作业（本机 Claude 订阅 · `claude-opus-5-5`，带图改共享组件）按原提示词对开发库只读重放，先在 SDK 0.3.263 上、再在 0.3.283 上；单测轮（新增 `tests/unit/api/agentSdk.test.ts`，先失败后通过）；隔离栈 3200 / 3201 + `quilt_test`（`LLM_DRIVER=agent-sdk`、`QUILT_MODEL=claude-opus-5-5`）上 `TC-EDIT-012`（真实回合）、`TC-CORE-039`（`CHAT_MODEL=claude-opus-5-5` 与缺省 `claude-sonnet-5` 各一次），外加一次按用户原路径的接口验证：建 Opus 5.5 订阅通道 → 验证 → 上传用户那张参考图 → 改组件 | 0.3.263：SDK 回 `is_error:true`、`api_error_status:400`、`subtype:"success"`，原文「Claude Code 2.1.263 does not support this model; version 2.1.280 or newer is required」，被当成产出 → 「0 个根元素」；0.3.283：同一提示词 19 s 出单根 `<nav>`（中间黑底加号圆钮），校验通过。单测 38/38，typecheck 通过。`TC-EDIT-012` 首两次失败在「点『改组件』后输入框没获得焦点」、脚本改为轮询后通过（该步真实回合走的是测试库里已验证的 Gemini 通道）。原路径接口验证：通道验证 3.1 s 通过，改组件 36 s 成功、组件 v2→v3、同步 3 屏。`TC-CORE-039` 两次都失败在第 3 步（见明细，非本轮引入）；第 2 步只问不改的回合通过 |
 | RUN-126 | 2026-09-27 | 未提交工作树（设计文档 v0.72：对话记录参考图预览，消息复制 / 重试 / 修改） | AI(Claude Code) | 局部轮：新增 `TC-CORE-042`；受影响回归 `TC-CORE-007` / `023` / `027` / `029`（输入框发送路径抽出公共段、对话记录面板改动）、`TC-EDIT-009`（「记为约定」在同一气泡里）；单测轮；另用真实参考图（82 KB PNG）在 1440×900 与 900×640 下看大图预览、悬停操作条与提示的实际画面。隔离栈 3200 / 3201 + `quilt_test` + stub | `TC-CORE-042` 首跑失败两次后通过（见明细）；`TC-CORE-007` / `029`、`TC-EDIT-009` 通过；`TC-CORE-027` 失败（无视觉的 model 形态通道，环境，同 RUN-122）；`TC-CORE-023` 失败在「重新展开后输入框没回到原位」（见明细）。单测 38/38，typecheck 通过。画面：预览标题「参考图 6 / 6 ·「原话」」、图居中、末张「下一张」淡出；操作条浮在气泡右上角不推动内容；「修改」「重试」的说明提示起初被面板右缘裁掉，改为右对齐向下展开后完整 |
 | RUN-127 | 2026-09-27 | 未提交工作树（设计文档 v0.73：组件卡预览关掉背景模糊） | AI(Claude Code) | 复现 + 修复轮：`TC-EDIT-012`（新增第 7a 步，`LIVE_LLM=0`）先在修复前的组件预览文档上跑（`services/components.ts` 临时换回 HEAD），再在修复后跑；单测轮；另对开发实例只读截图看用户那张「Bottom Bar」组件卡（1.46 倍、交互态、悬停最后一个 tab）。隔离栈改到 3410 / 3411 + `quilt_test` + stub——3200 与 3300 被别的项目（Ofcourt 的 Next 开发服务器与后端）占着，3200 上两个进程并存时 `localhost` 会落到对方那边 | 修复前 7a 失败：`backdrop-filter` 计算值 `blur(24px)`；修复后 `TC-EDIT-012` 通过。单测 38/38，typecheck 通过。开发实例组件卡：底栏 `backdrop-filter` 为 `none`，画面与修复前一致。原现象只在有头浏览器里出现（无头截图整帧重画），消失与否待用户在自己的浏览器里确认 |
+| RUN-128 | 2026-10-01 | 修复前：`c537fd5` 的实现 + 本批新写的用例与单测（设计文档 v0.74 已改、代码未动；API 与前端都按 `c537fd5` 重启 / 构建） | AI(Claude Code) | 复现轮：单测轮；e2e `TC-CORE-043`~`046`（三次调用，第二、三次前修了两处用例前置）。隔离栈 3420 / 3421 + `fea_quilt_test` + stub + 打包形态 | 单测 33/36（新增的三个测试文件失败：`failureText` / `presetPrompt` / `roundPreset` 尚不存在）；e2e 4/4 失败，逐条复现审计里的现象（见明细） |
+| RUN-129 | 2026-10-01 | 未提交工作树（设计文档 v0.74：对话轮次与输入框的缺陷回写 13 条） | AI(Claude Code) | 修复轮：单测轮；e2e `TC-CORE-043`~`046`，同一隔离栈 | 单测 43/43；e2e 首次调用 `044` / `045` 通过，`043` / `046` 各停在一处用例问题（见明细），修正用例后逐条重跑均通过 |
+| RUN-130 | 2026-10-01 | 同 RUN-129 | AI(Claude Code) | 局部轮（受影响回归 + 新用例，`LIVE_LLM=0`）：`TC-CORE-013` / `017` / `018` / `023` / `024` / `025` / `027` / `028` / `029` / `030` / `036` / `041` / `042` / `043`~`046`；另用无头 Edge 在 1440×900 与 390×844 下看补链胶囊、重试转圈、失败 toast、折叠横条失败标记、上传中的理由 | 通过 13/16，失败 3 均为基线：`TC-CORE-023`（「重新展开后输入框没回到原位」，§7 已登记、RUN-126 同一失败点）、`TC-CORE-027`（没有视觉通道，环境）、`TC-CORE-029`（动词行「造屏 · 交给本机会话」，§7 登记的整套顺序偶发，单跑见 RUN-131）；待人工 1（`020`）、跳过 1（`006`，见 RUN-132）。画面：两个视口 console 错误 0、无横向溢出；toast 在输入框上方，390 宽时与折叠横条重叠（toast 3.2 s 后消失） |
+| RUN-131 | 2026-10-01 | 同 RUN-129 | AI(Claude Code) | 局部轮：`TC-CORE-029` 单跑、`TC-EDIT-009`、`TC-EDIT-012`（components 套件，`LIVE_LLM=0`）、`TC-AGENT-009` / `012` | 通过 5/5 |
+| RUN-132 | 2026-10-01 | 同 RUN-129 | AI(Claude Code) | `TC-CORE-006`（`tests/e2e/core-stub.ts`，同一隔离端口上的 API 以 `LLM_STUB=503` 重启，跑完恢复） | 第 1、2 步通过：20 s 后 `failed`、`errorClass=provider`，助手回执「造屏失败：模型服务暂时不可用（HTTP 503）。稍后点「重试」，或在输入框换一个通道再发」；第 3、4 步（数 worker 日志里的调用次数、恢复后重试）脚本不覆盖，未执行 |
 | RUN-114 | 2026-09-23 | 未提交工作树（设计文档 v0.65：审查缺陷回写） | AI(Claude Code) | 单测轮 34/34；e2e 局部轮：`TC-AGENT-011`（含新增 7c / 8a）、`TC-AGENT-003` / `004`；`TC-PROTO-001` / `012`（含新增 5～6b）；`TC-CORE-007` / `010` / `011` / `018` / `023` / `034` / `036` / `040` / `041`（含新增断言）；`TC-EDIT-001` / `005` / `007` / `012`。隔离栈 3200 / 3201 + `quilt_test` + stub + 打包形态，逐套串行 | 通过 18/19 · 失败 1（`TC-CORE-023`，与 RUN-112 同一步、HEAD 同现，判环境） |
 | RUN-113 | 2026-09-23 | 未提交工作树（设计文档 v0.64：MCP 写屏改小步——`patch_screen` / `append_upload`、`get_screen` 只给 body） | AI(Claude Code) | 局部轮（`REQ-AGENT-002` → `TC-AGENT-011` 全部步骤含新增 7b；`get_screen` 口径变化波及的 `TC-AGENT-003` / `004`）。隔离环境 3200 / 3201 + `quilt_test` + stub，纯 MCP / API，未托管前端 | 通过 2/3 · 失败 1（`TC-AGENT-003`：MCP 部分——`get_screen` 只给 body、截图就绪——已过，随后打开浏览器页 `locator.waitFor` 超时：本栈没托管前端，判环境） |
 | RUN-112 | 2026-09-23 | 未提交工作树（设计文档 v0.60 工程底座 + v0.61 找屏与总览 + v0.62 状态变体 + v0.63 叠层屏） | AI(Claude Code) | 单测轮 `pnpm test` 31/31；e2e 局部轮（新增 `TC-CORE-040` / `041`、`TC-PROTO-012`；重构影响面：`TC-CORE-003` / `007` / `012` / `018` / `023` / `034` / `036`、`TC-EDIT-001` / `005`、`TC-AGENT-001` / `003` / `004` / `011`）。隔离环境：3200 / 3201 + `quilt_test` + stub 驱动 + 打包形态（`WEB_DIST` + `WEB_ORIGIN=3200`，§3），3100 / 5173 归另一会话 | 通过 15/17 · 失败 1（`TC-CORE-023`，HEAD 同现、判环境）· 未跑 1（`TC-EDIT-008` 需真实模型）· 跳过 / 待人工 2（`TC-AGENT-009` / `010`） |
@@ -1260,6 +1319,14 @@
 
 | 轮次 | 用例 | 结果 | 现象 / 证据 | 跟进 |
 | --- | --- | --- | --- | --- |
+| RUN-130 | TC-CORE-029 | 失败 | 「无目标时动词行应为『造 1 屏 · 自动摆放』：造屏 · 交给本机会话」：`TC-CORE-025` 把本机 agent 通道留作这个浏览器上下文记住的通道 | §7 已登记；单跑通过（RUN-131） |
+| RUN-130 | TC-CORE-023 | 失败 | 「重新展开后输入框没回到原位」，与 RUN-126 同一失败点 | §7 已登记，基线 |
+| RUN-129 | TC-CORE-046 | 失败 → 通过 | 首次调用第 6 步：没选会话按 `Enter` 后那一行写的是冲突理由「「Screen 1」正在改」——第 5 步发出的改屏作业还在跑，冲突理由优先占住同一行 | 用例修正：第 6 步先清空目标 |
+| RUN-129 | TC-CORE-043 | 失败 → 通过 | 第 11 步点 `data-route=/s1` 的卡片命中 3 张（Screen 1 与它的两张 Loading 变体同路由）；改点 Screen 2 后 30 s 点不到——第一张 Loading 变体落在 (470, 0)，与 Screen 2 同一坐标、整张盖住它 | 用例改点第 7 步造出的「Audit Help」；变体落位重叠记入 §7 |
+| RUN-128 | TC-CORE-046 | 失败 | 9 处：第 1 步切回「造 / 改」后通道触发器 `data-value` 与 `localStorage["quilt:runner"]` 都是空串；第 2 步 `Esc` 后 `⌘Z` 找不回草稿；第 3 步一次贴 3 张 300 ms 时只有 1 张缩略图，第二批没有上限提示，最终 6 张；第 4 步上传中按 `Enter` 没有理由；第 5 步发送成功后在途补打的字与新贴的图都被清掉；第 6 步本机 agent 没选会话按 `Enter` 没有理由 | 产品修复（v0.74） |
+| RUN-128 | TC-CORE-045 | 失败 | 首次调用 30 s 内没等到失败 toast（作业已 `failed / provider`，原因未定位；修复后用 0 延迟的 401 单独探一次，toast 正常、没有残留在跑行）。桩改为每个回应拖 1.5 s 后，第二次调用 6 处：toast「生成失败：openai-compatible 401 {"error":{"message":"invalid api key"}}」、宽 514 px 且下沿 y=982 落在输入框（y 821~984）里、折叠横条没有失败标记且 toast 消失后界面上没有失败痕迹、助手回执是同一段原始报文、改组件失败也写「生成失败」 | 产品修复；桩的 401 按 `holdMs` 延迟 |
+| RUN-128 | TC-CORE-044 | 失败 | 6 处：第 1 步翻到顶后别处一轮的进度与回执把列表拽回底部，`scrollTop` 最大到 2456；第 3 步同一帧连点三次发出 3 个重试请求，在途时按钮没有 `aria-disabled` / `aria-busy`；第 4、5 步预览翻到 2 / 2 后列表截短，整页崩成「Unexpected Application Error」，预览与说明都没有 | 产品修复 |
+| RUN-128 | TC-CORE-043 | 失败 | 第三次调用 19 处（首次停在前置：stub 驱动下 `count=1` 的造屏必然失败——单屏规划拿到的是整组计划，用例改为 `count=2`）：第 1 步 `preset` 被当未知字段丢掉，两种 400 报成 `content`；第 2、3 步锚点 0、组件 1，动词「改组件「AuditTab」 · 同步 0 屏」，重发请求不带 `anchor`、建成改组件；第 4、5 步没有胶囊，正文是「出「Loading」状态变体：spinner while loading」，动词「造 1 屏 · 自动摆放」，请求不带 `variantOf`；第 6、7 步同理缺 `route`，正文「生成缺失的页面 /audit-help」；第 8 步没有胶囊、动词「改 2 屏」，第 9 步留空按 `Enter` 发不出去（中断） | 产品修复 |
 | RUN-126 | TC-CORE-042 | 失败 → 通过 | ① 「job timeout」：种子按 `.env` 建了一条已验证的 Gemini 通道并成为缺省，前置里不指定通道的两轮打到了真实模型，第二轮超过 60 s；② 「这一轮还在跑时『重试』应置灰」：操作条只在气泡有正文时渲染，在跑的助手气泡还是空的，「重试」根本不存在，与设计文档「置灰并写明原因」不符 | ① 脚本更正：前置两轮显式走 `stub`；② 产品修复：操作条在「有正文或属于最后一轮」时渲染，「复制」只在有正文时出现 |
 | RUN-126 | TC-CORE-023 | 失败 | 先失败在「叫回后光标没落回输入区」（RUN-124 时这一步通过）：断言在输入框显形后一次性读 `activeElement`，而聚焦在 `showComposer` 的 `setTimeout(0)` 里，探针实测叫回后 56 ms 内光标已在输入框；改为轮询后这一步与下一步「安全区底部复原」都通过，随后失败在「重新展开后输入框没回到原位」——RUN-112 已记同一现象（刷新后输入框宽度要等通道目录取回才落定），HEAD 的脚本在该处只有「等 800 ms」的注释、没有等待语句 | 前一处：脚本更正（轮询 2 s）；后一处：§7 已登记的打包形态漂移，非本轮引入；实现未改 |
 | RUN-125 | TC-EDIT-012 | 失败 → 通过 | 两次失败在「点『改组件』后输入框没获得焦点」（负载 10 上下）：断言一次性读 `activeElement`（RUN-117 已记同一现象），`showComposer` 用 `setTimeout(0)` 聚焦 | 脚本更正：改为 2 s 内轮询；随后整条通过，焦点确实落到输入框，实现未改 |
@@ -1366,6 +1433,7 @@
 
 ## 7. 遗留问题
 
+- **出变体落在默认屏右侧时与右边已有的屏重叠**（RUN-129）：Screen 1 的第一张 Loading 变体落在 (470, 0)，与 Screen 2 同一坐标、整张盖住它，画布上点不到 Screen 2。`TC-CORE-043` 改点别的卡绕开。修法方向：变体落位避开已占用的矩形。
 - **`TC-CORE-029` 在整套 core 顺序下偶发**（RUN-115）：更早的用例（通道相关的 `TC-CORE-025` 一带）把本机 agent 通道留作浏览器上下文里记住的默认通道，029 开头的动词行于是是「造屏 · 交给本机会话」而不是「造 1 屏 · 自动摆放」。单跑与「028 + 029」组合都通过。修法方向：029 开头显式选一条模型通道，或前面的用例收尾时清掉 `quilt:runner` 的本机记忆。
 - **`TC-CORE-023` 在打包形态的隔离栈上失败**（RUN-112 / 114 / 115，HEAD 同现）：失败点在「刷新 / 叫回后输入框位置或焦点未复原」之间漂移，开发实例（3100 + Vite）上 RUN-111 通过。需在开发实例上复测定性。
 - **聊天回合经 `quilt.edit_element` 改的屏不记在聊天作业名下**（RUN-125，`TC-CORE-039` 第 3 步）：`edit_element` 不收 `jobId`，修订记为 `manual`，聊天回执与 `affectedScreenIds` 漏掉这一屏（画布经项目事件流照常刷新）。修法方向：`edit_element` 与 `patch_screen` 一样接受 `jobId` 并记 `agent_ingest`，或聊天系统提示里要求改屏一律带 `jobId` 的工具。

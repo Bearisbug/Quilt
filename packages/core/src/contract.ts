@@ -138,6 +138,20 @@ export function linkRepairPrompt(newRoutes: string[]): string {
 }
 // 「按新约定重生成」（REQ-EDIT-003）：约定写进 DESIGN.md 之后对全部屏跑一轮的固定指令
 export const CONVENTIONS_REGENERATE_PROMPT = 'Rework this screen so it follows every rule in the DESIGN SYSTEM section named "约定" (conventions). Keep the screen\'s purpose, content, links and overall layout; change only what the conventions require.';
+// 懒生成补屏（REQ-PROTO-003）与出变体（REQ-CORE-025）的提示词：画布发起与「修改」重发共用
+export const missingPagePrompt = (route: string): string => `Screen for route ${route}`;
+export const variantPrompt = (name: string): string => `The ${name} state`;
+// 系统代发轮次的提示词底稿（REQ-CORE-026 v0.74）：「修改」重发时用户写的字作为附加要求接在底稿之后；
+// presetNote 从提示词里反解出附加要求（没有附加要求为空串），不是这份底稿时返回 null
+export const ROUND_PRESETS = ['link_repair', 'conventions'] as const;
+export type RoundPresetKind = (typeof ROUND_PRESETS)[number];
+export const ROUND_PRESET_PROMPTS: Record<RoundPresetKind, string> = { link_repair: LINK_REPAIR_PROMPT, conventions: CONVENTIONS_REGENERATE_PROMPT };
+const NOTE_MARK = '\n\nADDITIONAL REQUIREMENTS FROM THE USER: ';
+export const presetPrompt = (base: string, note: string): string => (note.trim() ? `${base}${NOTE_MARK}${note.trim()}` : base);
+export function presetNote(prompt: string, base: string): string | null {
+  if (prompt === base) return '';
+  return prompt.startsWith(base + NOTE_MARK) ? prompt.slice(base.length + NOTE_MARK.length) : null;
+}
 
 // 批注合并成一条整屏指令（REQ-EDIT-004）：每屏一次作业，逐条点名元素 qid 与当初的可见文案，
 // 元素已不存在时让模型按文案自行判断、忽略即可，不要因为一条批注失效就放弃整屏。

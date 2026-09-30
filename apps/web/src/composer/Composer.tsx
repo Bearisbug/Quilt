@@ -42,6 +42,10 @@ export type ComposerProps = {
   onRemoveTarget: (id: string) => void;
   onRemoveAnchor: () => void;
   onClearTargets: () => void;
+  /** 「修改」还原的隐藏参数（REQ-CORE-026 v0.74）：出变体 / 补缺失页 / 补链 / 按新约定重生成，显示成目标区里一枚可移除的胶囊；
+   *  有它时动词行与占位由它给、屏数档位不显示、正文可以留空 */
+  preset: { label: string; verb: string; hint: string } | null;
+  onRemovePreset: () => void;
   /** 生成通道（REQ-CORE-011）：这一轮由谁来做；聊天模式下父组件只传 agent-sdk 通道（REQ-CORE-023） */
   runners: RunnerOptionDto[];
   runnerId: string;
@@ -130,7 +134,8 @@ export function Composer(p: ComposerProps) {
   // 共享组件目标（REQ-EDIT-006）：只有组件、没有屏也没有锚点 = 改组件（一次一个，多选由父组件的 blockedReason 挡）；否则只是上下文
   const comps = p.componentTargets;
   const compNames = comps.map((c) => c.name).join('、');
-  const compOnly = !chat && comps.length > 0 && creating && !p.anchor;
+  const preset = chat ? null : p.preset;
+  const compOnly = !chat && comps.length > 0 && creating && !p.anchor && !preset;
   const compSuffix = comps.length && !compOnly ? ` · ${creating ? '用' : '带'}组件 ${compNames}` : '';
 
   // 宽度跟着工具条走：这一行是输入框里最宽的东西，其余（动词行、占位、草稿）都比它短。
@@ -185,8 +190,12 @@ export function Composer(p: ComposerProps) {
 
   // 卸载时回收 objectURL，否则贴一次图泄一块内存
   useEffect(() => () => { shots.forEach((s) => URL.revokeObjectURL(s.url)); }, [shots]);
+  // 剩余名额读这个 ref、不读渲染闭包：两批贴得很近时，第二批还看不到第一批的渲染结果（REQ-CORE-012 v0.74）
+  const shotsRef = useRef(shots);
+  shotsRef.current = shots;
 
-  const addFiles = async (files: File[]) => {
+  // 同一批的图一次性全进缩略图（各自「上传中…」），再并行上传
+  const addFiles = (files: File[]) => {
     if (!files.length) return;
     // 通道不支持视觉时在这里就拦住。护栏必须落在贴图这一刻——贴图、拖入、点按钮三条路都经过这里；
     // 只在发送时拦的话，用户已经传完了才被告知白传（服务端那道校验仍在，防绕过）
@@ -194,36 +203,47 @@ export function Composer(p: ComposerProps) {
     const imgs = files.filter((f) => (IMAGE_MEDIA_TYPES as readonly string[]).includes(f.type));
     const rejected = files.length - imgs.length;
     if (rejected) p.onError(`有 ${rejected} 个文件不是 PNG / JPEG / WebP，已跳过`);
-    const room = MAX_ATTACHMENTS_PER_MESSAGE - shots.length;
+    const room = MAX_ATTACHMENTS_PER_MESSAGE - shotsRef.current.length;
     if (imgs.length > room) p.onError(`一条消息最多 ${MAX_ATTACHMENTS_PER_MESSAGE} 张参考图`);
-    for (const file of imgs.slice(0, Math.max(0, room))) {
-      if (file.size > MAX_ATTACHMENT_BYTES) { p.onError(`「${file.name}」超过 ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`); continue; }
-      const key = crypto.randomUUID();
-      setShots((prev) => [...prev, { key, url: URL.createObjectURL(file), name: file.name, id: null }]);
-      try {
-        const id = await p.onUploadImage(file);
-        setShots((prev) => prev.map((s) => (s.key === key ? { ...s, id } : s)));
-      } catch {
-        setShots((prev) => prev.filter((s) => s.key !== key));
-        p.onError(`「${file.name}」上传失败`);
-      }
+    const batch = imgs.slice(0, Math.max(0, room)).filter((file) => {
+      if (file.size <= MAX_ATTACHMENT_BYTES) return true;
+      p.onError(`「${file.name}」超过 ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`);
+      return false;
+    }).map((file) => ({ file, shot: { key: crypto.randomUUID(), url: URL.createObjectURL(file), name: file.name, id: null } as Shot }));
+    if (!batch.length) return;
+    shotsRef.current = [...shotsRef.current, ...batch.map((b) => b.shot)];
+    setShots((prev) => [...prev, ...batch.map((b) => b.shot)]);
+    for (const { file, shot } of batch) {
+      p.onUploadImage(file).then(
+        (id) => setShots((prev) => prev.map((s) => (s.key === shot.key ? { ...s, id } : s))),
+        () => { setShots((prev) => prev.filter((s) => s.key !== shot.key)); p.onError(`「${file.name}」上传失败`); },
+      );
     }
   };
   const removeShot = (key: string) => setShots((prev) => { prev.filter((s) => s.key === key).forEach((s) => URL.revokeObjectURL(s.url)); return prev.filter((s) => s.key !== key); });
 
   const uploading = shots.some((s) => !s.id);
+  // 冲突之外挡住发送的本地原因：按 Enter 被它们挡住时写在冲突理由同一行，原因消失即撤（REQ-CORE-020 v0.74）
+  const localReason = uploading ? '参考图还在上传' : !sessionOk ? '先选要投递的会话' : !chatChannelOk ? '先添加「本机 Claude 订阅」通道' : null;
+  const [nudged, setNudged] = useState(false);
+  useEffect(() => { if (!localReason) setNudged(false); }, [localReason]);
+  const shownReason = p.blockedReason ?? (nudged ? localReason : null);
   const submit = async (e?: FormEvent) => {
     e?.preventDefault();
     const content = text.trim();
-    if (!content || sending || p.blockedReason || uploading || !sessionOk || !chatChannelOk) return;
+    if ((!content && !preset) || sending || p.blockedReason) return;
+    if (localReason) { setNudged(true); return; }
     setSending(true);
+    // 在途期间照样能打字、贴图（REQ-CORE-020）：发送成功只去掉发出去的那段文字与那几张图
+    const sentText = text;
+    const sentKeys = new Set(shots.map((s) => s.key));
     try {
       // 没发出去（撞上 409 / 限流 / 会话失效）就留着草稿与参考图，不把用户的输入吞掉（REQ-CORE-020）
       const sent = await p.onSend(content, shots.map((s) => s.id!).filter(Boolean));
       if (sent) {
-        setText('');
-        shots.forEach((s) => URL.revokeObjectURL(s.url));
-        setShots([]);
+        setText((cur) => (cur.startsWith(sentText) ? cur.slice(sentText.length).trimStart() : cur));
+        shotsRef.current.filter((s) => sentKeys.has(s.key)).forEach((s) => URL.revokeObjectURL(s.url));
+        setShots((prev) => prev.filter((s) => !sentKeys.has(s.key)));
       }
     } finally { setSending(false); }
   };
@@ -239,7 +259,14 @@ export function Composer(p: ComposerProps) {
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); return; }
     // 输入框内 Esc：有草稿清草稿、无草稿失焦；都不清目标标签（REQ-CORE-006）
-    if (e.key === 'Escape') { e.stopPropagation(); if (text) setText(''); else taRef.current?.blur(); }
+    if (e.key === 'Escape') { e.stopPropagation(); if (text) clearDraft(); else taRef.current?.blur(); }
+  };
+  // 清草稿走浏览器的编辑命令：程序写 value（setText('')）会清掉原生撤销栈，⌘Z 就找不回来了（v0.74）
+  const clearDraft = () => {
+    const el = taRef.current;
+    if (!el) return;
+    el.select();
+    if (!document.execCommand('delete')) setText('');
   };
 
   // 动词行（REQ-CORE-006）：屏数 × 版数写全；任一档位 > 1 时追加预计调用数，取值与服务端同一个 estimateJob
@@ -252,6 +279,8 @@ export function Composer(p: ComposerProps) {
   // 聊天：范围由助手定，动词行只说这句话「关于」什么（选中的屏是上下文提示，不是目标锁）
   const verb = chat
     ? `聊 · ${one ? `关于「${one.name}」` : p.targets.length ? `关于 ${p.targets.length} 屏` : '整个项目'}`
+    : preset
+    ? preset.verb
     : compOnly
     ? (comps.length === 1 ? `改组件「${comps[0].name}」 · 同步 ${comps[0].usedBy.length} 屏` : `改组件 · ${comps.length} 个`)
     : agentRunner
@@ -262,6 +291,7 @@ export function Composer(p: ComposerProps) {
 
   const phrases = chat
     ? (p.targets.length ? [`关于${one ? `「${one.name}」` : `选中的 ${p.targets.length} 屏`}问点什么，或说要怎么改`] : CHAT_PHRASES)
+    : preset ? [preset.hint]
     : compOnly && comps.length === 1 ? [`修改组件「${comps[0].name}」：例如 tab 改成 3 个、图标换成描边`]
     : one ? [`修改「${one.name}」：例如 改成分组列表`]
     : p.targets.length ? [`修改选中的 ${p.targets.length} 屏：例如 统一把顶部导航改成标签栏`]
@@ -314,6 +344,14 @@ export function Composer(p: ComposerProps) {
               <button type="button" aria-label="取消锚点" onClick={p.onRemoveAnchor} className="grid size-5 place-items-center rounded-full text-muted transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"><X size={12} /></button>
             </li>
           )}
+          {preset && (
+            <li className="inline-flex items-center gap-1.5 rounded-full bg-panel-2 py-1 pl-2.5 pr-1 text-xs font-medium text-fg" data-testid="preset-chip">
+              <span className="max-w-48 truncate">{preset.label}</span>
+              <button type="button" aria-label={`去掉「${preset.label}」，改成普通的一轮`} onClick={p.onRemovePreset} className="grid size-5 place-items-center rounded-full text-muted transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">
+                <X size={12} />
+              </button>
+            </li>
+          )}
           {p.targets.map((t, i) => (
             <li key={t.id} className={`inline-flex items-center gap-1.5 rounded-full bg-panel-2 py-1 pl-2.5 pr-1 text-xs font-medium ${i < p.maxTargets ? 'text-fg' : 'text-warn'}`} data-testid="target-chip">
               <span className="max-w-32 truncate">{t.name}</span>
@@ -336,7 +374,7 @@ export function Composer(p: ComposerProps) {
             {over && !chat ? `已选 ${p.targets.length} 屏，一次最多改 ${p.maxTargets} 屏，只会发送前 ${p.maxTargets} 屏` : verb}
           </li>
         </ul>
-        {(p.targets.length > 0 || p.anchor || p.componentTargets.length > 0) && (
+        {(p.targets.length > 0 || p.anchor || p.componentTargets.length > 0 || preset) && (
           <button type="button" data-testid="clear-targets" onClick={p.onClearTargets} className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-muted transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">清空</button>
         )}
       </div>
@@ -366,7 +404,7 @@ export function Composer(p: ComposerProps) {
         />
       </div>
       {/* 冲突理由就地写在发送键上方：发送键只是 aria-disabled，输入照旧可改——换个目标或等这一轮完事就能发（A11Y-007 / IA-009） */}
-      {p.blockedReason && <p data-testid="send-blocked-reason" role="status" className="mt-2 px-1 text-right text-xs text-warn">{p.blockedReason}</p>}
+      {shownReason && <p data-testid="send-blocked-reason" role="status" className="mt-2 px-1 text-right text-xs text-warn">{shownReason}</p>}
       {/* 工具条允许换行：390px 视口放不下「通道 + 参考图 + 屏数 + 版数 + 发送」一整行，右侧档位组折到下一行而不是撑破外框 */}
       <div ref={barRef} className="composer-bar mt-3 flex items-center justify-between gap-2 border-t border-line pt-3">
         {/* 左组不能写 min-w-0：里面的控件都是 shrink-0，盒子缩了内容不缩，只会溢出去压在右边的档位上，
@@ -398,16 +436,16 @@ export function Composer(p: ComposerProps) {
         {/* 档位组自身也能换行：≤ 48rem 视口里输入框只有约 240px 宽，屏数 + 版数 + 发送一行放不下时各自折行、靠右 */}
         <div className="ml-auto flex items-center justify-end gap-2">
           {/* 本机 agent 通道没有档位（固定 1 版、屏数由会话自定），腾出的位置给会话下拉；聊天由助手定范围，同样没有档位；改组件一次一个也没有档位 */}
-          {!chat && creating && !agentRunner && !compOnly && (
+          {!chat && creating && !agentRunner && !compOnly && !preset && (
             <Segmented label="屏数（几张不同的屏）" testId="count" value={p.count} options={SCREEN_COUNT_OPTIONS.map((o) => ({ value: o, label: o === 'auto' ? '自动' : String(o) }))} onChange={p.onCount} />
           )}
-          {!chat && creating && !agentRunner && !compOnly && <span className="h-5 w-px bg-line" aria-hidden="true" />}
+          {!chat && creating && !agentRunner && !compOnly && !preset && <span className="h-5 w-px bg-line" aria-hidden="true" />}
           {!chat && !agentRunner && !compOnly && <Segmented label="版数（同一屏的几种画法）" testId="versions" value={p.versions} options={Array.from({ length: MAX_VERSIONS }, (_, i) => ({ value: i + 1, label: `${i + 1} 版` }))} onChange={p.onVersions} compact />}
           {/* 这个 40px 插槽永远是发送键（停止归在跑作业行上的取消键）；反色实心只给此刻唯一的主动作 */}
           <IconButton
-            type="submit" size="sm" tone={text.trim() ? 'invert' : 'default'} label={chat ? '发送（聊）' : compOnly ? '发送（改组件）' : creating ? '发送（造）' : '发送（改）'} hint="Enter" tip="top-end"
-            className={text.trim() ? undefined : 'bg-panel-2'}
-            unavailable={p.blockedReason ? p.blockedReason : uploading ? '参考图还在上传' : !sessionOk ? '先选要投递的会话' : !chatChannelOk ? '先添加「本机 Claude 订阅」通道' : !text.trim() && (chat ? '先说点什么' : compOnly ? '先说要怎么改组件' : creating ? '先描述要造的屏' : '先说要怎么改')}
+            type="submit" size="sm" tone={text.trim() || preset ? 'invert' : 'default'} label={chat ? '发送（聊）' : compOnly ? '发送（改组件）' : creating ? '发送（造）' : '发送（改）'} hint="Enter" tip="top-end"
+            className={text.trim() || preset ? undefined : 'bg-panel-2'}
+            unavailable={p.blockedReason ?? localReason ?? (!text.trim() && !preset && (chat ? '先说点什么' : compOnly ? '先说要怎么改组件' : creating ? '先描述要造的屏' : '先说要怎么改'))}
           >
             {sending ? <span className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" /> : <ArrowUp size={16} />}
           </IconButton>

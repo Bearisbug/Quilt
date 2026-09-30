@@ -1,6 +1,6 @@
-import type { JobDto, ScreenDto, ComponentDto, ScreenCount } from '@quilt/core';
+import { ROUND_PRESETS, ROUND_PRESET_PROMPTS, missingPagePrompt, presetNote, variantPrompt, type JobDto, type ScreenDto, type ComponentDto, type ScreenCount, type RoundPresetKind } from '@quilt/core';
 
-export type JobInput = { count?: ScreenCount; versions?: number; screenIds?: string[] | 'all'; screenId?: string; fromScreenId?: string; prompt?: string; componentId?: string; componentIds?: string[]; variantOf?: string; variantName?: string };
+export type JobInput = { count?: ScreenCount; versions?: number; screenIds?: string[] | 'all'; screenId?: string; fromScreenId?: string; route?: string; prompt?: string; componentId?: string; componentIds?: string[]; variantOf?: string; variantName?: string };
 // 一个在跑作业会改到哪些屏（REQ-CORE-020）。JobDto 不带 targetScreenId，只能按 kind 从 input 反推；
 // 口径与 apps/api/src/services/jobs.ts 的守卫对齐，但比它严：多屏 edit_screens 与回刷在后端落 target_screen_id=null，
 // 后端看不见它们实际改的屏（§16 真值表的缺口行），撞上的后果是一方作业 failed 或静默顶掉对方，所以前端按覆盖屏集拦。
@@ -42,4 +42,31 @@ export function jobLabel(job: JobDto, screens: ScreenDto[], components: Componen
     case 'chat': { const q = i.prompt ?? ''; return `聊「${q.length > 20 ? `${q.slice(0, 20)}…` : q}」`; }
     case 'edit_component': return `改组件「${components.find((c) => c.id === i.componentId)?.name ?? '已删除的组件'}」`;
   }
+}
+
+// 系统代发轮次的隐藏参数（REQ-CORE-026 v0.74）：出变体、补缺失页、补链、按新约定重生成的消息正文是描述，
+// 「修改」按作业输入把它们还原成同一类作业；text 是填回输入框的正文（变体是提示词本身，其余是附加要求）
+export type RoundPreset = { kind: 'variant'; variantOf: string; variantName: string } | { kind: 'missing'; route: string; fromScreenId?: string } | { kind: RoundPresetKind };
+export function roundPreset(job: JobDto): { preset: RoundPreset; text: string } | null {
+  const i = job.input as JobInput;
+  const prompt = i.prompt ?? '';
+  if (job.kind === 'generate' && i.variantOf && i.variantName) return { preset: { kind: 'variant', variantOf: i.variantOf, variantName: i.variantName }, text: prompt === variantPrompt(i.variantName) ? '' : prompt };
+  if (job.kind === 'generate' && i.route) return { preset: { kind: 'missing', route: i.route, fromScreenId: i.fromScreenId }, text: presetNote(prompt, missingPagePrompt(i.route)) ?? prompt };
+  if (job.kind === 'edit_screens') for (const kind of ROUND_PRESETS) { const note = presetNote(prompt, ROUND_PRESET_PROMPTS[kind]); if (note !== null) return { preset: { kind }, text: note }; }
+  return null;
+}
+// 胶囊文字、动词行与占位：出变体 / 补缺失页固定造 1 屏，补链 / 按新约定重生成改目标屏；版数照常
+const NOTE_HINT = '可以留空直接发；写了就作为附加要求';
+export function presetView(p: RoundPreset, screens: ScreenDto[], targets: number, versions: number): { label: string; verb: string; hint: string } {
+  const ver = versions > 1 ? ` × ${versions} 版` : '';
+  switch (p.kind) {
+    case 'variant': return { label: `「${screens.find((s) => s.id === p.variantOf)?.name ?? '已删除的屏'}」的 ${p.variantName} 变体`, verb: `出变体 1 屏${ver}`, hint: `描述这个状态长什么样；留空就按状态名「${p.variantName}」出` };
+    case 'missing': return { label: `缺失页 ${p.route}`, verb: `造 1 屏 · ${p.route}${ver}`, hint: NOTE_HINT };
+    case 'link_repair': return { label: '补链', verb: `补链 ${targets} 屏${ver}`, hint: NOTE_HINT };
+    case 'conventions': return { label: '按新约定重生成', verb: `按新约定重生成 ${targets} 屏${ver}`, hint: NOTE_HINT };
+  }
+}
+// 发送时随 API-CORE-010 带上的字段
+export function presetBody(p: RoundPreset): Record<string, string | undefined> {
+  return p.kind === 'variant' ? { variantOf: p.variantOf, variantName: p.variantName } : p.kind === 'missing' ? { route: p.route, fromScreenId: p.fromScreenId } : { preset: p.kind };
 }

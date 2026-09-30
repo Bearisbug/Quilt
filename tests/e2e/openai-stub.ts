@@ -3,7 +3,8 @@ import { createServer, type Server } from 'node:http';
 // 本地 OpenAI 兼容桩（REQ-CORE-013 用例用）：只认一个 Key，回固定内容；记录收到的请求供断言。
 // 用它验证的是「通道 → 驱动 → 端点」这条管道，不是模型质量。
 export type StubHit = { model: string; hasImage: boolean; auth: string | undefined; user: string; system: string };
-// holdMs：收到请求后拖这么久再回（TC-CORE-042 要一个在跑一阵子的作业）；请求照样立刻记进 hits
+// holdMs：收到请求后拖这么久再回（TC-CORE-042 要一个在跑一阵子的作业），Key 不对的 401 也一样拖（TC-CORE-045 要画布先认领作业、再收到失败）；
+// 请求照样立刻记进 hits
 export function startOpenAiStub(opts: { port: number; apiKey: string; reply: string | ((hit: StubHit) => string); holdMs?: number }): { server: Server; hits: StubHit[]; url: string; close: () => Promise<void> } {
   const hits: StubHit[] = [];
   const server = createServer((req, res) => {
@@ -11,7 +12,7 @@ export function startOpenAiStub(opts: { port: number; apiKey: string; reply: str
     req.on('data', (c) => { body += c; });
     req.on('end', () => {
       if (req.method !== 'POST' || req.url !== '/v1/chat/completions') { res.writeHead(404); res.end(); return; }
-      if (req.headers.authorization !== `Bearer ${opts.apiKey}`) { res.writeHead(401, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'invalid api key' } })); return; }
+      if (req.headers.authorization !== `Bearer ${opts.apiKey}`) { setTimeout(() => { res.writeHead(401, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'invalid api key' } })); }, opts.holdMs ?? 0); return; }
       const j = JSON.parse(body || '{}') as { model?: string; messages?: { role: string; content: unknown }[] };
       const user = j.messages?.find((m) => m.role === 'user');
       const userText = typeof user?.content === 'string' ? user.content : Array.isArray(user?.content) ? (user!.content as { type: string; text?: string }[]).filter((p) => p.type === 'text').map((p) => p.text ?? '').join('\n') : '';
