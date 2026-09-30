@@ -81,10 +81,10 @@ GEMINI_API_KEY=
 pnpm install
 cp .env.example .env             # DATABASE_URL 留空即用内置 PGlite
 docker compose up -d             # 可选：保留 DATABASE_URL 时起 127.0.0.1:5439 的 Postgres
-pnpm dev                         # API + Worker + 预览域在 3100/3101，Vite 在 5173
+pnpm dev                         # API + Worker + 预览域在 3100/3101，Vite 在 6688
 ```
 
-打开 `http://localhost:5173`。迁移在 API 启动时自动执行。`.env.example` 每个键都带说明。
+打开 `http://localhost:6688`。迁移在 API 启动时自动执行。`.env.example` 每个键都带说明。
 
 ## 接入编码 agent
 

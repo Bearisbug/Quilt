@@ -27,9 +27,9 @@ export const config = {
   apiPort, previewPort,
   // 本地版只绑回环地址：MCP 免鉴权的前提就是这一条（§15 安全）
   bindHost: env('BIND_HOST', '127.0.0.1'),
-  // 打包运行时静态前端由 API 进程托管，画布与 API 同源；开发时 Vite 在 5173 代理 /v1
+  // 打包运行时静态前端由 API 进程托管，画布与 API 同源；开发时 Vite 在 6688 代理 /v1
   webDist: process.env.WEB_DIST && existsSync(process.env.WEB_DIST) ? path.resolve(process.env.WEB_DIST) : '',
-  webOrigin: env('WEB_ORIGIN', home ? `http://localhost:${apiPort}` : 'http://localhost:5173'),
+  webOrigin: env('WEB_ORIGIN', home ? `http://localhost:${apiPort}` : 'http://localhost:6688'),
   apiOrigin: env('API_ORIGIN', `http://localhost:${apiPort}`),
   // 预览域与主站不同 origin 即够（无 cookie）：打包时用 127.0.0.1（Safari 不解析 *.localhost），开发保留 preview.localhost
   previewOrigin: env('PREVIEW_ORIGIN', home ? `http://127.0.0.1:${previewPort}` : `http://preview.localhost:${previewPort}`),

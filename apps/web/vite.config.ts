@@ -9,7 +9,7 @@ export default defineConfig({
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   server: {
     host: true,
-    port: 5173,
+    port: 6688,
     strictPort: true,
     // 本机 Vite 8 原生文件监听丢事件（M0 实证），开发用轮询
     watch: { usePolling: true, interval: 300 },

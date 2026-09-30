@@ -3,8 +3,8 @@ import path from 'node:path';
 import { chromium, type Browser, type Page } from 'playwright';
 
 export const ROOT = path.resolve(import.meta.dirname, '../..');
-// 可指到另一处前端：3100 / 5173 被别的会话占着时，按打包形态起一套（`WEB_DIST=apps/web/dist` 的 API 同端口托管前端）再跑浏览器用例
-export const WEB = process.env.QUILT_E2E_WEB ?? 'http://localhost:5173';
+// 可指到另一处前端：3100 / 6688 被别的会话占着时，按打包形态起一套（`WEB_DIST=apps/web/dist` 的 API 同端口托管前端）再跑浏览器用例
+export const WEB = process.env.QUILT_E2E_WEB ?? 'http://localhost:6688';
 // 可指到另一套 API（e2e:mcp 在独立端口 + 测试库上跑，不占用 3100 的开发实例）
 export const API = process.env.QUILT_E2E_API ?? 'http://localhost:3100';
 export const EVIDENCE = path.join(ROOT, 'docs/test-runs');

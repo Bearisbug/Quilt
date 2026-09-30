@@ -29,7 +29,7 @@ export function SettingsModal({ section, onSection, onClose, returnTo, onCatalog
   useEffect(load, []);
   const copy = async (text: string) => { try { await navigator.clipboard.writeText(text); toast('已复制'); } catch { toast('复制失败，请手动选择', 'error'); } };
   // MCP 接入命令（API-AGENT-002）：本地版免鉴权，地址就是本机 API；Codex 一条另给（v0.68），接入后要新开线程才加载
-  const mcpUrl = `${window.location.origin.replace(/:5173$/, ':3100')}/mcp`;
+  const mcpUrl = `${window.location.origin.replace(/:6688$/, ':3100')}/mcp`;
   const mcpAdd = `claude mcp add --transport http quilt ${mcpUrl}`;
   const codexMcpAdd = `codex mcp add quilt --url ${mcpUrl}`;
 

@@ -81,10 +81,10 @@ GEMINI_API_KEY=
 pnpm install
 cp .env.example .env             # leave DATABASE_URL empty to use embedded PGlite
 docker compose up -d             # optional: Postgres on 127.0.0.1:5439 if you keep DATABASE_URL
-pnpm dev                         # API + worker + preview on 3100/3101, Vite on 5173
+pnpm dev                         # API + worker + preview on 3100/3101, Vite on 6688
 ```
 
-Open `http://localhost:5173`. Migrations run automatically at API startup. Every key in `.env.example` is documented inline.
+Open `http://localhost:6688`. Migrations run automatically at API startup. Every key in `.env.example` is documented inline.
 
 ## Connect your coding agent
 
