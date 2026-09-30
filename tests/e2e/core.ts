@@ -323,6 +323,27 @@ await step('TC-CORE-023', async () => {
   const f1 = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
   expect(f0 !== f1 && !!f1, `方向键未在组内移动焦点（${f0} → ${f1}）`);
 
+  // 3b 窗口矮到放不下全部工具（v0.70）：工具栏封顶在可用区内、列内滚动、滚动条不可见；底部渐隐提示还有；End 跳到最后一个工具，
+  //    它滚进可见区且四周留出焦点环的 4 px，渐隐换到顶部
+  await page.setViewportSize({ width: 1440, height: 600 });
+  await page.waitForTimeout(400);
+  const rail = () => page.evaluate(() => {
+    const r = document.querySelector('[role="toolbar"]') as HTMLElement; const pill = r.parentElement!.getBoundingClientRect(); const rr = r.getBoundingClientRect();
+    const f = (document.activeElement as HTMLElement | null)?.closest('[role="toolbar"]') ? document.activeElement!.getBoundingClientRect() : null;
+    return { pillBottom: pill.bottom, vh: innerHeight, scrollable: r.scrollHeight > r.clientHeight, bar: r.offsetWidth - r.clientWidth, fade: r.dataset.fade ?? '',
+      room: f ? Math.min(f.top - rr.top, rr.bottom - f.bottom, f.left - rr.left, rr.right - f.right) : null, last: document.activeElement === [...r.querySelectorAll('button')].pop() };
+  });
+  await page.locator('[role="toolbar"] button[tabindex="0"]').focus();
+  await page.keyboard.press('Home');
+  const top = await rail();
+  expect(top.pillBottom < top.vh && top.scrollable && top.bar === 0 && top.fade === 'bottom', `矮窗口下工具栏没在列内滚动或提示不对：${JSON.stringify(top)}`);
+  await page.keyboard.press('End');
+  await page.waitForTimeout(300);
+  const end = await rail();
+  expect(end.last && end.fade === 'top' && (end.room ?? -1) >= 3.5, `End 后最后一个工具应可见、焦点环不被裁、渐隐在顶部：${JSON.stringify(end)}`);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(400);
+
   // 4 悬停提示要给出作用说明与快捷键，且不能被工具栏的滚动容器裁掉
   await page.locator('[data-testid="repair-links"]').hover();
   await page.locator('[data-testid="tool-tip"]').waitFor({ timeout: 3000 });
@@ -386,7 +407,8 @@ await step('TC-CORE-023', async () => {
 
   await eventually(async () => expect(await composerShown(), '⌘/ 未叫回输入框'));
   expect((await page.locator('#chat-input').inputValue()) === '草稿', '叫回后草稿丢了');
-  expect(await page.evaluate(() => document.activeElement?.id === 'chat-input'), '叫回后光标没落回输入区');
+  // 聚焦在 showComposer 的 setTimeout(0) 里，输入框显形与光标落下之间隔一拍（实测 ≤ 56 ms）：轮询，不一次性读
+  await eventually(async () => expect(await page.evaluate(() => document.activeElement?.id === 'chat-input'), '叫回后光标没落回输入区'), 2000);
   expect(Math.abs((await safeBottom()) - sb0) < 1, '叫回后安全区底部没复原');
   // 6c 工具栏「输入框」与 ⌘/ 是同一开关，aria-pressed 跟着显隐翻转
   await page.getByTestId('toggle-composer').click();
@@ -2076,6 +2098,129 @@ await step('TC-CORE-041', async () => {
   await eventually(async () => expect((await detail()).screens.length === 2, '删默认屏后变体应级联删除'));
   await shot(page, 'CORE-041');
   return '出变体落在默认屏右侧、地图 / 注册表 / 导出只认默认屏、卡片标签、聚焦切状态不动镜头、路由不可改 422、删默认屏级联';
+});
+
+// TC-CORE-042 对话记录的参考图预览与消息操作（REQ-CORE-026 v0.72 / API-CORE-034）
+await step('TC-CORE-042', async () => {
+  const { projectId, screens } = seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', 'Msgs', '--device', 'mobile', '--screens', '2');
+  const [s1, s2] = screens;
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const upload = async () => {
+    const { body } = await apiJson<{ attachmentId: string; putUrl: string }>(`/v1/projects/${projectId}/attachments`, { method: 'POST', body: JSON.stringify({ mediaType: 'image/png', bytes: png.length }) });
+    const put = await fetch(API + body.putUrl, { method: 'PUT', body: png, headers: { 'content-type': 'image/png' } });
+    expect(put.status === 204, `参考图上传 ${put.status}`);
+    return body.attachmentId;
+  };
+  type Msg = { id: string; role: string; content: string; jobId: string | null; attachments: { id: string }[] };
+  type Job = { id: string; kind: string; status: string; input: { screenIds?: string[]; imageKeys?: string[]; runner?: { kind: string; channelId?: string } } };
+  const messages = async () => (await apiJson<{ items: Msg[] }>(`/v1/projects/${projectId}/messages?limit=100`)).body.items;
+  // 显式走 stub：种子会按 .env 建一条已验证的 Gemini 通道并成为缺省通道，不指定就会打到真实模型
+  const STUB = { kind: 'model', driver: 'stub', model: 'stub' };
+  const send = async (content: string, target: string, attachmentIds: string[]) => {
+    const r = await apiJson<{ job: { id: string } }>(`/v1/projects/${projectId}/messages`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ content, targetScreenIds: [target], attachmentIds, runner: STUB }) });
+    expect(r.status === 202, `发消息 ${r.status}`);
+    const j = await waitJob(r.body.job.id, 60);
+    expect(j.status === 'succeeded', `「${content}」这一轮作业 ${j.status}`);
+  };
+  await send('第一轮：照这张图改', s1.id, [await upload()]);
+  await send('第二轮：照这两张图改', s2.id, [await upload(), await upload()]);
+  // 拖 6 s 才回的 OpenAI 兼容桩：重试这一轮要走它，好在它跑着的时候验「重试」置灰与 409
+  const rev0 = (await apiJson<{ items: { htmlUrl: string }[] }>(`/v1/screens/${s2.id}/revisions`)).body.items[0];
+  const body0 = (await (await fetch(rev0.htmlUrl)).text()).split('<body')[1].replace(/^[^>]*>/, '').replace(/<\/body>[\s\S]*$/, '').replace(/\sdata-qid="q\d+"/g, '');
+  const stub = startOpenAiStub({ port: 3993, apiKey: 'good-key-0042', reply: body0, holdMs: 6000 });
+  try {
+    const ch = await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label: 'Slow 通道', endpoint: stub.url, model: 'stub-42', apiKey: 'good-key-0042' }) });
+    const probe = await apiJson<{ ok: boolean }>(`/v1/runners/channel:${ch.body.channel.id}/probe`, { method: 'POST' });
+    expect(probe.body.ok, '慢桩通道验证未通过');
+    await page.goto(`${WEB}/p/${projectId}`);
+    await page.locator('[data-testid="screen-card"] img').first().waitFor({ timeout: 15000 });
+    if ((await page.getByTestId('chat-dock').getAttribute('data-state')) === 'collapsed') await page.getByRole('button', { name: '展开对话记录' }).click();
+    const thumbs = page.getByTestId('message-attachment-open');
+    await eventually(async () => expect((await thumbs.count()) === 3, `对话里应有 3 张参考图缩略图，实际 ${await thumbs.count()}`), 8000);
+
+    // 1 点最后一张 → 大图第 3 / 3，下一张不可用；← 两次到第一张、标题带第一轮的话；再 ← 停在第一张；Esc 关闭、焦点回到缩略图
+    await thumbs.nth(2).click();
+    const viewer = page.getByTestId('image-viewer');
+    await viewer.waitFor({ timeout: 3000 });
+    expect((await viewer.innerText()).includes('参考图 3 / 3'), `标题应是 3 / 3：${await viewer.innerText()}`);
+    expect(await page.getByTestId('viewer-image').evaluate((i) => (i as HTMLImageElement).naturalWidth > 0), '大图没加载出来');
+    expect((await page.getByTestId('viewer-next').getAttribute('aria-disabled')) === 'true', '最后一张时「下一张」应不可用');
+    expect(await page.evaluate(() => document.getElementById('root')?.hasAttribute('inert')), '预览打开时背景应 inert');
+    await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowLeft');
+    expect((await viewer.getAttribute('data-index')) === '0' && (await viewer.innerText()).includes('第一轮'), `← 两次应到第一张且写出第一轮的话：${await viewer.getAttribute('data-index')} ${await viewer.innerText()}`);
+    await page.keyboard.press('ArrowLeft');
+    expect((await viewer.getAttribute('data-index')) === '0' && (await page.getByTestId('viewer-prev').getAttribute('aria-disabled')) === 'true', '第一张时再 ← 应停住、「上一张」不可用');
+    await page.getByTestId('viewer-next').click();
+    expect((await viewer.getAttribute('data-index')) === '1', '点「下一张」应到第二张');
+    expect(await page.evaluate(() => !!document.activeElement?.closest('[data-testid="image-viewer"]')), '点翻页键后焦点应仍在预览里');
+    await page.keyboard.press('Escape');
+    await viewer.waitFor({ state: 'detached', timeout: 3000 });
+    expect(await thumbs.nth(2).evaluate((el) => el === document.activeElement), '关闭后焦点应回到点开它的缩略图');
+    expect(!(await page.evaluate(() => document.getElementById('root')?.hasAttribute('inert'))), '关闭后背景的 inert 应摘掉');
+    // 点图外空白处也关闭
+    await thumbs.nth(0).click();
+    await viewer.waitFor({ timeout: 3000 });
+    const vp = page.viewportSize()!;
+    await page.mouse.click(vp.width / 2, vp.height - 40);
+    await viewer.waitFor({ state: 'detached', timeout: 3000 });
+
+    // 2 悬停：每条都有「复制」；「修改」只在最后一轮的用户消息，「重试」只在最后一轮的助手消息；没悬停的那条操作条不显
+    const users = page.locator('[data-testid="message"][data-role="user"]');
+    const assts = page.locator('[data-testid="message"][data-role="assistant"]');
+    const actionsShown = (loc: import('playwright').Locator) => loc.locator('.msg-actions').evaluate((el) => getComputedStyle(el).opacity === '1');
+    await users.nth(0).hover();
+    await eventually(async () => expect(await actionsShown(users.nth(0)), '悬停第一条用户消息时操作条应显示'));
+    expect(!(await actionsShown(users.nth(1))), '没悬停的消息不该显示操作条');
+    expect((await users.nth(0).getByTestId('msg-copy').count()) === 1 && (await users.nth(0).getByTestId('msg-edit').count()) === 0, '早先那一轮不该有「修改」');
+    expect((await users.nth(1).getByTestId('msg-edit').count()) === 1 && (await assts.nth(1).getByTestId('msg-retry').count()) === 1 && (await assts.nth(0).getByTestId('msg-retry').count()) === 0, '「修改」「重试」应只在最后一轮');
+
+    // 3 复制：剪贴板里是这条的正文
+    await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: WEB });
+    await users.nth(1).hover();
+    await users.nth(1).getByTestId('msg-copy').click();
+    await eventually(async () => expect((await page.evaluate(() => navigator.clipboard.readText())) === '第二轮：照这两张图改', '剪贴板内容不是这条消息的正文'));
+
+    // 4 重试：输入框换成慢桩通道 → 点重试 → 新一轮追加，原文、两张图、原目标照旧，只有通道换了；跑着时「重试」置灰、接口 409
+    await pickOption(page, '[data-testid="runner-select"]', 'Slow 通道');
+    const before = (await messages()).length;
+    await assts.nth(1).hover();
+    await assts.nth(1).getByTestId('msg-retry').click();
+    await eventually(async () => expect((await messages()).length === before + 2, '重试后应追加一轮（两条消息）'), 5000);
+    const all = await messages();
+    const [oldUser, newUser] = [all.filter((m) => m.role === 'user').at(-2)!, all.filter((m) => m.role === 'user').at(-1)!];
+    expect(newUser.content === oldUser.content && newUser.attachments.map((a) => a.id).join() === oldUser.attachments.map((a) => a.id).join(), '重试的这一轮正文与参考图应与原来一致');
+    const oldJob = (await apiJson<{ job: Job }>(`/v1/jobs/${oldUser.jobId}`)).body.job;
+    const newJob = (await apiJson<{ job: Job }>(`/v1/jobs/${newUser.jobId}`)).body.job;
+    expect(newJob.kind === 'edit_screens' && newJob.input.screenIds?.join() === s2.id && newJob.input.imageKeys?.length === 2, `重试作业的种类 / 目标 / 参考图不对：${JSON.stringify(newJob.input).slice(0, 200)}`);
+    expect(newJob.input.runner?.kind === 'channel' && newJob.input.runner.channelId === ch.body.channel.id && oldJob.input.runner?.kind !== 'channel', '重试应改用输入框当前选的通道');
+    await assts.last().hover();
+    await eventually(async () => expect((await assts.last().getByTestId('msg-retry').getAttribute('aria-disabled')) === 'true', '这一轮还在跑时「重试」应置灰'), 3000);
+    const busy = await apiJson<{ type: string }>(`/v1/projects/${projectId}/messages/${newUser.id}/retry`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: '{}' });
+    expect(busy.status === 409 && busy.body.type === '/errors/job-not-finished', `在跑时重试应 409 job-not-finished：${busy.status} ${busy.body.type}`);
+    const done = await waitJob(newJob.id, 60);
+    expect(done.status === 'succeeded' && stub.hits.some((h) => h.hasImage), `重试作业 ${done.status}，或桩没收到参考图`);
+    await eventually(async () => expect((await assts.last().getByTestId('msg-retry').getAttribute('aria-disabled')) !== 'true', '跑完后「重试」应恢复可用'), 8000);
+
+    // 5 修改：文字、两张参考图、目标屏原样填回输入框
+    await users.last().hover();
+    await users.last().getByTestId('msg-edit').click();
+    await eventually(async () => expect((await page.locator('#chat-input').inputValue()) === '第二轮：照这两张图改', '修改后输入框应是这一轮的原文'));
+    expect((await page.locator('button[aria-label^="移除参考图"]').count()) === 2, '修改后输入框应带回两张参考图');
+    expect((await page.getByTestId('target-chip').count()) === 1 && (await verbLine(page)).includes('改'), `修改后目标应是原来那一屏：${await verbLine(page)}`);
+    expect(await page.locator('#chat-input').evaluate((el) => el === document.activeElement), '修改后焦点应在输入框');
+    await shot(page, 'CORE-042');
+
+    // 6 接口边界：助手消息 id → 404；不能重试的种类（导出）→ 400，且它成了最后一轮后画布上不再给「重试」「修改」
+    const asst = await apiJson(`/v1/projects/${projectId}/messages/${all.at(-1)!.id}/retry`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: '{}' });
+    expect(asst.status === 404, `对助手消息重试应 404：${asst.status}`);
+    const exp = await apiJson<{ job: { id: string } }>(`/v1/projects/${projectId}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ kind: 'export_prototype', input: {} }) });
+    await waitJob(exp.body.job.id, 90);
+    const expUser = (await messages()).filter((m) => m.role === 'user').at(-1)!;
+    const bad = await apiJson<{ errors?: { path: string }[] }>(`/v1/projects/${projectId}/messages/${expUser.id}/retry`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: '{}' });
+    expect(bad.status === 400 && bad.body.errors?.[0]?.path === 'messageId', `导出这一轮重试应 400 path=messageId：${bad.status} ${JSON.stringify(bad.body).slice(0, 160)}`);
+    await eventually(async () => expect((await page.getByTestId('msg-retry').count()) === 0 && (await page.getByTestId('msg-edit').count()) === 0, '最后一轮是导出时不该有「重试」「修改」'), 8000);
+    return '3 张图一组左右切换、到头停住、Esc / 点空白关闭且焦点回缩略图；复制进剪贴板；重试原样再发、只换通道、跑着时置灰且 409；修改填回文字 / 图 / 目标；助手消息 404、导出轮 400';
+  } finally { await stub.close(); }
 });
 
 await browser.close();

@@ -88,7 +88,7 @@ export async function resolveChannelSpec(userId: string, channelId: string): Pro
 
 const LOCAL_HINT: Partial<Record<ChannelKind, string>> = {
   'agent-sdk': '在本机终端执行 `claude` 并完成登录；Quilt 进程会复用这份登录态。',
-  codex: '安装 Codex 并执行 `codex` 用 ChatGPT 账号登录；Quilt 每次生成拉起一次 `codex exec`（不在你的 Codex 历史里留会话），模型名填你在 Codex 里用的那个。单次调用约 15～30 秒，比 API 通道慢。',
+  codex: '安装 Codex 并执行 `codex` 用 ChatGPT 账号登录；Quilt 每次生成拉起一次 `codex exec`（不在你的 Codex 历史里留会话，也不读你的 Codex 配置、MCP 与技能），模型名填 Codex 里可选的模型。验证约 20 秒；生成一屏约 2～4 分钟（桌面屏更久），比 API 通道慢得多，gpt-reserve 比 gpt-6-astra 快约三成。',
 };
 
 /** 统一目录（API-CORE-023）：输入框只渲染 available 的，设置页渲染全部 */

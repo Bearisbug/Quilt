@@ -18,11 +18,11 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-09-27 | 设计文档 v0.73（组件卡预览关掉背景模糊）：`TC-EDIT-012` 增第 7a 步（组件卡 iframe 里给根元素加 `backdrop-blur-xl` 后计算值仍为 `none`）。原现象（非 100% 缩放下交互态悬停出现灰影）只在有头浏览器里出现，无头截图整帧重画、复现不出来，由用户在自己的浏览器里确认 | @bug |
+| 2026-09-27 | 设计文档 v0.72（对话记录：参考图预览，消息复制 / 重试 / 修改）：新增 `TC-CORE-042`（大图预览的切换 / 到头停住 / 关闭与焦点归还、操作条显隐与归属、复制、重试只换通道且跑着时置灰与 409、修改填回、接口 404 / 400）；`tests/e2e/openai-stub.ts` 增 `holdMs`（拖一阵再回，造一个在跑的作业） | @bug |
+| 2026-09-25 | 设计文档 v0.70（工具栏滚动 / Codex 调用隔离）：`TC-CORE-023` 增第 3b 步（1440×600 下工具栏在列内滚动、滚动条不可见、渐隐方向随滚动、`End` 后末项可见且焦点环不被裁）；`TC-AGENT-012` 第 8 步增 `--ignore-user-config` / `--ignore-rules` 与「不许调工具」前置说明的断言 | @bug |
 | 2026-09-25 | 设计文档 v0.69（通道验证的前端等待上限）：`TC-AGENT-012` 第 8 步改为从设置弹窗添加本机 Codex 订阅通道并「保存并验证」，桩让验证拖 18 s，断言面板等得住、不报「保存失败」；§3 写明桩的这一延迟 | @bug |
 | 2026-09-25 | 设计文档 v0.68（接入 Codex）：新增 `TC-AGENT-012`（假 Codex：线程列表 / 会话下拉 / queue 投递 / 深链接 / 拒绝 / 按工具记忆 / Codex 订阅通道的 exec 参数与记账）与 `TC-AGENT-013`（真实 Codex：订阅通道生成、投给终端会话、残留锁判为未打开、深链接让桌面版打开线程）；§3 增假 Codex 的启动方式与真实 Codex 的前置 | @bug |
-| 2026-09-24 | 设计文档 v0.67（100 屏画布卡顿）：`TC-CORE-008` 重写——2 倍屏上下文、16 ms 连发滚轮、性能追踪断言每帧 GPU 主线程 ≤ 4 ms 与布局 ≤ 0.5 ms、结构检查（无 SVG 文字 / 小地图是 canvas / 停下后摘 will-change），原「首屏 img 请求数」「新进入视口 500 ms 内出图」两步随之去掉（100 屏骨架项目没有截图可数）；`TC-CORE-040` 第 6、7b 步改读小地图 canvas 的 `data-screens` / `data-view` | @bug |
-| 2026-09-23 | 设计文档 v0.66（新功能审查缺陷回写）：`TC-CORE-040` 增 7b–7f 步（拖视口框 1:1 不失控、聚焦时小地图隐藏、iframe 内 `⌘K`、关面板焦点归还、选中行滚入视野）；`TC-CORE-041` 增 1b（变体不被钉成样板）、4 步补胶囊不压角标、6b（呈现方式按家族改、变体上改 422、家族截图重拍）；`TC-PROTO-012` 增 1b（给叠层出变体）、5d–5f（脚本重跑不报已声明、叠层下底屏更新关层即见、标记落在叠层、叠层上切变体只换那一层）、6c（导出直开叠层 hash 垫起始屏） | @bug |
-| 2026-09-23 | e2e 等待改为轮询（审查第 27 项，用例步骤与预期不变）：`tests/e2e/lib.ts` 增 `eventually(check, 5000)`，core / proto / edit / components 四套里 64 处「固定睡一段再断言」改为轮询到断言成立（最多 5 s）；确认「某件事没有发生」的 12 处（单键不开面板、被拦下不发请求、Esc 不清选中、名字没被改等）与「断言之后紧接着读新页面」的 1 处（`TC-PROTO-005` 导出逐屏点链接，要等 view transition 换完 DOM）保留固定等待；固定等待总数 163 → 107，余下为动画让步与「点完读坐标再断言」 | @bug |
 
 ## 2. 测试范围 / 不测什么
 
@@ -61,7 +61,7 @@
 - 本机 Codex（`REQ-AGENT-003` / `REQ-CORE-013` v0.68，`ADR-020`）：`TC-AGENT-012` 用**假 Codex**验整条链——API 以 `QUILT_CODEX_HOME=/tmp/quilt-e2e-codex`、`QUILT_CODEX_BIN` 与 `QUILT_CODEX_OPENER` 都指向 `tests/e2e/codex-stub.mjs` 启动（另设 `OPENAI_API_KEY=sk-must-not-reach-codex`，验驱动会把它去掉），测试脚本也以同一个 `QUILT_CODEX_HOME` 运行（未设时登记「跳过」）。脚本自建假线程库（`state_5.sqlite`）；桩只记下 `queue` / 深链接 / `exec` 调用并回放 `exec` 的 JSONL（验证用的最小请求故意拖 18 s，与真 codex 冷启动相当，超过前端普通请求的 15 s 上限）；「Codex 窗口」一侧由脚本扮演——占住写锁文件表示线程打开着，读桩记下的队列消息、经 MCP 回写并收口。作业创建限流 10 次 / 分钟（§15），脚本在 `TC-AGENT-009` 之后先等过限流窗口再跑 012。`TC-AGENT-013`（真实 Codex）要本机 `codex` 已用 ChatGPT 登录、开着 Codex 桌面版，并临时把 Codex 的 `quilt` MCP 指到测试 API（`codex mcp add quilt --url http://127.0.0.1:3200/mcp` 加 `default_tools_approval_mode = "approve"`，测完改回 3100）；终端会话在伪终端里起 TUI（脚本替它回答终端能力探测与目录信任确认，只写进该伪终端，不动真实键盘鼠标）。
 - 聊天模式（`REQ-CORE-023` v0.45）：`TC-CORE-039` 要本机 `claude` 已登录——脚本经 API 建一条 `agent-sdk` 通道并探测通过后才发真实回合（模型 `CHAT_MODEL`，缺省 `claude-sonnet-5`；一轮 1～5 分钟，按订阅额度计费）；`LIVE_LLM=0` 只跑通道校验与串行守卫。SDK 会话文件落在 `~/.claude/projects/` 下按 `$dataDir/chat` 编码的目录，测试库与开发库共用该目录、会话 id 各自记在项目上，互不干扰。
 - MCP 与画布同面（`REQ-AGENT-002` v0.51）：`TC-AGENT-011` 由 `pnpm --filter @quilt/tests e2e:mcp` 执行，纯 MCP / REST、不开浏览器，要求 API 以 `LLM_DRIVER=stub` 启动（脚本先查 `/v1/health`，不是 stub 就退出）。为了不占用 3100 上的开发实例，可另起一套：`API_PORT=3200 PREVIEW_PORT=3201 API_ORIGIN=http://localhost:3200 PREVIEW_ORIGIN=http://preview.localhost:3201 DATABASE_URL=postgres://quilt:quilt@127.0.0.1:5439/quilt_test LLM_DRIVER=stub LLM_STUB= pnpm --filter @quilt/api dev`，脚本侧 `QUILT_E2E_API=http://localhost:3200 DATABASE_URL=…quilt_test`（种子脚本走同一个 `DATABASE_URL`）。`PREVIEW_ORIGIN` 必须一起改：`.env` 里写死的 3101 会让素材 URL 与截图渲染都打到开发实例的预览域。**浏览器用例也能在这套上跑**（v0.60 起）：先 `pnpm --filter @quilt/web build`，起 API 时再加 `WEB_DIST=$PWD/apps/web/dist WEB_ORIGIN=http://localhost:3200`（打包形态：API 同端口托管前端；`WEB_ORIGIN` 不改的话预览域的 `frame-ancestors` 还写着 5173，聚焦的 iframe 会整张拒载），脚本侧再加 `QUILT_E2E_WEB=http://localhost:3200`。
-- 单测（v0.60）：`pnpm test` 在 `tests/unit` 用 `node:test` 跑 `packages/core` 与前端纯函数的单测（不起库、不起浏览器，约 0.5 s）。TEST.md 不为单测逐条建 TC——测试文件名即覆盖范围（`core/inject`、`core/components`、`core/outline`、`core/lint`、`core/tokens`、`core/contract`、`web/arrange`、`web/jobs`），失败按「单测轮」登记。
+- 单测（v0.60）：`pnpm test` 在 `tests/unit` 用 `node:test` 跑 `packages/core` 与前端纯函数的单测（不起库、不起浏览器，约 0.5 s）。TEST.md 不为单测逐条建 TC——测试文件名即覆盖范围（`core/inject`、`core/components`、`core/outline`、`core/lint`、`core/tokens`、`core/contract`、`web/arrange`、`web/jobs`、`api/codex`、`api/agentSdk`），失败按「单测轮」登记。
 - LLM 故障注入：`LLM_STUB=503 pnpm dev` 让所有调用返回 503；`LLM_STUB=fixture` 回放固定 HTML（需要确定性时使用，用例中显式注明）。真实调用会消耗额度，每条用例后置不做特殊清理。
 - 工具：浏览器（自动化遵循运行环境既有约定：Playwright 驱动本机 Edge；帧率用页面内 rAF 计数 + `longtask` PerformanceObserver 采样；**在预览 iframe（跨域）内点击元素前必须先让画布处于该屏 1:1 聚焦态**——Playwright 不感知外层 CSS transform 缩放，非 1:1 下点击坐标会偏；键盘快捷键在焦点位于 iframe 内时由预览运行时转发，测试可直接对页面按键）；curl（不带凭据）；`pnpm mcp:call <tool> '<json>'` / `--resource <uri>` / `--list`（MCP 调用脚本，打印工具返回）。
 - 执行脚本：`tests/e2e/core.ts`（CORE）、`proto.ts`、`edit.ts`、`agent.ts`、`install.ts`（`TC-CORE-031`）、`smoke.ts`（开发冒烟）；环境变量 `RUN=轮次`、`ONLY=用例子集`、`LIVE_LLM=0` 跳过真实生成。各套件串行执行，不并行——每套开头的 `pnpm seed` 会清掉另一套正在用的数据。
@@ -260,6 +260,7 @@
 | 1 | 观察画布页 | 顶栏、右侧竖排工具栏、左侧对话记录面板、底部输入框四处浮层两两不重叠，画布铺满其下 |
 | 2 | 读顶栏的计算样式 | 顶栏自身无底色、无底边线、无 `backdrop-filter`，`::before` 是自上而下的线性渐变且高于内容行；在遮罩下半段取 `elementFromPoint` 命中的不是顶栏（不拦指针） |
 | 3 | 量工具栏每个按钮的命中盒与 Tab 序 | 命中盒均 ≥ 44×44；`tabindex=0` 的恰好 1 个；聚焦后按 ↓ 焦点移到下一个工具 |
+| 3b | 视口改成 1440×600，聚焦工具栏按 `Home`，再按 `End`；之后视口改回 1440×900 | 工具栏整体在视口内，放不下的工具在工具栏内滚动（`scrollHeight > clientHeight`），看不到滚动条（`offsetWidth − clientWidth = 0`）；`Home` 时 `data-fade=bottom`；`End` 后焦点在最后一个工具、它在滚动区可见范围内且四周留出 ≥ 4 px（焦点环不被裁），`data-fade=top`（v0.70） |
 | 4 | 悬停「补链」与「连线」工具 | 提示出现在工具栏左侧、完整可见不被裁切，含该工具的作用说明；有快捷键的工具在提示里标出按键 |
 | 5 | 依次按 `F` / `L` | 分别触发适配视图、切换连线显示（`toggle-links` 的 `aria-pressed` 翻转）|
 | 6 | 单独按 `D` / `T`，再按 `⌥D` / `⌥T`；另按 `⌘E` | 单键不开任何面板（URL 无 `panel=`）；带 `⌥` 才分别打开设计系统、本机 agent 面板，面板标识进 URL `?panel=`；`⌘E` 开启选择元素模式（不必先选中屏），再按一次退出 |
@@ -439,6 +440,22 @@
 | 8 | 选中 /s1 默认屏，`Delete` | 确认框写明「它的 1 个变体一起删除」；确认后项目剩 2 屏 |
 
 后置：无。
+
+#### `TC-CORE-042` 对话记录的参考图预览与消息操作 — 对应 `REQ-CORE-026`（v0.72）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：`pnpm seed:project --name Msgs --device mobile --screens 2`；API 以 stub 驱动；经接口发两轮（第一轮改 /s1 带 1 张参考图，第二轮改 /s2 带 2 张），都跑完；起一个收到请求 6 s 后才回的 OpenAI 兼容桩并建一条指向它的通道「Slow 通道」、验证通过；打开项目，对话记录展开。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 点对话记录里第 3 张缩略图（`message-attachment-open`） | 弹出 `image-viewer`，标题「参考图 3 / 3」，大图加载成功；「下一张」`aria-disabled=true`；`#root` 带 `inert` |
+| 2 | 按 `←` 两次，再按一次；点「下一张」 | 两次后 `data-index=0`、标题带第一轮的话；再按停在 0、「上一张」`aria-disabled=true`；点「下一张」到 1，焦点仍在预览里 |
+| 3 | 按 `Esc`；再点第 1 张缩略图，点大图外的空白处 | `Esc` 后预览关闭、焦点回到第 3 张缩略图、`#root` 的 `inert` 摘掉；点空白处同样关闭 |
+| 4 | 悬停第一条用户消息；看各条消息的操作条（`.msg-actions`） | 悬停的那条操作条不透明度 1、没悬停的为 0；每条都有「复制」（`msg-copy`），「修改」（`msg-edit`）只在最后一轮的用户消息、「重试」（`msg-retry`）只在最后一轮的助手消息 |
+| 5 | 授予剪贴板权限，点第二轮用户消息的「复制」 | 剪贴板内容 = 「第二轮：照这两张图改」 |
+| 6 | 输入框通道选「Slow 通道」，点最后一轮助手消息的「重试」 | 记录末尾多出一轮：用户消息正文与参考图 id 与原来一致；新作业 `kind=edit_screens`、`screenIds=[/s2]`、2 个 `imageKeys`，`runner` 是 Slow 通道（原作业不是） |
+| 7 | 新作业还在跑时悬停它的助手消息；同时对新用户消息 `POST …/messages/{id}/retry` | 「重试」`aria-disabled=true`；接口 `409 /errors/job-not-finished`；作业跑完成功、桩收到带图的请求，「重试」恢复可用 |
+| 8 | 点最后一轮用户消息的「修改」 | 输入框正文 = 这一轮原文、带回 2 张参考图、目标标签是 /s2 一枚、动词行是「改」，焦点在输入框 |
+| 9 | 对一条助手消息 `POST …/retry`；`POST jobs kind=export_prototype` 跑完后对它那条用户消息 `POST …/retry` | 前者 `404`；后者 `400 /errors/validation`、`path=messageId`；画布上不再有「重试」「修改」（最后一轮是导出） |
 
 ### CORE · 聚焦交互
 
@@ -969,6 +986,7 @@
 | 5 | `PATCH /v1/components/{cid}` 带 `name:"BottomNav"`、`expectedVersion:2` | `200`、`version=3`、`applied` 恰为 /s2、/s3；两屏 HTML 里实例根变为 `data-component="BottomNav"`，/s1（已脱离）`currentRevisionId` 不变 |
 | 6 | `DELETE /v1/components/{cid}` | `204`；三屏 `currentRevisionId` 都不变，/s2 HTML 里仍有 `data-component="BottomNav"`（已展开的留着）；详情 `components` 为空 |
 | 7 | 重新按步骤 1 提取（名 `TabBar`）；打开 `/p/{id}` | 画布出现 `component-card`（`data-name="TabBar"`），标签含「用于 3 屏」；在空白处框选到它 → 目标区出现 `component-chip`「组件 · TabBar」、动词行含「改组件「TabBar」」且无 `count-group` / `versions-group`；`⌘E` 点 /s1 进选择元素态，点 nav 里一个 tab → 检查器出现 `el-component-lock`（含「共享组件「TabBar」」）与 `el-edit-component`、`el-detach`，无 `#el-text`；点 `el-edit-component` → 目标区只剩「组件 · TabBar」、输入框获得焦点；工具栏 `new-component`（`⌥C`）填名 `Footer` 确认 → `component-card` 数变 2、目标区为「组件 · Footer」 |
+| 7a | 卡片报完尺寸后，在组件卡 iframe 里给根元素加 `backdrop-blur-xl` 类，等 300 ms 读计算样式（v0.73） | `backdrop-filter` 为 `none`（组件预览文档关掉了背景模糊，Tailwind 生成的规则压不过它） |
 | 8 | （真实 LLM）目标为 `TabBar` 组件，输入框发「把第二个 tab 的文案改成 Search，其他都别动」 | `POST messages` 带 `targetComponentIds=[cid]`，作业 `kind=edit_component`；在跑作业行写「改组件「TabBar」」；作业成功后组件 `version+1`、`summary` 含 `Search`，用它的每一屏各出一条 `sourceKind=component`、`jobId=本作业` 的新修订且 HTML 含 `Search`；助手消息以「已更新组件「TabBar」」开头并写「同步 N 屏」 |
 | 9 | 双击画布上的组件卡；按 `Esc`（v0.53 组件卡可交互） | 双击前后世界层 `.world` 的 `transform` **完全一致**（组件进交互不动镜头，与屏的「推到 1:1 居中」不同）；卡片带 `focused`、手势罩 `.gesture` 已移除、iframe 的 `pointer-events` 为 `auto`（组件里的按钮点得动）、右上出现呼吸绿点（`.live-dot`，`aria-label="交互中"`，8 px、`sk-pulse` 动画，不透明度在变）；此时双击一张屏卡进交互，组件的 `focused` 自动退掉（两态互斥）；`Esc` 退出交互态（焦点在组件 iframe 内按也有效）。再往组件里塞一个 `href="#"` 的链接并点它（v0.55 链接惰性）：不出现任何 toast、iframe 也不跳走 |
 | 10 | 目标为该组件，发「顶部一级频道导航：关注 / 推荐 / 附近 / 活动，默认选中「推荐」，点任意一条要真切换」；产出按组件预览文档渲染后点第 3 条（v0.54 组件交互契约） | 产出通过 `validateComponentHtml`（单根、无 `<script>`）；HTML 里每条是 `<label>` 且首个孩子是 `type="radio" class="peer sr-only"`、`name` 带组件名前缀，选中态全部写成 `peer-checked:` 变体、默认值只在 `checked` 上（**没有任何一条把选中样式硬编码进 class**），焦点环走 `peer-focus-visible:`，条目带 `data-slot` / `data-part`；渲染后点第 3 条：该条 `input.checked` 为 true、字重与字号升到选中档、indicator `opacity` 为 1，原选中项三项同时回落；容器高度前后一致（选中态变粗变大不得顶高）|
@@ -1061,7 +1079,7 @@
 | 5 | 直接 `POST` 投给「帮我看看首页」 | 202；桩先记 `queue` 再记打开 `codex://threads/<id>`；`delivery.opened=true`；脚本在看到深链接后占住该线程的锁、取走执行 → `succeeded` |
 | 6 | 分别投给 exec 线程、不存在的线程、「坏线程」 | 前两个 400 `/errors/validation`；「坏线程」建作业 202，随后 `failed`、`errorClass=agent`、`message` 以「投递失败」开头 |
 | 7 | 刷新页面；再把通道切到「交给本机 Claude Code」 | 刷新后会话下拉仍选中「设计稿」；切到 Claude Code 后触发器不带 Codex 的线程 id（记忆按工具分开） |
-| 8 | 打开 `?settings=runners`，「添加通道」选「本机 Codex 订阅」，填显示名与模型 `gpt-stub`，点「保存并验证」（桩让验证拖 18 s）；再用它发一条改 s1 的消息 | 面板没有 Key / 端点字段；等过 18 s 后面板关闭、不出现「保存失败」（v0.69：前端验证请求等 100 s，此前共用 15 s 上限），通道 `apiKeyHint=null`、`status=verified`；桩记下的 `exec` 参数含 `--json`、`--ephemeral`、`--skip-git-repo-check`、`-s read-only`、`-m gpt-stub`，环境里没有 API Key，工作目录不在仓库里；改屏作业成功、s1 新修订含桩的标记 `(by codex stub)`；`GET /v1/me/usage` 的 `tokensIn` 增加 ≥ 20000 |
+| 8 | 打开 `?settings=runners`，「添加通道」选「本机 Codex 订阅」，填显示名与模型 `gpt-stub`，点「保存并验证」（桩让验证拖 18 s）；再用它发一条改 s1 的消息 | 面板没有 Key / 端点字段；等过 18 s 后面板关闭、不出现「保存失败」（v0.69：前端验证请求等 100 s，此前共用 15 s 上限），通道 `apiKeyHint=null`、`status=verified`；桩记下的 `exec` 参数含 `--json`、`--ephemeral`、`--skip-git-repo-check`、`--ignore-user-config`、`--ignore-rules`（v0.70）、`-s read-only`、`-m gpt-stub`，输入开头是「Answer directly … Do not run shell commands …」，环境里没有 API Key，工作目录不在仓库里；改屏作业成功、s1 新修订含桩的标记 `(by codex stub)`；`GET /v1/me/usage` 的 `tokensIn` 增加 ≥ 20000 |
 
 后置：脚本关掉占着的锁文件句柄、删除通道；假 Codex 目录下次运行前清空。
 
@@ -1177,6 +1195,10 @@
 | RUN-121 | 2026-09-25 | 未提交工作树（设计文档 v0.68：接入 Codex） | AI(Claude Code) | 单测轮 37/37（新增 `tests/unit/api/codex.test.ts` 3 条）；e2e 局部轮 AGENT 整套（含新增 `TC-AGENT-012`），隔离栈 3200 / 3201 + `quilt_test` + stub，API 以 §3 的 `QUILT_CODEX_*` 指向假 Codex | 通过 5/5（另待人工 1：`TC-AGENT-010`）。过程中修掉三处：① 残留的写锁文件被判成「已打开」→ 改用 `lsof` 查占用（见 RUN-122 实测）；② 刷新后 Codex 线程记忆丢失，本地存储被写成空串——Radix Select 隐藏原生 `<select>` 在受控值暂不在选项里时回报 `''`，`onSessionChange` 与检查器的 `pickSession` 改为忽略空值，修后 `TC-AGENT-012` 连跑 2 次通过；③ 用例侧：`TC-AGENT-009` 刷新后立刻读会话值（列表还没到）改为等值出现，`TC-AGENT-012` 开头等过 009 留下的作业限流窗口（10 次 / 分钟） |
 | RUN-122 | 2026-09-25 | 同 RUN-121 | AI(Claude Code) | `TC-AGENT-013` 真实 Codex（CLI 0.153.4、桌面版 26.917.71314，模型 `gpt-6-astra`，ChatGPT 登录）+ 受影响回归：`TC-CORE-022` / `025` / `027` / `028` / `029` / `030` / `032` / `036`、`TC-EDIT-003` / `009`、`TC-CORE-039`（`LIVE_LLM=0`） | `TC-AGENT-013` 通过：订阅通道探测 20 s、改一屏 90 s（台账 `driver=codex` 25944 / 2003 token），当天 Codex 会话文件数不变；终端 TUI 线程取走投递、45 s 收口；关掉 TUI 后锁文件留下，改用 `lsof` 后列表判为未打开，再投递时 Quilt 排队并打开 `codex://threads/<id>`，桌面版打开线程执行、69 s 收口（`opened=true`）。回归通过 8/11：`TC-CORE-027`（无视觉通道，环境）、`TC-EDIT-003`（需真实模型）、`TC-CORE-029`（§7 已登记的顺序依赖）与 RUN-117 同列 |
 | RUN-123 | 2026-09-25 | 未提交工作树（设计文档 v0.69：通道验证的前端等待上限） | AI(Claude Code) | 复现 + 修复轮：`TC-AGENT-012`（第 8 步改为从设置弹窗添加 Codex 订阅通道、桩让验证拖 18 s）先在修复前的前端上跑，再在修复后跑；回归 `TC-CORE-022` / `025` / `028`。隔离栈 3200 / 3201 + `quilt_test` + stub + 假 Codex | 修复前失败：面板停在「编辑「Codex 订阅」」并显示「保存失败」，与用户报告一致（服务端此时已把通道标为已验证）；修复后 `TC-AGENT-012` 通过，回归 3/3 通过。用户报告的开发库通道「gpt - 6」在库里就是 `verified`，刷新设置页即可看到 |
+| RUN-124 | 2026-09-25 | 未提交工作树（设计文档 v0.70：工具栏放不下时滚动；Codex 订阅调用与用户环境隔离） | AI(Claude Code) | 复现 + 修复轮：`TC-CORE-023`（新增第 3b 步）先在修复前的前端（`git worktree` 于 `c2eabe2` 构建）上跑，再在修复后跑；`TC-AGENT-012`（第 8 步加隔离参数与前置说明断言）；另用真实 Codex 在同一个仪表盘屏上计时对比。隔离栈 3200 / 3201 + `quilt_test` + stub | 修复前 `TC-CORE-023` 失败在 3b：600 高时按钮列不滚动、工具溢出到药丸外、焦点环留白 0；修复后 3b 通过，该用例随后仍失败在 §7 已登记的「叫回后安全区底部没复原」。`TC-AGENT-012` 通过。真实 Codex：用户那条「卡住」的作业实为 3 分 8 秒成功（规划 28 s、出屏 2 分 36 秒）；原调用方式读了用户 `config.toml` 并先执行命令读全局技能，同屏 237 s、输入 4.5 万 token；隔离后 `gpt-6-astra` 143 s、`gpt-reserve` 104 s，输入 1.5～1.8 万 token、不再执行命令 |
+| RUN-125 | 2026-09-27 | 未提交工作树（设计文档 v0.71：本机 Claude 订阅 SDK 升级，API 报错不再当成产出） | AI(Claude Code) | 复现 + 修复轮：用户失败作业（本机 Claude 订阅 · `claude-opus-5-5`，带图改共享组件）按原提示词对开发库只读重放，先在 SDK 0.3.263 上、再在 0.3.283 上；单测轮（新增 `tests/unit/api/agentSdk.test.ts`，先失败后通过）；隔离栈 3200 / 3201 + `quilt_test`（`LLM_DRIVER=agent-sdk`、`QUILT_MODEL=claude-opus-5-5`）上 `TC-EDIT-012`（真实回合）、`TC-CORE-039`（`CHAT_MODEL=claude-opus-5-5` 与缺省 `claude-sonnet-5` 各一次），外加一次按用户原路径的接口验证：建 Opus 5.5 订阅通道 → 验证 → 上传用户那张参考图 → 改组件 | 0.3.263：SDK 回 `is_error:true`、`api_error_status:400`、`subtype:"success"`，原文「Claude Code 2.1.263 does not support this model; version 2.1.280 or newer is required」，被当成产出 → 「0 个根元素」；0.3.283：同一提示词 19 s 出单根 `<nav>`（中间黑底加号圆钮），校验通过。单测 38/38，typecheck 通过。`TC-EDIT-012` 首两次失败在「点『改组件』后输入框没获得焦点」、脚本改为轮询后通过（该步真实回合走的是测试库里已验证的 Gemini 通道）。原路径接口验证：通道验证 3.1 s 通过，改组件 36 s 成功、组件 v2→v3、同步 3 屏。`TC-CORE-039` 两次都失败在第 3 步（见明细，非本轮引入）；第 2 步只问不改的回合通过 |
+| RUN-126 | 2026-09-27 | 未提交工作树（设计文档 v0.72：对话记录参考图预览，消息复制 / 重试 / 修改） | AI(Claude Code) | 局部轮：新增 `TC-CORE-042`；受影响回归 `TC-CORE-007` / `023` / `027` / `029`（输入框发送路径抽出公共段、对话记录面板改动）、`TC-EDIT-009`（「记为约定」在同一气泡里）；单测轮；另用真实参考图（82 KB PNG）在 1440×900 与 900×640 下看大图预览、悬停操作条与提示的实际画面。隔离栈 3200 / 3201 + `quilt_test` + stub | `TC-CORE-042` 首跑失败两次后通过（见明细）；`TC-CORE-007` / `029`、`TC-EDIT-009` 通过；`TC-CORE-027` 失败（无视觉的 model 形态通道，环境，同 RUN-122）；`TC-CORE-023` 失败在「重新展开后输入框没回到原位」（见明细）。单测 38/38，typecheck 通过。画面：预览标题「参考图 6 / 6 ·「原话」」、图居中、末张「下一张」淡出；操作条浮在气泡右上角不推动内容；「修改」「重试」的说明提示起初被面板右缘裁掉，改为右对齐向下展开后完整 |
+| RUN-127 | 2026-09-27 | 未提交工作树（设计文档 v0.73：组件卡预览关掉背景模糊） | AI(Claude Code) | 复现 + 修复轮：`TC-EDIT-012`（新增第 7a 步，`LIVE_LLM=0`）先在修复前的组件预览文档上跑（`services/components.ts` 临时换回 HEAD），再在修复后跑；单测轮；另对开发实例只读截图看用户那张「Bottom Bar」组件卡（1.46 倍、交互态、悬停最后一个 tab）。隔离栈改到 3410 / 3411 + `quilt_test` + stub——3200 与 3300 被别的项目（Ofcourt 的 Next 开发服务器与后端）占着，3200 上两个进程并存时 `localhost` 会落到对方那边 | 修复前 7a 失败：`backdrop-filter` 计算值 `blur(24px)`；修复后 `TC-EDIT-012` 通过。单测 38/38，typecheck 通过。开发实例组件卡：底栏 `backdrop-filter` 为 `none`，画面与修复前一致。原现象只在有头浏览器里出现（无头截图整帧重画），消失与否待用户在自己的浏览器里确认 |
 | RUN-114 | 2026-09-23 | 未提交工作树（设计文档 v0.65：审查缺陷回写） | AI(Claude Code) | 单测轮 34/34；e2e 局部轮：`TC-AGENT-011`（含新增 7c / 8a）、`TC-AGENT-003` / `004`；`TC-PROTO-001` / `012`（含新增 5～6b）；`TC-CORE-007` / `010` / `011` / `018` / `023` / `034` / `036` / `040` / `041`（含新增断言）；`TC-EDIT-001` / `005` / `007` / `012`。隔离栈 3200 / 3201 + `quilt_test` + stub + 打包形态，逐套串行 | 通过 18/19 · 失败 1（`TC-CORE-023`，与 RUN-112 同一步、HEAD 同现，判环境） |
 | RUN-113 | 2026-09-23 | 未提交工作树（设计文档 v0.64：MCP 写屏改小步——`patch_screen` / `append_upload`、`get_screen` 只给 body） | AI(Claude Code) | 局部轮（`REQ-AGENT-002` → `TC-AGENT-011` 全部步骤含新增 7b；`get_screen` 口径变化波及的 `TC-AGENT-003` / `004`）。隔离环境 3200 / 3201 + `quilt_test` + stub，纯 MCP / API，未托管前端 | 通过 2/3 · 失败 1（`TC-AGENT-003`：MCP 部分——`get_screen` 只给 body、截图就绪——已过，随后打开浏览器页 `locator.waitFor` 超时：本栈没托管前端，判环境） |
 | RUN-112 | 2026-09-23 | 未提交工作树（设计文档 v0.60 工程底座 + v0.61 找屏与总览 + v0.62 状态变体 + v0.63 叠层屏） | AI(Claude Code) | 单测轮 `pnpm test` 31/31；e2e 局部轮（新增 `TC-CORE-040` / `041`、`TC-PROTO-012`；重构影响面：`TC-CORE-003` / `007` / `012` / `018` / `023` / `034` / `036`、`TC-EDIT-001` / `005`、`TC-AGENT-001` / `003` / `004` / `011`）。隔离环境：3200 / 3201 + `quilt_test` + stub 驱动 + 打包形态（`WEB_DIST` + `WEB_ORIGIN=3200`，§3），3100 / 5173 归另一会话 | 通过 15/17 · 失败 1（`TC-CORE-023`，HEAD 同现、判环境）· 未跑 1（`TC-EDIT-008` 需真实模型）· 跳过 / 待人工 2（`TC-AGENT-009` / `010`） |
@@ -1238,6 +1260,10 @@
 
 | 轮次 | 用例 | 结果 | 现象 / 证据 | 跟进 |
 | --- | --- | --- | --- | --- |
+| RUN-126 | TC-CORE-042 | 失败 → 通过 | ① 「job timeout」：种子按 `.env` 建了一条已验证的 Gemini 通道并成为缺省，前置里不指定通道的两轮打到了真实模型，第二轮超过 60 s；② 「这一轮还在跑时『重试』应置灰」：操作条只在气泡有正文时渲染，在跑的助手气泡还是空的，「重试」根本不存在，与设计文档「置灰并写明原因」不符 | ① 脚本更正：前置两轮显式走 `stub`；② 产品修复：操作条在「有正文或属于最后一轮」时渲染，「复制」只在有正文时出现 |
+| RUN-126 | TC-CORE-023 | 失败 | 先失败在「叫回后光标没落回输入区」（RUN-124 时这一步通过）：断言在输入框显形后一次性读 `activeElement`，而聚焦在 `showComposer` 的 `setTimeout(0)` 里，探针实测叫回后 56 ms 内光标已在输入框；改为轮询后这一步与下一步「安全区底部复原」都通过，随后失败在「重新展开后输入框没回到原位」——RUN-112 已记同一现象（刷新后输入框宽度要等通道目录取回才落定），HEAD 的脚本在该处只有「等 800 ms」的注释、没有等待语句 | 前一处：脚本更正（轮询 2 s）；后一处：§7 已登记的打包形态漂移，非本轮引入；实现未改 |
+| RUN-125 | TC-EDIT-012 | 失败 → 通过 | 两次失败在「点『改组件』后输入框没获得焦点」（负载 10 上下）：断言一次性读 `activeElement`（RUN-117 已记同一现象），`showComposer` 用 `setTimeout(0)` 聚焦 | 脚本更正：改为 2 s 内轮询；随后整条通过，焦点确实落到输入框，实现未改 |
+| RUN-125 | TC-CORE-039 | 失败 | 第 3 步「新修订来源 / 作业不对：manual null」，Opus 5.5 与 Sonnet 5 同现：助手改标题用的是 `quilt.edit_element`（事件里的进度是「正在调用 edit_element」），这个工具不收 `jobId`、修订记为 `manual`，于是不算聊天作业的产出（`affectedScreenIds` 缺这一屏）。标题确实改了、第二屏未动。该用例上一次执行是 RUN-092（v0.45），`edit_element` 进 MCP 在其后（v0.51） | 非本轮引入，登 §7；实现未改 |
 | RUN-117 | TC-CORE-016 / TC-CORE-017 | 失败 → 通过 | 016「在途预估应比之前多 8 屏，实际 3 → 10」：开跑时已有 3 屏在途，是前序用例的作业在高负载下还没收口；016 失败时没走到释放那步，留下的 running 种子作业让 017 的 `seed:job` 撞上项目级在跑作业唯一索引 | 复测：`ONLY=TC-CORE-013..017` 连跑 5/5 通过；本版没改作业与用量路径，不跟进 |
 | RUN-117 | TC-EDIT-001 / TC-EDIT-012 | 失败 → 通过 | EDIT-001 等检查器 8 s 超时；EDIT-012「点『改组件』后输入框没获得焦点」（断言是一次性读 `activeElement`，不轮询） | 单跑均通过（EDIT-001 保存响应 230 ms）；负载 60～70 下的时序问题，本版的 `useModal` 焦点归还不经过这条路径（改组件不开弹层） |
 | RUN-115 | 全部 | — | 第一次整套跑到 `TC-CORE-035` 时 Docker Desktop 整体退出，Postgres 容器随之停止（`ECONNREFUSED 127.0.0.1:5439`），后续用例与三套全部连坐失败；3100 开发实例同时因连不上库退出 | 重新拉起 Docker 与 `quilt-pg`，核对开发库完好（5 个项目、34 屏），重启隔离 API 后整套重跑 |
@@ -1342,6 +1368,7 @@
 
 - **`TC-CORE-029` 在整套 core 顺序下偶发**（RUN-115）：更早的用例（通道相关的 `TC-CORE-025` 一带）把本机 agent 通道留作浏览器上下文里记住的默认通道，029 开头的动词行于是是「造屏 · 交给本机会话」而不是「造 1 屏 · 自动摆放」。单跑与「028 + 029」组合都通过。修法方向：029 开头显式选一条模型通道，或前面的用例收尾时清掉 `quilt:runner` 的本机记忆。
 - **`TC-CORE-023` 在打包形态的隔离栈上失败**（RUN-112 / 114 / 115，HEAD 同现）：失败点在「刷新 / 叫回后输入框位置或焦点未复原」之间漂移，开发实例（3100 + Vite）上 RUN-111 通过。需在开发实例上复测定性。
+- **聊天回合经 `quilt.edit_element` 改的屏不记在聊天作业名下**（RUN-125，`TC-CORE-039` 第 3 步）：`edit_element` 不收 `jobId`，修订记为 `manual`，聊天回执与 `affectedScreenIds` 漏掉这一屏（画布经项目事件流照常刷新）。修法方向：`edit_element` 与 `patch_screen` 一样接受 `jobId` 并记 `agent_ingest`，或聊天系统提示里要求改屏一律带 `jobId` 的工具。
 
 - **对话记录折叠横条的进度未修**（v0.38 查出，实现与设计文档 §13 不符）：`Canvas.tsx` 给 ChatDock 的 `status` 在「恰好一个作业在跑且它还没有进度文案」时是 `null`，横条于是退回「对话 · N 条」。在跑作业行已按 v0.38 兜底写「排队中…」，横条那一路的兜底要在 Canvas 侧收敛（把「空进度说什么」收成一个出处），暂无用例覆盖。
 - **整组造屏的入口屏仍可能撞修订冲突**（设计文档 §16 真值表缺口行）：规划器返回的 `entryFrom` 在作业跑起来之后才知道，前端的覆盖屏集与后端的 `target_screen_id` 都看不见它；现无自动用例，触发后表现为改屏作业 `failed（revision conflict）` 或入口屏的跳转静默没接上。

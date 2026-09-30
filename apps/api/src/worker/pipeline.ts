@@ -395,7 +395,7 @@ async function runEditComponent(ctx: Ctx): Promise<{ component: string; applied:
   let out = stripFences(await llmCall(ctx, system, prompt, undefined, true));
   let v = validateComponentHtml(out);
   // 结构不对（多根 / 带 script）修一回合：这是硬要求，不是设计偏离
-  if (!v.ok) { out = stripFences(await llmCall(ctx, system, `${prompt}\n\nYour previous output was rejected: ${v.error}. Return exactly ONE root element, no <script>/<style>.`)); v = validateComponentHtml(out); }
+  if (!v.ok) { out = stripFences(await llmCall(ctx, system, `${prompt}\n\nYour previous output was rejected: ${v.error}. Return exactly ONE root element, no <script>/<style>.`, undefined, true)); v = validateComponentHtml(out); }
   if (!v.ok) throw new JobFailure('validation', v.error);
   const c = classifyComponentHtml(out);
   const [updated] = await db.update(schema.components)

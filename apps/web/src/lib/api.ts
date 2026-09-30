@@ -48,6 +48,9 @@ export const api = {
     // targetComponentIds（REQ-EDIT-006）：只有组件没有屏 = 改这个组件；与屏 / 锚点同发 = 它们的完整 HTML 进上下文
     send: (id: string, body: { content: string; mode?: 'chat'; targetScreenIds?: string[]; targetComponentIds?: string[]; count?: ScreenCount; versions?: number; anchor?: { x: number; y: number }; runner?: Runner; attachmentIds?: string[] }) =>
       call<{ userMessage: MessageDto; assistantMessage: MessageDto; job: JobDto }>(`/v1/projects/${id}/messages`, { method: 'POST', body: JSON.stringify(body), idempotencyKey: crypto.randomUUID() }),
+    // 重试一轮（API-CORE-034）：服务端复制原作业输入，只换通道
+    retry: (id: string, messageId: string, runner?: Runner) =>
+      call<{ userMessage: MessageDto; assistantMessage: MessageDto; job: JobDto }>(`/v1/projects/${id}/messages/${messageId}/retry`, { method: 'POST', body: JSON.stringify({ runner }), idempotencyKey: crypto.randomUUID() }),
     // 删项目（API-CORE-031）：行级联 + 对象文件清理；有进行中作业时 409 /errors/project-busy
     remove: (id: string) => call<void>(`/v1/projects/${id}`, { method: 'DELETE' }),
     // 应用简介 / 样板屏（API-CORE-027）

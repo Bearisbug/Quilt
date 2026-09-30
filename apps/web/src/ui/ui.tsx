@@ -32,7 +32,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 // 尺寸：xs 32px（面板角落的收起 / 关闭）、sm 40px（输入框的发送 / 取消）、md 44px（工具栏）。
 // tone=invert 是反色实心钮，只给「此刻唯一的主动作」（发送 / 停止）用。
 type IconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'disabled'> & {
-  label: string; hint?: string; desc?: string; active?: boolean; tip?: 'left' | 'right' | 'top' | 'top-end' | 'bottom' | 'none'; unavailable?: string | false; size?: 'xs' | 'sm' | 'md'; tone?: 'default' | 'danger' | 'invert';
+  label: string; hint?: string; desc?: string; active?: boolean; tip?: 'left' | 'right' | 'top' | 'top-end' | 'bottom' | 'bottom-end' | 'none'; unavailable?: string | false; size?: 'xs' | 'sm' | 'md'; tone?: 'default' | 'danger' | 'invert';
 };
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton({ label, hint, desc, active, tip = 'left', unavailable, size = 'md', tone = 'default', className, children, onClick, ...rest }, ref) {
   return (
@@ -65,6 +65,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
           tip === 'bottom' && 'top-full left-1/2 mt-2 -translate-x-1/2',
           // 贴容器右缘展开：按钮在容器边上时，居中锚点会把提示顶出容器（实测撑出 59px）
           tip === 'top-end' && 'bottom-full right-0 mb-2',
+          tip === 'bottom-end' && 'top-full right-0 mt-2',
         )}
       >
         <span className="flex items-baseline gap-1.5 whitespace-nowrap font-medium">

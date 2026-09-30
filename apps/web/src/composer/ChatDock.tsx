@@ -1,7 +1,12 @@
-import { useEffect, useRef } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
-import type { MessageDto } from '@quilt/core';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronUp, Copy, Pencil, RotateCcw } from 'lucide-react';
+import type { JobKind, MessageDto } from '@quilt/core';
 import { Wordmark } from '@/ui/BrandMark';
+import { IconButton } from '@/ui/ui';
+import { useToast } from '@/lib/toast';
+import { ImageViewer } from './ImageViewer';
+
+const RETRYABLE: JobKind[] = ['generate', 'edit_screens', 'edit_component', 'chat'];
 
 export type ChatDockProps = {
   messages: MessageDto[];
@@ -14,13 +19,33 @@ export type ChatDockProps = {
   /** 「记为约定」（REQ-EDIT-003）：把这一轮改屏的指令提炼成设计系统约定，预览后写入 */
   onRemember?: (assistant: MessageDto) => void;
   busy?: boolean;
+  /** 最后一轮的重试 / 修改（REQ-CORE-026）：参数都是这一轮的用户消息 */
+  onRetry?: (user: MessageDto) => void;
+  onEdit?: (user: MessageDto) => void;
+  /** 在排队或在跑的作业：最后一轮的作业还在其中时「重试」置灰 */
+  runningJobIds: ReadonlySet<string>;
 };
 
 // 对话记录（REQ-CORE-006，v0.34 挪到左下角）：底部对齐、从下往上长，头部一整条可点——上拉展开、下收折叠；
 // 折叠后只剩这一条横条（标题 + 条数；恰好一个作业在跑时显示它的进度，多个时显示条数）。输入在底部的 Composer 里。
 export function ChatDock(p: ChatDockProps) {
+  const toast = useToast();
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [p.messages.length, p.progress, p.collapsed]);
+  // 大图预览（REQ-CORE-026）：整个对话已加载的参考图按时间排成一组；关闭后焦点回到点开它的那张缩略图
+  const gallery = useMemo(() => p.messages.flatMap((m) => m.attachments.map((a) => ({ id: a.id, url: a.url, caption: m.content.slice(0, 40), messageId: m.id }))), [p.messages]);
+  const [viewerAt, setViewerAt] = useState<number | null>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  // 最后一轮 = 最后一条带作业的用户消息与同一作业的助手消息；只有输入框能发出的四类作业可重试 / 修改
+  const round = useMemo(() => {
+    const user = [...p.messages].reverse().find((m) => m.role === 'user' && m.jobId);
+    if (!user || !user.jobKind || !RETRYABLE.includes(user.jobKind)) return null;
+    return { user, assistant: p.messages.find((m) => m.role === 'assistant' && m.jobId === user.jobId) };
+  }, [p.messages]);
+  const copy = async (text: string) => {
+    try { await navigator.clipboard.writeText(text); toast('已复制'); }
+    catch { toast('复制失败：浏览器没有给剪贴板权限', 'error'); }
+  };
 
   return (
     <aside className="chat-dock chrome absolute left-3 z-20 flex w-[var(--dock-w)] flex-col overflow-hidden rounded-xl" aria-label="对话记录" data-testid="chat-dock" data-state={p.collapsed ? 'collapsed' : 'open'}>
@@ -44,21 +69,42 @@ export function ChatDock(p: ChatDockProps) {
               </div>
             )}
             {p.messages.map((m) => (
-              <div key={m.id} className={`fade-up rounded-xl px-3 py-2 text-sm ${m.role === 'user' ? 'ml-5 bg-accent/15' : 'mr-5 bg-panel-2'}`}>
+              <div key={m.id} data-testid="message" data-role={m.role} className={`msg fade-up relative rounded-xl px-3 py-2 text-sm ${m.role === 'user' ? 'ml-5 bg-accent/15' : 'mr-5 bg-panel-2'}`}>
                 {/* 不 uppercase：那会把字标写成 QUILT，改掉品牌字样 */}
                 <div className="mb-0.5 text-[10px] tracking-wide text-muted">{m.role === 'user' ? '你' : <Wordmark />}</div>
-                {/* 发过的参考图（REQ-CORE-012）：URL 是签名的、会过期，取不到就退成一行说明而不是裂图 */}
+                {/* 消息操作（REQ-CORE-026）：浮在气泡右上角、占的是标签行右侧的空白，出现时不推动任何内容；显隐规则在 styles.css 的 .msg-actions */}
+                {/* 在跑的助手气泡还没有正文、没得复制，但「重试」仍要出现并写明为什么用不了 */}
+                {(m.content || m.id === round?.user.id || m.id === round?.assistant?.id) && (
+                  <div className="msg-actions absolute -top-3 right-2 flex gap-0.5 rounded-full border border-line bg-panel p-0.5 shadow-md" role="group" aria-label="消息操作">
+                    {m.content && <IconButton label="复制" size="xs" tip="bottom-end" data-testid="msg-copy" onClick={() => void copy(m.content)}><Copy size={14} aria-hidden="true" /></IconButton>}
+                    {m.id === round?.user.id && p.onEdit && (
+                      <IconButton label="修改" desc="把这一轮的文字、参考图与目标填回输入框，改完再发" size="xs" tip="bottom-end" data-testid="msg-edit" onClick={() => p.onEdit!(m)}><Pencil size={14} aria-hidden="true" /></IconButton>
+                    )}
+                    {m.id === round?.assistant?.id && p.onRetry && (
+                      <IconButton label="重试" desc="用原来的文字、参考图与目标再发一轮，通道用输入框当前选的" size="xs" tip="bottom-end" data-testid="msg-retry"
+                        unavailable={p.runningJobIds.has(round.user.jobId!) && '这一轮还在跑，等它结束再重试'} onClick={() => p.onRetry!(round.user)}><RotateCcw size={14} aria-hidden="true" /></IconButton>
+                    )}
+                  </div>
+                )}
+                {/* 发过的参考图（REQ-CORE-012）：URL 是签名的、会过期，取不到就退成一行说明而不是裂图；点开是大图预览（REQ-CORE-026） */}
                 {m.attachments.length > 0 && (
                   <ul className="mb-1.5 flex flex-wrap gap-1.5" aria-label={`${m.attachments.length} 张参考图`}>
-                    {m.attachments.map((a) => (
-                      <li key={a.id}>
-                        <img
-                          src={a.url} alt="参考图" data-testid="message-attachment"
-                          className="size-14 rounded-md border border-line object-cover"
-                          onError={(e) => { e.currentTarget.replaceWith(Object.assign(document.createElement('span'), { className: 'text-[11px] text-muted', textContent: '参考图已过期' })); }}
-                        />
-                      </li>
-                    ))}
+                    {m.attachments.map((a) => {
+                      const at = gallery.findIndex((g) => g.id === a.id && g.messageId === m.id);
+                      return (
+                        <li key={a.id}>
+                          <button type="button" aria-label={`查看参考图 ${at + 1} / ${gallery.length}`} data-testid="message-attachment-open"
+                            className="block rounded-md transition-opacity duration-[var(--duration-fast)] hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                            onClick={(e) => { openerRef.current = e.currentTarget; setViewerAt(at); }}>
+                            <img
+                              src={a.url} alt="" data-testid="message-attachment"
+                              className="size-14 rounded-md border border-line object-cover"
+                              onError={(e) => { e.currentTarget.replaceWith(Object.assign(document.createElement('span'), { className: 'text-[11px] text-muted', textContent: '参考图已过期' })); }}
+                            />
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
                 {/* 回执还没落库的助手气泡显示它自己那个作业的进度：并行时按 jobId 取，否则每个空气泡都会写上别人的进度 */}
@@ -81,6 +127,7 @@ export function ChatDock(p: ChatDockProps) {
           </p>
         </>
       )}
+      {viewerAt !== null && gallery[viewerAt] && <ImageViewer images={gallery} start={viewerAt} returnTo={openerRef} onClose={() => setViewerAt(null)} />}
     </aside>
   );
 }

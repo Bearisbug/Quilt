@@ -6,7 +6,8 @@ import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, M
 import { IconButton } from '@/ui/ui';
 import { VendorIcon } from '@/ui/VendorIcon';
 
-export type ComposerHandle = { focus: () => void };
+/** load（REQ-CORE-026「修改」）：把一轮的文字与参考图填回来、替换现有草稿；参考图已上传过，直接带 id */
+export type ComposerHandle = { focus: () => void; load: (draft: { text: string; images: { id: string; url: string }[] }) => void };
 /** 一行在跑作业（REQ-CORE-020）：label = 它在做什么，progress = 当前阶段 */
 export type RunningJob = { id: string; label: string; progress: string | null };
 /** 输入框的动词模式（REQ-CORE-023）：design = 造 / 改（动词由目标决定）；chat = 交给助手定范围 */
@@ -97,7 +98,13 @@ export function Composer(p: ComposerProps) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  useImperativeHandle(p.handle, () => ({ focus: () => taRef.current?.focus() }), []);
+  useImperativeHandle(p.handle, () => ({
+    focus: () => taRef.current?.focus(),
+    load: ({ text, images }) => {
+      setText(text);
+      setShots((prev) => { prev.forEach((s) => URL.revokeObjectURL(s.url)); return images.map((im, n) => ({ key: im.id, url: im.url, name: `参考图 ${n + 1}`, id: im.id })); });
+    },
+  }), []);
   // 把实际高度报给外壳（收起时 display:none 量到 0，不报）
   const onResize = p.onResize;
   useEffect(() => {

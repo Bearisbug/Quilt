@@ -109,6 +109,13 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 /* 对话记录（v0.34）：贴左下角、底部对齐，从下往上长。窄视口下输入框横跨整宽，横条停在输入框上方（输入框收起时 --chrome-bottom 只剩 1rem，横条随之落底） */
 .chat-dock { --dock-bottom: 1rem; bottom: var(--dock-bottom); max-height: calc(100dvh - var(--dock-top) - var(--dock-bottom)); }
 @media (max-width: 48rem) { .chat-dock { --dock-bottom: var(--chrome-bottom); } }
+/* 消息操作（REQ-CORE-026）：精确指针悬停或键盘聚焦到这条消息时显示；触屏没有悬停，常显（INT-006）。
+   只用 opacity 隐藏、不用 visibility / display：纯文字消息里没有别的可聚焦元素，按钮必须留在 Tab 序里，
+   键盘才进得来（进来即 focus-within 显形）；指针能点到它时必然悬停在这条消息上，此时它已经显形 */
+.msg-actions { opacity: 0; transition: opacity var(--duration-fast) var(--ease-out); }
+.msg:focus-within .msg-actions { opacity: 1; }
+@media (hover: hover) and (pointer: fine) { .msg:hover .msg-actions { opacity: 1; } }
+@media (hover: none) { .msg-actions { opacity: 1; } }
 /* 底部输入框：实底外壳，不走 .chrome——它是主输入控件，需要一块与画布截图分离的稳定底色。
    聚焦只加深投影、提亮边线（透明 outline 留给强制配色模式顶上，A11Y-008），不再套强调色描边。 */
 .composer {
@@ -174,7 +181,11 @@ body { background: var(--color-canvas); color: var(--color-fg); font-family: var
 .pop-in { animation: menu-in var(--duration-base) var(--ease-out); }
 
 /* 右侧竖排工具栏（RESP-016 / RESP-017）：高度有界、自身滚动、无可见滚动条，溢出时边缘渐隐提示 */
-.rail { max-height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; mask-image: linear-gradient(180deg, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%); }
+.rail { max-height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+/* 只在那一侧还有被遮住的工具时渐隐（CanvasToolbar 按滚动位置写 data-fade） */
+.rail[data-fade="top"] { mask-image: linear-gradient(180deg, transparent 0, #000 16px); }
+.rail[data-fade="bottom"] { mask-image: linear-gradient(0deg, transparent 0, #000 16px); }
+.rail[data-fade="top bottom"] { mask-image: linear-gradient(180deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%); }
 .rail::-webkit-scrollbar { display: none; }
 
 @keyframes slide-in-right { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }

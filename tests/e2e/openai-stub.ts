@@ -3,7 +3,8 @@ import { createServer, type Server } from 'node:http';
 // 本地 OpenAI 兼容桩（REQ-CORE-013 用例用）：只认一个 Key，回固定内容；记录收到的请求供断言。
 // 用它验证的是「通道 → 驱动 → 端点」这条管道，不是模型质量。
 export type StubHit = { model: string; hasImage: boolean; auth: string | undefined; user: string; system: string };
-export function startOpenAiStub(opts: { port: number; apiKey: string; reply: string | ((hit: StubHit) => string) }): { server: Server; hits: StubHit[]; url: string; close: () => Promise<void> } {
+// holdMs：收到请求后拖这么久再回（TC-CORE-042 要一个在跑一阵子的作业）；请求照样立刻记进 hits
+export function startOpenAiStub(opts: { port: number; apiKey: string; reply: string | ((hit: StubHit) => string); holdMs?: number }): { server: Server; hits: StubHit[]; url: string; close: () => Promise<void> } {
   const hits: StubHit[] = [];
   const server = createServer((req, res) => {
     let body = '';
@@ -18,8 +19,10 @@ export function startOpenAiStub(opts: { port: number; apiKey: string; reply: str
       const hit: StubHit = { system: systemText, model: j.model ?? '', hasImage: Array.isArray(user?.content) && (user!.content as { type: string }[]).some((p) => p.type === 'image_url'), auth: req.headers.authorization, user: userText };
       hits.push(hit);
       const text = typeof opts.reply === 'function' ? opts.reply(hit) : opts.reply;
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ choices: [{ message: { content: text } }], usage: { prompt_tokens: 42, completion_tokens: 7 } }));
+      setTimeout(() => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ choices: [{ message: { content: text } }], usage: { prompt_tokens: 42, completion_tokens: 7 } }));
+      }, opts.holdMs ?? 0);
     });
   });
   server.listen(opts.port, '127.0.0.1');

@@ -324,6 +324,39 @@ export function CanvasPage() {
       return null;
     }
   };
+  // 一轮建好（发送 / 重试）：消息追加进记录；交给本机 agent 的已投递到会话，切到 agent 面板看状态，其余进在跑作业行
+  const roundStarted = (r: { userMessage: MessageDto; assistantMessage: MessageDto; job: JobDto }) => {
+    setMessages((m) => [...m, r.userMessage, r.assistantMessage]);
+    if (r.job.runner === 'agent') { refresh(); setPanel('agent'); }
+    else trackJob(r.job);
+  };
+  // 最后一轮的重试 / 修改（REQ-CORE-026）。重试由服务端复制原作业输入（API-CORE-034），这里只给通道：输入框此刻选的那条，聊天轮用聊天通道
+  const retryRound = async (user: MessageDto) => {
+    try { roundStarted(await api.projects.retry(projectId, user.id, user.jobKind === 'chat' ? chatRunner : sendRunner)); }
+    catch (e) {
+      if (e instanceof ApiError && e.type === '/errors/job-not-finished') toast('这一轮还在跑，等它结束再重试', 'error');
+      else if (e instanceof ApiError && e.type === '/errors/validation') toast((e.problem as { errors?: { message: string }[] }).errors?.[0]?.message ?? e.problem.title, 'error');
+      else handleJobError(e, '重试失败');
+    }
+  };
+  // 修改：这一轮的文字、参考图、目标、动词与档位原样填回输入框（替换现有草稿），不改写历史；已被删掉的屏 / 组件不填、说一声
+  const editRound = async (user: MessageDto) => {
+    let job: JobDto;
+    try { job = (await api.jobs.get(user.jobId!)).job; } catch { toast('读取这一轮失败', 'error'); return; }
+    const input = job.input as { screenIds?: string[]; componentIds?: string[]; componentId?: string; count?: ScreenCount; versions?: number; anchor?: { x: number; y: number } };
+    const screenIds = (input.screenIds ?? []).filter((id) => screens.some((s) => s.id === id));
+    const compIds = (input.componentId ? [input.componentId] : input.componentIds ?? []).filter((id) => components.some((c) => c.id === id));
+    const lost = (input.screenIds?.length ?? 0) - screenIds.length + ((input.componentId ? 1 : input.componentIds?.length ?? 0) - compIds.length);
+    onMode(job.kind === 'chat' ? 'chat' : 'design');
+    setSelectedIds(screenIds); setTargetIds(screenIds);
+    setSelectedComponentIds(compIds); setTargetComponentIds(compIds);
+    setAnchor(job.kind === 'generate' ? input.anchor ?? null : null);
+    if (input.count !== undefined) setCount(input.count);
+    if (input.versions !== undefined) setVersions(input.versions);
+    composerRef.current?.load({ text: user.content, images: user.attachments.map((a) => ({ id: a.id, url: a.url })) });
+    showComposer();
+    if (lost > 0) toast(`这一轮有 ${lost} 个目标已被删除，没有填回`);
+  };
   // 发送（REQ-CORE-006）：有目标 = 改（targetScreenIds），没有 = 造（count / anchor）；版数两边都带。
   // 返回是否发出去了：没发出去时输入框保留草稿与参考图（REQ-CORE-020）
   // 聊天（REQ-CORE-023）：不看目标，选中的屏只作上下文提示随消息带上；通道用收窄后的那条
@@ -336,10 +369,8 @@ export function CanvasPage() {
       const r = await api.projects.send(projectId, chat
         ? { content, mode: 'chat', targetScreenIds: targets, runner: chatRunner, attachmentIds: attachmentIds.length ? attachmentIds : undefined }
         : { content, targetScreenIds: targets, targetComponentIds: compTargets, count: targets ? undefined : count, versions, anchor: targets ? undefined : anchor ?? undefined, runner: sendRunner, attachmentIds: attachmentIds.length ? attachmentIds : undefined });
-      setMessages((m) => [...m, r.userMessage, r.assistantMessage]);
+      roundStarted(r);
       if (!targets && !chat) setAnchor(null);
-      if (r.job.runner === 'agent') { refresh(); setPanel('agent'); }  // 交给本机 agent：已投递到会话，切到 agent 面板看状态
-      else trackJob(r.job);
       return true;
     } catch (e) {
       // 记住的会话在发送前关掉了：说清楚并重取列表，下拉会回到「选择会话」
@@ -552,6 +583,8 @@ export function CanvasPage() {
   };
   // busy = 有任何作业在跑（设计系统面板的回刷、导出、接上跳转等仍按这个语义走）
   const busy = activeJobs.length > 0;
+  // 对话记录里「重试」要知道最后一轮还在不在跑：本页跟踪的作业 + 服务端列出的（含交给本机 agent 的）
+  const runningJobIds = useMemo(() => new Set([...activeJobs, ...(detail?.activeJobs ?? [])].map((j) => j.id)), [activeJobs, detail?.activeJobs]);
   const keyState = { plain, alted, toggleInspect, toggleComposer, undoPos, blocked, closeModals, openFinder: () => setFinderOpen(true), expanded: !!candidates, focused: !!focusedId, busy, cancel: cancelNewest, selectAll: () => setSelectedIds(screens.map((x) => x.id)) };
   const keyRef = useRef(keyState);
   keyRef.current = keyState;
@@ -699,7 +732,8 @@ export function CanvasPage() {
         )}
       </TopNav>
       {settingsSection && <SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} returnTo={settingsBtnRef} onCatalog={applyCatalog} />}
-      <ChatDock messages={messages} progress={progress} status={jobStatus} collapsed={chatCollapsed} onToggle={toggleChat} onRemember={rememberConvention} busy={busy} />
+      <ChatDock messages={messages} progress={progress} status={jobStatus} collapsed={chatCollapsed} onToggle={toggleChat} onRemember={rememberConvention} busy={busy}
+        onRetry={(u) => void retryRound(u)} onEdit={(u) => void editRound(u)} runningJobIds={runningJobIds} />
       <Composer
         handle={composerRef} safeAreaRef={safeAreaRef} running={running} blockedReason={blockedReason} targets={targetScreens} totalScreens={screens.length} anchor={anchor} maxTargets={MAX_TARGETS}
         componentTargets={targetComponents}

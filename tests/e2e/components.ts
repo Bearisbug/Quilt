@@ -116,6 +116,15 @@ await step('TC-EDIT-012', async () => {
   expect((await card.locator('.label').innerText()).includes('用于 3 屏'), `卡片标签不对：${await card.locator('.label').innerText()}`);
   // 等预览页报了尺寸（卡片从整屏高缩到导航栏高）再框选，否则框到的是一张 844 高的卡
   await page.waitForFunction(() => { const el = document.querySelector('[data-testid="component-card"][data-name="TabBar"]') as HTMLElement | null; return !!el && el.getBoundingClientRect().height < 200; }, null, { timeout: 15000 });
+  // 7a 组件卡预览里背景模糊一律关掉（v0.73）：给根元素加上 backdrop-blur-xl，Tailwind 生成规则后计算值仍是 none
+  const cardFrame = (await card.locator('iframe').elementHandle())!.contentFrame();
+  const backdrop = await (await cardFrame)!.evaluate(async () => {
+    const root = document.querySelector('[data-component]') as HTMLElement;
+    root.classList.add('backdrop-blur-xl');
+    await new Promise((r) => setTimeout(r, 300));
+    return getComputedStyle(root).backdropFilter;
+  });
+  expect(backdrop === 'none', `组件卡预览里背景模糊没关掉：${backdrop}`);
   await page.keyboard.press('f');
   await page.waitForTimeout(500);
   const box = (await card.boundingBox())!;
@@ -142,7 +151,7 @@ await step('TC-EDIT-012', async () => {
   await page.getByTestId('el-edit-component').click();
 
   await eventually(async () => expect((await page.getByTestId('component-chip').count()) === 1 && (await page.getByTestId('target-chip').count()) === 0, '点「改组件」后目标区应只剩组件'));
-  expect(await page.evaluate(() => document.activeElement?.id === 'chat-input'), '点「改组件」后输入框没获得焦点');
+  await eventually(async () => expect(await page.evaluate(() => document.activeElement?.id === 'chat-input'), '点「改组件」后输入框没获得焦点'), 2000);
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);

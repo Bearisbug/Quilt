@@ -320,7 +320,7 @@ function ChannelDialog(p: { mode: 'add' | 'edit'; channel?: ChannelDto; onClose:
           )}
           {kind === 'codex' && (
             <p className="rounded-md border border-line bg-canvas p-3 text-xs leading-cn text-muted">
-              用运行 Quilt 服务端那台机器上的 <code className="font-mono text-fg">codex</code> 登录态（ChatGPT 账号），不需要 API Key；模型名填你在 Codex 里用的那个。每次生成拉起一次 <code className="font-mono text-fg">codex exec</code>，单次约 15～30 秒，比 API 通道慢，也不会在你的 Codex 历史里留会话。
+              用运行 Quilt 服务端那台机器上的 <code className="font-mono text-fg">codex</code> 登录态（ChatGPT 账号），不需要 API Key；模型名填 Codex 里可选的模型。每次生成拉起一次 <code className="font-mono text-fg">codex exec</code>（不读你的 Codex 配置、MCP 与技能，也不会在你的 Codex 历史里留会话）：验证约 20 秒，生成一屏约 2～4 分钟，比 API 通道慢得多；<code className="font-mono text-fg">gpt-reserve</code> 比 <code className="font-mono text-fg">gpt-6-astra</code> 快约三成。
             </p>
           )}
         </div>

@@ -295,5 +295,8 @@ export function componentPreviewDocument(row: Row, prelude: string): string {
   const measure = `<script>window.addEventListener('load',function(){var r=document.querySelector('[data-component]');if(!r)return;var b=r.getBoundingClientRect();parent.postMessage({type:'quilt:component-size',componentId:${JSON.stringify(row.id)},w:Math.ceil(b.width),h:Math.ceil(b.height)},'*');});</script>`;
   // 告诉预览运行时「这是组件不是屏」：组件里的链接一律惰性，不劫持、不上报（v0.55）
   const isComponent = '<script>window.__quiltComponent = true;</script>';
-  return `<!doctype html>\n<html lang="en">\n<head>\n${prelude}\n${isComponent}\n<title>${row.name}</title>\n</head>\n<body>\n<div class="flex flex-col">${body}</div>\n${measure}\n</body>\n</html>\n`;
+  // 关掉背景模糊（v0.73）：组件卡在画布缩放不是 100% 时也可交互，浏览器只重画悬停处那一小块时，块里的背景模糊会取到块外的透明像素，
+  // 画出一片往外渐暗的灰影；卡片里组件背后只有纯色底，关掉画面不变。屏进交互态会推到 1:1，不需要这一条
+  const noBackdrop = '<style>[data-component], [data-component] * { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }</style>';
+  return `<!doctype html>\n<html lang="en">\n<head>\n${prelude}\n${isComponent}\n${noBackdrop}\n<title>${row.name}</title>\n</head>\n<body>\n<div class="flex flex-col">${body}</div>\n${measure}\n</body>\n</html>\n`;
 }

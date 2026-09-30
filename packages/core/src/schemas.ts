@@ -147,6 +147,8 @@ export const createMessageSchema = z.object({
   runner: runnerSchema.optional(),
   attachmentIds: z.array(z.uuid()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
 });
+// 重试一轮（REQ-CORE-026 v0.72 / API-CORE-034）：只换通道，其余照原作业
+export const retryMessageSchema = z.object({ runner: runnerSchema.optional() });
 
 // 项目级持久记忆（REQ-CORE-016 / API-CORE-027）
 export const updateProjectSchema = z.object({

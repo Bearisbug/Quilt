@@ -1,7 +1,7 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { and, eq, desc, asc, lt, inArray, isNull } from 'drizzle-orm';
-import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, createProjectSchema, createJobSchema, createMessageSchema, createAttachmentSchema, updateProjectSchema, cursorQuerySchema, listJobsQuerySchema, type MessageDto, type LinkDto, type CreateJobInput, type JobKind, type ProjectEventDto, type Runner, createPresetSchema, applyPresetSchema } from '@quilt/core';
+import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, createProjectSchema, createJobSchema, createMessageSchema, retryMessageSchema, createAttachmentSchema, updateProjectSchema, cursorQuerySchema, listJobsQuerySchema, type MessageDto, type LinkDto, type CreateJobInput, type JobKind, type ProjectEventDto, type Runner, createPresetSchema, applyPresetSchema } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
 import { parseBody, parseQuery, requireUser, type Env } from '../app.ts';
 import { createProject, deleteProject, getProjectDetail, listProjects, ownedProject, updateProject, projectDto, designSystemDto, jobDto } from '../../services/projects.ts';
@@ -138,18 +138,50 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
     : { kind: 'generate', input: { prompt: body.content, count: body.count ?? (screenCount === 0 ? 'auto' : 1), versions, anchor: body.anchor, runner, imageKeys, componentIds } };
   // 通道选「交给本机 Claude Code」（REQ-CORE-011 / ADR-015 v0.34）：同样是作业（runner=agent），由 agentDelivery 投递到选中的会话，
   // 不入 worker 队列、不记 LLM 用量；助手消息在会话收口（quilt.finish_job）时回填。
+  const [res, status] = await startRound(c, user, project.id, input, runner, { content: body.content, attachments }, targets);
+  return c.json(res, status);
+});
+
+// 建一轮（消息 + 作业）并给出响应体：发消息与重试共用。本机 agent 的轮次助手回执立刻写明投给了谁
+async function startRound(c: Context<Env>, user: ReturnType<typeof requireUser>, projectId: string, input: CreateJobInput, runner: Runner | undefined, message: { content: string; attachments: StoredAttachment[] }, targets: string[] | null) {
   const agent = runner?.kind === 'agent';
-  const { job, userMessage, assistantMessage, reused } = await createJob({ user, projectId: project.id, input, idempotencyKey: c.req.header('idempotency-key') ?? null, requestId: c.get('requestId'), runner: agent ? 'agent' : 'model', withMessage: { content: body.content, attachments } });
+  const { job, userMessage, assistantMessage, reused } = await createJob({ user, projectId, input, idempotencyKey: c.req.header('idempotency-key') ?? null, requestId: c.get('requestId'), runner: agent ? 'agent' : 'model', withMessage: message });
   if (reused) {
     const msgs = await db.select().from(schema.messages).where(eq(schema.messages.jobId, job.id));
     const u = msgs.find((m) => m.role === 'user'); const a = msgs.find((m) => m.role === 'assistant');
-    return c.json({ userMessage: u && await messageDto(u), assistantMessage: a && await messageDto(a), job: jobDto(job) }, 200);
+    return [{ userMessage: u && await messageDto(u), assistantMessage: a && await messageDto(a), job: jobDto(job) }, 200] as const;
   }
   if (agent) {
     const [assistant] = await db.update(schema.messages).set({ content: await deliveredText(runner?.kind === 'agent' ? runner : undefined), affectedScreenIds: targets ?? [] }).where(eq(schema.messages.id, assistantMessage!.id)).returning();
-    return c.json({ userMessage: await messageDto(userMessage!), assistantMessage: await messageDto(assistant), job: jobDto(job) }, 202);
+    return [{ userMessage: await messageDto(userMessage!), assistantMessage: await messageDto(assistant), job: jobDto(job) }, 202] as const;
   }
-  return c.json({ userMessage: await messageDto(userMessage!), assistantMessage: await messageDto(assistantMessage!), job: jobDto(job) }, 202);
+  return [{ userMessage: await messageDto(userMessage!), assistantMessage: await messageDto(assistantMessage!), job: jobDto(job) }, 202] as const;
+}
+
+// API-CORE-034（v0.72 REQ-CORE-026）：重试一轮。复制原作业输入、只换通道——系统代发的轮次（补链、按新约定重生成）
+// 消息正文是描述而不是提示词，所以不能按消息正文重拼请求；参考图按 id 复用，正文已不在存储里时同发消息一样报 400
+const RETRYABLE: JobKind[] = ['generate', 'edit_screens', 'edit_component', 'chat'];
+projectRoutes.post('/v1/projects/:projectId/messages/:messageId/retry', async (c) => {
+  const user = requireUser(c);
+  const project = await ownedProject(user.id, c.req.param('projectId'));
+  const body = await parseBody(c, retryMessageSchema);
+  const [msg] = await db.select().from(schema.messages).where(and(eq(schema.messages.id, c.req.param('messageId')), eq(schema.messages.projectId, project.id), eq(schema.messages.role, 'user')));
+  const [old] = msg?.jobId ? await db.select().from(schema.generationJobs).where(eq(schema.generationJobs.id, msg.jobId)) : [];
+  if (!msg || !old) throw problems.notFound();
+  if (!RETRYABLE.includes(old.kind as JobKind)) throw problems.validation([{ path: 'messageId', message: '这一轮不能重试' }]);
+  if (old.status === 'queued' || old.status === 'running') throw problems.jobNotFinished();
+  const prev = old.input as { runner?: Runner; screenIds?: string[] };
+  const requested = body.runner ?? prev.runner;
+  if (old.kind === 'edit_component' && requested?.kind === 'agent') throw problems.validation([{ path: 'runner', message: '改组件请换一个模型通道，本机会话不接这类作业' }]);
+  const attachments = await resolveForMessage(project.id, (msg.attachments as StoredAttachment[]).map((a) => a.id));
+  if (attachments.length && requested?.kind === 'model' && !driverSupportsVision(requested.driver)) {
+    throw problems.validation([{ path: 'runner', message: `「${requested.driver}」通道不支持参考图，换一个支持视觉的通道再发` }]);
+  }
+  if (requested?.kind === 'channel') await ownedChannelOrThrow(user.id, requested.channelId);
+  const runner = old.kind === 'chat' ? await chatRunner(user.id, requested) : requested;
+  const input = { kind: old.kind, input: { ...prev, runner, imageKeys: attachments.length ? attachments.map((a) => a.key) : undefined } } as CreateJobInput;
+  const [res, status] = await startRound(c, user, project.id, input, runner, { content: msg.content, attachments }, prev.screenIds ?? null);
+  return c.json(res, status);
 });
 
 // API-CORE-029：作业列表（agent 面板：本机 agent 作业的状态 / 日志尾）

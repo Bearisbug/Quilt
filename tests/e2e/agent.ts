@@ -271,7 +271,7 @@ await step('TC-AGENT-012', async () => {
   await wf(lockPath(T_OPEN), '');
   const held = new Map([[T_OPEN, await fopen(lockPath(T_OPEN), 'r')]]);
   await wf(lockPath(T_CLOSED), ''); // 残留的锁文件（Codex 进程被杀后留下）：没人占着，应判为未打开
-  type Rec = { cmd: string; thread?: string; message?: string; url?: string; args?: string[]; hasApiKey?: boolean; cwd?: string };
+  type Rec = { cmd: string; thread?: string; message?: string; url?: string; args?: string[]; hasApiKey?: boolean; cwd?: string; promptHead?: string };
   const stubLog = async (): Promise<Rec[]> => { try { return (await rf(path.join(HOME, 'stub-log.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   // 深链接打开过的线程（桩记下 open）也由本脚本占住锁，等于桌面版把它打开了
   const isOpen = async (id: string) => {
@@ -404,6 +404,8 @@ await step('TC-AGENT-012', async () => {
   expect(ch.body.channel?.apiKeyHint === null && ch.body.channel.status === 'verified', `Codex 订阅通道应无 Key 且已验证：${JSON.stringify(ch.body.channel)}`);
   const ex = (await stubLog()).filter((x) => x.cmd === 'exec').pop()!;
   const a = ex.args ?? [];
+  // v0.70：不读用户的 Codex 配置与规则（不起用户配的 MCP），输入开头明说不许调工具
+  expect(['--ignore-user-config', '--ignore-rules'].every((f) => a.includes(f)) && /^Answer directly .* Do not run shell commands/.test(ex.promptHead ?? ''), `codex exec 没有隔离用户配置或缺「不许调工具」前置说明：${JSON.stringify({ args: a, head: ex.promptHead })}`);
   expect(['--json', '--ephemeral', '--skip-git-repo-check'].every((f) => a.includes(f)) && a[a.indexOf('-s') + 1] === 'read-only' && a[a.indexOf('-m') + 1] === 'gpt-stub' && ex.hasApiKey === false && !(ex.cwd ?? '').includes('Quilt'), `codex exec 参数 / 环境不对：${JSON.stringify(ex)}`);
   const usage0 = (await apiJson<{ tokensIn: number }>('/v1/me/usage')).body.tokensIn;
   const edit = await apiJson<{ job: { id: string } }>(`/v1/projects/${r.projectId}/messages`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ content: '用 Codex 订阅改首页', targetScreenIds: [s1], runner: { kind: 'channel', channelId: ch.body.channel.id } }) });

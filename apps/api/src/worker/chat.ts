@@ -109,8 +109,9 @@ export async function runChatTurn(a: ChatTurnArgs): Promise<ChatTurnResult> {
           const u = m.usage;
           tokensIn = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
           tokensOut = u.output_tokens ?? 0;
-          if (m.subtype === 'success') return { ok: true, reply: String(m.result ?? '').trim().slice(0, REPLY_MAX), sessionId, tokensIn, tokensOut };
-          return { ok: false, error: m.errors?.[0] ?? m.subtype, maxTurns: m.subtype === 'error_max_turns', sessionId, tokensIn, tokensOut };
+          // API 报错时 subtype 也是 success、错误原文在 result 里，只有 is_error 分得出来（§17，v0.71）
+          if (m.subtype === 'success' && !m.is_error) return { ok: true, reply: String(m.result ?? '').trim().slice(0, REPLY_MAX), sessionId, tokensIn, tokensOut };
+          return { ok: false, error: m.subtype === 'success' ? m.result.trim().slice(0, 300) : m.errors?.[0] ?? m.subtype, maxTurns: m.subtype === 'error_max_turns', sessionId, tokensIn, tokensOut };
         }
       }
       return { ok: false, error: 'agent-sdk: no result', sessionId, tokensIn, tokensOut };

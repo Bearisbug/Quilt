@@ -80,19 +80,30 @@ class AgentSdkLlm implements Llm {
       : prompt;
     const q = query({ prompt: promptArg, options: { systemPrompt: { type: 'custom', prompt: system }, tools: [], maxTurns: 1, model, permissionMode: 'dontAsk', settingSources: [], env, abortController: abort } });
     for await (const m of q) {
-      if (m.type === 'result') {
-        const r = m as { subtype: string; result?: string; usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; output_tokens?: number } };
-        if (r.subtype !== 'success') throw new ProviderError(`agent-sdk ${r.subtype}`, true);
-        const u = r.usage ?? {};
-        return { text: String(r.result ?? ''), tokensIn: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), tokensOut: u.output_tokens ?? 0, model, ms: Date.now() - t0 };
-      }
+      if (m.type === 'result') return { ...agentSdkOutput(m), model, ms: Date.now() - t0 };
     }
     throw new ProviderError('agent-sdk: no result', true);
   }
 }
 
+type AgentSdkResult = { subtype: string; is_error?: boolean; api_error_status?: number | null; result?: string; usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; output_tokens?: number } };
+/** SDK 的 result 消息 → 产出。API 报错（模型要求更新的 Claude Code、额度用完、过载）时 subtype 仍是 success，
+ *  只在 is_error / api_error_status 上标出、错误原文在 result 里——不拦下的话它会被当成模型产出往下传（§17，v0.71） */
+export function agentSdkOutput(r: AgentSdkResult): { text: string; tokensIn: number; tokensOut: number } {
+  if (r.subtype !== 'success') throw new ProviderError(`agent-sdk ${r.subtype}`, true);
+  if (r.is_error) {
+    const status = r.api_error_status ?? 0;
+    throw new ProviderError(`agent-sdk: ${String(r.result ?? '').trim().slice(0, 300)}`, status === 429 || status >= 500);
+  }
+  const u = r.usage ?? {};
+  return { text: String(r.result ?? ''), tokensIn: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), tokensOut: u.output_tokens ?? 0 };
+}
+
 // 本机 Codex 订阅（v0.68 ADR-020）：每次拉起本机 codex exec，复用它的 ChatGPT 登录态。
 // --ephemeral：不在用户的 Codex 历史里留会话；空的临时目录 + 只读沙箱：它是出 HTML 的，不该去翻用户的仓库。
+// --ignore-user-config / --ignore-rules（v0.70）：不读用户的 config.toml——不起用户配的 MCP 服务（其中可能就有指向开发库的 quilt）、
+// 不套用户的推理强度；技能关不掉，所以输入最前面明说不许调工具——实测不说的话它会先去读用户全局装的前端技能，
+// 多一轮往返、多 2 万输入 token，同一屏 237 s → 加上这两样后 143 s。
 // Codex 没有替换系统提示的入口（base_instructions 实测省不下 token，大头是工具定义），所以系统提示与任务拼进同一条输入，从 stdin 传。
 // 参考图写成临时文件用 -i 传。事件是 JSONL：最后一条 agent_message 是产出，turn.completed 带用量。
 export function parseCodexEvents(lines: string[]): { text: string; tokensIn: number; tokensOut: number; error?: string } {
@@ -108,6 +119,8 @@ export function parseCodexEvents(lines: string[]): { text: string; tokensIn: num
   return { text, tokensIn, tokensOut, error };
 }
 
+const CODEX_PREAMBLE = 'Answer directly in this single reply. Do not run shell commands, read or write files, load skills, or call any tools.';
+
 class CodexLlm implements Llm {
   readonly vision = true;
   async complete({ system, prompt, images, model, signal }: LlmArgs) {
@@ -122,7 +135,7 @@ class CodexLlm implements Llm {
         return f;
       }));
       // 提示词用 - 从 stdin 读，放在 -i 之前：-i 收多个值，放后面会把 - 当成图片路径吃掉
-      const args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '-s', 'read-only', '-C', dir, ...(model ? ['-m', model] : []), '-', ...files.flatMap((f) => ['-i', f])];
+      const args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-s', 'read-only', '-C', dir, ...(model ? ['-m', model] : []), '-', ...files.flatMap((f) => ['-i', f])];
       const env = { ...process.env };
       delete env.OPENAI_API_KEY; delete env.CODEX_API_KEY; // 让它用 ChatGPT 登录态，而不是环境里恰好有的 API Key
       const { code, lines, stderr } = await new Promise<{ code: number | null; lines: string[]; stderr: string }>((resolve, reject) => {
@@ -135,7 +148,7 @@ class CodexLlm implements Llm {
         child.stderr.setEncoding('utf8').on('data', (d: string) => { err = (err + d).slice(-4000); });
         child.once('error', (e) => { signal?.removeEventListener('abort', onAbort); reject(new ProviderError(`codex 启动失败：${e.message}`, false)); });
         child.once('close', (c) => { signal?.removeEventListener('abort', onAbort); if (buf) out.push(buf); resolve({ code: c, lines: out, stderr: err }); });
-        child.stdin.end(`${system}\n\n---\n\n${prompt}`);
+        child.stdin.end(`${CODEX_PREAMBLE}\n\n${system}\n\n---\n\n${prompt}`);
       });
       const r = parseCodexEvents(lines);
       if (r.error || !r.text) {
