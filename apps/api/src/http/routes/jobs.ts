@@ -7,7 +7,7 @@ import { parseBody, requireUser, type Env } from '../app.ts';
 import { ownedJob, cancelJob } from '../../services/jobs.ts';
 import { jobDto, ownedProject } from '../../services/projects.ts';
 import { listCandidates, adoptCandidate, deriveLinks } from '../../services/screens.ts';
-import { listJobEvents, subscribeJob } from '../../lib/events.ts';
+import { listJobEvents, subscribeJob, notifyCanvas } from '../../lib/events.ts';
 import { problems, Problem } from '../../lib/errors.ts';
 import { storage } from '../../lib/storage.ts';
 
@@ -37,7 +37,10 @@ jobRoutes.post('/v1/jobs/:jobId/candidates/adopt', async (c) => {
     try { await db.transaction((tx) => adoptCandidate(tx, screen, rev.id)); adopted.push(s.screenId); }
     catch (e) { if (e instanceof Problem) skipped.push(s.screenId); else throw e; }
   }
-  if (adopted.length) await db.transaction((tx) => deriveLinks(tx, project.id));
+  if (adopted.length) {
+    await db.transaction((tx) => deriveLinks(tx, project.id));
+    await notifyCanvas(project.id, { reason: 'revision' });
+  }
   return c.json({ adopted, skipped });
 });
 

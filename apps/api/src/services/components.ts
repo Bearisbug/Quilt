@@ -5,7 +5,7 @@ import { config } from '../config.ts';
 import { problems, isUniqueViolation } from '../lib/errors.ts';
 import { storage } from '../lib/storage.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
-import { emitProjectEvent } from '../lib/events.ts';
+import { emitProjectEvent, notifyCanvas } from '../lib/events.ts';
 import {
   assembleDocument, buildPrelude, extractBody, lintScreenBody, expandComponents, extractComponent, findComponentMatch, replaceWithPlaceholder,
   componentSummary, componentSlots, componentPlacement, componentOf, validateComponentHtml, classifyComponentHtml, applyElementOps, injectQids, MAX_COMPONENTS_PER_PROJECT,
@@ -180,6 +180,7 @@ export async function createComponent(ownerId: string, projectId: string, input:
     if (!v.ok) throw problems.validation([{ path: 'html', message: v.error }]);
     const c = classifyComponentHtml(input.html);
     const row = await insert({ name: input.name, html: c.html, activeClass: c.activeClass, inactiveClass: c.inactiveClass });
+    await notifyCanvas(project.id, { reason: 'components' });
     return { component: await dtoOf(project, row.id), applied: [], skipped: [] };
   }
   // 提取：先看来源屏能不能动，再落组件行，再换屏
@@ -218,6 +219,7 @@ export async function createComponent(ownerId: string, projectId: string, input:
   }
   if (applied.length) await db.transaction((tx) => deriveLinks(tx, project.id));
   await notifyApplied(project.id, applied);
+  await notifyCanvas(project.id, { reason: 'components' });
   return { component: await dtoOf(project, row.id), applied: applied.map((a) => a.screenId), skipped };
 }
 
@@ -240,8 +242,8 @@ export async function applyComponentElementEdit(ownerId: string, componentId: st
   const next = applyElementOps(component.html, qid, ops);
   if (next === null) throw problems.elementNotFound();
   const v = validateComponentHtml(next);
-  // 删掉根元素就没有组件了；其余结构性错误同样退回去，不落库
-  if (!v.ok) throw problems.validation([{ path: 'ops', message: v.error }]);
+  // 删掉根元素就没有组件了；其余结构性错误同样退回去，不落库（422：请求合法、改出来的内容不合规，API-EDIT-005）
+  if (!v.ok) throw problems.unprocessable([{ path: 'ops', message: v.error }]);
   return updateComponent(ownerId, componentId, { html: next, expectedVersion });
 }
 
@@ -250,6 +252,7 @@ export async function updateComponent(ownerId: string, componentId: string, patc
   const contentChange = patch.html !== undefined || patch.name !== undefined;
   if (!contentChange) {
     await db.update(schema.components).set({ ...(patch.x !== undefined ? { x: patch.x } : {}), ...(patch.y !== undefined ? { y: patch.y } : {}) }).where(eq(schema.components.id, component.id));
+    await notifyCanvas(project.id, { reason: 'components' });
     return { component: await dtoOf(project, component.id), applied: [], skipped: [] };
   }
   if (component.version !== patch.expectedVersion) throw problems.versionConflict();
@@ -276,6 +279,7 @@ export async function updateComponent(ownerId: string, componentId: string, patc
   const rename = patch.name !== undefined && patch.name !== component.name ? { from: component.name, to: patch.name } : undefined;
   const { applied, skipped } = await reflowComponent(project.id, updated, { rename, oldName: component.name });
   await notifyApplied(project.id, applied);
+  await notifyCanvas(project.id, { reason: 'components' });
   return { component: await dtoOf(project, updated.id), applied: applied.map((a) => a.screenId), skipped };
 }
 
@@ -284,6 +288,7 @@ export async function deleteComponent(ownerId: string, componentId: string): Pro
   const { component } = await ownedComponent(ownerId, componentId);
   await db.delete(schema.components).where(eq(schema.components.id, component.id));
   await db.delete(schema.componentUses).where(and(eq(schema.componentUses.projectId, component.projectId), eq(schema.componentUses.name, component.name)));
+  await notifyCanvas(component.projectId, { reason: 'components' });
 }
 
 // 预览域 /c/：只渲染这一个组件，加载后把根元素在视口里的框报给父页，画布卡片按它定大小、按它的左上角裁切；

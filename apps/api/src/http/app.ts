@@ -43,6 +43,16 @@ export function createApp() {
     await next();
   });
 
+  // 路径里的资源 id 都是 UUID（§14 v0.77）：不是的直接 404——原样进 uuid 列的查询会被 Postgres 报 22P02，落成 500
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const uuidParams = async (c: AppContext, next: () => Promise<void>) => {
+    if (!Object.values(c.req.param()).every((v) => UUID.test(v))) throw problems.notFound();
+    await next();
+  };
+  for (const p of ['projects', 'screens', 'jobs', 'components', 'annotations', 'assets', 'design-presets', 'channels']) app.use(`/v1/${p}/:id/*`, uuidParams);
+  app.use('/v1/projects/:projectId/messages/:id/*', uuidParams);
+  app.use('/v1/screens/:screenId/revisions/:id/*', uuidParams);
+
   return app;
 }
 
@@ -52,11 +62,11 @@ export const requireUser = (c: AppContext): UserRow => {
   return u;
 };
 
-export async function parseBody<T extends ZodType>(c: AppContext, schema: T): Promise<z.infer<T>> {
+export async function parseBody<T extends ZodType>(c: AppContext, schema: T, invalid: (errors: unknown) => Problem = problems.validation): Promise<z.infer<T>> {
   let raw: unknown;
   try { raw = await c.req.json(); } catch { raw = {}; }
   const r = schema.safeParse(raw);
-  if (!r.success) throw problems.validation(r.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })));
+  if (!r.success) throw invalid(r.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })));
   return r.data;
 }
 

@@ -26,6 +26,8 @@ agentRoutes.post('/v1/projects/:projectId/uploads', async (c) => {
   const uploadId = randomToken(16);
   const exp = Math.floor(Date.now() / 1000) + 600;
   const key = `uploads/${uploadId}.html`;
+  // 签发即建空上传位：quilt.append_upload 只认签发过的（v0.77）
+  await storage.put(key, '', 'text/html');
   return c.json({ uploadId, putUrl: `${config.apiOrigin}/v1/uploads/${uploadId}?exp=${exp}&sig=${signObject(key, exp)}`, expiresAt: new Date(exp * 1000).toISOString() });
 });
 agentRoutes.put('/v1/uploads/:uploadId', async (c) => {

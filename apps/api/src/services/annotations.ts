@@ -1,11 +1,13 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { annotationsPrompt, type AnnotationDto } from '@quilt/core';
 import { db, schema } from '../db/client.ts';
+import { config } from '../config.ts';
 import { problems } from '../lib/errors.ts';
-import { ownedScreen, currentBody } from './screens.ts';
+import { notifyCanvas } from '../lib/events.ts';
+import { ownedScreen, currentBody, hasActiveJob } from './screens.ts';
 import { ownedProject, type JobRow } from './projects.ts';
 import type { UserRow } from './user.ts';
-import { createJob } from './jobs.ts';
+import { createJob, cancelJob, assertRateRoom } from './jobs.ts';
 import { assertNotLocked } from './components.ts';
 
 type Row = typeof schema.annotations.$inferSelect;
@@ -37,25 +39,28 @@ export async function create(ownerId: string, screenId: string, input: { qid: st
   const body = await currentBody(screen.id);
   if (body) await assertNotLocked(screen.projectId, body, input.qid);
   const [row] = await db.insert(schema.annotations).values({ screenId, qid: input.qid, note: input.note, anchorText: input.anchorText, rect: input.rect }).returning();
+  await notifyCanvas(screen.projectId, { reason: 'annotations', screenId });
   return dto(row);
 }
 
-async function owned(ownerId: string, id: string): Promise<Row> {
+async function owned(ownerId: string, id: string): Promise<{ row: Row; projectId: string }> {
   const [row] = await db.select().from(schema.annotations).where(eq(schema.annotations.id, id));
   if (!row) throw problems.notFound();
-  await ownedScreen(ownerId, row.screenId);
-  return row;
+  const { screen } = await ownedScreen(ownerId, row.screenId);
+  return { row, projectId: screen.projectId };
 }
 
 export async function update(ownerId: string, id: string, patch: { note?: string; status?: string }): Promise<AnnotationDto> {
-  await owned(ownerId, id);
+  const { projectId } = await owned(ownerId, id);
   const [row] = await db.update(schema.annotations).set({ ...patch, updatedAt: new Date() }).where(eq(schema.annotations.id, id)).returning();
+  await notifyCanvas(projectId, { reason: 'annotations', screenId: row.screenId });
   return dto(row);
 }
 
 export async function remove(ownerId: string, id: string): Promise<void> {
-  await owned(ownerId, id);
+  const { row, projectId } = await owned(ownerId, id);
   await db.delete(schema.annotations).where(eq(schema.annotations.id, id));
+  await notifyCanvas(projectId, { reason: 'annotations', screenId: row.screenId });
 }
 
 // 发送（API-EDIT-003）：按屏分组，每屏合成一条 edit_screens 作业——N 屏 = N 次计费，而不是 N 条批注 = N 次。
@@ -71,14 +76,26 @@ export async function send(user: UserRow, projectId: string, annotationIds: stri
   const byScreen = new Map<string, Row[]>();
   for (const { a } of rows) byScreen.set(a.screenId, [...(byScreen.get(a.screenId) ?? []), a]);
 
+  // 全有或全无（v0.77）：先对全部目标屏查屏锁与限流余量，任何一屏不满足就整批拒、一个作业也不建——
+  // 否则前几屏的作业已入队、响应却是 409 / 429，调用方按失败重发会把那几屏改两次
+  const limit = config.rateLimitJobsPerMinute;
+  if (byScreen.size > limit) throw problems.unprocessable([{ path: 'annotationIds', message: `一次最多发 ${limit} 屏的批注（每分钟最多建 ${limit} 个作业），分批发` }]);
+  for (const screenId of byScreen.keys()) if (await hasActiveJob(db, projectId, screenId)) throw problems.screenBusy();
+  assertRateRoom(user.id, byScreen.size);
   const jobs: JobRow[] = [];
-  for (const [screenId, items] of byScreen) {
-    const { job } = await createJob({
-      user, projectId, requestId, idempotencyKey: null,
-      input: { kind: 'edit_screens', input: { prompt: annotationsPrompt(items.map((i) => ({ qid: i.qid, note: i.note, anchorText: i.anchorText }))), screenIds: [screenId], versions: 1 } },
-    });
-    await db.update(schema.annotations).set({ status: 'sent', sentJobId: job.id, updatedAt: new Date() }).where(inArray(schema.annotations.id, items.map((i) => i.id)));
-    jobs.push(job);
+  try {
+    for (const [screenId, items] of byScreen) {
+      const { job } = await createJob({
+        user, projectId, requestId, idempotencyKey: null,
+        input: { kind: 'edit_screens', input: { prompt: annotationsPrompt(items.map((i) => ({ qid: i.qid, note: i.note, anchorText: i.anchorText }))), screenIds: [screenId], versions: 1 } },
+      });
+      jobs.push(job);
+      await db.update(schema.annotations).set({ status: 'sent', sentJobId: job.id, updatedAt: new Date() }).where(inArray(schema.annotations.id, items.map((i) => i.id)));
+    }
+  } catch (e) {
+    // 预检之后仍在中途撞上（与别的请求竞争）：取消已建的作业，它们的批注随之回到 open，再报原错误
+    for (const j of jobs) await cancelJob(j).catch(() => {});
+    throw e;
   }
   return { jobs };
 }

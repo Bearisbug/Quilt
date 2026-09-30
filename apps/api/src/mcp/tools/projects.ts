@@ -145,7 +145,7 @@ export function registerProjectTools(c: ToolCtx) {
   // 对话记录（API-CORE-011）：游标分页，同一时间戳助手排在用户之前（倒序取、再 reverse 后用户在前）
   server.registerTool('quilt.list_messages', {
     description: 'Conversation of a project: user prompts and assistant receipts (with jobId / affectedScreenIds), oldest first within the page. For older pages pass nextCursor as cursor.',
-    inputSchema: { projectId: z.string().uuid(), cursor: z.string().optional(), limit: z.number().int().min(1).max(100).optional() },
+    inputSchema: { projectId: z.string().uuid(), cursor: z.iso.datetime().optional(), limit: z.number().int().min(1).max(100).optional() },
   }, wrap(async (a) => {
     read();
     const project = await ownedProject(user.id, a.projectId as string);

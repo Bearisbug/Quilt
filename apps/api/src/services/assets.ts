@@ -3,6 +3,7 @@ import { ASSET_MEDIA_TYPES, MAX_ASSET_BYTES, MAX_ASSETS_PER_PROJECT, type AssetD
 import { db, schema } from '../db/client.ts';
 import { problems } from '../lib/errors.ts';
 import { storage } from '../lib/storage.ts';
+import { notifyCanvas } from '../lib/events.ts';
 import { config } from '../config.ts';
 import { ownedProject } from './projects.ts';
 
@@ -58,6 +59,7 @@ export async function createAsset(ownerId: string, projectId: string, input: { n
     return inserted;
   });
   await storage.put(assetKey(project.id, row.id, row.mediaType), input.body, row.mediaType);
+  await notifyCanvas(project.id, { reason: 'assets' });
   return assetDto(row);
 }
 
@@ -68,6 +70,7 @@ export async function deleteAsset(ownerId: string, assetId: string): Promise<voi
   if (!row || row.ownerId !== ownerId) throw problems.notFound();
   await db.delete(schema.assets).where(eq(schema.assets.id, assetId));
   await storage.delete(assetKey(row.a.projectId, row.a.id, row.a.mediaType)).catch(() => {});
+  await notifyCanvas(row.a.projectId, { reason: 'assets' });
 }
 
 /** 预览域按 id 取素材（ADR-017）：不签名，靠 UUID 不可猜；项目不符即 404 */

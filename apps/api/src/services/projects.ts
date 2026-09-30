@@ -3,6 +3,7 @@ import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
 import { problems } from '../lib/errors.ts';
 import { storage } from '../lib/storage.ts';
+import { notifyCanvas } from '../lib/events.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
 import { assetsOf } from './assets.ts';
 import { copyPresetAssets, presetSeed } from './presets.ts';
@@ -52,6 +53,7 @@ export async function updateProject(ownerId: string, projectId: string, patch: {
     if (!s) throw problems.validation([{ path: 'exemplarScreenId', message: '样板屏必须是本项目的屏' }]);
   }
   const [updated] = await db.update(schema.projects).set({ ...patch, updatedAt: new Date() }).where(eq(schema.projects.id, project.id)).returning();
+  await notifyCanvas(project.id, { reason: 'project' });
   return updated;
 }
 
@@ -64,6 +66,8 @@ export async function deleteProject(ownerId: string, projectId: string): Promise
   if (active) throw problems.projectBusy();
   await db.delete(schema.projects).where(eq(schema.projects.id, project.id));
   await storage.deletePrefix(`projects/${project.id}/`).catch((e) => console.warn(`[project ${project.id}] 对象文件清理失败：${(e as Error).message}`));
+  // 还开着这个项目的画布：事件流发完这一条就关，画布重取得 404（API-CORE-030 v0.77）
+  await notifyCanvas(project.id, { reason: 'project_deleted' });
 }
 
 export async function listProjects(ownerId: string, cursor?: string, limit = 50): Promise<{ items: ProjectDto[]; nextCursor: string | null }> {

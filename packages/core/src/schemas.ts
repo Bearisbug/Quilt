@@ -304,7 +304,8 @@ export type ComponentDto = {
   createdAt: string; updatedAt: string;
 };
 
-export const cursorQuerySchema = z.object({ cursor: z.string().optional(), limit: z.coerce.number().int().min(1).max(100).default(50) });
+// cursor 是上一页的 nextCursor（ISO 时间）；别的字符串 new Date() 出来是 Invalid Date，序列化时 500（v0.77 起 400）
+export const cursorQuerySchema = z.object({ cursor: z.iso.datetime().optional(), limit: z.coerce.number().int().min(1).max(100).default(50) });
 
 // ---------- AGENT 域（v0.32：本地版无 OAuth、无派活任务；本机 agent 是被投递的 Claude Code 会话）----------
 export const listJobsQuerySchema = z.object({ runner: z.enum(JOB_RUNNERS).optional(), limit: z.coerce.number().int().min(1).max(100).default(50) });

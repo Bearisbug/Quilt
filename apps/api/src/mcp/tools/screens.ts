@@ -5,6 +5,7 @@ import { db, schema } from '../../db/client.ts';
 import { config } from '../../config.ts';
 import { Problem, problems, isUniqueViolation } from '../../lib/errors.ts';
 import { storage } from '../../lib/storage.ts';
+import { notifyCanvas } from '../../lib/events.ts';
 import { randomToken, signObject } from '../../lib/signing.ts';
 import { createUpload } from '../../services/attachments.ts';
 import { ownedProject } from '../../services/projects.ts';
@@ -13,6 +14,17 @@ import { ingestScreen, validateScreenHtml } from '../../services/ingest.ts';
 import { applyElementEdit } from '../../services/edit.ts';
 import { updateComponent } from '../../services/components.ts';
 import type { ToolCtx } from '../ctx.ts';
+
+// 同一上传位的追加串行执行（v0.77）：「读长度 → 比 offset → 写回」之间插进另一段，同 offset 的两段就都「成功」、先写的被覆盖。
+// 工具按请求重建，链挂在模块上才跨请求；本地版单进程，进程内的链足够
+const appendChains = new Map<string, Promise<unknown>>();
+function serialized<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const next = (appendChains.get(key) ?? Promise.resolve()).catch(() => {}).then(fn);
+  appendChains.set(key, next);
+  const cleanup = () => { if (appendChains.get(key) === next) appendChains.delete(key); };
+  next.then(cleanup, cleanup);
+  return next;
+}
 
 // 屏：大纲 / 读 HTML 与截图 / agent 自带 HTML 推屏（含直传）/ 补路由 / 删 / 摆放 / 零 token 直改
 export function registerScreenTools(c: ToolCtx) {
@@ -70,7 +82,7 @@ export function registerScreenTools(c: ToolCtx) {
   server.registerTool('quilt.update_screen', {
     description: 'Replace an existing screen\'s HTML (new revision). To change part of a screen use quilt.patch_screen instead of resending it; a full rewrite over ~8 KB goes through create_upload_url + append_upload chunks and uploadId. name and route are optional and default to the screen\'s current ones. expectedRevisionId guards against concurrent edits and is REQUIRED when jobId is given (use the revision id from the prompt, quilt.get_outline or quilt.get_project; on 409 call quilt.get_screen and redo on the current version).',
     inputSchema: {
-      projectId: z.string().uuid(), screenId: z.string().uuid(), name: z.string().min(1).max(80).optional(), route: z.string().optional(),
+      projectId: z.string().uuid(), screenId: z.string().uuid(), name: z.string().min(1).max(80).optional(), route: routeSchema.optional(),
       html: z.string().optional(), uploadId: z.string().optional(), expectedRevisionId: z.string().uuid().optional(), jobId: z.string().uuid().optional(),
       presentation: z.enum(PRESENTATIONS).optional(),
     },
@@ -106,18 +118,23 @@ export function registerScreenTools(c: ToolCtx) {
 
   // 分块上传（v0.64）：大屏拆成多次小调用写进同一个 HTML 上传位，再把 uploadId 交给 create_screen / update_screen
   server.registerTool('quilt.append_upload', {
-    description: 'Append one chunk (≤ 16,000 chars; aim for ≤ 8 KB per call) to an HTML upload from quilt.create_upload_url, so a large screen is written over several short calls. offset = the chars already uploaded (0 for the first chunk, then the chars value the previous call returned): a mismatch returns 409 with the current chars, so a retried chunk is never appended twice. When done pass uploadId to create_screen / update_screen (the upload is consumed by that write).',
+    description: 'Append one chunk (≤ 16,000 chars; aim for ≤ 8 KB per call) to an HTML upload from quilt.create_upload_url, so a large screen is written over several short calls. offset = the chars already uploaded (0 for the first chunk, then the chars value the previous call returned): a mismatch returns 409 with the current chars, so a retried chunk is never appended twice. uploadId must come from quilt.create_upload_url: an unknown or already consumed one returns 404. When done pass uploadId to create_screen / update_screen (the upload is consumed by that write).',
     inputSchema: { uploadId: z.string().regex(/^[A-Za-z0-9_-]{16,64}$/), offset: z.number().int().min(0), chunk: z.string().min(1).max(16000) },
   }, wrap(async (a) => {
     write();
     const key = `uploads/${a.uploadId as string}.html`;
-    const before = (await storage.get(key).catch(() => null))?.toString('utf8') ?? '';
-    // 按位置续写：重试同一段（上次其实写成功了、只是回包丢了）时 offset 对不上，报出当前长度让调用方接着写
-    if (a.offset !== before.length) throw new Problem(409, '/errors/upload-offset', `upload has ${before.length} chars, offset was ${a.offset}`, { chars: before.length });
-    const next = before + (a.chunk as string);
-    if (Buffer.byteLength(next) > config.maxScreenHtmlBytes) throw problems.unprocessable([{ path: 'chunk', message: `upload would be ${Buffer.byteLength(next)} bytes, the screen limit is ${config.maxScreenHtmlBytes}` }]);
-    await storage.put(key, next, 'text/html');
-    return { uploadId: a.uploadId, chars: next.length };
+    return serialized(key, async () => {
+      // 上传位是签发时建的（v0.77）：没签发过、或已被写入口用掉的不收，免得打错一位的 id 悄悄开一个新空位
+      const stored = await storage.get(key).catch(() => null);
+      if (!stored) throw new Problem(404, '/errors/not-found', 'no such upload slot: get one from quilt.create_upload_url (a slot is consumed by the create_screen / update_screen that uses it)');
+      const before = stored.toString('utf8');
+      // 按位置续写：重试同一段（上次其实写成功了、只是回包丢了）时 offset 对不上，报出当前长度让调用方接着写
+      if (a.offset !== before.length) throw new Problem(409, '/errors/upload-offset', `upload has ${before.length} chars, offset was ${a.offset}`, { chars: before.length });
+      const next = before + (a.chunk as string);
+      if (Buffer.byteLength(next) > config.maxScreenHtmlBytes) throw problems.unprocessable([{ path: 'chunk', message: `upload would be ${Buffer.byteLength(next)} bytes, the screen limit is ${config.maxScreenHtmlBytes}` }]);
+      await storage.put(key, next, 'text/html');
+      return { uploadId: a.uploadId, chars: next.length };
+    });
   }));
 
   // 直传（v0.60 合并了 create_upload_url 与 create_attachment_upload_url）：mediaType 决定去处——
@@ -132,6 +149,8 @@ export function registerScreenTools(c: ToolCtx) {
     const mediaType = (a.mediaType as string | undefined) ?? 'text/html';
     if (mediaType === 'text/html') {
       const uploadId = randomToken(16);
+      // 签发即建空上传位：append_upload 只认签发过的（v0.77）
+      await storage.put(`uploads/${uploadId}.html`, '', 'text/html');
       const exp = Math.floor(Date.now() / 1000) + 600;
       return { mediaType, uploadId, putUrl: `${config.apiOrigin}/v1/uploads/${uploadId}?exp=${exp}&sig=${signObject(`uploads/${uploadId}.html`, exp)}`, projectId: project.id };
     }
@@ -154,6 +173,7 @@ export function registerScreenTools(c: ToolCtx) {
         await deriveLinks(tx, project.id);
       });
     } catch (e) { if (isUniqueViolation(e)) throw problems.routeTaken(); throw e; }
+    await notifyCanvas(project.id, { reason: 'updated', screenId: screen.id });
     return { screenId: screen.id, route: a.route };
   }));
 
@@ -178,6 +198,7 @@ export function registerScreenTools(c: ToolCtx) {
     write();
     const moved = { screens: [] as string[], components: [] as string[] };
     const failed: { id: string; error: string }[] = [];
+    const projects = new Set<string>();
     const attempt = async (id: string, into: string[], fn: () => Promise<unknown>) => {
       try { await fn(); into.push(id); }
       catch (e) { failed.push({ id, error: e instanceof Problem ? e.type : (e as Error).message }); }
@@ -186,9 +207,12 @@ export function registerScreenTools(c: ToolCtx) {
       await attempt(s.id, moved.screens, async () => {
         const { screen } = await ownedScreen(user.id, s.id);
         await db.update(schema.screens).set({ x: s.x, y: s.y, updatedAt: new Date() }).where(eq(schema.screens.id, screen.id));
+        projects.add(screen.projectId);
       });
     }
+    // 组件挪位置由 updateComponent 自己通知；屏按项目各通知一次，不逐张发
     for (const cm of (a.components as Pos[] | undefined) ?? []) await attempt(cm.id, moved.components, () => updateComponent(user.id, cm.id, { x: cm.x, y: cm.y }));
+    for (const p of projects) await notifyCanvas(p, { reason: 'updated' });
     return { moved, failed };
   }));
 

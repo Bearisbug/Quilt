@@ -4,6 +4,7 @@ import { MAX_VERSIONS, extractBody } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
 import { Problem, problems } from '../../lib/errors.ts';
 import { storage } from '../../lib/storage.ts';
+import { notifyCanvas } from '../../lib/events.ts';
 import { ownedJob, enqueueScreenshot } from '../../services/jobs.ts';
 import { ownedProject } from '../../services/projects.ts';
 import { ownedScreen, getRevision, listRevisions, hasActiveJob, createRevision, deriveLinks, revisionDto, adoptCandidate, listCandidates } from '../../services/screens.ts';
@@ -44,11 +45,12 @@ export function registerRevisionTools(c: ToolCtx) {
       if (await hasActiveJob(tx, project.id, screen.id)) throw problems.screenBusy();
       const r = await createRevision(tx, { projectId: project.id, screenId: screen.id, html, sourceKind: 'restore', lintReport: source.lintReport, expectedRevisionId: a.expectedRevisionId as string });
       if (!r) throw problems.revisionConflict();
-      if (source.screenshotKey) await tx.update(schema.screenRevisions).set({ screenshotKey: source.screenshotKey }).where(eq(schema.screenRevisions.id, r.id));
       await deriveLinks(tx, project.id);
-      return { ...r, screenshotKey: source.screenshotKey };
+      return r;
     });
-    if (!rev.screenshotKey) await enqueueScreenshot(rev.id);
+    // 与 REST 一样重拍（API-CORE-015 v0.66）：旧版的截图可能是按另一种呈现方式拍的
+    await enqueueScreenshot(rev.id);
+    await notifyCanvas(project.id, { reason: 'revision', screenId: screen.id, revisionId: rev.id });
     return { revision: await revisionDto(rev) };
   }));
 
@@ -83,7 +85,10 @@ export function registerRevisionTools(c: ToolCtx) {
       try { await db.transaction((tx) => adoptCandidate(tx, screen, rev.id)); adopted.push(s.screenId); }
       catch (e) { if (e instanceof Problem) skipped.push({ screenId: s.screenId, error: e.type }); else throw e; }
     }
-    if (adopted.length) await db.transaction((tx) => deriveLinks(tx, project.id));
+    if (adopted.length) {
+      await db.transaction((tx) => deriveLinks(tx, project.id));
+      await notifyCanvas(project.id, { reason: 'revision' });
+    }
     return { adopted, skipped };
   }));
 }

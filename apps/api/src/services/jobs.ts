@@ -1,7 +1,7 @@
 import { and, eq, inArray, desc } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
-import { problems, isUniqueViolation } from '../lib/errors.ts';
+import { Problem, problems, isUniqueViolation } from '../lib/errors.ts';
 import { emitJobEvent } from '../lib/events.ts';
 import { storage } from '../lib/storage.ts';
 import { InProcessQueue } from '../lib/queue.ts';
@@ -31,11 +31,19 @@ export const modelAborts = new Map<string, AbortController>();
 
 // §15 限流：作业创建 ≤ 10 次/分钟（进程内滑动窗口；本地版保留，挡住 agent 失控循环）
 const windows = new Map<string, number[]>();
-function assertRate(userId: string) {
+// 返回退还函数：同一幂等键的并发请求最后拿到的是首次作业，没建新作业就不该占名额
+function assertRate(userId: string): () => void {
   const now = Date.now();
   const arr = (windows.get(userId) ?? []).filter((t) => now - t < 60_000);
   if (arr.length >= config.rateLimitJobsPerMinute) throw problems.rateLimited(60);
   arr.push(now); windows.set(userId, arr);
+  return () => { const a = windows.get(userId) ?? []; const i = a.indexOf(now); if (i >= 0) a.splice(i, 1); };
+}
+// 一次要建 n 个作业时的余量预检（批注跨屏发送，API-EDIT-003 v0.77）：只看不占，名额仍由每次 createJob 自己占
+export function assertRateRoom(userId: string, n: number): void {
+  const now = Date.now();
+  const used = (windows.get(userId) ?? []).filter((t) => now - t < 60_000).length;
+  if (used + n > config.rateLimitJobsPerMinute) throw problems.rateLimited(60);
 }
 
 export function targetScreenOf(input: CreateJobInput): string | null {
@@ -63,15 +71,33 @@ async function assertSubtreeTarget(input: { screenId: string; qid: string; expec
   if (!html.includes(`data-qid="${input.qid}"`)) throw problems.elementNotFound();
 }
 
-// 作业创建（状态机 [*]→queued）：幂等 → 限流 → 目标屏占用 → 落库 → 入队（model）或投递到本机会话（agent）。
+// 目标在建作业之前复核（API-CORE-006 / 010 / 034 v0.77）：改屏的目标屏得还在本项目里，造变体的 variantOf 得是本项目的默认屏——
+// 不查就建的话，作业会「成功」更新 0 屏，或在 worker 里以英文原因失败
+async function assertTargets(projectId: string, input: CreateJobInput) {
+  if (input.kind === 'edit_screens') {
+    const ids = Array.from(new Set(input.input.screenIds));
+    const found = await db.select({ id: schema.screens.id }).from(schema.screens).where(and(eq(schema.screens.projectId, projectId), inArray(schema.screens.id, ids)));
+    if (found.length !== ids.length) throw new Problem(404, '/errors/not-found', '目标屏不存在或已被删除');
+  }
+  if (input.kind === 'generate' && input.input.variantOf) {
+    const [base] = await db.select({ variantOf: schema.screens.variantOf }).from(schema.screens).where(and(eq(schema.screens.id, input.input.variantOf), eq(schema.screens.projectId, projectId)));
+    if (!base || base.variantOf) throw problems.unprocessable([{ path: 'variantOf', message: '变体只能从本项目的默认屏出' }]);
+  }
+}
+
+const jobByKey = async (projectId: string, key: string): Promise<JobRow | undefined> =>
+  (await db.select().from(schema.generationJobs).where(and(eq(schema.generationJobs.projectId, projectId), eq(schema.generationJobs.idempotencyKey, key))))[0];
+
+// 作业创建（状态机 [*]→queued）：幂等 → 目标存在 → 限流 → 目标屏占用 → 落库 → 入队（model）或投递到本机会话（agent）。
 export async function createJob(args: { user: UserRow; projectId: string; input: CreateJobInput; idempotencyKey: string | null; requestId: string; runner?: JobRunner; withMessage?: { content: string; attachments?: unknown[] } }): Promise<{ job: JobRow; userMessage?: typeof schema.messages.$inferSelect; assistantMessage?: typeof schema.messages.$inferSelect; reused: boolean }> {
   const { user, projectId, input, idempotencyKey } = args;
   const runner: JobRunner = args.runner ?? 'model';
   if (idempotencyKey) {
-    const [existing] = await db.select().from(schema.generationJobs).where(and(eq(schema.generationJobs.projectId, projectId), eq(schema.generationJobs.idempotencyKey, idempotencyKey)));
+    const existing = await jobByKey(projectId, idempotencyKey);
     if (existing) return { job: existing, reused: true };
   }
-  assertRate(user.id);
+  await assertTargets(projectId, input);
+  const releaseRate = assertRate(user.id);
   // 没带通道的 LLM 作业（MCP 建的、辅助作业）用用户自己配的默认通道；一条都没有才回落到 .env 的驱动
   if (runner === 'model' && ['generate', 'edit_screens', 'regenerate_subtree', 'propose_design_system', 'edit_component'].includes(input.kind)) {
     const inp = input.input as { runner?: unknown };
@@ -96,7 +122,7 @@ export async function createJob(args: { user: UserRow; projectId: string; input:
   const targetScreenId = targetScreenOf(input);
   const multi = input.kind === 'edit_screens' ? input.input.screenIds : input.kind === 'apply_design_system' && input.input.screenIds !== 'all' ? input.input.screenIds : [];
 
-  const result = await db.transaction(async (tx) => {
+  const created = db.transaction(async (tx) => {
     for (const sid of [targetScreenId, ...multi].filter((x): x is string => !!x)) {
       if (await hasActiveJob(tx, projectId, sid)) throw problems.screenBusy();
     }
@@ -122,6 +148,16 @@ export async function createJob(args: { user: UserRow; projectId: string; input:
     }
     return { job, userMessage, assistantMessage, reused: false };
   });
+  let result: Awaited<typeof created>;
+  try { result = await created; } catch (e) {
+    // 同一幂等键并发到达（§16 v0.77）：上面那次幂等查询在事务外，后到的查不到、随后撞上首个作业的屏锁或唯一索引——
+    // 这时首个已经提交，按键重查一次就是它；查不到才是真的屏忙
+    if (idempotencyKey && e instanceof Problem && e.type === '/errors/screen-busy') {
+      const existing = await jobByKey(projectId, idempotencyKey);
+      if (existing) { releaseRate(); return { job: existing, reused: true }; }
+    }
+    throw e;
+  }
   await emitJobEvent(result.job.id, 'progress', { stage: 'queued' });
   if (runner === 'model') jobQueue.push({ jobId: result.job.id });
   else agentHooks?.run(result.job.id);

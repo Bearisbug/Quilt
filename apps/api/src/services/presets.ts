@@ -3,6 +3,7 @@ import { MAX_ASSETS_PER_PROJECT, RADIUS_SCALES, tokensFromSeed, type ColorMode, 
 import { db, schema } from '../db/client.ts';
 import { problems } from '../lib/errors.ts';
 import { storage } from '../lib/storage.ts';
+import { notifyCanvas } from '../lib/events.ts';
 import { ownedProject } from './projects.ts';
 import { assetKey } from './assets.ts';
 
@@ -90,6 +91,7 @@ export async function applyPreset(ownerId: string, projectId: string, input: { p
   // 素材是新增不是替换：同名不合并，用户要的是「把这套 logo 也带过来」，删旧的该由他自己决定
   const total = await db.$count(schema.presetAssets, eq(schema.presetAssets.presetId, preset.id));
   const copied = await copyPresetAssets(preset.id, project.id);
+  await notifyCanvas(project.id, { reason: 'design_system' });
   return { assetsCopied: copied, skipped: total - copied };
 }
 

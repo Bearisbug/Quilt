@@ -3,7 +3,8 @@ import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
 import { jobQueue, shotQueue } from '../services/jobs.ts';
 import { emitJobEvent, emitProjectEvent } from '../lib/events.ts';
-import { storage, objectKeys } from '../lib/storage.ts';
+import { storage } from '../lib/storage.ts';
+import { storeRevisionShot } from '../services/screens.ts';
 import { screenshotHtml } from '../lib/screenshot.ts';
 import { DEVICE_SIZE, failureText, type DeviceType, type JobKind } from '@quilt/core';
 import { runJob } from './pipeline.ts';
@@ -19,9 +20,7 @@ export async function renderRevisionScreenshot(revisionId: string): Promise<bool
   if (!r || r.screenshotKey) return false;
   const html = (await storage.get(r.htmlKey)).toString('utf8');
   const png = await screenshotHtml(html, DEVICE_SIZE[r.deviceType as DeviceType], { overlay: r.presentation === 'overlay' });
-  const key = objectKeys.revisionShot(r.projectId, r.screenId, r.id);
-  await storage.put(key, png, 'image/png');
-  await db.update(schema.screenRevisions).set({ screenshotKey: key }).where(eq(schema.screenRevisions.id, r.id));
+  if (!(await storeRevisionShot(r.projectId, r.screenId, r.id, png))) return false;
   // 截图就绪：非作业路径（MCP 回写、直改）没有 screen_screenshot_ready 事件，项目频道补一条让卡片换图
   await emitProjectEvent(r.projectId, 'screen_changed', { screenId: r.screenId, revisionId: r.id, screenshot: true }).catch(() => {});
   return true;
@@ -44,10 +43,7 @@ export async function retryScreenshots(): Promise<number> {
       try {
         const html = (await storage.get(r.htmlKey)).toString('utf8');
         const png = await screenshotHtml(html, DEVICE_SIZE[r.deviceType as DeviceType], { overlay: r.presentation === 'overlay' });
-        const key = objectKeys.revisionShot(r.projectId, r.screenId, r.id);
-        await storage.put(key, png, 'image/png');
-        await db.update(schema.screenRevisions).set({ screenshotKey: key }).where(eq(schema.screenRevisions.id, r.id));
-        n++;
+        if (await storeRevisionShot(r.projectId, r.screenId, r.id, png)) n++;
       } catch (e) { console.warn(`[screenshot.retry] ${r.id}: ${(e as Error).message}`); }
     }
     if (n) console.log(`[screenshot.retry] backfilled ${n}`);

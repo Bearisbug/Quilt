@@ -1,6 +1,7 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { problems } from '../lib/errors.ts';
+import { notifyCanvas } from '../lib/events.ts';
 import { storage } from '../lib/storage.ts';
 import { applyElementOps, extractBody, assembleDocument, buildPrelude, lintScreenBody, tokensFromSeed, withConventions, RADIUS_SCALES, type ElementOp, type Tokens, type RevisionDto, type Palette, type ColorMode, type FontSource } from '@quilt/core';
 import { ownedScreen, hasActiveJob, createRevision, deriveLinks, revisionDto } from './screens.ts';
@@ -33,6 +34,7 @@ export async function applyElementEdit(ownerId: string, screenId: string, qid: s
     return r;
   });
   await enqueueScreenshot(created.id);
+  await notifyCanvas(project.id, { reason: 'revision', screenId: screen.id, revisionId: created.id });
   return revisionDto(created);
 }
 
@@ -60,8 +62,11 @@ export async function updateDesignSystem(ownerId: string, projectId: string, pat
   const colorMode: ColorMode = palette?.dark ? (patch.colorMode ?? (ds.colorMode as ColorMode)) : 'light';
   const tokens = tokensFromSeed(seedColor, { fontFamily, fontSource, fontUrl, radiusScale, colorMode, palette: palette?.[colorMode] });
   const designMd = patch.conventions ? withConventions(patch.designMd ?? ds.designMd, patch.conventions) : (patch.designMd ?? ds.designMd);
+  // 条件更新才是锁（v0.77）：上面的比对与这里之间隔着好几次 await，同一版本的并发请求都能过比对
   const [updated] = await db.update(schema.designSystems)
     .set({ seedColor, tokens, palette, colorMode, designMd, version: ds.version + 1, updatedAt: new Date() })
-    .where(eq(schema.designSystems.id, ds.id)).returning();
+    .where(and(eq(schema.designSystems.id, ds.id), eq(schema.designSystems.version, patch.expectedVersion))).returning();
+  if (!updated) throw problems.versionConflict();
+  await notifyCanvas(project.id, { reason: 'design_system' });
   return designSystemDto(updated);
 }

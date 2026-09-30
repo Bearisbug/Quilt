@@ -115,10 +115,7 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
   const targets = body.targetScreenIds?.length ? body.targetScreenIds : null;
   // 共享组件目标（REQ-EDIT-006）：只有组件、没有屏也没有锚点 = 改这个组件（恰好 1 个）；其余情况它们的完整 HTML 进上下文
   const compTargets = body.mode !== 'chat' && body.targetComponentIds?.length ? body.targetComponentIds : null;
-  if (compTargets) {
-    const mine = await db.select({ id: schema.components.id }).from(schema.components).where(and(eq(schema.components.projectId, project.id), inArray(schema.components.id, compTargets)));
-    if (mine.length !== compTargets.length) throw problems.validation([{ path: 'targetComponentIds', message: '有组件不属于这个项目或已被删除' }]);
-  }
+  if (compTargets) await assertOwnComponents(project.id, compTargets);
   // 「修改」还原的隐藏参数（REQ-CORE-026 v0.74）：出变体 / 补缺失页是钉死路由的造，补链 / 按新约定重生成是改；聊天时忽略
   const chat = body.mode === 'chat';
   const pinned = !chat && !!(body.variantOf || body.route);
@@ -162,6 +159,13 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
   return c.json(res, status);
 });
 
+// 组件目标（发消息）与原作业里的组件（重试，API-CORE-034 v0.77）同一句 400：得都还在本项目里
+async function assertOwnComponents(projectId: string, ids: string[]) {
+  const want = Array.from(new Set(ids));
+  const mine = await db.select({ id: schema.components.id }).from(schema.components).where(and(eq(schema.components.projectId, projectId), inArray(schema.components.id, want)));
+  if (mine.length !== want.length) throw problems.validation([{ path: 'targetComponentIds', message: '有组件不属于这个项目或已被删除' }]);
+}
+
 // 建一轮（消息 + 作业）并给出响应体：发消息与重试共用。本机 agent 的轮次助手回执立刻写明投给了谁
 async function startRound(c: Context<Env>, user: ReturnType<typeof requireUser>, projectId: string, input: CreateJobInput, runner: Runner | undefined, message: { content: string; attachments: StoredAttachment[] }, targets: string[] | null) {
   const agent = runner?.kind === 'agent';
@@ -190,7 +194,10 @@ projectRoutes.post('/v1/projects/:projectId/messages/:messageId/retry', async (c
   if (!msg || !old) throw problems.notFound();
   if (!RETRYABLE.includes(old.kind as JobKind)) throw problems.validation([{ path: 'messageId', message: '这一轮不能重试' }]);
   if (old.status === 'queued' || old.status === 'running') throw problems.jobNotFinished();
-  const prev = old.input as { runner?: Runner; screenIds?: string[] };
+  const prev = old.input as { runner?: Runner; screenIds?: string[]; componentId?: string; componentIds?: string[] };
+  // 原作业的目标可能已被删：组件在这里查（与发消息同一句 400），目标屏与 variantOf 由 createJob 查（404 / 422）
+  const comps = [...(prev.componentId ? [prev.componentId] : []), ...(prev.componentIds ?? [])];
+  if (comps.length) await assertOwnComponents(project.id, comps);
   const requested = body.runner ?? prev.runner;
   if (old.kind === 'edit_component' && requested?.kind === 'agent') throw problems.validation([{ path: 'runner', message: '改组件请换一个模型通道，本机会话不接这类作业' }]);
   const attachments = await resolveForMessage(project.id, (msg.attachments as StoredAttachment[]).map((a) => a.id));
@@ -226,7 +233,15 @@ projectRoutes.get('/v1/projects/:projectId/events', async (c) => {
     let idle = 0;
     while (open) {
       await stream.sleep(250);
-      if (queue.length) { idle = 0; for (const e of queue.splice(0)) await stream.writeSSE({ event: e.type, data: JSON.stringify(e) }); continue; }
+      if (queue.length) {
+        idle = 0;
+        for (const e of queue.splice(0)) {
+          await stream.writeSSE({ event: e.type, data: JSON.stringify(e) });
+          // 项目被删（v0.77）：这是最后一条，写完就结束；EventSource 重连拿到 404 后不再重连
+          if ((e.data as { reason?: string } | null)?.reason === 'project_deleted') open = false;
+        }
+        continue;
+      }
       idle += 250;
       if (idle >= 15_000) { idle = 0; await stream.writeSSE({ event: 'ping', data: '' }); }
     }
@@ -299,7 +314,8 @@ projectRoutes.delete('/v1/assets/:assetId', async (c) => {
 projectRoutes.post('/v1/projects/:projectId/attachments', async (c) => {
   const user = requireUser(c);
   const project = await ownedProject(user.id, c.req.param('projectId'));
-  const body = await parseBody(c, createAttachmentSchema);
+  // 请求体只有类型与大小两个字段，不合 schema 就是内容不合规：与直传复核同一个 422（API-CORE-019）
+  const body = await parseBody(c, createAttachmentSchema, problems.unprocessable);
   return c.json(await createUpload(project.id, body), 201);
 });
 

@@ -28,15 +28,15 @@ export async function createUpload(projectId: string, input: { mediaType: string
   };
 }
 
-/** 直传落库。类型与大小在这里复核一次——签发时报的 bytes 只是声明，真正到货的才算数 */
+/** 直传落库。类型与大小在这里复核一次——签发时报的 bytes 只是声明，真正到货的才算数（不合规 422，API-CORE-019） */
 export async function storeUpload(key: string, mediaType: string, body: Buffer): Promise<void> {
   if (!(IMAGE_MEDIA_TYPES as readonly string[]).includes(mediaType)) {
-    throw problems.validation([{ path: 'mediaType', message: `只支持 ${IMAGE_MEDIA_TYPES.join(' / ')}` }]);
+    throw problems.unprocessable([{ path: 'mediaType', message: `只支持 ${IMAGE_MEDIA_TYPES.join(' / ')}` }]);
   }
   if (body.byteLength > MAX_ATTACHMENT_BYTES) {
-    throw problems.validation([{ path: 'body', message: `单张最大 ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB` }]);
+    throw problems.unprocessable([{ path: 'body', message: `单张最大 ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB` }]);
   }
-  if (!body.byteLength) throw problems.validation([{ path: 'body', message: '空文件' }]);
+  if (!body.byteLength) throw problems.unprocessable([{ path: 'body', message: '空文件' }]);
   await storage.put(key, body, mediaType);
 }
 

@@ -1,6 +1,7 @@
 import { and, eq, desc, sql, inArray, isNull, isNotNull, or } from 'drizzle-orm';
 import { db, schema, type Db } from '../db/client.ts';
 import { problems } from '../lib/errors.ts';
+import { notifyCanvas } from '../lib/events.ts';
 import { storage, objectKeys } from '../lib/storage.ts';
 import { config } from '../config.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
@@ -55,11 +56,14 @@ export async function pointCurrentToFirstCandidate(tx: Tx, screenId: string, job
   if (first) await tx.update(schema.screens).set({ currentRevisionId: first.id, updatedAt: new Date() }).where(onlyIfCurrent ? and(eq(schema.screens.id, screenId), eq(schema.screens.currentRevisionId, onlyIfCurrent)) : eq(schema.screens.id, screenId));
 }
 
-// 采用候选（API-CORE-025）：只改 current 指针、结清同批；current 已不属同批（用户在某版上继续改了）则拒绝，不顶掉他的改动
+// 采用候选（API-CORE-025）：只改 current 指针、结清同批；current 已不属同批（用户在某版上继续改了）则拒绝，不顶掉他的改动。
+// 「同批」按事务里锁住的屏行判（v0.77）：调用方手里的屏行是事务外读的，回溯 / 直改 / 回写在那之后提交的话，拿它判会把用户刚落的修订顶掉
 export async function adoptCandidate(tx: Tx, screen: ScreenRow, revisionId: string): Promise<void> {
   const [rev] = await tx.select().from(schema.screenRevisions).where(and(eq(schema.screenRevisions.id, revisionId), eq(schema.screenRevisions.screenId, screen.id)));
   if (!rev || rev.candidateIndex === null || !rev.jobId) throw problems.notFound();
-  const [cur] = screen.currentRevisionId ? await tx.select().from(schema.screenRevisions).where(eq(schema.screenRevisions.id, screen.currentRevisionId)) : [];
+  const [locked] = await tx.select({ currentRevisionId: schema.screens.currentRevisionId }).from(schema.screens).where(eq(schema.screens.id, screen.id)).for('update');
+  if (!locked) throw problems.notFound();
+  const [cur] = locked.currentRevisionId ? await tx.select().from(schema.screenRevisions).where(eq(schema.screenRevisions.id, locked.currentRevisionId)) : [];
   if (!cur || cur.jobId !== rev.jobId || cur.candidateIndex === null) throw problems.revisionConflict();
   if (await hasActiveJob(tx, screen.projectId, screen.id)) throw problems.screenBusy();
   await tx.update(schema.screens).set({ currentRevisionId: rev.id, updatedAt: new Date() }).where(eq(schema.screens.id, screen.id));
@@ -196,6 +200,19 @@ export async function deleteScreen(projectId: string, screenId: string): Promise
     await deriveLinks(tx, projectId);
   });
   for (const id of family) await storage.deletePrefix(`projects/${projectId}/screens/${id}/`).catch((e) => console.warn(`[delete screen] ${id}: ${(e as Error).message}`));
+  await notifyCanvas(projectId, { reason: 'deleted', screenId });
+}
+
+// 截图写回（§16 v0.77）：渲染要几秒，期间屏或整个项目可能已被删、对象前缀已清过。先写对象再按修订行条件回填，
+// 行已不在就清掉这一屏（项目也不在了就清整个项目）的前缀——否则刚写的 PNG 没有任何行指向它，再也没人清。返回 null = 屏已删
+export async function storeRevisionShot(projectId: string, screenId: string, revisionId: string, png: Buffer): Promise<string | null> {
+  const key = objectKeys.revisionShot(projectId, screenId, revisionId);
+  await storage.put(key, png, 'image/png');
+  const rows = await db.update(schema.screenRevisions).set({ screenshotKey: key }).where(eq(schema.screenRevisions.id, revisionId)).returning({ id: schema.screenRevisions.id });
+  if (rows.length) return key;
+  const [project] = await db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.id, projectId));
+  await storage.deletePrefix(project ? `projects/${projectId}/screens/${screenId}/` : `projects/${projectId}/`).catch(() => {});
+  return null;
 }
 
 // 呈现方式（v0.63）是整个家族的：变体是同一屏的另一个状态，播放按默认屏的路由找屏，所以默认屏改了变体跟着改。

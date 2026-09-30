@@ -5,6 +5,7 @@ import { applyElementEdit, updateDesignSystem } from '../../services/edit.ts';
 import { db, schema } from '../../db/client.ts';
 import { problems, isUniqueViolation } from '../../lib/errors.ts';
 import { storage } from '../../lib/storage.ts';
+import { notifyCanvas } from '../../lib/events.ts';
 import { parseBody, requireUser, type Env } from '../app.ts';
 import { ownedScreen, hasActiveJob, createRevision, deriveLinks, listRevisions, getRevision, revisionDto, adoptCandidate, deleteScreen, setFamilyPresentation } from '../../services/screens.ts';
 import { screenDtos } from '../../services/projects.ts';
@@ -40,6 +41,7 @@ screenRoutes.patch('/v1/screens/:screenId', async (c) => {
     throw e;
   }
   for (const id of reshoot) await enqueueScreenshot(id);
+  await notifyCanvas(project.id, { reason: 'updated', screenId: screen.id });
   const [updated] = await db.select().from(schema.screens).where(eq(schema.screens.id, screen.id));
   return c.json({ screen: (await screenDtos(project, [updated]))[0] });
 });
@@ -60,6 +62,7 @@ screenRoutes.post('/v1/screens/:screenId/revisions/:revisionId/adopt', async (c)
     await adoptCandidate(tx, screen, c.req.param('revisionId'));
     await deriveLinks(tx, project.id);
   });
+  await notifyCanvas(project.id, { reason: 'revision', screenId: screen.id, revisionId: c.req.param('revisionId') });
   const [updated] = await db.select().from(schema.screens).where(eq(schema.screens.id, screen.id));
   return c.json({ screen: (await screenDtos(project, [updated]))[0] });
 });
@@ -111,6 +114,7 @@ screenRoutes.post('/v1/screens/:screenId/revisions/:revisionId/restore', async (
     return r;
   });
   await enqueueScreenshot(rev.id);
+  await notifyCanvas(project.id, { reason: 'revision', screenId: screen.id, revisionId: rev.id });
   return c.json({ revision: await revisionDto(rev) }, 201);
 });
 

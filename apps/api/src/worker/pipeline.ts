@@ -10,7 +10,7 @@ import { emitJobEvent } from '../lib/events.ts';
 import { storage, objectKeys } from '../lib/storage.ts';
 import { screenshotHtml, extractTailwindCss } from '../lib/screenshot.ts';
 import { recordUsage } from '../services/usage.ts';
-import { createRevision, deriveLinks, pointCurrentToFirstCandidate, priorInstructions, exemplarBody, currentBody } from '../services/screens.ts';
+import { createRevision, deriveLinks, pointCurrentToFirstCandidate, priorInstructions, exemplarBody, currentBody, storeRevisionShot } from '../services/screens.ts';
 import { screenDtos } from '../services/projects.ts';
 import { timeoutFor, modelAborts } from '../services/jobs.ts';
 import { runChatTurn, ChatFailure } from './chat.ts';
@@ -152,9 +152,8 @@ async function screenshotRevision(ctx: Ctx, screenId: string, revisionId: string
   try {
     const [row] = await db.select({ presentation: schema.screens.presentation }).from(schema.screens).where(eq(schema.screens.id, screenId));
     const png = await screenshotHtml(html, DEVICE_SIZE[ctx.device], { overlay: row?.presentation === 'overlay' });
-    const key = objectKeys.revisionShot(ctx.project.id, screenId, revisionId);
-    await storage.put(key, png, 'image/png');
-    await db.update(schema.screenRevisions).set({ screenshotKey: key }).where(eq(schema.screenRevisions.id, revisionId));
+    const key = await storeRevisionShot(ctx.project.id, screenId, revisionId, png);
+    if (!key) return;
     await emitJobEvent(ctx.job.id, 'screen_screenshot_ready', { screenId, revisionId, screenshotUrl: await storage.signedUrl(key) });
   } catch (e) {
     console.warn(`[job ${ctx.job.id}] screenshot failed for ${revisionId}: ${(e as Error).message}`);
@@ -288,6 +287,8 @@ async function runEditScreens(ctx: Ctx) {
   const versions = Math.max(1, input.versions ?? 1);
   const screens = await db.select().from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id));
   const targets = screens.filter((s) => input.screenIds.includes(s.id) && s.currentRevisionId);
+  // 建作业时屏都在（createJob 已查），排队期间被删光的不能报「已更新 0 屏」成功（API-CORE-006 v0.77）
+  if (!targets.length) throw new JobFailure('validation', '目标屏都已被删除');
   // 共享组件卡（REQ-EDIT-006）：框选的与目标屏本来就用的附完整 HTML
   const system = screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], await registry(ctx), await references(ctx), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds, screenIds: targets.map((s) => s.id) }));
   const prepared = await Promise.all(targets.map(async (screen) => {

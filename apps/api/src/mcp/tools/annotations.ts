@@ -37,7 +37,7 @@ export function registerAnnotationTools(c: ToolCtx) {
   }));
 
   server.registerTool('quilt.send_annotations', {
-    description: 'Send annotations to the server-side model: one edit_screens job per screen; they become sent, then resolved when the job succeeds.',
+    description: 'Send annotations to the server-side model: one edit_screens job per screen; they become sent, then resolved when the job succeeds. All or nothing: annotations on more than 10 screens are rejected with 422 (send them in batches), and a busy screen (409) or too little rate-limit room (429) rejects the whole call with no job created and the annotations still open.',
     inputSchema: { projectId: z.string().uuid(), annotationIds: z.array(z.string().uuid()).min(1).max(50) },
   }, wrap(async (a) => {
     write();
