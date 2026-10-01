@@ -25,13 +25,15 @@ const record = (tc: string, ok: boolean | 'manual' | 'skip', note = '') => {
 const shot = (page: import('playwright').Page, tc: string) => page.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-tc-${tc.toLowerCase()}.png`) });
 const ONLY = process.env.ONLY?.split(',').map((s) => s.trim()).filter(Boolean);
 let currentPage: import('playwright').Page | null = null;
+// 用例里登记的收尾（桩通道与它占的端口）：成败都在这条用例结束时做，不漏给后面的用例
+const cleanups: (() => Promise<unknown>)[] = [];
 const step = async (tc: string, fn: () => Promise<string | void>) => {
   if (ONLY && !ONLY.includes(tc)) return;
   try { const note = await fn(); record(tc, true, note ?? ''); }
   catch (e) {
     record(tc, false, (e as Error).message.split('\n')[0].slice(0, 300));
     await currentPage?.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}-fail.png`) }).catch((err) => console.log('   (截图失败:', (err as Error).message.split('\n')[0], ')'));
-  }
+  } finally { for (const c of cleanups.splice(0)) await c().catch(() => {}); }
 };
 const expect = (cond: unknown, msg: string) => { if (!cond) throw new Error(msg); };
 const waitJob = async (jobId: string, maxSec = 180) => {
@@ -53,6 +55,25 @@ const blankSpot = (pg: import('playwright').Page) => pg.evaluate(() => {
   return null;
 });
 const verbLine = (pg: import('playwright').Page) => pg.getByTestId('verb-line').innerText();
+// stub 轮次没有云端通道（§3：GEMINI_API_KEY 置空，种子不建 Gemini 通道），输入框的缺省通道落到「交给本机 Claude Code」：
+// 没有屏数 / 版数档位、没选会话时 Enter 被挡。要从输入框发一轮、或要量带档位的输入框的用例，先建一条 OpenAI 兼容桩通道、验证，
+// 给了页面就重载（画布在打开时取通道清单）并在输入框里选中它。验证请求（用户提示 ping）不拖，其余按 holdMs 拖
+async function useStubChannel(pg: import('playwright').Page | null, opts: { port: number; label: string; holdMs?: number }) {
+  const key = `good-key-${opts.port}`;
+  const stub = startOpenAiStub({ port: opts.port, apiKey: key, reply: '<div class="min-h-dvh bg-background p-6"><h1 class="text-xl">Stub</h1></div>', holdMs: (hit) => (hit.user === 'ping' ? 0 : opts.holdMs ?? 0) });
+  let id = '';
+  cleanups.push(async () => { if (id) await apiJson(`/v1/channels/${id}`, { method: 'DELETE' }).catch(() => {}); stub.server.closeAllConnections(); await stub.close(); });
+  id = (await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label: opts.label, endpoint: stub.url, model: `stub-${opts.port}`, apiKey: key }) })).body.channel.id;
+  const probe = await apiJson<{ ok: boolean }>(`/v1/runners/channel:${id}/probe`, { method: 'POST' });
+  expect(probe.body.ok === true, `桩通道验证未通过：${JSON.stringify(probe.body)}`);
+  if (pg) {
+    await pg.reload();
+    await pg.locator('[data-testid="screen-card"]').first().waitFor();
+    await pg.getByTestId('runner-select').waitFor({ timeout: 10000 });
+    await pickOption(pg, '[data-testid="runner-select"]', opts.label);
+    await eventually(async () => expect((await selectedValue(pg, '[data-testid="runner-select"]')) === `channel:${id}`, `输入框没选上「${opts.label}」`));
+  }
+}
 
 const browser = await launch();
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -296,6 +317,8 @@ await step('TC-CORE-023', async () => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${WEB}/p/${projectId}`);
   await page.locator('[data-testid="screen-card"]').first().waitFor();
+  // 第 7 步量的是带屏数 / 版数档位的输入框（模型通道），stub 轮次没有云端通道时自己建一条
+  await useStubChannel(page, { port: 3986, label: 'Stub 输入框 23' });
   await page.waitForTimeout(800);
 
   // 1 四处 chrome 两两不重叠
@@ -507,6 +530,8 @@ await step('TC-CORE-024', async () => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${WEB}/p/${projectId}`);
   await page.locator('[data-testid="screen-card"]').first().waitFor();
+  // 第 5 步从输入框发一轮要模型通道：stub 轮次自己建一条，桩拖住不回、这一轮随后取消
+  await useStubChannel(page, { port: 3985, label: 'Stub 多选 24', holdMs: 60_000 });
   await page.getByRole('button', { name: '适配视图' }).click();
   await page.waitForTimeout(700);
   const card = (r: string) => page.locator(`[data-testid="screen-card"][data-route="${r}"]`);
@@ -556,10 +581,12 @@ await step('TC-CORE-024', async () => {
   const res = page.waitForResponse((r) => r.url().includes('/messages') && r.request().method() === 'POST');
   await page.fill('#chat-input', '统一把顶部导航改成标签栏');
   await page.keyboard.press('Enter');
-  const sent = JSON.parse((await req).postData() ?? '{}') as { targetScreenIds?: string[] };
+  // 两个等待一起收：只等 req 时它一超时，并行的 res 拒绝没人接，整套进程退出
+  const [sentReq, sentRes] = await Promise.all([req, res]);
+  const sent = JSON.parse(sentReq.postData() ?? '{}') as { targetScreenIds?: string[] };
   expect(sent.targetScreenIds?.length === 4, `targetScreenIds 不是 4 屏：${JSON.stringify(sent.targetScreenIds)}`);
   expect(screens.every((s) => sent.targetScreenIds!.includes(s.id)), 'targetScreenIds 与选中集合不一致');
-  const sentJob = (await (await res).json()) as { job: { id: string } };
+  const sentJob = (await sentRes.json()) as { job: { id: string } };
   // 5b 目标标签粘性（REQ-CORE-006）：点空白只清画布高亮，目标标签与「改」的动词行都还在；「清空」才回到「造」
   const spot = await blankSpot(page);
   expect(!!spot, '找不到画布空白点');
@@ -590,10 +617,12 @@ await step('TC-CORE-024', async () => {
 
 await step('TC-CORE-025', async () => {
   const { projectId, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Runner', '--device', 'mobile', '--screens', '2');
+  // stub 轮次种子不建云端通道（§3）：自建一条 OpenAI 兼容桩通道当清单里的云端通道，发出的作业拖住不回、随后取消
+  await useStubChannel(null, { port: 3984, label: 'Stub 云端 25', holdMs: 60_000 });
 
   // 清单：只给标识与显示名；缺凭据的驱动照样列出但标为不可用
   const list = (await apiJson<{ items: { id: string; label: string; hint?: string; available: boolean; unavailableReason?: string; runner: Record<string, string> }[]; default: string }>('/v1/runners')).body;
-  expect(list.items.length >= 2 && list.items.some((i) => i.runner.kind === 'agent') && list.items.some((i) => i.runner.kind === 'channel'), '通道清单缺云端通道（seed 会按 .env 的 GEMINI_API_KEY 建一条）或本机 agent');
+  expect(list.items.length >= 2 && list.items.some((i) => i.runner.kind === 'agent') && list.items.some((i) => i.runner.kind === 'channel'), '通道清单缺云端通道或本机 agent');
   // 只查真实密钥形态；unavailableReason 里出现的是配置项名（ANTHROPIC_API_KEY），不是凭据
   expect(!/sk-[A-Za-z0-9]{10,}|AIza[A-Za-z0-9_-]{10,}|-----BEGIN/.test(JSON.stringify(list.items)), '通道清单泄漏了凭据');
   const unavailable = list.items.filter((i) => !i.available);
@@ -873,7 +902,9 @@ await step('TC-CORE-028', async () => {
     const gone = await apiJson<{ type: string }>(`/v1/projects/${projectId}/messages`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ content: 'x', targetScreenIds: [screens[0].id], runner: { kind: 'channel', channelId: cid } }) });
     expect(gone.status === 404, `已删通道仍能发消息：${gone.status}`);
 
-    // 7 设置弹层里的管理器：三组行、状态药丸、验证按钮、本机通道的配置步骤
+    // 7 设置弹层里的管理器：三组行、状态药丸、验证按钮、本机通道的配置步骤。第 6 步已删了 Stub 通道，stub 轮次又没有种子的云端通道（§3），
+    //   先建一条已验证的自建通道当「自建通道」那一组的行
+    await useStubChannel(null, { port: 3983, label: 'Stub 管理 28' });
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${WEB}/p/${projectId}?settings=runners`);
     const modal = page.getByTestId('settings-modal');
@@ -988,6 +1019,8 @@ await step('TC-CORE-029', async () => {
     await page.goto(`${WEB}/p/${projectId}`);
     await page.locator('[data-testid="screen-card"]').first().waitFor();
     await page.getByTestId('runner-select').waitFor({ timeout: 10000 });
+    // 同一浏览器上下文里更早的用例（TC-CORE-025 选过「另一个可用通道」）可能让它记住了本机 agent 通道：开头就显式选上桩通道
+    await pickOption(page, '[data-testid="runner-select"]', 'Stub 新屏');
     expect((await verbLine(page)).includes('造 1 屏 · 自动摆放'), `无目标时动词行应为「造 1 屏 · 自动摆放」：${await verbLine(page)}`);
     const spot = await blankSpot(page);
     expect(!!spot, '找不到画布空白点');
@@ -2075,7 +2108,9 @@ await step('TC-CORE-041', async () => {
   const d = await detail();
   const base = d.screens.find((s) => s.id === s1.id)!;
   expect(v!.route === '/s1' && v!.variantName === '空态' && v!.name === 'Screen 1 · 空态', `变体元数据不对：${JSON.stringify({ route: v!.route, variantName: v!.variantName, name: v!.name })}`);
-  expect(v!.y === base.y && v!.x === base.x + 390 + 80, `变体应落在默认屏右侧同一行，实际 (${v!.x}, ${v!.y}) vs 默认 (${base.x}, ${base.y})`);
+  // 落在默认屏那一行最右（REQ-CORE-025）：种子三屏在 (0,0) / (470,0) / (940,0)，变体排在 /s3 右侧
+  const rowRight = Math.max(...d.screens.filter((s) => s.id !== v!.id && s.y < base.y + 844 && base.y < s.y + 844).map((s) => s.x + 390));
+  expect(v!.y === base.y && v!.x === rowRight + 80, `变体应落在默认屏那一行最右（x = ${rowRight + 80}），实际 (${v!.x}, ${v!.y}) vs 默认 (${base.x}, ${base.y})`);
   // 1b 变体不会被自动钉成样板屏（v0.66）
   const proj = (await apiJson<{ project: { exemplarScreenId: string | null } }>(`/v1/projects/${projectId}`)).body.project;
   expect(proj.exemplarScreenId !== v!.id, '变体不该被钉成样板屏');
@@ -2506,7 +2541,10 @@ await step('TC-CORE-044', async () => {
   const GET_RE = /\/v1\/projects\/[^/]+\/messages\?limit=100$/;
   try {
     const slow = await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label: 'Slow 通道 44', endpoint: stub.url, model: 'stub-44', apiKey: 'good-key-0044' }) });
+    // 第 2 步从输入框发一轮：stub 轮次没有云端通道时缺省是本机 agent、Enter 被挡，在打开画布之前验证慢桩通道（画布打开时取通道清单），打开后在输入框选中它
+    expect((await apiJson<{ ok: boolean }>(`/v1/runners/channel:${slow.body.channel.id}/probe`, { method: 'POST' })).body.ok === true, '慢桩通道验证未通过');
     await openCanvas(projectId);
+    await pickOption(page, '[data-testid="runner-select"]', 'Slow 通道 44');
     const list = page.locator('[data-testid="chat-dock"] [role="log"]');
     const atBottom = () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight < 4);
     // 1 打开时在底部；往上翻到顶后，别处发的一轮一路推进度、落终态回执，列表不动（修复前每条进度都拽回底部）
@@ -3711,6 +3749,168 @@ await step('TC-CORE-068', async () => {
   }
   if (bad.length) { console.log(`   TC-CORE-068 全部失败项：\n   - ${bad.join('\n   - ')}`); throw new Error(bad.join('；')); }
   return '中途被杀的造屏：Cart 两版候选接管 current 并带角标、Checkout 删掉、地图有 Cart 连线；queued 的 agent 作业补投后 failed、屏锁放开；首轮补扫补上截图并推事件';
+});
+
+// ---------- v0.82 后端、截图与测试基础设施 ----------
+type Scr082 = { id: string; name: string; route: string; x: number; y: number; variantOf: string | null; variantName: string | null; currentRevisionId: string | null; previewUrl: string | null };
+const detail082 = async (pid: string) => (await apiJson<{ screens: Scr082[] }>(`/v1/projects/${pid}`)).body;
+
+// TC-CORE-070 从 127.0.0.1 打开画布（§15 预览域）：frame-ancestors 列出来源名单展开出的全部 origin，/p/ 的 ACAO 回显名单内的请求 Origin
+await step('TC-CORE-070', async () => {
+  const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Loopback', '--device', 'mobile', '--screens', '3');
+  const port = new URL(WEB).port;
+  const alt = `http://127.0.0.1:${port}`;
+  // 1 预览响应头：带 127.0.0.1 画布的 Origin 取 /s1（Node 解析不了 *.localhost，直连 127.0.0.1，预览域不看 Host）
+  const u = new URL((await detail082(pid)).screens.find((s) => s.id === screens[0].id)!.previewUrl!);
+  u.hostname = '127.0.0.1';
+  const head = async (origin: string) => { const r = await fetch(u, { headers: { Origin: origin } }); await r.arrayBuffer(); return { status: r.status, csp: r.headers.get('content-security-policy') ?? '', acao: r.headers.get('access-control-allow-origin') }; };
+  const h = await head(alt);
+  const ancestors = /frame-ancestors ([^;]+)/.exec(h.csp)?.[1].trim().split(/\s+/) ?? [];
+  for (const o of [`http://localhost:${port}`, alt, `http://[::1]:${port}`]) expect(ancestors.includes(o), `frame-ancestors 缺 ${o}：${ancestors.join(' ')}`);
+  expect(h.status === 200 && h.acao === alt, `带 ${alt} 的 Origin 取屏，ACAO 应回显它：${h.status} ${h.acao}`);
+  const evil = await head('http://evil.example');
+  expect(evil.acao !== 'http://evil.example', `名单外的 Origin 不该被回显：${evil.acao}`);
+  // 2 从 127.0.0.1 打开画布，双击 /s1 进交互：iframe 里加载出这一屏（修复前 frame-ancestors 拦下，iframe 是禁止图标）
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${alt}/p/${pid}`);
+  await page.locator('[data-testid="screen-card"] img').first().waitFor({ timeout: 15000 });
+  await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').dblclick();
+  await page.locator('.card.focused .badge', { hasText: '交互中' }).waitFor({ timeout: 20000 });
+  const fl = page.frameLocator('.card.focused iframe');
+  await eventually(async () => expect((await fl.locator('h1').innerText({ timeout: 1000 })).startsWith('Screen 1'), 'iframe 里不是 Screen 1'), 10000)
+    .catch(() => { throw new Error('从 127.0.0.1 打开画布，交互态 iframe 10 s 内没加载出 Screen 1（被 frame-ancestors 拦下？）'); });
+  // 3 屏内跳到 /s2：父页跨源取目标屏 HTML 换进同一个 iframe（要 ACAO 放行 127.0.0.1 画布）
+  const spot = await blankSpot(page);
+  expect(!!spot, '找不到画布空白点');
+  await page.mouse.move(spot!.x, spot!.y);
+  await page.mouse.wheel(0, 240);
+  await page.waitForTimeout(400);
+  await fl.locator('a[href="/s2"]', { hasText: 'Go to' }).click();
+  await page.locator('.card.focused .badge', { hasText: '/s2' }).waitFor({ timeout: 10000 });
+  await eventually(async () => expect((await fl.locator('h1').innerText()).startsWith('Screen 2'), 'iframe 内容未切到 Screen 2'), 10000);
+  await page.keyboard.press('Escape');
+  await shot(page, 'CORE-070');
+  return `frame-ancestors ${ancestors.length} 个 origin，ACAO 回显 ${alt}；从 ${alt} 打开画布交互态加载出 Screen 1，屏内跳转换到 Screen 2`;
+});
+
+// TC-CORE-071 截图浏览器（§16 进程启动、§17 Chromium）：浏览器还没起来时并发的截图共用一次启动；SIGKILL 重启后上次的截图浏览器被结束、临时目录删掉，
+// 别的 Edge 不受影响。要 QUILT_E2E_RESTART（§3）
+await step('TC-CORE-071', async () => {
+  const RESTART = process.env.QUILT_E2E_RESTART;
+  expect(RESTART, '环境：未设 QUILT_E2E_RESTART（重启被测 API 的命令，§3）');
+  const bad: string[] = [];
+  const check = (cond: unknown, msg: string) => { if (!cond) bad.push(msg); };
+  const { projectId: pid } = seedJson<{ projectId: string }>('seed:project', '--name', 'Browsers', '--device', 'mobile', '--screens', '4', '--no-shot');
+  const ps = () => execFileSync('ps', ['-A', '-o', 'pid=,ppid=,command='], { encoding: 'utf8', maxBuffer: 16 << 20 }).split('\n').flatMap((l) => { const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(l); return m ? [{ pid: Number(m[1]), ppid: Number(m[2]), command: m[3] }] : []; });
+  const dirOf = (command: string) => /--user-data-dir=(\S+)/.exec(command)?.[1];
+  const apiPid = () => Number(execFileSync('lsof', ['-nP', `-tiTCP:${new URL(API).port}`, '-sTCP:LISTEN'], { encoding: 'utf8' }).trim().split('\n')[0]);
+  const shotBrowsers = (owner: number) => ps().filter((p) => p.ppid === owner && p.command.includes('--remote-debugging-pipe'));
+  const restart = () => new Promise<void>((resolve, reject) => { const p = spawn('sh', ['-c', RESTART!], { stdio: 'ignore' }); p.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`重启命令退出码 ${code}`)))); });
+  // 1 重启（新进程里还没有截图浏览器）后立刻回刷 4 屏：4 张截图同时要浏览器
+  await restart();
+  const owner = apiPid();
+  const r = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ kind: 'apply_design_system', input: { screenIds: 'all' } }) });
+  expect(r.status === 202, `回刷 ${r.status}`);
+  const job = await waitJob(r.body.job.id, 120);
+  check(job.status === 'succeeded', `回刷作业 ${job.status}`);
+  await sleep079(1000);
+  const live = shotBrowsers(owner);
+  check(live.length === 1, `回刷 4 屏后 API 名下应只有 1 个截图浏览器，实际 ${live.length} 个（pid ${live.map((p) => p.pid).join(' ')}）`);
+  const old = live.flatMap((p) => { const dir = dirOf(p.command); return dir ? [{ pid: p.pid, dir }] : []; });
+  expect(old.length > 0, '前置不成立：API 名下没有截图浏览器');
+  // 2 种子脚本自己拍截图（同一数据目录里它也记一份，不能把 API 的记录冲掉）；测试进程自己开一个无头 Edge（代表用户自己的浏览器），下面的重启不该动它
+  seedJson('seed:project', '--name', 'ShotSeed', '--device', 'mobile', '--screens', '1');
+  const mine = await chromium.launch({ channel: 'msedge', headless: true });
+  try {
+    // 3 SIGKILL 重启：旧进程的截图浏览器成了孤儿；新进程启动时按记录结束它们、删掉临时目录
+    await restart();
+    await eventually(() => expect(ps().filter((p) => old.some((o) => dirOf(p.command) === o.dir)).length === 0, 'orphan'), 15_000)
+      .catch(() => check(false, `重启后 15 s 仍有上次的截图浏览器进程：${ps().filter((p) => old.some((o) => dirOf(p.command) === o.dir)).map((p) => `${p.pid}(ppid ${p.ppid})`).join(' ')}`));
+    check(old.every((o) => !existsSync(o.dir)), `上次的临时目录还在：${old.filter((o) => existsSync(o.dir)).map((o) => o.dir).join(' ')}`);
+    const pg = await mine.newPage();
+    check(mine.isConnected() && (await pg.evaluate(() => 1 + 1)) === 2, '测试自己开的 Edge 被结束了');
+  } finally { await mine.close(); }
+  if (bad.length) { console.log(`   TC-CORE-071 全部失败项：\n   - ${bad.join('\n   - ')}`); throw new Error(bad.join('；')); }
+  return `回刷 4 屏只起 1 个截图浏览器（pid ${old.map((o) => o.pid).join(' ')}）；SIGKILL 重启后它与子进程被结束、临时目录删掉；测试自己的 Edge 照常`;
+});
+
+// TC-CORE-072 出变体落位（REQ-CORE-025）：落在默认屏那一行（与它纵向相交的屏）最右、与默认屏同 y，不压住已有的屏；别的行不影响
+await step('TC-CORE-072', async () => {
+  const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'VariantRow', '--device', 'mobile', '--screens', '3', '--no-shot');
+  const [s1, , s3] = screens.map((s) => s.id);
+  // /s3 挪到下一行、很远的右边：它不在 /s1 那一行，不该把变体推过去。种子 /s1 (0,0)、/s2 (470,0)
+  expect((await apiJson(`/v1/screens/${s3}`, { method: 'PATCH', body: JSON.stringify({ x: 3000, y: 1200 }) })).status === 200, '挪 /s3 失败');
+  const variant = async (name: string) => {
+    const r = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ kind: 'generate', input: { prompt: `the ${name} state`, count: 1, versions: 1, variantOf: s1, variantName: name, runner: STUB_RUNNER } }) });
+    expect(r.status === 202, `出变体 ${r.status}`);
+    const j = await waitJob(r.body.job.id, 60);
+    expect(j.status === 'succeeded', `出变体作业 ${j.status}`);
+    return (await detail082(pid)).screens.find((s) => s.variantOf === s1 && s.variantName === name)!;
+  };
+  const a = await variant('Empty');
+  expect(a.x === 940 && a.y === 0, `第一个变体应落在 /s2 右侧 (940, 0)，实际 (${a.x}, ${a.y})`);
+  const b = await variant('Error');
+  expect(b.x === 1410 && b.y === 0, `第二个变体应落在第一个右侧 (1410, 0)，实际 (${b.x}, ${b.y})`);
+  const all = (await detail082(pid)).screens;
+  const overlaps = all.flatMap((p, i) => all.slice(i + 1).filter((q) => p.x < q.x + 390 && q.x < p.x + 390 && p.y < q.y + 844 && q.y < p.y + 844).map((q) => `${p.name} × ${q.name}`));
+  expect(overlaps.length === 0, `有屏相互重叠：${overlaps.join('；')}`);
+  return `变体落在 (${a.x}, ${a.y}) 与 (${b.x}, ${b.y})；另一行的 /s3 (3000, 1200) 不影响；${all.length} 屏两两不相交`;
+});
+
+// TC-CORE-073 路径参数不是 UUID（§14 /errors/not-found）：预览域 /p/ /c/ /a/ 与 /v1 下带路径参数的端点一律 404，不 500
+await step('TC-CORE-073', async () => {
+  const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'BadIds', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const s1 = screens[0].id;
+  const pv = new URL((await detail082(pid)).screens[0].previewUrl!);
+  pv.hostname = '127.0.0.1';
+  const t = pv.searchParams.get('t')!; const rev = pv.searchParams.get('rev')!;
+  const X = 'not-a-uuid';
+  const bad: string[] = [];
+  expect((await fetch(pv)).status === 200, '对照：签名有效的预览地址应 200');
+  for (const p of [`/a/${X}/${X}`, `/a/${pid}/${X}`, `/p/${pid}/${X}?rev=${rev}&t=${t}`, `/p/${pid}/${s1}?rev=${X}&t=${t}`, `/c/${pid}/${X}?t=${t}`]) {
+    const r = await fetch(`${pv.origin}${p}`);
+    const body = await r.text();
+    if (r.status !== 404 || !body.includes('/errors/not-found')) bad.push(`预览域 ${p.split('?')[0]} → ${r.status}`);
+  }
+  const rest: [string, string][] = [
+    ['GET', `/v1/projects/${X}`], ['PATCH', `/v1/projects/${X}`], ['DELETE', `/v1/projects/${X}`],
+    ...['app-map', 'assets', 'events', 'jobs', 'messages'].map((s): [string, string] => ['GET', `/v1/projects/${X}/${s}`]),
+    ...['annotations/send', 'assets', 'attachments', 'components', 'design-preset', 'jobs', 'messages', 'uploads', `messages/${X}/retry`].map((s): [string, string] => ['POST', `/v1/projects/${X}/${s}`]),
+    ['PUT', `/v1/projects/${X}/design-system`],
+    ...['', '/candidates', '/events', '/export'].map((s): [string, string] => ['GET', `/v1/jobs/${X}${s}`]),
+    ['POST', `/v1/jobs/${X}/cancel`], ['POST', `/v1/jobs/${X}/candidates/adopt`],
+    ...['screens', 'components', 'annotations', 'channels'].flatMap((k): [string, string][] => [['PATCH', `/v1/${k}/${X}`], ['DELETE', `/v1/${k}/${X}`]]),
+    ['DELETE', `/v1/assets/${X}`], ['DELETE', `/v1/design-presets/${X}`],
+    ...['annotations', 'revisions', `revisions/${X}`].map((s): [string, string] => ['GET', `/v1/screens/${X}/${s}`]),
+    ['POST', `/v1/screens/${X}/annotations`], ['POST', `/v1/screens/${X}/elements/q1`], ['POST', `/v1/components/${X}/elements/q1`],
+    ['POST', `/v1/screens/${X}/revisions/${X}/adopt`], ['POST', `/v1/screens/${X}/revisions/${X}/restore`],
+  ];
+  for (const [method, p] of rest) {
+    const r = await fetch(`${API}${p}`, { method, headers: { 'Content-Type': 'application/json' }, body: method === 'GET' || method === 'DELETE' ? undefined : '{}' });
+    await r.arrayBuffer();
+    if (r.status !== 404) bad.push(`${method} ${p} → ${r.status}`);
+  }
+  expect(bad.length === 0, bad.join('；'));
+  return `预览域 5 处、/v1 ${rest.length} 个端点的非 UUID 路径参数全部 404`;
+});
+
+// TC-CORE-074 改屏目标还没有内容（API-CORE-006）：屏还在、只是它的造屏作业还没落第一版时，失败原因照实说，不说「都已被删除」
+await step('TC-CORE-074', async () => {
+  const { projectId: pid } = seedJson<{ projectId: string }>('seed:project', '--name', 'NotYet', '--device', 'mobile', '--screens', '1', '--no-shot');
+  // 懒生成 /later，桩拖 15 s 才出屏：这段时间里 /later 已建好、还没有当前修订
+  const g = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ kind: 'generate', input: { prompt: '[stub-hold:15000] a later screen', route: '/later', count: 1, versions: 1, runner: STUB_RUNNER } }) });
+  expect(g.status === 202, `懒生成 ${g.status}`);
+  let later: Scr082 | undefined;
+  await eventually(async () => { later = (await detail082(pid)).screens.find((s) => s.route === '/later'); expect(later && !later.currentRevisionId, 'later'); }, 10_000)
+    .catch(() => { throw new Error(`前置不成立：/later 应已建好、还没有当前修订（${JSON.stringify(later ?? null)}）`); });
+  const r = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/messages`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ content: '把标题改短', targetScreenIds: [later!.id], runner: STUB_RUNNER }) });
+  expect(r.status === 202, `对 /later 发改屏 ${r.status}`);
+  const j = await waitJob(r.body.job.id, 30) as { status: string; output: { errorClass?: string; message?: string } };
+  expect(j.status === 'failed' && j.output.errorClass === 'validation' && j.output.message === '目标屏还没有生成出内容', `改屏作业应 failed(validation)「目标屏还没有生成出内容」：${j.status} ${j.output.errorClass} ${j.output.message}`);
+  const msg = (await apiJson<{ items: { role: string; jobId: string | null; content: string }[] }>(`/v1/projects/${pid}/messages`)).body.items.find((m) => m.role === 'assistant' && m.jobId === r.body.job.id);
+  expect(msg?.content.startsWith('改屏失败：目标屏还没有生成出内容'), `回执应写「改屏失败：目标屏还没有生成出内容」：${msg?.content}`);
+  await waitJob(g.body.job.id, 60);
+  return `作业 failed(validation)「${j.output.message}」；回执「${msg!.content}」`;
 });
 
 await browser.close();

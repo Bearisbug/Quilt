@@ -24,7 +24,7 @@ agentRoutes.post('/v1/projects/:projectId/uploads', async (c) => {
   const user = requireUser(c);
   await ownedProject(user.id, c.req.param('projectId'));
   const uploadId = randomToken(16);
-  const exp = Math.floor(Date.now() / 1000) + 600;
+  const exp = Math.floor(Date.now() / 1000) + config.uploadUrlMinutes * 60;
   const key = `uploads/${uploadId}.html`;
   // 签发即建空上传位：quilt.append_upload 只认签发过的（v0.77）
   await storage.put(key, '', 'text/html');

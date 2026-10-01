@@ -13,7 +13,6 @@ import { hasActiveJob } from './screens.ts';
 import { estimateJob, type CreateJobInput, type JobRunner } from '@quilt/core';
 import type { UserRow } from './user.ts';
 import type { JobRow } from './projects.ts';
-import { settleByJob } from './annotations.ts';
 
 // 进程内队列（ADR-010 v0.32）：job.run 跑 worker 作业，screenshot.render 按 revisionId 去重
 export const jobQueue = new InProcessQueue<{ jobId: string }>('job.run', config.workerConcurrency);
@@ -188,6 +187,7 @@ export async function cancelJob(job: JobRow): Promise<JobRow> {
   else modelAborts.get(job.id)?.abort(new Error('cancelled'));
   await db.update(schema.messages).set({ content: '已取消' }).where(and(eq(schema.messages.jobId, job.id), eq(schema.messages.role, 'assistant'), eq(schema.messages.content, '')));
   // 批注发出去的作业被取消：批注回到「未处理」，不然图钉永远闪「发送中」
+  const { settleByJob } = await import('./annotations.ts');
   await settleByJob(job.id, false);
   await emitJobEvent(job.id, 'cancelled', {});
   return updated;

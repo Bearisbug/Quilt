@@ -2,6 +2,8 @@ import { Hono, type Context } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
+import { requestSource } from '../lib/origin.ts';
+import { UUID } from './app.ts';
 import { verifyPreview } from '../lib/signing.ts';
 import { storage } from '../lib/storage.ts';
 import { withCurrentRuntime, withOverlayStyle, buildPrelude, SCREEN_CSP, type Tokens } from '@quilt/core';
@@ -15,6 +17,17 @@ import { componentPreviewDocument } from '../services/components.ts';
 export const previewApp = new Hono();
 
 previewApp.get('/healthz', (c) => c.text('ok'));
+
+// 路径里的 id 与 /p/ 的 rev 都是 UUID（§14 v0.82）：不是的直接 404，同 /v1——原样进 uuid 列的查询会被 Postgres 报 22P02，落成 500
+for (const route of ['/p/:projectId/:id', '/c/:projectId/:id', '/a/:projectId/:id']) {
+  previewApp.use(route, async (c, next) => {
+    const ids = [...Object.values(c.req.param() as Record<string, string>), ...(route.startsWith('/p/') ? [c.req.query('rev') ?? ''] : [])];
+    if (!ids.every((v) => UUID.test(v))) return problem(c, 404, '/errors/not-found', '资源不存在');
+    await next();
+  });
+}
+// 画布可能从来源名单里任一种回环写法打开（§15）：frame-ancestors 列全，ACAO 回显名单内的请求 Origin
+const FRAME_ANCESTORS = requestSource.origins.join(' ');
 
 previewApp.get('/p/:projectId/:screenId', async (c) => {
   const { projectId, screenId } = c.req.param();
@@ -32,10 +45,11 @@ previewApp.get('/p/:projectId/:screenId', async (c) => {
   // 修订本身不可变，但这份响应不是：运行时每次下发都换成当前版本（上一行）。标成 immutable 时浏览器 10 分钟内
   // 连条件请求都不发，运行时修复到不了已经开着的会话，而 iframe 是聚焦时才建的、硬刷新页面也绕不过这层缓存。
   c.header('Cache-Control', 'no-cache');
-  c.header('Content-Security-Policy', `${SCREEN_CSP}; frame-ancestors ${config.webOrigin}`);
+  c.header('Content-Security-Policy', `${SCREEN_CSP}; frame-ancestors ${FRAME_ANCESTORS}`);
   c.header('Referrer-Policy', 'no-referrer');
   // 父页需要 fetch 目标屏 HTML 做同 iframe 换屏（ADR-003）；URL 已带签名，只放行画布 origin
-  c.header('Access-Control-Allow-Origin', config.webOrigin);
+  const origin = c.req.header('Origin');
+  c.header('Access-Control-Allow-Origin', origin && requestSource.origins.includes(origin) ? origin : config.webOrigin);
   c.header('Vary', 'Origin');
   return c.body(html);
 });
@@ -50,7 +64,7 @@ previewApp.get('/c/:projectId/:componentId', async (c) => {
   c.header('Content-Type', 'text/html; charset=utf-8');
   // 同 /p/：这份文档是每次请求现拼的（prelude 里带当前运行时与当前 token），缓存住等于把 Quilt 自己的代码冻在旧版
   c.header('Cache-Control', 'no-cache');
-  c.header('Content-Security-Policy', `${SCREEN_CSP}; frame-ancestors ${config.webOrigin}`);
+  c.header('Content-Security-Policy', `${SCREEN_CSP}; frame-ancestors ${FRAME_ANCESTORS}`);
   c.header('Referrer-Policy', 'no-referrer');
   return c.body(componentPreviewDocument(row, buildPrelude(ds.tokens as Tokens)));
 });

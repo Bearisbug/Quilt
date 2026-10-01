@@ -1,4 +1,4 @@
-import { and, eq, or, sql, isNull, inArray } from 'drizzle-orm';
+import { and, eq, ne, sql, isNull, inArray } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
 import { settleByJob } from '../services/annotations.ts';
@@ -298,8 +298,12 @@ async function runEditScreens(ctx: Ctx) {
   const versions = Math.max(1, input.versions ?? 1);
   const screens = await db.select().from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id));
   const targets = screens.filter((s) => input.screenIds.includes(s.id) && s.currentRevisionId);
-  // 建作业时屏都在（createJob 已查），排队期间被删光的不能报「已更新 0 屏」成功（API-CORE-006 v0.77）
-  if (!targets.length) throw new JobFailure('validation', '目标屏都已被删除');
+  // 建作业时屏都在（createJob 已查），排队期间被删光的不能报「已更新 0 屏」成功（API-CORE-006 v0.77）；
+  // 屏还在但没有当前修订的（它的造屏作业还没落第一版）同样改不了，原因照实说
+  if (!targets.length) {
+    const alive = screens.filter((s) => input.screenIds.includes(s.id)).length;
+    throw new JobFailure('validation', !alive ? '目标屏都已被删除' : alive < new Set(input.screenIds).size ? '目标屏有的已被删除，其余还没有生成出内容' : '目标屏还没有生成出内容');
+  }
   // 共享组件卡（REQ-EDIT-006）：框选的与目标屏本来就用的附完整 HTML
   const system = screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], await registry(ctx), await references(ctx), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds, screenIds: targets.map((s) => s.id) }));
   const prepared = await Promise.all(targets.map(async (screen) => {
@@ -451,12 +455,13 @@ async function runChat(ctx: Ctx): Promise<{ reply: string }> {
   return { reply: r.reply };
 }
 
-// 变体落位（v0.62）：默认屏同一行、它最右一个变体的右侧；只看这一家族，不避让别的屏（要整齐用排列条）
+// 变体落位（REQ-CORE-025）：默认屏那一行最右——这一行 = 与默认屏纵向范围相交的全部屏，变体排在它们右侧、与默认屏同 y，
+// 所以不会压住已有的屏（只看这一家族时，默认屏右边紧挨着的别的屏会被整张盖住）
 async function layoutVariant(ctx: Ctx, id: string, baseId: string) {
   const size = DEVICE_SIZE[ctx.device];
-  const family = await db.select({ id: schema.screens.id, x: schema.screens.x, y: schema.screens.y }).from(schema.screens).where(or(eq(schema.screens.id, baseId), eq(schema.screens.variantOf, baseId)));
-  const b = family.find((s) => s.id === baseId)!;
-  const x = family.filter((s) => s.id !== id).reduce((m, s) => Math.max(m, s.x + size.w + 80), b.x + size.w + 80);
+  const others = await db.select({ id: schema.screens.id, x: schema.screens.x, y: schema.screens.y }).from(schema.screens).where(and(eq(schema.screens.projectId, ctx.project.id), ne(schema.screens.id, id)));
+  const b = others.find((s) => s.id === baseId)!;
+  const x = others.filter((s) => s.y < b.y + size.h && b.y < s.y + size.h).reduce((m, s) => Math.max(m, s.x + size.w + 80), b.x + size.w + 80);
   await db.update(schema.screens).set({ x, y: b.y }).where(eq(schema.screens.id, id));
 }
 

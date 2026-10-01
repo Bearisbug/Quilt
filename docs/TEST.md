@@ -10,7 +10,7 @@
 | Owner | @bug |
 | 关联设计文档 | `docs/DESIGN.md` |
 | 被测系统 | `~/Documents/Projects/Quilt`（Web 画布 + API/MCP 服务 + Worker + 预览域服务） |
-| 最后更新 | 2026-10-01（设计文档 v0.81） |
+| 最后更新 | 2026-10-01（设计文档 v0.82） |
 
 变更记录（登用例增改，不登执行轮次）：
 
@@ -18,11 +18,11 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-10-01 | 设计文档 v0.82（后端、截图与测试基础设施的遗留问题）：新增 `TC-CORE-070`（预览域 `frame-ancestors` 列全画布 origin、ACAO 回显，从 `127.0.0.1` 打开画布交互态与屏内跳转）、`TC-CORE-071`（截图浏览器启动单飞；SIGKILL 重启后上次的截图浏览器被结束、临时目录删掉，别的 Edge 不动）、`TC-CORE-072`（变体落在默认屏那一行最右、不压住已有的屏）、`TC-CORE-073`（预览域 `/p/` `/c/` `/a/` 与 `/v1` 下 42 个端点的非 UUID 路径参数一律 404）、`TC-CORE-074`（改屏目标还没有当前修订时的失败原因）、`TC-EDIT-022`（截图卡住时回刷作业照常收口）、`TC-EDIT-023`（回刷超时收口，`QUILT_JOB_TIMEOUT_BASE_MS` + `SCREEN_CONCURRENCY=1` 重启）、`TC-AGENT-022`（上传位闲置 10 分钟回收）；`TC-CORE-041` 第 1 步落位预期改为「这一行最右」；`TC-CORE-023` / `024` / `025` / `028` / `044` / `055` / `056` 前置改为自建并选中 OpenAI 兼容桩通道，不再依赖种子的 Gemini 通道（`024` 第 5 步的请求与响应一起等）；`TC-CORE-029` 前置加「打开项目后先在输入框选中桩通道」（025 自建通道后它记住的会是本机 agent）；`TC-CORE-068` 后置去掉手工清孤儿浏览器；§3 补 v0.82 一条与单测 `api/bundle`；§7 删去本版修掉的 8 条（含 `TC-CORE-029` 的顺序依赖）、`TC-CORE-023` 一条去掉「让位过度」 | @bug |
 | 2026-10-01 | 设计文档 v0.81（v0.74–v0.80 合并后全量回归的修复）：`TC-CORE-049` 前置加「这台浏览器先打开过一次画布」（通道清单已在本机留底），第 1 步预期补「从第一帧起通道触发器就在」；`TC-CORE-044` 第 5 步写明发轮次之前就开始等「预览已关闭」——页面在这一轮作业刚建出来时就补取消息、关掉预览（v0.76），toast 只停 3.2 s，等作业跑完再找会落空；§7「依赖种子 Gemini 通道」一条补上 `TC-CORE-025` / `028` / `055` / `056` | @bug |
 | 2026-10-01 | 设计文档 v0.80（画布交互与键盘）：新增 §4「CORE · 画布交互与键盘」`TC-CORE-057`（`Esc` 由近及远：面板、编辑控件、待命模式、聚焦、选中逐层关，最后才取消作业；组件交互态下 `⌥N`）、`TC-CORE-058`（卡片标签在画面上、空格从卡片起手平移、低缩放选中描边、待命提示对比度、框选与拖卡片拖过 iframe、交互态组件卡的捏合与滚轮、小地图拖框与拖框后新屏落地重算、`⌘A` 含组件卡、框选中途按空格仍跟手）、`TC-CORE-059`（Tab 序与风格指南卡焦点环、卡片键盘停靠点 / 方向键 / 空格 / `Enter` / 焦点归还、工具栏几何与「进入 / 退出交互」同一格、iframe 里的 ⌥ 快捷键、减少动态效果下镜头直接到位），执行脚本 `tests/e2e/canvas.ts`（`e2e:canvas`，每一步单独登记结果）；`TC-CORE-023` 第 10 步写明「取消作业」的前提是面板、模式、选中都没开 | @bug |
 | 2026-10-01 | 设计文档 v0.79（作业与 worker 健壮性）：新增 `TC-CORE-065`（掐掉 API 的 LISTEN 连接后项目流收到 `reconnected`、之后的写入照常推到、作业流不靠心跳推进）、`TC-CORE-066`（lucide 不认识的图标名照常出截图；作业里第一次拍摄失败后入队重试补上并推 `screenshot` 事件）、`TC-CORE-067`（三版候选里一版失败：已落的两版接管 current、带角标，回执按屏计数）、`TC-CORE-068`（中途被杀的造屏在重启时补收尾、停在 queued 的 agent 作业重启后补投、首轮补扫推事件）与 `TC-EDIT-019`（取消后子树重生成 / 改组件不落；作业在跑时改组件，落地用新版）；`TC-AGENT-012` 前置加第五个线程、增第 6a 步（打不开 Codex 线程时作业仍 running 并提示，打开后收口）；§3 写明 stub 的 `[stub-hold:<ms>]`、`QUILT_E2E_RESTART`、探针图、`openai-stub` 的 `fail` 与按请求的 `holdMs`、`codex-stub` 的 `eeee` 线程、`seed:job --runner`，单测清单加 `api/llm` | @bug |
 | 2026-10-01 | 设计文档 v0.78（面板、表单与窄视口的缺陷回写 21 条）：新增 `TC-CORE-047`（`?panel=revisions` 不残留、`⌘K` 列全、工具栏提示在面板之上、关面板焦点归还、删屏 / 补屏单层遮罩、改名不被指针抢焦点）、`TC-CORE-048`（通道弹层即时重验 / 焦点落首错 / 遮罩不丢已填内容 / 本机订阅不校验端点 / 未配主密钥的说明与禁用，新建项目的错误关联）、`TC-CORE-049`（首帧终值宽度、面板开时截通道名不折行、对话记录与面板同开不挤、折叠横条不被压、排列条不被小地图盖、窄屏不显示手势提示）、`TC-EDIT-013`（提案「确认写入」即落库、第二步焦点与 `Esc`、21 屏分两批重生成、面板草稿留存与按格同步、放弃改动、文本框细滚动条）、`TC-EDIT-014`（批注草稿按元素暂存、存不上不清不发、只发刚记下的那条、改写失败不关、检查器草稿按元素暂存）；单测增 `tests/unit/web/designDraft.test.ts`（草稿按格同步、约定节替换、保存后强制取服务端值）。审查修复：`TC-EDIT-013` 增第 7 步（只改大小写 / 空格的保存不留「有未保存改动」、之后删约定不冲掉草稿）；同步两条旧用例的文字——`TC-EDIT-009` 第 3 步按钮改名「不重生成」、写入在点「确认写入」时，`TC-CORE-023` 第 12 步 ④ 改为先截短通道名、再 `wrap`、最窄 `wrap-all` | @bug |
-| 2026-10-01 | 设计文档 v0.77（API 契约与数据一致性）：新增 `TC-CORE-062`（目标屏 / 组件在建作业前复核、`variantOf` 422、15 个非 UUID 路径 404、非法游标 400、附件与组件直改 422）、`TC-CORE-063`（采用 vs 回溯、设计系统同版本并发、同幂等键并发、删屏 / 删项目时在途截图不留对象）、`TC-CORE-064`（MCP 与另一个标签页的挪屏 / 删屏 / 改名 / 改设计系统 / 建组件 / 批注推到已打开的画布，删项目时事件流收尾）与 `TC-AGENT-018`（`update_screen` 路由格式、`restore_revision` 重拍、`append_upload` 签发与串行、`send_annotations` 全有或全无、`list_messages` 游标）；`tests/e2e/mcp.ts` 支持 `ONLY`；`TC-CORE-027` 第 1 步签发附件时类型 / 大小不合规的预期由 400 改为 422（与 `API-CORE-019` 一致）；§3 LLM 驱动一条补：不带通道的作业会走种子建的 Gemini 通道，stub 轮次跑套件时把 `GEMINI_API_KEY` 置空 | @bug |
 
 ## 2. 测试范围 / 不测什么
 
@@ -51,7 +51,7 @@
 - 用户：只有默认用户 `local@quilt.local`（迁移 `0008` 创建，`pnpm seed` 不删它）。所有 curl / 浏览器请求都不带凭据。
 - 种子数据与重置：
   - `pnpm seed [--empty]`：重置基线——删掉默认用户名下全部项目（级联屏 / 修订 / 作业 / 台账 / 通道）与对象子目录，再建空项目 `Demo Mobile`（mobile）与 `Demo Desktop`（desktop），设计系统 seedColor `#3B5BDB`；`--empty` 不建示例项目（PAGE-FIRST 用例）。
-  - LLM 驱动：`.env` 的 `LLM_DRIVER` 取 `agent-sdk`（本机 Claude 订阅）/ `anthropic` / `gemini`（模型 `QUILT_MODEL` 用 `gemini-3.8-flash`；计费路径二选一：AI Studio 需 `GEMINI_API_KEY`，Vertex AI 需 `GEMINI_VERTEX=1` + `GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION=global` + `GOOGLE_APPLICATION_CREDENTIALS` 指向服务账号 JSON）；`GET /v1/health` 的 `llm` / `model` 字段确认生效。真实 LLM 用例（`TC-CORE-005` 等）的耗时与通过率随驱动变化，登记时在明细注明驱动。`.env` 里有 `GEMINI_API_KEY` 时 `pnpm seed` 会建一条已验证的 Gemini 通道并成为缺省通道，此后不带 `runner` 的作业（MCP 造屏 / 改屏、发批注、REST 建作业）都打到真实模型；`LLM_DRIVER=stub` 的轮次跑套件时在环境里把它置空（`GEMINI_API_KEY=`，dotenv 不覆盖已有的空值），种子就不建这条通道，缺省回落到 stub。
+  - LLM 驱动：`.env` 的 `LLM_DRIVER` 取 `agent-sdk`（本机 Claude 订阅）/ `anthropic` / `gemini`（模型 `QUILT_MODEL` 用 `gemini-3.8-flash`；计费路径二选一：AI Studio 需 `GEMINI_API_KEY`，Vertex AI 需 `GEMINI_VERTEX=1` + `GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION=global` + `GOOGLE_APPLICATION_CREDENTIALS` 指向服务账号 JSON）；`GET /v1/health` 的 `llm` / `model` 字段确认生效。真实 LLM 用例（`TC-CORE-005` 等）的耗时与通过率随驱动变化，登记时在明细注明驱动。`.env` 里有 `GEMINI_API_KEY` 时 `pnpm seed` 会建一条已验证的 Gemini 通道并成为缺省通道，此后不带 `runner` 的作业（MCP 造屏 / 改屏、发批注、REST 建作业）都打到真实模型；`LLM_DRIVER=stub` 的轮次跑套件时在环境里把它置空（`GEMINI_API_KEY=`，dotenv 不覆盖已有的空值），种子就不建这条通道，缺省回落到 stub。stub 轮次里要从输入框发一轮、或要量带屏数 / 版数档位的输入框的用例（`TC-CORE-023` / `024` / `025` / `028` / `044` / `055` / `056`），自己建一条 OpenAI 兼容桩通道（`tests/e2e/openai-stub.ts`，端口 3982～3986；`044` 用它自己的 3994 慢桩）并验证，要用输入框的再在输入框里选中（画布在打开时取通道清单：页面打开后才建的通道要重载页面才出现在下拉里），用例结束时删通道（v0.82）——不依赖种子的 Gemini 通道。
   - `pnpm seed:project --name <名> --device mobile|desktop --screens <N> [--revisions <M>] [--dangling] [--no-shot]`：用内置 fixture HTML 直接落库（不调 LLM），每屏含 `data-qid`、路由 `/s1`…`/sN` 与互链；`--revisions M` 给每屏 M 个修订；`--dangling` 让第一屏多一条 `href=/settings` 断链。输出 projectId 与各 screenId。fixture 每屏 depth-1 有一个 `<header>`（标题 `Screen N vM`）与一个 `<nav>`（tab 数 = min(N, 4)，指向 `/s1`…，各条链接类名完全相同、无 `aria-current`），它们是共享组件用例（`TC-EDIT-012`）的提取靶子——提取这个 `<nav>` 得到的是非导航型组件（`nav=false`）。
   - `pnpm seed:job --project <id> --screen <id> --status running`：构造进行中作业占用某屏；`--status running --tokens 3000 [--screens 400]`：构造已消耗 3000 token（与 400 屏）的运行中作业，台账预写在 `stub` 驱动名下（供取消记账与用量展示用例）；`--input '<json>'` 覆盖作业输入（在途预估用例：`{"prompt":"x","count":4,"versions":2}`）；`--runner agent` 造一个停在 queued、没投递出去的本机 agent 作业（会话写在 `--input` 的 `runner` 里，`TC-CORE-068`，v0.79）。
   - `pnpm seed:preview-token --screen <id> --expired`：打印一个已过期的预览签名 URL。
@@ -61,9 +61,10 @@
 - 本机 Codex（`REQ-AGENT-003` / `REQ-CORE-013` v0.68，`ADR-020`）：`TC-AGENT-012` 用**假 Codex**验整条链——API 以 `QUILT_CODEX_HOME=/tmp/quilt-e2e-codex`、`QUILT_CODEX_BIN` 与 `QUILT_CODEX_OPENER` 都指向 `tests/e2e/codex-stub.mjs` 启动（另设 `OPENAI_API_KEY=sk-must-not-reach-codex`，验驱动会把它去掉），测试脚本也以同一个 `QUILT_CODEX_HOME` 运行（未设时登记「跳过」）。脚本自建假线程库（`state_5.sqlite`）；桩只记下 `queue` / 深链接 / `exec` 调用并回放 `exec` 的 JSONL（验证用的最小请求故意拖 18 s，与真 codex 冷启动相当，超过前端普通请求的 15 s 上限）；「Codex 窗口」一侧由脚本扮演——占住写锁文件表示线程打开着，读桩记下的队列消息、经 MCP 回写并收口。作业创建限流 10 次 / 分钟（§15），脚本在 `TC-AGENT-009` 之后先等过限流窗口再跑 012。`TC-AGENT-013`（真实 Codex）要本机 `codex` 已用 ChatGPT 登录、开着 Codex 桌面版，并临时把 Codex 的 `quilt` MCP 指到测试 API（`codex mcp add quilt --url http://127.0.0.1:3200/mcp` 加 `default_tools_approval_mode = "approve"`，测完改回 3100）；终端会话在伪终端里起 TUI（脚本替它回答终端能力探测与目录信任确认，只写进该伪终端，不动真实键盘鼠标）。
 - 聊天模式（`REQ-CORE-023` v0.45）：`TC-CORE-039` 要本机 `claude` 已登录——脚本经 API 建一条 `agent-sdk` 通道并探测通过后才发真实回合（模型 `CHAT_MODEL`，缺省 `claude-sonnet-5`；一轮 1～5 分钟，按订阅额度计费）；`LIVE_LLM=0` 只跑通道校验与串行守卫。SDK 会话文件落在 `~/.claude/projects/` 下按 `$dataDir/chat` 编码的目录，测试库与开发库共用该目录、会话 id 各自记在项目上，互不干扰。
 - MCP 与画布同面（`REQ-AGENT-002` v0.51）：`TC-AGENT-011` 由 `pnpm --filter @quilt/tests e2e:mcp` 执行，纯 MCP / REST、不开浏览器，要求 API 以 `LLM_DRIVER=stub` 启动（脚本先查 `/v1/health`，不是 stub 就退出）。为了不占用 3100 上的开发实例，可另起一套：`API_PORT=3200 PREVIEW_PORT=3201 API_ORIGIN=http://localhost:3200 PREVIEW_ORIGIN=http://preview.localhost:3201 DATABASE_URL=postgres://quilt:quilt@127.0.0.1:5439/quilt_test LLM_DRIVER=stub LLM_STUB= pnpm --filter @quilt/api dev`，脚本侧 `QUILT_E2E_API=http://localhost:3200 DATABASE_URL=…quilt_test`（种子脚本走同一个 `DATABASE_URL`）。`PREVIEW_ORIGIN` 必须一起改：`.env` 里写死的 3101 会让素材 URL 与截图渲染都打到开发实例的预览域。**浏览器用例也能在这套上跑**（v0.60 起）：先 `pnpm --filter @quilt/web build`，起 API 时再加 `WEB_DIST=$PWD/apps/web/dist WEB_ORIGIN=http://localhost:3200`（打包形态：API 同端口托管前端；`WEB_ORIGIN` 不改的话预览域的 `frame-ancestors` 还写着 6688，聚焦的 iframe 会整张拒载），脚本侧再加 `QUILT_E2E_WEB=http://localhost:3200`。
-- 单测（v0.60）：`pnpm test` 在 `tests/unit` 用 `node:test` 跑 `packages/core` 与前端纯函数的单测（不起库、不起浏览器，约 0.5 s）。TEST.md 不为单测逐条建 TC——测试文件名即覆盖范围（`core/inject`、`core/components`、`core/outline`、`core/lint`、`core/tokens`、`core/contract`、`web/arrange`、`web/jobs`、`web/messages`、`api/codex`、`api/agentSdk`、`api/origin`、`api/llm`），失败按「单测轮」登记。
+- 单测（v0.60）：`pnpm test` 在 `tests/unit` 用 `node:test` 跑 `packages/core` 与前端纯函数的单测（不起库、不起浏览器，约 0.5 s）。TEST.md 不为单测逐条建 TC——测试文件名即覆盖范围（`core/inject`、`core/components`、`core/outline`、`core/lint`、`core/tokens`、`core/contract`、`web/arrange`、`web/jobs`、`web/messages`、`api/codex`、`api/agentSdk`、`api/origin`、`api/llm`、`api/bundle`），失败按「单测轮」登记。`api/bundle` 按 `apps/cli/build.mjs` 同样的参数打一遍打包入口，断言静态 import 图无环（v0.82：环会让打包形态冷启动时顶层 await 永不落定、退出码 13）。
 - LLM 故障注入：`LLM_STUB=503 pnpm dev` 让所有调用返回 503；`LLM_STUB=fixture` 回放固定 HTML（需要确定性时使用，用例中显式注明）。stub 驱动认指令里的 `[stub-hold:<毫秒>]`（写进系统提示或用户提示都算）：这次调用先拖这么久再回，且不理会中止信号——用来造「作业在跑的那一阵」与「模型已经在回来的路上时被取消」（`TC-EDIT-019`、`TC-CORE-065`，v0.79）。
 - 作业与 worker 健壮性（v0.79）：`TC-CORE-065` 要本机 docker 里的 `quilt-pg`，脚本用 `docker exec quilt-pg psql` 对被测库执行 `pg_terminate_backend`、只掐 `query ilike 'listen %'` 的连接（按 `current_database()` 过滤，别的库不受影响）。`TC-CORE-066` / `068` 在本机起**探针图**服务（3989 / 3988）：屏里一张指向它的图，探针回 404 时 `onerror` 挂一个不停清空 Tailwind 样式的定时器，截图的就绪判定等不到样式、这次拍摄失败；回 PNG 就一切正常——用它确定性地造「第一次拍摄失败」。`TC-CORE-068` 要重启被测 API：`QUILT_E2E_RESTART` 给一条命令，须以 SIGKILL 结束旧进程（模拟崩溃，`finally` 不执行）、再按本节的命令起新进程并轮询 `/v1/health` 到就绪（例如 `kill -9` 监听 API 端口的进程及其 `pnpm` / `tsx` 父进程后重起），未设时该用例失败并注明环境。`tests/e2e/openai-stub.ts` 的 `holdMs` 可以按请求给、`fail` 按请求回错误状态码；`codex-stub.mjs` 对 id 以 `eeee` 结尾的线程打开深链接失败（记 `open-failed`，模拟本机没装 Codex 桌面版）。真实调用会消耗额度，每条用例后置不做特殊清理。
+- 截图链与上传位（v0.82）：`TC-CORE-071` 要 `QUILT_E2E_RESTART` 与本机的 `ps` / `lsof`（按 `ppid` 与命令行里的 `--user-data-dir` 认截图浏览器）。`TC-EDIT-022` 的两张卡住的屏由屏自己的脚本造（把 `document.fonts.ready` 换成永不落定的 promise；页面加载完之后再调 `lucide.createIcons` 就死循环）。`TC-EDIT-023` 以 `QUILT_JOB_TIMEOUT_BASE_MS=1000 SCREEN_CONCURRENCY=1` 执行 `QUILT_E2E_RESTART`，要求重启命令把调用方的环境变量传给新进程（`stack.sh` 的 `env … pnpm` 即如此）；`QUILT_JOB_TIMEOUT_BASE_MS` 只在 `LLM_DRIVER=stub` 时生效，跑完不带它再重启一次；3987 端口起一个只收不回的服务当慢图。`TC-AGENT-022` 要被测 API 用 fs 存储、数据目录在本机（`/v1/config` 的 `home`），脚本直接拨上传位文件的修改时间。
 - 工具：浏览器（自动化遵循运行环境既有约定：Playwright 驱动本机 Edge；帧率用页面内 rAF 计数 + `longtask` PerformanceObserver 采样；**在预览 iframe（跨域）内点击元素前必须先让画布处于该屏 1:1 聚焦态**——Playwright 不感知外层 CSS transform 缩放，非 1:1 下点击坐标会偏；键盘快捷键在焦点位于 iframe 内时由预览运行时转发，测试可直接对页面按键）；curl（不带凭据）；`pnpm mcp:call <tool> '<json>'` / `--resource <uri>` / `--list`（MCP 调用脚本，打印工具返回）。
 - 执行脚本：`tests/e2e/core.ts`（CORE）、`load.ts`（v0.76 画布加载与数据新鲜度 `TC-CORE-050`~`056`）、`canvas.ts`（v0.80 画布交互与键盘 `TC-CORE-057`~`059`）、`proto.ts`、`edit.ts`、`agent.ts`、`install.ts`（`TC-CORE-031`）、`smoke.ts`（开发冒烟）；环境变量 `RUN=轮次`、`ONLY=用例子集`、`LIVE_LLM=0` 跳过真实生成。各套件串行执行，不并行——每套开头的 `pnpm seed` 会清掉另一套正在用的数据。
 - 证据目录：`docs/test-runs/`（截图按 `run-NNN-tc-<域>-NNN.png`、响应体按 `.json` 命名；文中引用以项目根为基准）。
@@ -254,7 +255,7 @@
 
 #### `TC-CORE-023` 画布浮层外壳与快捷键 — 对应 `REQ-CORE-004` · 级别: 回归 · 执行者: AI
 
-前置：`pnpm seed:project --name ShellCheck --device mobile --screens 4`；打开该项目，视口 1440×900。
+前置：`pnpm seed:project --name ShellCheck --device mobile --screens 4`；打开该项目，视口 1440×900；建一条 OpenAI 兼容桩通道并在输入框里选中（第 7 步量的是带屏数 / 版数档位的输入框，stub 轮次没有云端通道，v0.82）。
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
@@ -280,7 +281,7 @@
 
 #### `TC-CORE-024` 多选屏幕作为对话上下文 — 对应 `REQ-CORE-006` · 级别: 回归 · 执行者: AI
 
-前置：`pnpm seed:project --name MultiSel --device mobile --screens 4`；打开该项目并按「适配视图」。
+前置：`pnpm seed:project --name MultiSel --device mobile --screens 4`；打开该项目，建一条拖住不回的 OpenAI 兼容桩通道并在输入框里选中（第 5 步从输入框发一轮，随后取消，v0.82），按「适配视图」。
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
@@ -296,11 +297,11 @@
 
 #### `TC-CORE-025` 生成通道可选 — 对应 `REQ-CORE-011` · 级别: 回归 · 执行者: AI
 
-前置：`pnpm seed:project --name Runner --device mobile --screens 2`；打开；记录 `GET /v1/me/usage`。
+前置：`pnpm seed:project --name Runner --device mobile --screens 2`；建一条已验证的 OpenAI 兼容桩通道当云端通道（拖住不回，v0.82：stub 轮次种子不建 Gemini 通道）；打开；记录 `GET /v1/me/usage`。
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
-| 1 | curl `GET /v1/runners` | 返回用户自己配的云端通道（`source=channel`，`pnpm seed` 按 `.env` 的 `GEMINI_API_KEY` 建了一条已验证的 Gemini）与「交给本机 agent」两类，没有「系统预置」（v0.34）；响应中无任何凭据形态的串（`sk-…`/`AIza…`/PEM）；未验证 / 验证失败的通道照样列出但 `available=false` 且带 `unavailableReason` |
+| 1 | curl `GET /v1/runners` | 返回用户自己配的云端通道（`source=channel`：前置建的桩通道；`.env` 有 `GEMINI_API_KEY` 时还有种子建的 Gemini 通道）与「交给本机 agent」两类，没有「系统预置」（v0.34）；响应中无任何凭据形态的串（`sk-…`/`AIza…`/PEM）；未验证 / 验证失败的通道照样列出但 `available=false` 且带 `unavailableReason` |
 | 2 | 打开画布，看输入框工具条左端的通道选择器 | 触发器的 `data-value` 等于 `GET /v1/runners` 返回的 `default`，且显示该项名称 |
 | 3 | 点开选择器 | 只列 `available=true` 的通道，项数等于清单中可用项数；不可用项不出现（原因在设置页看，`REQ-CORE-013`）；仍按「云端模型 / 本机 agent」分组；末尾有「管理通道…」入口；每项只有厂商图标 + 显示名——取一个显示名不含模型 id 的可用通道，其模型 id（如 `gemini-3.8-flash`）不出现在任何下拉项里（模型 id 在设置弹层看，见 `TC-CORE-028` 第 7 步） |
 | 4 | 列表开着时按 `Esc`；再选中一屏、点开列表、按 `Esc` | 列表关闭、焦点回到触发器；画布上那一屏仍处于选中态（`Esc` 没有漏给画布） |
@@ -341,7 +342,7 @@
 
 #### `TC-CORE-028` 生成通道可配置 — 对应 `REQ-CORE-013` · 级别: 回归 · 执行者: AI
 
-前置：服务端 `.env` 已配置 `QUILT_SECRETS_KEY`；`pnpm seed:project --name Chan --device mobile --screens 1 --no-shot`；本地起一个 OpenAI 兼容桩（`tests/e2e/openai-stub.ts`，只认 Key `good-key-0001`，回放该屏当前 body 并加标记）。
+前置：服务端 `.env` 已配置 `QUILT_SECRETS_KEY`；`pnpm seed:project --name Chan --device mobile --screens 1 --no-shot`；本地起一个 OpenAI 兼容桩（`tests/e2e/openai-stub.ts`，只认 Key `good-key-0001`，回放该屏当前 body 并加标记）。第 7 步之前另建一条已验证的桩通道 `Stub 管理 28`（第 6 步已删掉 Stub 通道，stub 轮次又没有种子的云端通道，管理器的「自建通道」一组要有一行，v0.82）。
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
@@ -360,7 +361,7 @@
 
 #### `TC-CORE-029` 锚点造屏：一屏三版候选、造一组反向连线 — 对应 `REQ-CORE-014`、`REQ-CORE-003`、`REQ-CORE-015`、`REQ-CORE-016` · 级别: 回归 · 执行者: AI
 
-前置：服务端 `.env` 已配置 `QUILT_SECRETS_KEY`；`pnpm seed:project --name Blank --device mobile --screens 1 --no-shot`；本地起 OpenAI 兼容桩（`tests/e2e/openai-stub.ts`，Key `good-key-0002`）：单屏规划提示（含 `Requested screen:`）固定回 `{"name":"Order Detail","route":"/order-detail","purpose":"show one order",…,"links":[],"entryFrom":null}`；整组规划提示（含 `Request:`）回 `{"entryFrom":"/s1","screens":[Cart /cart, Checkout /checkout]}`；出屏 / 改屏提示回放种子屏 body 并编号；以 API 建好指向桩的通道并探测通过。
+前置：服务端 `.env` 已配置 `QUILT_SECRETS_KEY`；`pnpm seed:project --name Blank --device mobile --screens 1 --no-shot`；本地起 OpenAI 兼容桩（`tests/e2e/openai-stub.ts`，Key `good-key-0002`）：单屏规划提示（含 `Requested screen:`）固定回 `{"name":"Order Detail","route":"/order-detail","purpose":"show one order",…,"links":[],"entryFrom":null}`；整组规划提示（含 `Request:`）回 `{"entryFrom":"/s1","screens":[Cart /cart, Checkout /checkout]}`；出屏 / 改屏提示回放种子屏 body 并编号；以 API 建好指向桩的通道并探测通过；打开项目后先在输入框里选中这条桩通道（同一浏览器上下文里更早的用例可能让它记住了本机 agent 通道，v0.82）。
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
@@ -428,7 +429,7 @@
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
-| 1 | 点 /s1 卡片 → 工具栏「出变体」（`new-variant`）→ 状态名填「空态」→「出变体」（`variant-create`） | toast「正在出「Screen 1」的「空态」变体」；60 s 内 `GET /v1/projects/{id}` 多出一屏：`variantOf=/s1 的 id`、`variantName=空态`、`name=Screen 1 · 空态`、`route=/s1`，位置 y 同默认屏、x = 默认屏 x + 390 + 80 |
+| 1 | 点 /s1 卡片 → 工具栏「出变体」（`new-variant`）→ 状态名填「空态」→「出变体」（`variant-create`） | toast「正在出「Screen 1」的「空态」变体」；60 s 内 `GET /v1/projects/{id}` 多出一屏：`variantOf=/s1 的 id`、`variantName=空态`、`name=Screen 1 · 空态`、`route=/s1`，位置 y 同默认屏、x = 这一行（与默认屏纵向相交的屏）最右一屏的右缘 + 80，三屏种子即 1410（v0.82） |
 | 1b | 看 `GET /v1/projects/{id}` 的 `project.exemplarScreenId` | 不是变体的 id（样板屏只自动钉整屏默认屏） |
 | 2 | 看 `links` 与 `GET /v1/projects/{id}/app-map` | 指向 /s1 的链接 `toScreenId` 都是默认屏；地图 `nodes` 只有 3 个默认屏、不含变体 |
 | 3 | 看画布 | 变体卡（`.card[data-variant="true"]`）标签带「变体」片；/s1 默认屏卡标签含「1 个变体」 |
@@ -439,6 +440,19 @@
 | 6b | `PATCH /v1/screens/{变体}` `{ presentation: overlay }`；再 `PATCH /v1/screens/{默认屏}` `{ presentation: overlay }`；之后改回 push | 前者 `422`；后者 `200` 且变体的 `presentation` 同为 overlay；20 s 内两屏的截图内容都变了（按透明底重拍） |
 | 7 | `POST jobs kind=export_prototype` → 下载 | 单文件里只有 3 个 `<template data-route=`（不含变体） |
 | 8 | 选中 /s1 默认屏，`Delete` | 确认框写明「它的 1 个变体一起删除」；确认后项目剩 2 屏 |
+
+后置：无。
+
+#### `TC-CORE-072` 出变体落位不压住已有的屏 — 对应 `REQ-CORE-025`（v0.82）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：`pnpm seed:project --name VariantRow --device mobile --screens 3 --no-shot`（/s1 (0,0)、/s2 (470,0)、/s3 (940,0)）；建作业一律显式带 `runner:{kind:"model",driver:"stub",model:"stub"}`。脚本 `tests/e2e/core.ts`（`ONLY=TC-CORE-072`）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | `PATCH /v1/screens/<s3>` `{ x: 3000, y: 1200 }` | `200`（/s3 挪到下一行） |
+| 2 | `POST …/jobs` 建 `generate { variantOf: s1, variantName: "Empty" }`，等它结束 | `succeeded`；变体落在 (940, 0)：/s1 那一行（/s1、/s2）最右一屏的右缘 + 80，与默认屏同 y；另一行的 /s3 不影响（修复前落在 (470, 0)，压住 /s2） |
+| 3 | 再出一个 `variantName: "Error"` | 落在 (1410, 0)，即第一个变体右侧 |
+| 4 | 读项目全部屏 | 任意两屏的 390×844 矩形不相交 |
 
 后置：无。
 
@@ -478,7 +492,7 @@
 
 #### `TC-CORE-044` 对话记录：贴底才跟随、重试在途锁、预览按图定位 — 对应 `REQ-CORE-026`、`PAGE-CANVAS`（v0.74）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
 
-前置：`pnpm seed:project --name Scroll --device mobile --screens 2 --messages 30`（30 条没有作业的文字消息，撑出滚动）；经接口发两轮带图改屏（各 1 张），都跑完；起一个收到请求 4 s 后才回的 OpenAI 兼容桩并建一条指向它的通道；输入框发出的写请求同 `TC-CORE-043` 拦下改走 stub。打开项目，对话记录展开。
+前置：`pnpm seed:project --name Scroll --device mobile --screens 2 --messages 30`（30 条没有作业的文字消息，撑出滚动）；经接口发两轮带图改屏（各 1 张），都跑完；起一个收到请求 4 s 后才回的 OpenAI 兼容桩并建一条指向它的通道；输入框发出的写请求同 `TC-CORE-043` 拦下改走 stub。打开项目，对话记录展开；验证这条慢桩通道并在输入框里选中（第 2 步从输入框发一轮，v0.82）。
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
@@ -734,6 +748,30 @@
 
 后置：无。
 
+#### `TC-CORE-073` 路径参数不是 UUID：预览域与 `/v1` 都回 404 — 对应 `REQ-CORE-005`、`REQ-CORE-006`（设计文档 §14 `/errors/not-found`，v0.82）· 级别: 回归 · 执行者: AI
+
+前置：`pnpm seed:project --name BadIds --device mobile --screens 1 --no-shot`；取 /s1 的预览地址（签名 `t`、修订 `rev`，主机换成 `127.0.0.1`）。脚本 `tests/e2e/core.ts`（`ONLY=TC-CORE-073`），失败项攒齐一起报。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 取 /s1 的预览地址 | `200`（对照） |
+| 2 | 预览域：`/a/not-a-uuid/not-a-uuid`、`/a/<pid>/not-a-uuid`、`/p/<pid>/not-a-uuid?rev=…&t=…`、`/p/<pid>/<s1>?rev=not-a-uuid&t=…`、`/c/<pid>/not-a-uuid?t=…` | 全部 `404`，体含 `/errors/not-found`（修复前 `500`） |
+| 3 | `/v1` 下 42 个带路径参数的端点（项目 / 作业 / 屏 / 组件 / 批注 / 素材 / 预设 / 通道及其子路径，GET / POST / PUT / PATCH / DELETE），路径参数一律 `not-a-uuid` | 全部 `404` |
+
+后置：无。
+
+#### `TC-CORE-074` 改屏目标还没有内容时的失败原因 — 对应 `REQ-CORE-006`（`API-CORE-006` 目标屏，v0.82）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：`pnpm seed:project --name NotYet --device mobile --screens 1 --no-shot`；建作业一律显式带 stub runner。脚本 `tests/e2e/core.ts`（`ONLY=TC-CORE-074`）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | `POST …/jobs` 建懒生成 `generate { route: "/later", prompt: "[stub-hold:15000] a later screen" }` | `202`；10 s 内 /later 已建好、`currentRevisionId` 为空 |
+| 2 | 对 /later 发一轮改屏（`POST …/messages`） | `202`；作业 `failed`、`errorClass=validation`、`message=目标屏还没有生成出内容`；助手回执以「改屏失败：目标屏还没有生成出内容」开头（修复前是「目标屏都已被删除」） |
+| 3 | 等第 1 步的作业结束 | 结束 |
+
+后置：无。
+
 ### CORE · 用量与恢复
 
 #### `TC-CORE-016` 台账无硬上限且在途预估可见 — 对应 `REQ-CORE-008` · 级别: 回归 · 执行者: 皆可
@@ -845,7 +883,19 @@
 | 5 | 等 agent 作业（≤ 10 s）；再对 `/s2` 发一轮改屏 | agent 作业 `failed`（会话不存在，投递时收口）；改屏 `202` |
 | 6 | 等 `/probe` 的截图（≤ 30 s） | 首轮补扫补上截图；事件流里有带该修订 id 与 `"screenshot":true` 的 `screen_changed` |
 
-后置：删通道，关桩与探针；被 SIGKILL 的旧 API 进程拉起的截图浏览器（Playwright 启动的 Edge）不会随它退出，按重启前记下的子进程 PID 清掉。
+后置：删通道，关桩与探针。被 SIGKILL 的旧 API 进程拉起的截图浏览器由新进程启动时结束（v0.82，`TC-CORE-071`）。
+
+#### `TC-CORE-071` 截图浏览器：启动单飞与重启后清理 — 对应 `REQ-CORE-004`、`REQ-CORE-017`（设计文档 §16 进程启动、§17 Chromium 一行，v0.82）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：设 `QUILT_E2E_RESTART`（§3）；本机有 `ps` 与 `lsof`；`pnpm seed:project --name Browsers --device mobile --screens 4 --no-shot`。脚本 `tests/e2e/core.ts`（`ONLY=TC-CORE-071`），失败项攒齐一起报。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 执行 `QUILT_E2E_RESTART`（新进程里还没有截图浏览器），就绪后立即 `POST …/jobs` 建 `apply_design_system { screenIds: "all" }`，等它结束 | `succeeded`；API 进程名下（`ppid` = 监听 API 端口的进程、命令行带 `--remote-debugging-pipe`）恰好 1 个截图浏览器（修复前 4 张截图各起一个）；记下它的 PID 与 `--user-data-dir` |
+| 2 | `pnpm seed:project --name ShotSeed --device mobile --screens 1`（种子脚本自己拍截图，在同一数据目录里也记一份）；测试进程自己起一个无头 Edge（代表用户自己的浏览器） | 都起得来 |
+| 3 | 再执行 `QUILT_E2E_RESTART`（SIGKILL 旧进程） | 15 s 内不再有命令行带第 1 步那个 `--user-data-dir` 的进程、该目录已删（修复前主进程与子进程都留着，`ppid` 变 1）；第 2 步的 Edge 仍连着、能执行脚本 |
+
+后置：关掉第 2 步的 Edge。
 
 ### CORE · 画布加载与数据新鲜度
 
@@ -920,7 +970,7 @@ v0.76 起，执行脚本 `tests/e2e/load.ts`（`pnpm --filter @quilt/tests e2e:l
 
 #### `TC-CORE-055` 切项目不串状态 — 对应 `REQ-CORE-009`、`REQ-CORE-014`、`REQ-CORE-005`（v0.76）· 级别: 回归 · 执行者: AI
 
-前置：`pnpm seed:project --name Alpha --device mobile --screens 2 --messages 2` 与 `pnpm seed:project --name Bravo --device mobile --screens 3 --no-shot`；打开 Alpha。切项目一律经顶栏项目切换器（客户端导航）。
+前置：`pnpm seed:project --name Alpha --device mobile --screens 2 --messages 2` 与 `pnpm seed:project --name Bravo --device mobile --screens 3 --no-shot`；打开 Alpha，建一条 OpenAI 兼容桩通道并在输入框里选中（第 1a 步的版数档位只在模型通道下出现，v0.82）。切项目一律经顶栏项目切换器（客户端导航）。
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
@@ -933,7 +983,7 @@ v0.76 起，执行脚本 `tests/e2e/load.ts`（`pnpm --filter @quilt/tests e2e:l
 
 #### `TC-CORE-056` 对话记录一致性 — 对应 `REQ-CORE-006`、`REQ-CORE-020`（v0.76）· 级别: 回归 · 执行者: AI
 
-前置：`pnpm seed:project --name Talk --device mobile --screens 2 --no-shot`；打开项目、展开对话记录。
+前置：`pnpm seed:project --name Talk --device mobile --screens 2 --no-shot`；打开项目，建一条 OpenAI 兼容桩通道并在输入框里选中（第 1 步在输入框按 `Enter`，发出的请求再改走 stub，v0.82），展开对话记录。
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
@@ -1024,6 +1074,18 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | 4 | 无头 Edge 以 `--host-resolver-rules=MAP rebind.test 127.0.0.1` 启动（DNS 重绑之后的状态），打开 `http://rebind.test:<P>/`，页内 `fetch('/v1/projects')` 与 `fetch('/mcp', POST)`；再从该页提交一个 `enctype=text/plain` 的表单到 `http://localhost:<P>/v1/projects` | 两个同源 fetch 都 `403`；表单导航的响应 `403`；项目列表里仍没有 `csrf-060` |
 
 后置：无（项目随下一次 `pnpm seed` 清掉）。
+
+#### `TC-CORE-070` 从 `127.0.0.1` 打开画布：交互态与屏内跳转 — 对应 `REQ-CORE-005`、`REQ-PROTO-001`、`REQ-CORE-017`（设计文档 §15 安全「预览域」，v0.82）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：`pnpm seed:project --name Loopback --device mobile --screens 3`；画布地址的端口记作 `<P>`（打包形态即 API 端口），`WEB_ORIGIN=http://localhost:<P>`。脚本 `tests/e2e/core.ts`（`ONLY=TC-CORE-070`）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 带 `Origin: http://127.0.0.1:<P>` 取 /s1 的预览地址（主机换成 `127.0.0.1`）；再带 `Origin: http://evil.example` 取一次 | `200`；CSP 的 `frame-ancestors` 含 `http://localhost:<P>`、`http://127.0.0.1:<P>`、`http://[::1]:<P>`；第一次的 `Access-Control-Allow-Origin` = `http://127.0.0.1:<P>`，名单外的 Origin 不被回显 |
+| 2 | 无头 Edge 打开 `http://127.0.0.1:<P>/p/<id>`，双击 /s1 | 角标「交互中」；10 s 内 iframe 里的 `h1` 是 Screen 1（修复前 `frame-ancestors` 只有 `WEB_ORIGIN`，iframe 被拦） |
+| 3 | 在画布空白处滚一下露出「Go to /s2」，点它 | 角标变 /s2，iframe 里的 `h1` 是 Screen 2（父页跨源取目标屏 HTML 成功）；按 `Esc` 退出 |
+
+后置：无。
 
 ### PROTO · 原型播放
 
@@ -1398,6 +1460,30 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 后置：无。
 
+#### `TC-EDIT-022` 截图卡住时回刷作业照常收口 — 对应 `REQ-EDIT-003`、`REQ-CORE-004`（设计文档 §17 Chromium 一行与 `screenshot.render`，v0.82）· 级别: 回归 · 执行者: AI
+
+前置：`pnpm seed:project --name HangShots --device mobile --screens 1`；MCP 建两屏：`Fonts`（屏里的脚本把 `document.fonts.ready` 换成永不落定的 promise）与 `Icons`（页面加载完之后再调 `lucide.createIcons` 就死循环——截图的就绪判定会再调一次）。脚本 `tests/e2e/edit.ts`（`ONLY=TC-EDIT-022`），失败项攒齐一起报。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | `POST …/jobs` 建 `apply_design_system { screenIds: "all" }` | 120 s 内 `succeeded`、`revisionIds` 3 条（修复前停在 `running`） |
+| 2 | 看 `Fonts` 与 Screen 1 这次的新修订 | 60 s 内都有截图（字体就绪是软条件，最多等 4 s） |
+| 3 | MCP 再建一张普通屏 `After` | 60 s 内有截图（截图链没被卡住的那一张拖住） |
+| 4 | 看 `Icons` 这次的新修订 | 没有截图（在「载入到拍完」的 30 s 上限处放弃、交给截图重试），修订照常在 |
+
+后置：删项目。
+
+#### `TC-EDIT-023` 回刷超时收口 — 对应 `REQ-EDIT-003`、`REQ-CORE-008`（设计文档 §11 迁移表「超时」，v0.82）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：设 `QUILT_E2E_RESTART`，且重启命令把调用方的环境变量传给新进程（§3）；本机 3987 端口起一个只收不回的服务（屏里一张指向它的图：截图等 `networkidle` 满 15 s、视口内图片再等 4 s，一张约 20 s）。脚本 `tests/e2e/edit.ts`（`ONLY=TC-EDIT-023`）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 以 `QUILT_JOB_TIMEOUT_BASE_MS=1000 SCREEN_CONCURRENCY=1` 执行重启；`pnpm seed:project --name Timeout --device mobile --screens 1 --no-shot`，MCP 建两张带那张图的屏 `Slow A` / `Slow B` | 就绪 |
+| 2 | `POST …/jobs` 建 `apply_design_system { screenIds: [Slow A, Slow B] }`，等它结束 | `failed`、`errorClass=timeout`、`message=job exceeded 11s`（1 s + 2 屏 × 5 s）；`revisionIds` 1 条——恰好一屏 current 变了，另一屏没轮到、current 不变；作业在 60 s 内收口（修复前基数固定 3 min，没有手段走到这条路径：作业 `succeeded`） |
+
+后置：删项目、关 3987 服务，不带这两个变量再执行一次重启。
+
 ### AGENT · MCP 与本机 agent
 
 > v0.32 本地单用户版：`TC-AGENT-002`（scope 不足）、`TC-AGENT-005`（长轮询领取）、`TC-AGENT-006`（租约过期）、`TC-AGENT-007`（deeplink）、`TC-AGENT-008`（伴侣进程）随 `REQ-AGENT-001` 的 OAuth 与 `REQ-AGENT-004/005` 推迟，用例正文移除；ID 保留不复用。
@@ -1541,6 +1627,19 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 后置：脚本取消第 4 / 6 步若有漏建的作业；证据随套件的 `docs/test-runs/run-<RUN>-tc-agent-011.txt`。
 
+#### `TC-AGENT-022` 上传位闲置回收 — 对应 `REQ-AGENT-002`（`API-AGENT-003`、MCP `append_upload`、设计文档 §17 `upload.gc`，v0.82）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：被测 API 用 fs 存储、数据目录在本机（`/v1/config` 的 `home`）；`pnpm seed:project --name Uploads --device mobile --screens 1 --no-shot`。脚本 `tests/e2e/mcp.ts`（`ONLY=TC-AGENT-022`）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | MCP `create_upload_url` 签三个 HTML 上传位 A / B / C，REST `POST …/uploads` 签 D；B 追加一段后丢下，C 追加一段（正在写） | 四个上传位的文件都在 `<home>/objects/uploads/` |
+| 2 | 把 A / B / D 文件的修改时间拨回 11 分钟，等至多 75 s | A / B / D 被删（每分钟一轮的 `upload.gc`）；C 还在（修复前 A / B / D 永久留下） |
+| 3 | 往 A 追加一段 | `404 /errors/not-found` |
+| 4 | C 按 `offset` 续写一段，再 `create_screen` 带 `uploadId: C` | 建屏成功，C 被用掉（文件删除） |
+
+后置：无。
+
 ## 5. 回归策略
 
 冒烟级 = `TC-CORE-003`、`TC-CORE-005`、`TC-CORE-010`、`TC-CORE-012`、`TC-CORE-018`、`TC-CORE-031`、`TC-PROTO-001`、`TC-AGENT-001`——建项目 → 生成 → 聚焦 → 对话改屏 → 恢复 → 一键安装冷启动，加播放与 MCP 各一条主链路。
@@ -1676,6 +1775,12 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | RUN-181 | 2026-10-01 | `main` `36680e9`（v0.74–v0.80 七批合并后，未改动） | AI(Claude Code) | 全量轮：typecheck；单测轮；CORE（`core.ts` / `load.ts` / `canvas.ts`）、PROTO、EDIT、COMPONENTS、AGENT、MCP、CHAT 九套整套，`LIVE_LLM=0`、`GEMINI_API_KEY=`（种子不建真实通道）。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态（`apps/web/dist` 当场构建），`QUILT_E2E_RESTART=/tmp/quilt-fix/stack.sh main restart`；`TC-CORE-024` 会让整套进程退出（§7），单独执行，其余 CORE 用例按套件顺序连跑 | typecheck 通过，单测 58/58。e2e 98 条：通过 76 · 失败 19 · 待人工 2（`TC-CORE-020`、`TC-AGENT-010`）· 跳过 1（`TC-CORE-006`）。分套：`core.ts` 39/52、LOAD 5/7、CANVAS 3/3（22 步）、PROTO 10/12、EDIT 10/14、COMPONENTS 1/1、AGENT 5/6、MCP 2/2、CHAT 1/1。失败归因：需真实模型 6（`TC-CORE-005` / `012`、`TC-PROTO-004` / `009`、`TC-EDIT-003` / `008`）；§7 遗留 2（`TC-CORE-023`、`024`）；HEAD 同现 4（`TC-CORE-035` / `037`、`TC-EDIT-002` / `006`）；环境 5（`TC-CORE-027`，以及没有云端通道导致的 `025` / `028` / `055` / `056`）；合并引入 1（`TC-CORE-049`，产品）；用例需随 v0.76 更正 1（`TC-CORE-044`）。见明细 |
 | RUN-182 | 2026-10-01 | 未提交工作树（设计文档 v0.81：通道清单本机留底；`TC-CORE-044` 第 5 步先等 toast 再发轮次） | AI(Claude Code) | 复测 + 回归轮：同 RUN-181 九套整套（`TC-CORE-024` 除外），同一隔离栈与环境；typecheck；单测轮 | typecheck 通过，单测 58/58。e2e 97 条：通过 78 · 失败 16 · 待人工 2 · 跳过 1。`core.ts` 41/51（`044`、`049` 通过）、LOAD 5/7、CANVAS 3/3、PROTO 10/12、EDIT 10/14、COMPONENTS 1/1、AGENT 5/6、MCP 2/2、CHAT 1/1。失败全部在 RUN-181 的基线与环境项内；`TC-CORE-023` 的失败点后移到第 7 步「让位过度」，见 RUN-183 |
 | RUN-183 | 2026-10-01 | 同 RUN-182；对照用的修复前前端由 HEAD 的 `useRunnerPrefs.ts` 构建，跑完换回并重建 | AI(Claude Code) | 对照轮：`TC-CORE-023` 修复后单跑 5 次、修复前 3 次（`GEMINI_API_KEY=`），修复前另在种子建了 Gemini 通道时单跑 2 次；`TC-CORE-049`（第 1 步补「通道触发器从第一帧起就在」的断言、前置等通道清单留底）修复前 / 修复后各 2 次；`TC-CORE-044` 单跑修复后 2 次、修复前 1 次。同一隔离栈 | `049` 修复前 2/2 失败（偏离的帧里触发器都不在）、修复后 2/2 通过；`023` 的「让位过度」修复前后都出现，种子建了 Gemini 通道时不出现，判环境；`044` 单跑第 2 步修复前后都失败（缺省通道是本机 agent，见明细），整套顺序下通过（RUN-182） |
+| RUN-184 | 2026-10-01 | 修复前代码（`83884a5` 的产品代码：`git stash` 收起 `apps/` 的改动；工作树只带新用例、改过的用例与单测 `api/bundle`） | AI(Claude Code) | 复现轮：新增 `TC-CORE-070`～`074`、`TC-EDIT-022` / `023`、`TC-AGENT-022`，改过预期的 `TC-CORE-041`；`TC-CORE-031`（install 套件）；单测轮。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态，`LIVE_LLM=0`、`GEMINI_API_KEY=`，`QUILT_E2E_RESTART=/tmp/quilt-fix/stack.sh v082 restart` | 失败 10/10（预期），本版 9 条产品缺陷都在这里复现（第 10 条是用例对种子 Gemini 通道的依赖，见 RUN-181～183）：070 `frame-ancestors` 只有 `http://localhost:3410`；071 回刷 4 屏起了 4 个截图浏览器，SIGKILL 重启后主进程（`ppid` 1）与 4 个子进程留着、3 个临时目录留着；072 / 041 变体落在 (470, 0) 压住 /s2；073 预览域 5 处全是 500；074 回执「目标屏都已被删除」；EDIT-022 回刷作业 120 s 仍 `running`；EDIT-023 设了 `QUILT_JOB_TIMEOUT_BASE_MS` 也不认，作业 93 s 后 `succeeded`；AGENT-022 拨回 11 分钟的三个上传位 75 s 内一个都没删；031 冷启动退出码 13（`Detected unsettled top-level await`）。单测 58/59：`api/bundle` 报 5 个静态 import 环（`projects` ↔ `assets` / `presets`、`jobs` ↔ `annotations` ↔ `components`） |
+| RUN-185 | 2026-10-01 | 未提交工作树（设计文档 v0.82） | AI(Claude Code) | 修复轮：同 RUN-184 的 10 条 + 单测轮 + typecheck，同一隔离栈与环境 | 10/10 通过（两条首跑未过，见明细）：070 从 `127.0.0.1:3410` 打开画布交互态加载出 Screen 1、屏内跳到 Screen 2；071 回刷 4 屏只起 1 个截图浏览器、重启后它与子进程被结束、目录删掉（启动日志「结束上次留下的截图浏览器进程 1 个」）；072 变体落在 (940, 0) / (1410, 0)；073 预览域 5 处与 `/v1` 42 个端点全部 404；074 回执「改屏失败：目标屏还没有生成出内容」；EDIT-022 回刷 3 屏 33 s `succeeded`；EDIT-023 33 s 收口为 `failed(timeout)`「job exceeded 11s」、落 1 屏跳 1 屏；AGENT-022 三个上传位 46 s 内回收；031 包 642 KB、冷启动 4025 ms、二次 1009 ms。单测 59/59，typecheck 通过 |
+| RUN-186 | 2026-10-01 | 同 RUN-185 | AI(Claude Code) | 回归轮（§7「stub 轮次下依赖种子 Gemini 通道的用例」整条）：`TC-CORE-023` / `024` / `025` / `028`（core 顺序），`TC-CORE-044` 单跑，`TC-CORE-055` / `056`；`TC-CORE-023` 另单跑 3 次；临时脚本在 1440×900 下量开设计系统面板时输入框右缘到面板的距离。同一隔离栈，账号里除用例自建的桩通道外没有云端通道 | 首跑 5 条 `locator.click` 超时（脚本，见明细），更正后 024 / 025 / 028 / 044（单跑）/ 055 / 056 通过；023 4 次失败在 §7 的漂移点（「叫回后安全区底部没复原」2 次、「重新展开后输入框没回到原位」2 次）。量距：选中桩通道时输入框 673 px、右缘到面板 16.0 px（≤ 24，第 7 步成立）；缺省本机 agent 时 510 px、69.0 px（RUN-182 / 183 的「让位过度」） |
+| RUN-187 | 2026-10-01 | 同 RUN-185（`TC-CORE-024` / `029` 的脚本更正见明细） | AI(Claude Code) | 全量轮：CORE（`core.ts` / `load.ts` / `canvas.ts`）、PROTO、EDIT、COMPONENTS、AGENT、MCP、CHAT 九套整套，同一隔离栈与环境；`TC-CORE-024` 回到整套里跑 | e2e 106 条：通过 89 · 失败 14 · 待人工 2（`TC-CORE-020`、`TC-AGENT-010`）· 跳过 1（`TC-CORE-006`）。分套：`core.ts` 47/57、LOAD 7/7、CANVAS 3/3（22 步）、PROTO 10/12、EDIT 12/16、COMPONENTS 1/1、AGENT 5/6、MCP 3/3、CHAT 1/1。12 条在基线内（需真实模型 6、HEAD 同现 4、环境 `TC-CORE-027`、§7 `TC-CORE-023`）；另 2 条 `TC-CORE-029` / `011` 见明细与 RUN-188。与 RUN-182 比：`TC-CORE-024` / `025` / `028` / `055` / `056` 由失败转通过 |
+| RUN-188 | 2026-10-01 | 同 RUN-185 + `TC-CORE-029` 开头显式选桩通道 | AI(Claude Code) | 复测轮：`TC-CORE-024` → `025` → `028` → `029`；`TC-CORE-010` + `011`；`TC-CORE-023` → `024` → `025` → `028` → `029` → `030` → `009` → `010` → `011`（整套里的顺序）。同一隔离栈 | 除 `TC-CORE-023`（§7）外全部通过：029 两次都过，011 单跑与按整套顺序各过一次 |
+| RUN-189 | 2026-10-01 | 同 RUN-188 + 审查修复（`discard` 当场清掉截图浏览器单例，不等关不掉的浏览器发 `disconnected`；启动清理里删目录 / 删记录失败不挡启动；进程正常退出时删掉自己那份浏览器记录） | AI(Claude Code) | 复测轮（改到截图链）：`TC-CORE-066` / `068` / `071`、`TC-EDIT-022` / `023`、`TC-CORE-031`；单测轮；typecheck；脚本里建桩通道的辅助函数整理后，`TC-CORE-023` / `024` / `025` / `028` / `029` 按 core 顺序复跑。同一隔离栈 | 截图链 6/6 通过：071 只起 1 个截图浏览器、重启后被结束；EDIT-022 33 s `succeeded`；EDIT-023 33 s 收口为 `failed(timeout)`；031 包 642 KB、冷启动 3536 ms、二次 1011 ms。跑完后数据目录的 `screenshot-browsers/` 为空（种子脚本退出时删掉了自己那份）。复跑 024 / 025 / 028 / 029 通过，023 失败（§7，见明细）。单测 59/59，typecheck 通过 |
 | RUN-114 | 2026-09-23 | 未提交工作树（设计文档 v0.65：审查缺陷回写） | AI(Claude Code) | 单测轮 34/34；e2e 局部轮：`TC-AGENT-011`（含新增 7c / 8a）、`TC-AGENT-003` / `004`；`TC-PROTO-001` / `012`（含新增 5～6b）；`TC-CORE-007` / `010` / `011` / `018` / `023` / `034` / `036` / `040` / `041`（含新增断言）；`TC-EDIT-001` / `005` / `007` / `012`。隔离栈 3200 / 3201 + `quilt_test` + stub + 打包形态，逐套串行 | 通过 18/19 · 失败 1（`TC-CORE-023`，与 RUN-112 同一步、HEAD 同现，判环境） |
 | RUN-113 | 2026-09-23 | 未提交工作树（设计文档 v0.64：MCP 写屏改小步——`patch_screen` / `append_upload`、`get_screen` 只给 body） | AI(Claude Code) | 局部轮（`REQ-AGENT-002` → `TC-AGENT-011` 全部步骤含新增 7b；`get_screen` 口径变化波及的 `TC-AGENT-003` / `004`）。隔离环境 3200 / 3201 + `quilt_test` + stub，纯 MCP / API，未托管前端 | 通过 2/3 · 失败 1（`TC-AGENT-003`：MCP 部分——`get_screen` 只给 body、截图就绪——已过，随后打开浏览器页 `locator.waitFor` 超时：本栈没托管前端，判环境） |
 | RUN-112 | 2026-09-23 | 未提交工作树（设计文档 v0.60 工程底座 + v0.61 找屏与总览 + v0.62 状态变体 + v0.63 叠层屏） | AI(Claude Code) | 单测轮 `pnpm test` 31/31；e2e 局部轮（新增 `TC-CORE-040` / `041`、`TC-PROTO-012`；重构影响面：`TC-CORE-003` / `007` / `012` / `018` / `023` / `034` / `036`、`TC-EDIT-001` / `005`、`TC-AGENT-001` / `003` / `004` / `011`）。隔离环境：3200 / 3201 + `quilt_test` + stub 驱动 + 打包形态（`WEB_DIST` + `WEB_ORIGIN=3200`，§3），3100 / 5173 归另一会话 | 通过 15/17 · 失败 1（`TC-CORE-023`，HEAD 同现、判环境）· 未跑 1（`TC-EDIT-008` 需真实模型）· 跳过 / 待人工 2（`TC-AGENT-009` / `010`） |
@@ -1737,6 +1842,17 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 | 轮次 | 用例 | 结果 | 现象 / 证据 | 跟进 |
 | --- | --- | --- | --- | --- |
+| RUN-189 | TC-CORE-023 | 失败 | 第 6d 步「Esc 未退出聚焦」：失败截图里 /s1 仍是「交互中」，此前 ⌘/ 刚收回输入框；这一处此前没出现过，与 §7 的漂移同属聚焦期间输入框显隐与焦点的时序 | §7，基线（失败点补进该条） |
+| RUN-188 | TC-CORE-023 | 失败 | 「叫回后安全区底部没复原」 | §7，基线 |
+| RUN-187 | TC-CORE-029 | 失败 → 通过 | 第 1 步「无目标时动词行应为「造 1 屏 · 自动摆放」：造屏 · 交给本机会话」。`TC-CORE-025` 自建桩通道后服务端缺省变成它，025「选另一个可用通道」选中的就成了本机 Claude Code，同一浏览器上下文把它记住；025 收尾删掉桩通道后这条记忆仍有效（RUN-115 起 §7 记的就是这条顺序依赖，此前 025 选的是 Codex 或 Gemini） | 脚本更正：029 打开项目后先在输入框选中自己的桩通道；RUN-188 按 024 → 029 与 023 → 011 两种顺序都通过，§7 删去该条 |
+| RUN-187 | TC-CORE-011 | 失败 | 第 2 步「过期截图没换回来（详情 GET 1 次）」：截图 403 后页面没有重取详情 | RUN-188 单跑与按整套顺序重跑各通过一次；本版没改对象地址、截图 403 后重取详情这条路径，记为偶发，后续轮次再看 |
+| RUN-187 | TC-CORE-023 / 027 / 035 / 037、TC-EDIT-002 / 006 | 失败 | `023`「叫回后安全区底部没复原」；`027`「没有任何支持视觉的云端通道可用」；`035`「fetch failed」；`037` `locator.click` 30 s 超时；`EDIT-002`「reading 'some'」；`EDIT-006` 字体下拉 5 s 没展开 | 基线（§7 / 环境 / HEAD 同现），与 RUN-181 同列 |
+| RUN-187 | TC-CORE-005 / 012、TC-PROTO-004 / 009、TC-EDIT-003 / 008 | 失败 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-186 | TC-CORE-023 | 失败 | 4 次：「重新展开后输入框没回到原位」2 次、「叫回后安全区底部没复原」2 次；都没走到第 7 步的让位断言，让位改由临时脚本量（见汇总） | §7，基线；「让位过度」一节从 §7 删去 |
+| RUN-186 | TC-CORE-023 / 024 / 044 / 055 / 056 | 失败 → 通过 | 首跑都在 `locator.click` 30 s 超时：失败截图里通道下拉只有「交给本机 Claude Code / Codex」——画布在打开时取通道清单，页面打开之后才建的桩通道不在清单里 | 脚本更正：建桩通道并验证后重载页面再选（`044` 改为打开画布之前验证慢桩通道）；更正后 024 / 044 / 055 / 056 通过 |
+| RUN-185 | TC-CORE-071 | 补断言 | 修复轮跑完后按本道工作目录清孤儿进程，又找到一个 `ppid` 1 的截图浏览器：它属于更早的 API 进程，那次重启后没被结束。原因是记录文件被同一数据目录下的种子脚本覆盖——`pnpm seed:project` 不带 `--no-shot` 时自己拍截图，也写这一份记录，API 的那条被冲掉 | 产品修复：记录按进程分文件（`screenshot-browsers/<pid>.json`，设计文档 §16 同步）；071 第 2 步加「种子脚本自己拍截图」，修复后通过 |
+| RUN-185 | TC-EDIT-023 | 失败 → 通过 | 首跑第 2 步通过（33 s 收口为 `failed(timeout)`），原第 3 步「对 Screen 1 单独回刷应在 6 s 内做完」`failed`「job exceeded 6s」：同一时刻截图队列里还有两张慢屏的建屏截图在跑，普通屏的截图排不到 6 s 内，这一步验的不是超时收口 | 脚本更正：删去这一步，改为断言第 2 步的作业 60 s 内收口；重跑通过 |
+| RUN-184 | 10 条（见汇总） | 失败（预期） | 见汇总；失败截图与日志在 `docs/test-runs/run-184-*` | 产品修复，RUN-185 通过 |
 | RUN-183 | TC-CORE-049 | 失败（预期）→ 通过 | 第 1 步补断言后，修复前构建 2/2 失败「偏离的帧 [毫秒, 左, 宽, 触发器] [[17,446,548,0],[22,446,548,0]]」（终值 左 465 宽 510：新上下文里缺省通道是本机 agent，输入框比整套里窄），修复后 2/2 通过 | — |
 | RUN-183 | TC-CORE-023 | 失败 | 修复后单跑 4/5、修复前 2/3 失败在第 7 步「让位过度：输入框右缘与面板之间空出 83.0px」，其余各 1 次在「叫回后安全区底部没复原」；种子建了 Gemini 通道时修复前单跑 2 次，失败在「叫回后安全区底部没复原」「重新展开后输入框没回到原位」，不出现让位过度。失败截图 `run-183-tc-core-023-fail.png`：缺省通道是本机 agent，输入框没有屏数 / 版数档位，宽约 510 px 居中，开设计系统面板时右缘离面板本来就有 83 px，用不着让位；用例假定输入框宽到会被面板压住 | 环境（stub 轮次没有云端通道），不是本版引入；§7「TC-CORE-023」一条补上 |
 | RUN-183 | TC-CORE-044 | 失败 | 单跑时第 2 步「自己发出的一轮应滚到底」并中断在「应有 4 轮，实际 3」：新开的浏览器上下文没有记住的通道，缺省是本机 agent、没选会话，输入框按 `Enter` 被挡（v0.74 起就地写理由）；修复前构建单跑同样失败。整套顺序下更早的用例已在本机记住一条模型通道，RUN-182 通过 | 环境 + 顺序，并入 §7「stub 轮次下依赖种子 Gemini 通道的用例」 |
@@ -1922,15 +2038,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 ## 7. 遗留问题
 
-- **`apply_design_system` 超时路径没有自动化用例**（v0.79）：超时基数 3 min 写死在 `config.jobTimeoutMs`、不可配，要真跑到超时得 80 屏以上；「中止即判 timeout」与按屏数加时只在 RUN-168 以临时补丁验过。
-- **截图卡住时回刷作业跟着卡在 running**（RUN-168 见到一次，原因未完全定位）：截图路径里 `page.evaluate`（图标 / 字体就绪）与 `context.close()` 没有超时，浏览器进程等不到一帧时整条链一直挂着；另外 `getBrowser` 在浏览器还没起来时被并发调用会各自 launch 一个（那次见到 4 个），只有最后一个被记住、其余泄漏到进程退出。修法方向：launch 收成一个共享 promise；`screenshotHtml` 整体套一个上限，超时即关掉 context 并抛错交给重试。
-- **以 SIGKILL 重启 API 会留下孤儿截图浏览器**（`TC-CORE-068` / `stack.sh restart`）：Playwright 拉起的 Edge 不随父进程退出，每次重启留一组（主进程加若干子进程），要按重启前记下的子进程 PID 手动清掉。
-- **stub 轮次下依赖种子 Gemini 通道的用例**（RUN-150 起；RUN-181 补全名单）：stub 轮次把 `GEMINI_API_KEY` 置空后种子不建云端通道，输入框的缺省通道落到「交给本机 Claude Code」、没选会话。`TC-CORE-024` 第 5 步从输入框直接发一轮改 4 屏，`Enter` 被挡、30 s 等不到请求，脚本里并行的 `waitForResponse` 拒绝没人接、整套进程退出（有 Gemini 通道时这一步会真打一轮再取消）；`TC-CORE-055` 第 1a 步要点「2 版」，本机 agent 通道不出版数档位，30 s 点不到；`TC-CORE-056` 第 1 步在输入框按 `Enter` 被同一理由挡住，等不到 POST；`TC-CORE-025` / `028` 要通道清单与管理器里有一条自建云端通道（RUN-170 / 171）。055 / 056 在种子建了 Gemini 通道时通过（RUN-181 单跑对照，两条都不打真实模型：输入框发出的请求改走 stub）。`TC-CORE-044` 单跑时第 2 步同样被挡（RUN-183），整套顺序下更早的用例已在本机记住一条模型通道才通过。修法方向：这些步骤前建一条 OpenAI 兼容桩通道并选中（同 `TC-CORE-029` / `036`），024 的 `req` 与 `res` 一起 await。
-- **`TC-CORE-031` 打包形态冷启动退出码 13**（RUN-136，c537fd5 同现）：打包的 `server.mjs` 顶层 await 一直不落定、事件循环排空后进程退出，一键安装在本机（Node 26.5.0）起不来。`apps/api` 下单独起 PGlite 正常，挂起点未定位；排查从打包产物的启动序列（迁移、截图浏览器、队列）逐段打点开始。
-- **从 `127.0.0.1:<画布端口>` 打开画布时交互态 iframe 被拦**（v0.75 审查实测，c537fd5 同现）：预览域 CSP 的 `frame-ancestors` 只写 `WEB_ORIGIN` 一个地址，来源校验却放行 `localhost` / `127.0.0.1` / `[::1]` 三种回环写法；开发形态从 `127.0.0.1:3412` 打开时 `/v1` 请求全 200，双击进交互态的 iframe 显示禁止图标。RUN-137 写的「`127.0.0.1` 入口画布正常加载」只覆盖页面加载时的 `/v1` 请求。修法方向：`frame-ancestors` 列出来源名单展开出的全部画布 origin。
-- **出变体落在默认屏右侧时与右边已有的屏重叠**（RUN-129）：Screen 1 的第一张 Loading 变体落在 (470, 0)，与 Screen 2 同一坐标、整张盖住它，画布上点不到 Screen 2。`TC-CORE-043` 改点别的卡绕开。修法方向：变体落位避开已占用的矩形。
-- **`TC-CORE-029` 在整套 core 顺序下偶发**（RUN-115）：更早的用例（通道相关的 `TC-CORE-025` 一带）把本机 agent 通道留作浏览器上下文里记住的默认通道，029 开头的动词行于是是「造屏 · 交给本机会话」而不是「造 1 屏 · 自动摆放」。单跑与「028 + 029」组合都通过。修法方向：029 开头显式选一条模型通道，或前面的用例收尾时清掉 `quilt:runner` 的本机记忆。
-- **`TC-CORE-023` 在打包形态的隔离栈上失败**（RUN-112 / 114 / 115，HEAD 同现）：失败点在「刷新 / 叫回后输入框位置或焦点未复原」之间漂移，开发实例（3100 + Vite）上 RUN-111 通过。需在开发实例上复测定性。stub 轮次（没有云端通道）下还会失败在第 7 步「让位过度」（RUN-182 / 183）：缺省通道是本机 agent 时输入框没有屏数 / 版数档位、约 510 px 宽，开设计系统面板时本来就压不到面板，用例却假定它要让位；有 Gemini 通道时不出现。
+- **`TC-CORE-023` 在打包形态的隔离栈上失败**（RUN-112 / 114 / 115，HEAD 同现）：失败点在「刷新 / 叫回后输入框位置或焦点未复原」之间漂移，开发实例（3100 + Vite）上 RUN-111 通过。需在开发实例上复测定性。RUN-186～189 在输入框选中桩通道后（第 7 步「让位过度」随之消失）7 次单跑与整套仍全部失败，失败点在「叫回后安全区底部没复原」「重新展开后输入框没回到原位」之间漂移，RUN-189 还出现一次「Esc 未退出聚焦」（第 6d 步）。
 - **聊天回合经 `quilt.edit_element` 改的屏不记在聊天作业名下**（RUN-125，`TC-CORE-039` 第 3 步）：`edit_element` 不收 `jobId`，修订记为 `manual`，聊天回执与 `affectedScreenIds` 漏掉这一屏（画布经项目事件流照常刷新）。修法方向：`edit_element` 与 `patch_screen` 一样接受 `jobId` 并记 `agent_ingest`，或聊天系统提示里要求改屏一律带 `jobId` 的工具。
 
 - **对话记录折叠横条的进度未修**（v0.38 查出，实现与设计文档 §13 不符）：`Canvas.tsx` 给 ChatDock 的 `status` 在「恰好一个作业在跑且它还没有进度文案」时是 `null`，横条于是退回「对话 · N 条」。在跑作业行已按 v0.38 兜底写「排队中…」，横条那一路的兜底要在 Canvas 侧收敛（把「空进度说什么」收成一个出处），暂无用例覆盖。

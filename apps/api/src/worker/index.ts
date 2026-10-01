@@ -95,6 +95,13 @@ async function recoverJobs() {
   if (stale.length || queued.length) console.log(`[worker] recovered: ${queued.length} re-queued, ${stale.length} marked failed`);
 }
 
+// upload.gc（§17 v0.82）：上传位最后一次写入后闲置超过签名 PUT 地址的有效期即删——签发了没用的空位、写了一半被丢下的都在这里收。
+// 按最后一次写入算而不是签发时刻：分块写大屏的 agent 每段都是一轮模型输出，按签发时刻删会让写到一半的屏断掉
+async function sweepUploads() {
+  const before = Date.now() - config.uploadUrlMinutes * 60_000;
+  for (const o of await storage.list('uploads/')) if (o.modifiedAt.getTime() < before) await storage.delete(o.key);
+}
+
 // 作业 Worker（§17 内部任务 job.claim / job.timeout / screenshot.render / screenshot.retry）
 export async function startWorker() {
   await startAgentDelivery();
@@ -117,5 +124,6 @@ export async function startWorker() {
   }, 60_000).unref();
   setTimeout(() => retryScreenshots().catch(() => {}), 3_000);
   setInterval(() => retryScreenshots().catch(() => {}), 5 * 60_000).unref();
+  setInterval(() => sweepUploads().catch((e) => console.error('[upload.gc]', e)), 60_000).unref();
   console.log(`[worker] in-process queues ready (concurrency ${config.workerConcurrency}, llm=${config.llmDriver}, screenshot=${config.screenshotChannel || 'auto'})`);
 }

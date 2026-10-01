@@ -404,6 +404,38 @@ await step('TC-AGENT-018', async () => {
   return 'update_screen 非法路由被拒；restore_revision 重拍；append_upload 未签发 404、并发一成四 409、用后 404；send_annotations 被占 409 / 超限 429 均不建作业，放开后三屏三条；非法游标是参数错误';
 });
 
+// TC-AGENT-022（v0.82）：上传位按最后一次写入闲置 10 分钟回收（upload.gc，§17）——签发后没用的空位、写了一半被丢下的都删；正在写的不动。
+// 要被测 API 用 fs 存储、数据目录在本机（/v1/config 的 home）：把上传位文件的修改时间拨回 11 分钟，等每分钟一轮的 upload.gc
+await step('TC-AGENT-022', async () => {
+  const { utimes, stat } = await import('node:fs/promises');
+  const r = seedJson<{ projectId: string }>('seed:project', '--name', 'Uploads', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const pid = r.projectId;
+  const home = ((await (await fetch(`${API}/v1/config`)).json()) as { home: string }).home;
+  const fileOf = (id: string) => path.join(home, 'objects', 'uploads', `${id}.html`);
+  const exists = (id: string) => stat(fileOf(id)).then(() => true, () => false);
+  // 三个上传位：A 签发后没用（空位）、B 写了一段后被丢下、C 正在写（刚追加过）；REST 签发的 D 同样没用
+  const slot = async () => (await call<{ uploadId: string }>('quilt.create_upload_url', { projectId: pid })).uploadId;
+  const [a, b, c] = [await slot(), await slot(), await slot()];
+  const d = (await apiJson<{ uploadId: string }>(`/v1/projects/${pid}/uploads`, { method: 'POST' })).body.uploadId;
+  await call('quilt.append_upload', { uploadId: b, offset: 0, chunk: '<div class="p-4">half' });
+  await call('quilt.append_upload', { uploadId: c, offset: 0, chunk: '<div class="min-h-dvh bg-background p-6">' });
+  for (const id of [a, b, c, d]) expect(await exists(id), `前置不成立：上传位 ${id} 的文件不在 ${fileOf(id)}（被测 API 不是本机 fs 存储？）`);
+  const stale = new Date(Date.now() - 11 * 60_000);
+  for (const id of [a, b, d]) await utimes(fileOf(id), stale, stale);
+  // 1 下一轮 upload.gc（每分钟）删掉 A、B、D；C 不动
+  const t0 = Date.now();
+  for (let i = 0; i < 150 && ((await exists(a)) || (await exists(b)) || (await exists(d))); i++) await sleep(500);
+  const gone = { a: !(await exists(a)), b: !(await exists(b)), d: !(await exists(d)) };
+  expect(gone.a && gone.b && gone.d, `闲置 11 分钟的上传位 75 s 内没被回收：${JSON.stringify(gone)}`);
+  expect(await exists(c), '刚写过的上传位被删了');
+  // 2 回收后再追加 → 404；正在写的 C 照常续写、交给 create_screen 用掉
+  await fail('quilt.append_upload', { uploadId: a, offset: 0, chunk: 'late' }, '/errors/not-found', '往已回收的上传位追加');
+  await call('quilt.append_upload', { uploadId: c, offset: '<div class="min-h-dvh bg-background p-6">'.length, chunk: '<h1 class="text-xl">From upload</h1></div>' });
+  const made = await call<{ screenId: string }>('quilt.create_screen', { projectId: pid, name: 'From upload', route: '/from-upload', uploadId: c });
+  expect(!!made.screenId && !(await exists(c)), '续写的上传位没被 create_screen 用掉');
+  return `空位 / 写了一半的 / REST 签发的三个上传位在 ${Math.round((Date.now() - t0) / 1000)} s 内被回收，追加 404；刚写过的照常续写并建屏`;
+});
+
 await mcp.close();
 await rm(PNG_PATH, { force: true });
 await writeFile(path.join(EVIDENCE, `run-${RUN}-tc-agent-011.txt`), results.map((x) => `${x.tc} ${x.result} ${x.note}`).join('\n') + '\n');

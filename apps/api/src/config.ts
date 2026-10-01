@@ -17,6 +17,7 @@ const env = (k: string, d?: string): string => {
 
 const apiPort = Number(env('API_PORT', '3100'));
 const previewPort = Number(env('PREVIEW_PORT', '3101'));
+const llmDriver = env('LLM_DRIVER', 'agent-sdk') as 'agent-sdk' | 'codex' | 'anthropic' | 'gemini' | 'stub';
 
 export const config = {
   /** 本地数据目录：打包运行时 = QUILT_HOME（默认 ~/.quilt）；仓库内开发 = 仓库根 .data */
@@ -36,7 +37,7 @@ export const config = {
   openBrowser: env('QUILT_OPEN_BROWSER', '0') === '1',
   version: env('QUILT_VERSION', '0.1.0'),
   previewSigningSecret: env('PREVIEW_SIGNING_SECRET', 'dev-preview-secret-change-me'),
-  llmDriver: env('LLM_DRIVER', 'agent-sdk') as 'agent-sdk' | 'codex' | 'anthropic' | 'gemini' | 'stub',
+  llmDriver,
   llmStub: env('LLM_STUB', '') as '' | '503' | 'fixture',
   // 用户自填通道密钥的加密主密钥（ADR-013）；为空则拒绝保存含密钥的通道（fail closed）。打包运行时首次启动自动生成
   secretsKey: process.env.QUILT_SECRETS_KEY ?? '',
@@ -61,12 +62,15 @@ export const config = {
   // §15 容量与限流
   workerConcurrency: Number(env('WORKER_CONCURRENCY', '20')),
   screenConcurrency: Number(env('SCREEN_CONCURRENCY', '4')),
-  // 作业超时随预估调用数伸缩（REQ-CORE-008）：基数 + 每次调用 1 分钟 + 每屏确定性回刷 5 秒，封顶 30 分钟
-  jobTimeoutMs: { base: 3 * 60_000, perCall: 60_000, perScreen: 5_000, max: 30 * 60_000 },
+  // 作业超时随预估调用数伸缩（REQ-CORE-008）：基数 + 每次调用 1 分钟 + 每屏确定性回刷 5 秒，封顶 30 分钟。
+  // QUILT_JOB_TIMEOUT_BASE_MS 只给测试用（超时路径的自动化用例，§11）：只在 LLM_DRIVER=stub 时认，真实安装里设了也不生效
+  jobTimeoutMs: { base: llmDriver === 'stub' && process.env.QUILT_JOB_TIMEOUT_BASE_MS ? Number(process.env.QUILT_JOB_TIMEOUT_BASE_MS) : 3 * 60_000, perCall: 60_000, perScreen: 5_000, max: 30 * 60_000 },
   rateLimitJobsPerMinute: 10,
   maxScreensPerProject: 200,
   maxScreenHtmlBytes: 256 * 1024,
   previewTokenMinutes: 10,
   objectUrlMinutes: 5,
+  // HTML 上传位的签名 PUT 地址有效期；上传位最后一次写入后闲置这么久即由 upload.gc 删掉（§17 v0.82）
+  uploadUrlMinutes: 10,
 };
 export type Config = typeof config;

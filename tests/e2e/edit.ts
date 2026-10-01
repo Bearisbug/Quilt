@@ -861,6 +861,104 @@ await step('TC-EDIT-019', async () => {
   return '取消后子树重生成与改组件都不落（current、组件版本不变）；作业在跑时改组件，回刷跳过该屏，作业落地用的是新版组件';
 });
 
+// v0.82 截图链与回刷作业（DESIGN §17 Chromium 一行、§11 超时）。两种卡法都用屏自己的脚本造：
+// 字体就绪——把 document.fonts.ready 换成永不落定的 promise；图标——页面加载完之后再调 lucide.createIcons 就死循环（截图就绪判定会再调一次）
+const HANG_FONTS = (title: string) => `<div class="min-h-dvh bg-background p-6"><h1 class="text-xl">${title}</h1><script>Object.defineProperty(document.fonts, 'ready', { get: function () { return new Promise(function () {}); } });</script></div>`;
+const HANG_ICONS = (title: string) => `<div class="min-h-dvh bg-background p-6"><h1 class="text-xl">${title}</h1><i data-lucide="home" class="w-5 h-5"></i><script>(function wrap() { if (!window.lucide || !window.lucide.createIcons) return setTimeout(wrap, 5); var orig = window.lucide.createIcons; window.lucide.createIcons = function () { if (document.readyState === 'complete') { for (;;) {} } return orig.apply(this, arguments); }; })();</script></div>`;
+type Rev082 = { id: string; jobId: string | null; screenshotUrl: string | null };
+const revs082 = async (sid: string) => (await apiJson<{ items: Rev082[] }>(`/v1/screens/${sid}/revisions`)).body.items;
+const mcpScreens = async (pid: string, items: { name: string; route: string; html: string }[]) => {
+  const { connectMcp, callTool } = await import('./mcp-client.ts');
+  const mcp = await connectMcp();
+  try {
+    const out: string[] = [];
+    for (const it of items) {
+      const r = await callTool(mcp, 'quilt.create_screen', { projectId: pid, ...it });
+      expect(!r.isError, `建屏 ${it.name} 出错：${r.text.slice(0, 200)}`);
+      out.push((r.json as { screenId: string }).screenId);
+    }
+    return out;
+  } finally { await mcp.close(); }
+};
+
+// TC-EDIT-022 截图卡住时回刷作业照常收口：字体就绪永不落定的屏照常出截图（软条件）；图标那一步卡死的屏这一张按时放弃、交给重试，作业不等它；
+// 之后的新屏截图照常
+await step('TC-EDIT-022', async () => {
+  const bad: string[] = [];
+  const check = (cond: unknown, msg: string) => { if (!cond) bad.push(msg); };
+  const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'HangShots', '--device', 'mobile', '--screens', '1');
+  const s1 = screens[0].id;
+  try {
+    const [fonts, icons] = await mcpScreens(pid, [{ name: 'Fonts', route: '/fonts', html: HANG_FONTS('Fonts') }, { name: 'Icons', route: '/icons', html: HANG_ICONS('Icons') }]);
+    // 1 回刷全部 3 屏：120 s 内终态 succeeded、3 屏都落了新修订（修复前停在 running）
+    const r = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ kind: 'apply_design_system', input: { screenIds: 'all' } }) });
+    expect(r.status === 202, `回刷 ${r.status}`);
+    const t0 = Date.now();
+    let job: { status: string; output: Record<string, unknown> };
+    try { job = await waitJob(r.body.job.id, 120); }
+    catch { throw new Error(`回刷作业 120 s 仍是 ${(await apiJson<{ job: { status: string } }>(`/v1/jobs/${r.body.job.id}`)).body.job.status}（截图卡住时跟着挂住）`); }
+    const took = Math.round((Date.now() - t0) / 1000);
+    expect(job.status === 'succeeded' && (job.output.revisionIds as string[]).length === 3, `回刷作业应 succeeded 且 3 屏都有新修订：${job.status} ${JSON.stringify(job.output).slice(0, 200)}`);
+    const newRev = async (sid: string) => (await revs082(sid)).find((x) => x.jobId === r.body.job.id);
+    // 2 字体就绪永不落定的屏、正常的屏：新修订 60 s 内有截图
+    for (const [name, sid] of [['Fonts', fonts], ['Screen 1', s1]] as const) {
+      await eventually(async () => expect((await newRev(sid))?.screenshotUrl, 'shot'), 60_000).catch(() => check(false, `「${name}」回刷后的修订 60 s 内没有截图`));
+    }
+    // 3 之后建的新屏截图照常（浏览器没被卡死的那一张拖住）
+    const [after] = await mcpScreens(pid, [{ name: 'After', route: '/after', html: '<div class="min-h-dvh bg-background p-6"><h1 class="text-xl">After</h1></div>' }]);
+    await eventually(async () => expect((await revs082(after))[0]?.screenshotUrl, 'after'), 60_000).catch(() => check(false, '回刷之后新建的屏 60 s 内没有截图'));
+    // 4 图标那一步卡死的屏：这一张没拍成（等待交给截图重试），修订照常在
+    check(!(await newRev(icons))?.screenshotUrl, '「Icons」的截图不该拍成（它每次都卡死在图标那一步）');
+    if (bad.length) { console.log(`   TC-EDIT-022 全部失败项：\n   - ${bad.join('\n   - ')}`); throw new Error(bad.join('；')); }
+    return `回刷 3 屏 ${took} s 内 succeeded；字体卡住的屏照常出截图，图标卡死的那张按时放弃；之后的新屏截图照常`;
+  } finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
+});
+
+// TC-EDIT-023 回刷超时收口（§11 超时）：超时基数用 QUILT_JOB_TIMEOUT_BASE_MS 改到 1 s、SCREEN_CONCURRENCY=1 重启 API，回刷两张截图要 ~20 s 的屏：
+// 超时 = 1 s + 2 × 5 s = 11 s，第一屏落修订、第二屏没轮到被跳过，作业 failed(timeout)。要 QUILT_E2E_RESTART（§3），跑完按原环境重启
+await step('TC-EDIT-023', async () => {
+  const RESTART = process.env.QUILT_E2E_RESTART;
+  expect(RESTART, '环境：未设 QUILT_E2E_RESTART（重启被测 API 的命令，§3）');
+  const http = await import('node:http');
+  const { spawn } = await import('node:child_process');
+  const restart = (extra: Record<string, string>) => new Promise<void>((resolve, reject) => {
+    const env: Record<string, string | undefined> = { ...process.env, ...extra };
+    for (const k of ['QUILT_JOB_TIMEOUT_BASE_MS', 'SCREEN_CONCURRENCY']) if (!(k in extra)) delete env[k];
+    const p = spawn('sh', ['-c', RESTART!], { stdio: 'ignore', env });
+    p.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`重启命令退出码 ${code}`))));
+  });
+  // 一张永远等不到的图：截图等 networkidle 等满 15 s、视口内图片再等 4 s，一张 ~20 s
+  const hold = http.createServer(() => { /* 不回 */ });
+  await new Promise<void>((r) => hold.listen(3987, '127.0.0.1', () => r()));
+  const SLOW = (title: string) => `<div class="min-h-dvh bg-background p-6"><h1 class="text-xl">${title}</h1><img src="http://127.0.0.1:3987/hang.png" width="8" height="8" alt=""></div>`;
+  let pid = '';
+  try {
+    await restart({ QUILT_JOB_TIMEOUT_BASE_MS: '1000', SCREEN_CONCURRENCY: '1' });
+    pid = seedJson<{ projectId: string }>('seed:project', '--name', 'Timeout', '--device', 'mobile', '--screens', '1', '--no-shot').projectId;
+    const [a, b] = await mcpScreens(pid, [{ name: 'Slow A', route: '/slow-a', html: SLOW('Slow A') }, { name: 'Slow B', route: '/slow-b', html: SLOW('Slow B') }]);
+    const cur = async (sid: string) => (await revs082(sid))[0]?.id;
+    const before = { [a]: await cur(a), [b]: await cur(b) };
+    // 1 回刷两张慢屏：failed(timeout)、消息写明 11 s；一屏落了修订、另一屏 current 不变；作业不挂住
+    const t0 = Date.now();
+    const r = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ kind: 'apply_design_system', input: { screenIds: [a, b] } }) });
+    expect(r.status === 202, `回刷 ${r.status}`);
+    const job = await waitJob(r.body.job.id, 120);
+    const took = Math.round((Date.now() - t0) / 1000);
+    const out = job.output as { errorClass?: string; message?: string; revisionIds?: string[] };
+    expect(job.status === 'failed' && out.errorClass === 'timeout' && out.message === 'job exceeded 11s', `回刷两屏应 failed(timeout)「job exceeded 11s」：${job.status} ${out.errorClass ?? ''} ${out.message ?? ''}（${took} s）`);
+    const changed = [a, b].filter((sid) => before[sid] !== undefined);
+    const moved: string[] = [];
+    for (const sid of changed) if ((await cur(sid)) !== before[sid]) moved.push(sid);
+    expect(out.revisionIds?.length === 1 && moved.length === 1, `应恰好一屏落了新修订、另一屏没轮到：revisionIds ${out.revisionIds?.length}，current 变了 ${moved.length} 屏`);
+    expect(took <= 60, `作业 ${took} s 才收口`);
+    return `两张慢屏超时 11 s → ${took} s 收口为 failed(timeout)，落 1 屏、跳过 1 屏`;
+  } finally {
+    if (pid) await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});
+    hold.closeAllConnections(); hold.close();
+    await restart({});
+  }
+});
+
 await browser.close();
 console.log(`\n=== RUN-${RUN} EDIT ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));
 console.log(results.map((r) => `${r.tc} ${r.result} ${r.note}`).join('\n'));

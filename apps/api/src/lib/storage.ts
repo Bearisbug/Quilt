@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, unlink, rm } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, unlink, rm, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../config.ts';
 import { signObject, stableExpiry } from './signing.ts';
@@ -10,6 +10,8 @@ export interface Storage {
   delete(key: string): Promise<void>;
   /** 删掉某前缀下的全部对象（删项目时清它的修订 HTML / 截图 / 导出） */
   deletePrefix(prefix: string): Promise<void>;
+  /** 列出某前缀下的对象与最后写入时间（upload.gc 按它判闲置） */
+  list(prefix: string): Promise<{ key: string; modifiedAt: Date }[]>;
   signedUrl(key: string, minutes?: number): Promise<string>;
 }
 
@@ -27,6 +29,12 @@ class FsStorage implements Storage {
   get(key: string) { return readFile(this.p(key)); }
   async delete(key: string) { await unlink(this.p(key)).catch(() => {}); }
   async deletePrefix(prefix: string) { await rm(this.p(prefix), { recursive: true, force: true }); }
+  async list(prefix: string) {
+    const dir = this.p(prefix);
+    const names = await readdir(dir).catch(() => [] as string[]);
+    const found = await Promise.all(names.map((n) => stat(path.join(dir, n)).then((s) => ({ key: `${prefix}${n}`, modifiedAt: s.mtime }), () => null)));
+    return found.filter((o) => o !== null);
+  }
   async signedUrl(key: string, minutes = config.objectUrlMinutes) {
     const exp = stableExpiry(minutes);
     return `${config.apiOrigin}/v1/objects/${encodeURIComponent(key)}?exp=${exp}&sig=${signObject(key, exp)}`;
@@ -65,6 +73,18 @@ class S3Storage implements Storage {
       if (keys.length) await client.send(new DeleteObjectsCommand({ Bucket: config.s3.bucket, Delete: { Objects: keys } }));
       token = page.IsTruncated ? page.NextContinuationToken : undefined;
     } while (token);
+  }
+  async list(prefix: string) {
+    const { ListObjectsV2Command } = await import('@aws-sdk/client-s3');
+    const client = await this.c();
+    const out: { key: string; modifiedAt: Date }[] = [];
+    let token: string | undefined;
+    do {
+      const page = await client.send(new ListObjectsV2Command({ Bucket: config.s3.bucket, Prefix: prefix, ContinuationToken: token }));
+      for (const o of page.Contents ?? []) out.push({ key: o.Key!, modifiedAt: o.LastModified ?? new Date(0) });
+      token = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (token);
+    return out;
   }
   async signedUrl(key: string, minutes = config.objectUrlMinutes) {
     const { GetObjectCommand } = await import('@aws-sdk/client-s3');

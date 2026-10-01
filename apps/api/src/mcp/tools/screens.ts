@@ -151,7 +151,7 @@ export function registerScreenTools(c: ToolCtx) {
       const uploadId = randomToken(16);
       // 签发即建空上传位：append_upload 只认签发过的（v0.77）
       await storage.put(`uploads/${uploadId}.html`, '', 'text/html');
-      const exp = Math.floor(Date.now() / 1000) + 600;
+      const exp = Math.floor(Date.now() / 1000) + config.uploadUrlMinutes * 60;
       return { mediaType, uploadId, putUrl: `${config.apiOrigin}/v1/uploads/${uploadId}?exp=${exp}&sig=${signObject(`uploads/${uploadId}.html`, exp)}`, projectId: project.id };
     }
     if (typeof a.bytes !== 'number') throw problems.validation([{ path: 'bytes', message: 'bytes is required for an image upload' }]);

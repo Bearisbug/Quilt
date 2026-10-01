@@ -44,7 +44,6 @@ export function createApp() {
   });
 
   // 路径里的资源 id 都是 UUID（§14 v0.77）：不是的直接 404——原样进 uuid 列的查询会被 Postgres 报 22P02，落成 500
-  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const uuidParams = async (c: AppContext, next: () => Promise<void>) => {
     if (!Object.values(c.req.param()).every((v) => UUID.test(v))) throw problems.notFound();
     await next();
@@ -55,6 +54,8 @@ export function createApp() {
 
   return app;
 }
+
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const requireUser = (c: AppContext): UserRow => {
   const u = c.get('user');

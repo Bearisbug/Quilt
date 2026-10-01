@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { Page, Route, Request } from 'playwright';
-import { launch, seed, seedJson, apiJson, EVIDENCE, WEB, eventually } from './lib.ts';
+import { launch, seed, seedJson, apiJson, EVIDENCE, WEB, eventually, pickOption, selectedValue } from './lib.ts';
 import { startOpenAiStub } from './openai-stub.ts';
 
 // docs/TEST.md 画布加载与数据新鲜度（v0.76）用例 TC-CORE-050~056 的 AI 执行脚本：组件卡首帧、首次适配、适配视图下限、
@@ -13,10 +13,13 @@ const results: { tc: string; result: string; note: string }[] = [];
 const ONLY = process.env.ONLY?.split(',').map((s) => s.trim()).filter(Boolean);
 let current: Page | null = null;
 const record = (tc: string, result: string, note = '') => { results.push({ tc, result, note }); console.log(`${result === '通过' ? '✅' : '❌'} ${tc} ${result} ${note}`); };
+// 用例里登记的收尾（桩通道与它占的端口）：成败都在这条用例结束时做
+const cleanups: (() => Promise<unknown>)[] = [];
 const step = async (tc: string, fn: () => Promise<string | void>) => {
   if (ONLY && !ONLY.includes(tc)) return;
   try { const note = await fn(); record(tc, '通过', note ?? ''); await current?.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}.png`) }).catch(() => {}); }
   catch (e) { record(tc, '失败', (e as Error).message.split('\n')[0].slice(0, 400)); await current?.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}-fail.png`) }).catch(() => {}); }
+  finally { for (const c of cleanups.splice(0)) await c().catch(() => {}); }
 };
 const expect = (cond: unknown, msg: string) => { if (!cond) throw new Error(msg); };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -46,6 +49,21 @@ const stubComposer = (page: Page, pid: string) => page.route(`**/v1/projects/${p
   const body = JSON.parse(route.request().postData() ?? '{}');
   await route.continue({ postData: JSON.stringify({ ...body, runner: STUB }) });
 });
+// stub 轮次没有云端通道（§3：种子不建 Gemini 通道），输入框缺省落到「交给本机 Claude Code」：没有版数档位、没选会话时 Enter 被挡。
+// 要用档位或从输入框发一轮的用例建一条 OpenAI 兼容桩通道、验证，重载页面（画布在打开时取通道清单）后在输入框里选中；用例结束时删通道、关桩
+const useStubChannel = async (page: Page, label: string) => {
+  const stub = startOpenAiStub({ port: 3982, apiKey: 'good-key-3982', reply: '<div class="min-h-dvh bg-background p-6"><h1 class="text-xl">Stub</h1></div>' });
+  let id = '';
+  const close = async () => { if (id) await apiJson(`/v1/channels/${id}`, { method: 'DELETE' }).catch(() => {}); stub.server.closeAllConnections(); await stub.close(); };
+  cleanups.push(close);
+  id = (await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label, endpoint: stub.url, model: 'stub-3982', apiKey: 'good-key-3982' }) })).body.channel.id;
+  expect((await apiJson<{ ok: boolean }>(`/v1/runners/channel:${id}/probe`, { method: 'POST' })).body.ok === true, '桩通道验证未通过');
+  await page.reload();
+  await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+  await page.getByTestId('runner-select').waitFor({ timeout: 10000 });
+  await pickOption(page, '[data-testid="runner-select"]', label);
+  await eventually(async () => expect((await selectedValue(page, '[data-testid="runner-select"]')) === `channel:${id}`, `输入框没选上「${label}」`));
+};
 const switchTo = async (page: Page, name: string) => {
   await page.getByTestId('project-switcher').click();
   await page.getByTestId('project-switcher-list').getByTestId('project-option').filter({ hasText: name }).first().click();
@@ -423,6 +441,8 @@ await step('TC-CORE-055', async () => {
   const page = await newPage();
   await page.goto(`${WEB}/p/${a.projectId}`);
   await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+  // 第 1a 步要点「2 版」：版数档位只在模型通道下出现
+  await useStubChannel(page, 'Stub 档位 55');
   const toB = async () => {
     await switchTo(page, 'Bravo');
     await page.waitForURL(new RegExp(b.projectId));
@@ -489,6 +509,8 @@ await step('TC-CORE-056', async () => {
   await stubComposer(page, pid);
   await page.goto(`${WEB}/p/${pid}`);
   await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+  // 第 1 步在输入框按 Enter：要选中一条模型通道（发出的请求再由 stubComposer 改走 stub）
+  await useStubChannel(page, 'Stub 发送 56');
   const dock = page.getByTestId('chat-dock');
   if ((await dock.getAttribute('data-state')) === 'collapsed') await page.getByRole('button', { name: '展开对话记录' }).click();
   // 1 较早发起的消息 GET 晚到：另一个作业引起的消息 GET 全部扣住，这期间在输入框发出一轮，发出后再按原顺序放行

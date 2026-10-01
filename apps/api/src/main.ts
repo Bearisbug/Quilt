@@ -8,6 +8,7 @@ import { backfillSemanticColors, backfillComponentQids } from './db/backfill.ts'
 import { localUser } from './services/user.ts';
 import { startHttp } from './http/server.ts';
 import { startWorker } from './worker/index.ts';
+import { reapOrphanBrowsers } from './lib/screenshot.ts';
 
 await runMigrations();
 // 回填不是启动条件：数据库里有一行算不出来也要让人能打开画布，缺的键下一次写设计系统仍会补上
@@ -16,6 +17,9 @@ if (backfilled) console.log(`[quilt] 语义色回填 ${backfilled} 个项目`);
 const qidded = await backfillComponentQids().catch((e) => { console.error('[quilt] 组件 qid 回填失败', e); return 0; });
 if (qidded) console.log(`[quilt] 组件 qid 回填 ${qidded} 个组件`);
 await localUser();
+// 上次进程被 SIGKILL 时 Playwright 来不及关的截图浏览器（§16 进程启动）：在本进程拉起自己的浏览器之前结束掉
+const reaped = reapOrphanBrowsers();
+if (reaped) console.log(`[quilt] 结束上次留下的截图浏览器进程 ${reaped} 个`);
 startHttp();
 await startWorker();
 console.log(`[quilt] v${config.version} · data ${config.dataDir} · ${config.databaseUrl ? 'postgres' : 'pglite'}`);

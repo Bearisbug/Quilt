@@ -5,8 +5,6 @@ import { problems } from '../lib/errors.ts';
 import { storage } from '../lib/storage.ts';
 import { notifyCanvas } from '../lib/events.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
-import { assetsOf } from './assets.ts';
-import { copyPresetAssets, presetSeed } from './presets.ts';
 import { tokensFromSeed, defaultDesignMd, DEFAULT_COMPONENTS, DEVICE_SIZE, type DeviceType, type ProjectDto, type ProjectDetailDto, type DesignSystemDto, type ScreenDto, type LinkDto, type JobDto, type JobRunner, RADIUS_SCALES, type Palette, type ColorMode, type FontSource, type Presentation } from '@quilt/core';
 
 export type ProjectRow = typeof schema.projects.$inferSelect;
@@ -19,6 +17,7 @@ const DEFAULT_SEED = '#3B5BDB';
 // REQ-CORE-002：建项目并由种子色算出设计系统（ADR-005）。
 export async function createProject(ownerId: string, input: { name: string; deviceType: DeviceType; seedColor?: string; presetId?: string }) {
   // 按设计预设开局（v0.40 REQ-CORE-021）：预设存的是输入，tokens 这里现算；素材在事务外复制（要读写对象存储）
+  const { copyPresetAssets, presetSeed } = await import('./presets.ts');
   const preset = input.presetId ? await presetSeed(ownerId, input.presetId) : null;
   const seedColor = preset?.seedColor ?? input.seedColor ?? DEFAULT_SEED;
   const created = await db.transaction(async (tx) => {
@@ -123,6 +122,7 @@ export async function getProjectDetail(ownerId: string, projectId: string): Prom
   const links: LinkDto[] = linkRows.map((l) => ({ fromScreenId: l.fromScreenId, qid: l.elementQid, href: l.href, toScreenId: l.toScreenId }));
   const { listOpenForProject } = await import('./annotations.ts');
   const { componentRows, componentDtos } = await import('./components.ts');
+  const { assetsOf } = await import('./assets.ts');
   // 素材随详情一起给（v0.35 REQ-CORE-019）：风格指南卡片与设计系统面板用的是同一份，分两次取会各刷各的
   // 共享组件也随详情走（v0.46 REQ-EDIT-006）：画布上的组件卡与输入框的目标标签都从这一份读
   return { project: projectDto(project), designSystem: designSystemDto(ds), screens: await screenDtos(project, rows), links, activeJobs: activeJobs.map(jobDto), annotations: await listOpenForProject(projectId), assets: await assetsOf(project.id), components: await componentDtos(project, await componentRows(project.id)) };
