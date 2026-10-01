@@ -676,11 +676,13 @@ await step('TC-EDIT-013', async () => {
     // 6 「放弃改动」回到已保存的那份
     await page.getByRole('button', { name: '放弃改动' }).click();
     await S.check(async () => { const now = await ds(); expect((await hex.inputValue()) === saved.seedColor && (await md.inputValue()) === now.designMd && !(await versionLine.innerText()).includes('有未保存改动'), '⑥ 放弃改动后应回到已保存的值'); });
-    // 7 只改大小写 / 多打空格再保存：服务端规范化回原值，保存完不再标有未保存改动；之后删约定不把别的格子的草稿冲掉
+    // 7 种子色只改大小写、字体名多打空格，连同 DESIGN.md 加的一行一起保存：保存完各格是服务端的值、不再标有未保存改动；之后删约定不把别的格子的草稿冲掉
+    // （只差大小写 / 空格本身不算改动、保存键不亮——v0.83，见 TC-EDIT-024——所以这里要带上一处真改动才保存得了）
     const before = await ds();
     const font = page.getByTestId('ds-font');
     await hex.fill(before.seedColor.toLowerCase());
     await font.fill(`${await font.inputValue()} `);
+    await md.fill(`第 7 步加的一行\n${await md.inputValue()}`);   // 加在开头：末尾是「## 约定」节，加在那里会变成一条约定
     await page.getByTestId('ds-save').click();
     await eventually(async () => expect((await ds()).version === before.version + 1, '⑦ 保存应落库'));
     await page.waitForTimeout(600);
@@ -957,6 +959,53 @@ await step('TC-EDIT-023', async () => {
     hold.closeAllConnections(); hold.close();
     await restart({});
   }
+});
+
+// TC-EDIT-024 设计系统面板：只差大小写 / 首尾空格的值不算改动，保存不因它问「回刷所有屏？」（REQ-EDIT-003 v0.83）
+await step('TC-EDIT-024', async () => {
+  const r = seedJson<{ projectId: string }>('seed:project', '--name', 'Normalize', '--device', 'mobile', '--screens', '2', '--no-shot');
+  const S = softly();
+  try {
+    const ds = async () => (await detail(r.projectId)).designSystem as Detail['designSystem'] & { designMd: string };
+    const saved = await ds();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(`${WEB}/p/${r.projectId}`);
+    await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+    await page.keyboard.press('Alt+d');
+    const hex = page.getByLabel('种子色十六进制');
+    const font = page.getByTestId('ds-font');
+    const md = page.locator('#ds-md');
+    const versionLine = page.locator('.slide-in-right').getByText(/^版本 \d+/);
+    await hex.waitFor({ timeout: 5000 });
+    const fontSaved = await font.inputValue();
+    const state = async () => ({ line: await versionLine.innerText(), save: await page.getByTestId('ds-save').isEnabled(), discard: await page.getByTestId('ds-discard').count() });
+    // 1 种子色改成已保存值的小写、字体名前后加空格：规范化后与已保存值相同，不算改动
+    await hex.fill(saved.seedColor.toLowerCase());
+    await font.fill(`  ${fontSaved}  `);
+    const s1 = await state();
+    await S.check(() => expect(!s1.line.includes('有未保存改动') && !s1.save && s1.discard === 0, `① 只差大小写 / 空格不该算改动：${s1.line}，保存可点 ${s1.save}，放弃改动 ${s1.discard}`));
+    // 2 再在 DESIGN.md 开头加一行并保存：只有 DESIGN.md 真变了，不问「回刷所有屏？」；保存后各格是服务端规范化后的值
+    await md.fill(`规范化用例加的一行\n${await md.inputValue()}`);
+    await page.getByTestId('ds-save').click();
+    await eventually(async () => expect((await ds()).version === saved.version + 1, '② 保存应落库'));
+    await page.waitForTimeout(1200);
+    const asked = await page.getByTestId('ds-apply-ask').count();
+    if (asked) await page.getByTestId('ds-apply-ask').getByRole('button', { name: '以后再说' }).click();
+    await S.check(() => expect(asked === 0, '② 只改了 DESIGN.md（种子色只差大小写、字体名只多空格），保存后不该问「回刷所有屏？」'));
+    const after = await ds();
+    const s2 = { ...(await state()), hex: await hex.inputValue(), font: await font.inputValue() };
+    await S.check(() => expect(after.seedColor === saved.seedColor && s2.hex === saved.seedColor && s2.font === fontSaved && !s2.line.includes('有未保存改动') && !s2.save, `② 保存后应是规范化后的已保存值、无未保存改动：库里 ${after.seedColor}，种子「${s2.hex}」字体「${s2.font}」，${s2.line}，保存可点 ${s2.save}`));
+    // 3 真改了种子色（小写写法）：算改动，保存后照常问「回刷所有屏？」，库里存大写
+    await hex.fill('#c2410c');
+    const s3 = await state();
+    await S.check(() => expect(s3.line.includes('有未保存改动') && s3.save, `③ 换了种子色应算改动：${s3.line}，保存可点 ${s3.save}`));
+    await page.getByTestId('ds-save').click();
+    await S.check(() => page.getByTestId('ds-apply-ask').waitFor({ timeout: 5000 }));
+    if (await page.getByTestId('ds-apply-ask').count()) await page.getByTestId('ds-apply-ask').getByRole('button', { name: '以后再说' }).click();
+    await S.check(async () => expect((await ds()).seedColor === '#C2410C', `③ 库里的种子色应是大写 #C2410C：${(await ds()).seedColor}`));
+  } catch (e) { S.fail(e); }
+  S.done();
+  return '只差大小写 / 空格不标未保存、保存置灰；连同 DESIGN.md 一起保存不问回刷、保存后各格是规范化后的值；真换种子色照常问回刷、库里存大写';
 });
 
 await browser.close();

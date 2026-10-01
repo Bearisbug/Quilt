@@ -274,10 +274,17 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) tran
 .card .skeleton .sk-sweep, .comp .skeleton .sk-sweep { position: absolute; top: 0; bottom: 0; left: 0; width: 75%; background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.75) 50%, transparent); animation: sk-sweep 1.8s ease-in-out infinite; animation-delay: inherit; }
 .card .skeleton .sk-label { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: color-mix(in srgb, var(--brand-ink) 78%, transparent); color: var(--color-on-accent); font-size: 12px; backdrop-filter: blur(6px); white-space: nowrap; }
 .card .skeleton .sk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); animation: sk-pulse 1.2s ease-in-out infinite; }
+/* 截图取不到（v0.83）：线框停住、不呼吸，说明与重试在卡片正中的 .shot-retry 上 */
+.card .skeleton.failed::before { animation: none; }
 @keyframes sk-breathe { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
 /* 光带层只有光带那么宽（卡宽 75%），从卡片左外侧扫到右外侧：层做成卡宽的 250% 再平移的话，2 倍屏下每张卡要合成一张近 2000 px 宽的纹理 */
 @keyframes sk-sweep { from { transform: translateX(-283%); } to { transform: translateX(517%); } }
 @keyframes sk-pulse { 0%, 100% { opacity: 0.35; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.15); } }
+/* 骨架动画只在卡片进了视口、骨架又露着时跑（v0.83）：视口外的卡（含还没轮到取图的懒加载截图卡）没有 data-onscreen（CanvasView 的
+   IntersectionObserver 打），聚焦屏的骨架被 iframe 接班、组件卡上报尺寸后骨架藏起来——这几种都停着，不为看不见的东西每帧合成。
+   要排在上面几条 animation 简写之后：同等特异度下简写会把 play-state 写回 running */
+.card:not([data-onscreen]) .skeleton::before, .card:not([data-onscreen]) .skeleton *, .comp:not([data-onscreen]) .skeleton::before, .comp:not([data-onscreen]) .skeleton *,
+.card.live .skeleton::before, .card.live .skeleton *, .comp.live .skeleton::before, .comp.live .skeleton * { animation-play-state: paused; }
 /* 页面地图连线（REQ-PROTO-002）：世界坐标系里的 SVG，随画布缩放 */
 .world .edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .world .edges path { fill: none; stroke: var(--color-accent); stroke-width: 2.5; stroke-linecap: round; opacity: 0.85; }
@@ -291,6 +298,12 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) tran
 /* 聚焦的 iframe 重载后仍等不到就绪（v0.76）：角标换成可点的「加载失败 · 重试」，用警示色与正常角标区分 */
 .card .badge.failed { border: 0; background: var(--color-warn); color: var(--brand-ink); font-weight: 600; cursor: pointer; pointer-events: auto; }
 .card .badge.failed:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+/* 卡片截图重试到头仍取不到（v0.83）：卡片正中一枚可点的「截图没取到 · 重试」，盖在手势层之上 */
+.card .shot-retry { position: absolute; left: 50%; top: 50%; z-index: 2; transform: translate(-50%, -50%); border: 0; border-radius: 999px; padding: 6px 12px; background: var(--color-warn); color: var(--brand-ink); font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.card .shot-retry:focus-visible { outline: calc(2px / var(--canvas-zoom, 1)) solid var(--color-accent); outline-offset: calc(2px / var(--canvas-zoom, 1)); }
+/* 卡片上可点的失败标记，点击区不小于 24×24 屏幕像素（v0.83，A11Y-009；触屏 44）：它们随画布缩放，最小尺寸按 --canvas-zoom 反算 */
+.card .badge.failed, .card .shot-retry { --hit: 24px; display: inline-flex; align-items: center; justify-content: center; min-width: calc(var(--hit) / var(--canvas-zoom, 1)); min-height: calc(var(--hit) / var(--canvas-zoom, 1)); }
+@media (pointer: coarse) { .card .badge.failed, .card .shot-retry { --hit: 44px; } }
 /* 素材瓦片的底色（REQ-CORE-019）：品牌素材有白色版也有深墨版，固定一种底色必然有一半看不见，
    所以按图的平均亮度选底（lib/assetTone.ts）。这三种底都是恒定色而非主题色——它们衬的是用户的品牌资产，
    不是 Quilt 的外壳（VIS-010 的「确需恒定色」情形）。读不出亮度时用棋盘格，那是透明通道的通用指示。 */

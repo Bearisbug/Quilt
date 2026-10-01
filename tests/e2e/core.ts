@@ -1382,10 +1382,14 @@ await step('TC-CORE-032', async () => {
   const body0 = (await (await fetch(rev0.htmlUrl)).text()).split('<body')[1].replace(/^[^>]*>/, '').replace(/<\/body>[\s\S]*$/, '').replace(/\sdata-qid="q\d+"/g, '');
   const stub = startOpenAiStub({ port: 3997, apiKey: 'good-key-0032', reply: () => body0.replace('>Follow<', '>热更新<') });
   let cid = '';
+  const vp0 = page.viewportSize();
   try {
     cid = (await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label: 'Stub 热更新', endpoint: stub.url, model: 'stub-4', apiKey: 'good-key-0032' }) })).body.channel.id;
     expect((await apiJson<{ ok: boolean }>(`/v1/runners/channel:${cid}/probe`, { method: 'POST' })).body.ok, '桩通道探测未通过');
     const revs = async () => (await apiJson<{ screens: { route: string; currentRevisionId: string }[] }>(`/v1/projects/${r.projectId}`)).body.screens.map((s) => s.currentRevisionId).join(',');
+    // 屏内点击要在 1:1 聚焦下做（§3）：整套顺序下跑到这里时视口已被前面的用例改成 1440×900，聚焦缩放 0.896，
+    // Playwright 对跨域 iframe 外层的 CSS 缩放不感知，点击点偏移后会落到压在屏底的输入框上（RUN-150 / v0.83 复现）
+    await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto(`${WEB}/p/${r.projectId}`);
     await page.locator('[data-testid="screen-card"] img').first().waitFor({ timeout: 15000 });
     // 1 进交互、屏内滚下去一段
@@ -1394,6 +1398,7 @@ await step('TC-CORE-032', async () => {
     const fl = page.frameLocator('.card.focused iframe');
     await fl.locator('#toggle').waitFor({ timeout: 15000 });
     await page.waitForTimeout(600);
+    expect((await page.getByTestId('stat').innerText()).endsWith('100%'), `聚焦后不是 1:1：${await page.getByTestId('stat').innerText()}`);
     const src0 = await iframe.getAttribute('src');
     expect(!(await page.locator('form.composer').isVisible()), '进入交互后输入框未自动收起');
     await fl.locator('body').evaluate(() => window.scrollTo(0, 100));
@@ -1413,8 +1418,9 @@ await step('TC-CORE-032', async () => {
     expect((await page.locator('.card.focused .badge').innerText()).includes('交互中'), '热更新后角标不是「交互中」');
     const y1 = await fl.locator('body').evaluate(() => Math.round(window.scrollY));
     expect(Math.abs(y1 - y0) <= 2, `滚动位置未保持：${y0} → ${y1}`);
-    // 等改屏作业收口：v0.36 起输入框不再随作业禁用，改问后端还有没有在跑的作业
+    // 等改屏作业收口：v0.36 起输入框不再随作业禁用，改问后端还有没有在跑的作业；页面上的在跑作业行要等它自己收到终态事件才撤（输入框随之变矮）
     for (let i = 0; i < 30; i++) { if (!(await apiJson<{ activeJobs: unknown[] }>(`/v1/projects/${r.projectId}`)).body.activeJobs.length) break; await page.waitForTimeout(1000); }
+    await page.locator('[data-testid="running-job"]').first().waitFor({ state: 'detached', timeout: 10000 });
     // 3 跳到 /s2 后回刷（<head> 变了）：正显示的 /s2 原地换色、src 不变
     await fl.locator('a[href="/s2"]').first().click();
     await page.locator('.card.focused .badge', { hasText: '/s2' }).waitFor({ timeout: 10000 });
@@ -1447,7 +1453,7 @@ await step('TC-CORE-032', async () => {
 
     await eventually(async () => expect((await page.locator('.card.focused').count()) === 0, 'Esc 未退出交互'));
     return `改屏后 ${ms} ms 内热更新（src 不变、scrollY ${y0} 保持）；回刷后 /s2 原地换色、/s1 后退也是新色`;
-  } finally { await stub.close(); if (cid) await apiJson(`/v1/channels/${cid}`, { method: 'DELETE' }).catch(() => {}); }
+  } finally { if (vp0) await page.setViewportSize(vp0); await stub.close(); if (cid) await apiJson(`/v1/channels/${cid}`, { method: 'DELETE' }).catch(() => {}); }
 });
 
 // ---------- 对话迭代与修订 ----------

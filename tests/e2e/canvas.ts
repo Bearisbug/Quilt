@@ -580,6 +580,87 @@ await step('TC-CORE-059', '5', async () => {
   return `适配视图与 ⌘K 跳屏都一步到位（${fit[1]}）`;
 });
 
+// ---------- TC-CORE-079 小地图拖完视口框之后的镜头变化不跳（canvas-15 残留，v0.83） ----------
+// 视口框在小地图里该挪多少：屏幕上平移 d px，框挪 d × 框宽 / 画布视口宽（框宽就是视口宽按小地图比例换算的结果）
+const miniFrame = async (page: Page) => (await page.getByTestId('minimap').getAttribute('data-view'))!.split(' ').map(Number);
+const fmtFrame = (f: number[]) => f.map((n) => n.toFixed(1)).join(' ');
+const dragFrame = async (page: Page, dx: number, dy: number, steps: number) => {
+  const box = (await page.getByTestId('minimap').boundingBox())!;
+  const [fx, fy, fw, fh] = await miniFrame(page);
+  const g = { x: box.x + fx + fw / 2, y: box.y + fy + fh / 2 };
+  await page.mouse.move(g.x, g.y);
+  await page.mouse.down();
+  for (let i = 1; i <= steps; i++) await page.mouse.move(g.x + (dx * i) / steps, g.y + (dy * i) / steps);
+  await page.mouse.up();
+  await sleep(300);
+};
+
+await step('TC-CORE-079', '1', async () => {
+  // 拖完视口框、松手，再滚一下滚轮：框只按镜头的位移挪，不重新缩放、不跳
+  const page = await open(ptrPid, { view: { x: 400, y: 120, zoom: 1 } });
+  await page.getByTestId('minimap').waitFor({ timeout: 3000 });
+  await sleep(300);
+  await dragFrame(page, 24, 12, 6);
+  const released = await miniFrame(page);
+  const vb = (await page.getByTestId('canvas').boundingBox())!;
+  await page.mouse.move(vb.x + vb.width / 2, vb.y + vb.height / 2);
+  const w0 = await world(page);
+  await page.mouse.wheel(0, 40);
+  await sleep(400);
+  const w1 = await world(page);
+  const after = await miniFrame(page);
+  const k = released[2] / vb.width;
+  const want = [released[0] - (w1.x - w0.x) * k, released[1] - (w1.y - w0.y) * k, released[2], released[3]];
+  expect(Math.abs(w1.y - w0.y) > 5, `滚轮没平移画布：${w0.y} → ${w1.y}`);
+  expect(after.every((v, i) => Math.abs(v - want[i]) <= 1), `拖完视口框后第一次镜头变化，框跳了：松手 ${fmtFrame(released)}，镜头平移 ${(w1.y - w0.y).toFixed(0)} px 后 ${fmtFrame(after)}，应为 ${fmtFrame(want)}`);
+  return `松手 ${fmtFrame(released)} → 平移 ${(w1.y - w0.y).toFixed(0)} px 后 ${fmtFrame(after)}（应为 ${fmtFrame(want)}）`;
+});
+
+await step('TC-CORE-079', '2', async () => {
+  // 拖完之后一直往外平移：视口框到了小地图边上，外接框逐帧向外扩，每一步只挪「镜头位移」那么多，框始终在小地图里
+  const page = await open(ptrPid, { view: { x: 400, y: 120, zoom: 1 } });
+  await page.getByTestId('minimap').waitFor({ timeout: 3000 });
+  await sleep(300);
+  await dragFrame(page, 30, 16, 6);
+  const vb = (await page.getByTestId('canvas').boundingBox())!;
+  await page.mouse.move(vb.x + vb.width / 2, vb.y + vb.height / 2);
+  let prev = await miniFrame(page);
+  const bad: string[] = [];
+  for (let i = 0; i < 24; i++) {
+    const w0 = await world(page);
+    await page.mouse.wheel(0, 200);
+    await sleep(120);
+    const w1 = await world(page);
+    const f = await miniFrame(page);
+    // 框在扩张的外接框里贴边时，位置随比例一起收；单步位移不超过镜头位移按上一步比例换算 + 2 px
+    const allow = Math.abs(w1.y - w0.y) * (prev[2] / vb.width) + 2;
+    const moved = Math.max(Math.abs(f[0] - prev[0]), Math.abs(f[1] - prev[1]));
+    if (moved > allow) bad.push(`第 ${i + 1} 步框挪了 ${moved.toFixed(1)} px（镜头 ${(w1.y - w0.y).toFixed(0)} px，上限 ${allow.toFixed(1)}）：${fmtFrame(prev)} → ${fmtFrame(f)}`);
+    if (f[0] < -0.5 || f[1] < -0.5 || f[0] + f[2] > 176.5 || f[1] + f[3] > 112.5) bad.push(`第 ${i + 1} 步框出了小地图：${fmtFrame(f)}`);
+    prev = f;
+  }
+  expect(bad.length === 0, bad.slice(0, 3).join('；'));
+  return `连续向外平移 24 步，每步框的位移都不超过镜头位移换算值 + 2 px、始终在小地图内，末了 ${fmtFrame(prev)}`;
+});
+
+await step('TC-CORE-079', '3', async () => {
+  // 拖完之后来一次与卡片几何无关的整体重取（别处改了项目名 → 项目事件）：框不动
+  const page = await open(ptrPid, { view: { x: 400, y: 120, zoom: 1 } });
+  await page.getByTestId('minimap').waitFor({ timeout: 3000 });
+  await sleep(300);
+  await dragFrame(page, 24, 12, 6);
+  const released = await miniFrame(page);
+  const name = `Pointer ${Date.now() % 1000}`;
+  const refetched = page.waitForResponse((r) => r.request().method() === 'GET' && new URL(r.url()).pathname === `/v1/projects/${ptrPid}`, { timeout: 10000 });
+  await apiJson(`/v1/projects/${ptrPid}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+  await refetched;
+  await sleep(500);
+  const after = await miniFrame(page);
+  await apiJson(`/v1/projects/${ptrPid}`, { method: 'PATCH', body: JSON.stringify({ name: 'Pointer' }) });
+  expect(after.every((v, i) => Math.abs(v - released[i]) <= 0.6), `拖完视口框后一次与卡片无关的重取让框跳了：${fmtFrame(released)} → ${fmtFrame(after)}`);
+  return `重取详情前后框都是 ${fmtFrame(after)}`;
+});
+
 await ctx?.close().catch(() => {});
 console.log('\n| 用例 | 结果 | 备注 |\n| --- | --- | --- |');
 for (const r of results) console.log(`| ${r.tc} | ${r.result} | ${r.note} |`);

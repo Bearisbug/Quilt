@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type Ref } from 'react';
 import { ChevronDown, ChevronUp, Copy, Pencil, RotateCcw } from 'lucide-react';
 import type { JobKind, MessageDto } from '@quilt/core';
 import { Wordmark } from '@/ui/BrandMark';
@@ -9,6 +9,8 @@ import { ImageViewer } from './ImageViewer';
 const RETRYABLE: JobKind[] = ['generate', 'edit_screens', 'edit_component', 'chat'];
 
 export type ChatDockProps = {
+  /** 外壳量它的位置：折叠横条落在 toast 那一列底下时 toast 要让开（useComposerChrome，v0.83） */
+  boxRef?: Ref<HTMLElement>;
   messages: MessageDto[];
   /** 各在跑作业的进度，按 jobId 索引（REQ-CORE-020）：空内容的助手气泡只读它自己那一条 */
   progress: Record<string, string>;
@@ -30,8 +32,9 @@ export type ChatDockProps = {
   followSeq: number;
   /** 折叠期间失败了几轮（v0.74）：横条上标出，展开即由父组件清零 */
   failed: number;
-  /** 对话记录还没取到（loading）或取不到（error）：两种都不当成空，不写「0 条」、不出空态示例（v0.76） */
-  loadState?: 'loading' | 'error';
+  /** 对话记录还没取到（loading）或取不到（error）：两种都不当成空，不写「0 条」、不出空态示例（v0.76）；
+   *  missing = 项目不存在（v0.83）：没有对话可言，只写一句说明 */
+  loadState?: 'loading' | 'error' | 'missing';
   onReload?: () => void;
 };
 
@@ -67,14 +70,14 @@ export function ChatDock(p: ChatDockProps) {
   };
 
   return (
-    <aside className="chat-dock chrome absolute left-3 z-20 flex w-[var(--dock-w)] flex-col overflow-hidden rounded-xl" aria-label="对话记录" data-testid="chat-dock" data-state={p.collapsed ? 'collapsed' : 'open'}>
+    <aside ref={p.boxRef} className="chat-dock chrome absolute left-3 z-20 flex w-[var(--dock-w)] flex-col overflow-hidden rounded-xl" aria-label="对话记录" data-testid="chat-dock" data-state={p.collapsed ? 'collapsed' : 'open'}>
       <button
         type="button" aria-expanded={!p.collapsed} aria-label={p.collapsed ? `展开对话记录${p.failed ? `（${p.failed} 轮失败）` : ''}` : '折叠对话记录'} onClick={p.onToggle}
         className="flex h-11 w-full shrink-0 items-center justify-between gap-2 px-3 text-left transition-colors duration-[var(--duration-fast)] hover:bg-panel-2/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
       >
         <span className="flex min-w-0 items-baseline gap-2">
           <span className="text-sm font-semibold">对话</span>
-          <span className="truncate text-xs text-muted">{p.collapsed && p.status ? p.status : p.loadState === 'error' ? '没加载出来' : p.loadState === 'loading' ? '加载中…' : `${p.messages.length} 条`}</span>
+          <span className="truncate text-xs text-muted">{p.collapsed && p.status ? p.status : p.loadState === 'missing' ? '项目不存在' : p.loadState === 'error' ? '没加载出来' : p.loadState === 'loading' ? '加载中…' : `${p.messages.length} 条`}</span>
           {/* 折叠期间有作业失败：toast 几秒就走，横条上留一枚标记直到展开（v0.74） */}
           {p.collapsed && p.failed > 0 && <span data-testid="chat-failed" className="shrink-0 self-center rounded-full bg-danger/10 px-1.5 py-px text-[11px] font-medium text-danger">{p.failed} 轮失败</span>}
         </span>
@@ -96,13 +99,14 @@ export function ChatDock(p: ChatDockProps) {
                 <Button size="sm" className="mt-2" onClick={p.onReload}>重试</Button>
               </div>
             )}
+            {p.loadState === 'missing' && <p className="text-xs text-muted">没有可显示的对话。</p>}
             {p.messages.length === 0 && !p.loadState && (
               <div className="rounded-lg border border-dashed border-line p-3 text-xs text-muted">
                 <p className="font-medium text-fg">试试这样描述：</p>
                 <p className="mt-1">「做一个宠物社交 APP：分享宠物照片、关注其他宠物、附近约玩、和主人聊天、管理宠物资料」</p>
               </div>
             )}
-            {p.messages.map((m) => (
+            {p.loadState !== 'missing' && p.messages.map((m) => (
               <div key={m.id} data-testid="message" data-role={m.role} className={`msg fade-up relative rounded-xl px-3 py-2 text-sm ${m.role === 'user' ? 'ml-5 bg-accent/15' : 'mr-5 bg-panel-2'}`}>
                 {/* 不 uppercase：那会把字标写成 QUILT，改掉品牌字样 */}
                 <div className="mb-0.5 text-[10px] tracking-wide text-muted">{m.role === 'user' ? '你' : <Wordmark />}</div>

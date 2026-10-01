@@ -163,6 +163,26 @@ export function CanvasView(p: CanvasProps) {
   const [compSize, setCompSize] = useState<Record<string, CompBox>>(() => readCompSizes(compKey));
   // 本次挂载里已上报过尺寸的组件：上报前卡片里是骨架、iframe 透明（样式还没到齐，画出来是白底或没排版的字）
   const [compLive, setCompLive] = useState<ReadonlySet<string>>(() => new Set());
+  // 卡片在不在视口里（v0.83）：骨架的呼吸与扫光只在进了视口的卡片上跑（styles.css 按 data-onscreen 暂停）。
+  // 直接改 DOM 属性、不进 state：平移时卡片进出视口很频繁，进 state 就是每次整块画布重渲染
+  const onscreenIo = useRef<IntersectionObserver | null>(null);
+  const watchOnscreen = useCallback((el: HTMLElement | null) => {
+    if (!el) return;
+    onscreenIo.current ??= new IntersectionObserver((entries) => { for (const e of entries) e.target.toggleAttribute('data-onscreen', e.isIntersecting); });
+    const io = onscreenIo.current;
+    io.observe(el);
+    return () => io.unobserve(el);
+  }, []);
+  useEffect(() => () => onscreenIo.current?.disconnect(), []);
+  // 截图重试到头仍取不到、又没有旧图可退的卡（v0.83）：卡上给「截图没取到 · 重试」；点一下把那张卡的重试从头再来
+  const [shotFailed, setShotFailed] = useState<ReadonlySet<string>>(() => new Set());
+  const [shotRetry, setShotRetry] = useState<Record<string, number>>({});
+  const markShot = useCallback((id: string, failed: boolean) => setShotFailed((s) => {
+    if (s.has(id) === failed) return s;
+    const next = new Set(s);
+    if (failed) next.add(id); else next.delete(id);
+    return next;
+  }), []);
   // 首帧按占位算了适配（有组件没记过尺寸）：尺寸到齐后补一次
   const measureFit = useRef(!savedView && p.components.some((c) => !compSize[c.id]));
   const compFrames = useRef(new Map<string, HTMLIFrameElement>());
@@ -1008,7 +1028,7 @@ export function CanvasView(p: CanvasProps) {
           return (
             <Fragment key={s.id}>
             {stacked && [2, 1].map((k) => <div key={k} className="cand-ghost" aria-hidden="true" style={{ width: s.width, height: s.height, transform: `translate(${q.x + 14 * k}px, ${q.y + 10 * k}px)`, opacity: 1 - 0.25 * k }} />)}
-            <div data-testid="screen-card" data-route={s.route} data-variant={s.variantOf ? 'true' : undefined} data-presentation={s.presentation} className={`card${s.presentation === 'overlay' ? ' overlay' : ''}${(marquee ? hitSet.has(s.id) || (marquee.additive && selectedSet.has(s.id)) : selectedSet.has(s.id)) ? ' selected' : ''}${isFocused ? ' focused' : ''}${live && iframeReady ? ' live' : ''}${dragPos[s.id] ? ' dragging' : ''}`} style={{ width: s.width, height: s.height, transform: `translate(${q.x}px, ${q.y}px)` }}>
+            <div ref={watchOnscreen} data-testid="screen-card" data-route={s.route} data-variant={s.variantOf ? 'true' : undefined} data-presentation={s.presentation} className={`card${s.presentation === 'overlay' ? ' overlay' : ''}${(marquee ? hitSet.has(s.id) || (marquee.additive && selectedSet.has(s.id)) : selectedSet.has(s.id)) ? ' selected' : ''}${isFocused ? ' focused' : ''}${live && iframeReady ? ' live' : ''}${dragPos[s.id] ? ' dragging' : ''}`} style={{ width: s.width, height: s.height, transform: `translate(${q.x}px, ${q.y}px)` }}>
               <div className="label">{s.variantOf && <span className="chip">变体</span>}{s.presentation === 'overlay' && <span className="chip">叠层</span>}<b>{s.name}</b> {s.route}{p.exemplarScreenId === s.id ? ' · 样板' : ''}{variantCount.get(s.id) ? ` · ${variantCount.get(s.id)} 个变体` : ''}{s.deviations ? ` · ${s.deviations} 处偏离` : ''}</div>
               {/* 圆角裁切只包截图 / 骨架 / iframe 这一层（v0.80）：裁整张卡的话，画在卡片上方的标签一起被裁掉 */}
               <div className="card-clip">
@@ -1016,12 +1036,18 @@ export function CanvasView(p: CanvasProps) {
                     双击即撤掉截图的话，iframe 加载的 1 s 多里整张卡是白的，深色屏黑→白→黑 */}
                 {s.screenshotUrl ? (
                   <CardShot url={s.screenshotUrl} width={s.width} height={s.height} alt={s.name} onError={p.onShotError}
-                    fallback={<CardSkeleton desktop={desktop} delay={(idx % 6) * -230} />} />
+                    retryKey={shotRetry[s.id] ?? 0} onGiveUp={(failed) => markShot(s.id, failed)}
+                    fallback={<CardSkeleton desktop={desktop} delay={(idx % 6) * -230} />} failed={<CardSkeleton desktop={desktop} delay={0} failed />} />
                 ) : (
                   <CardSkeleton desktop={desktop} delay={(idx % 6) * -230} status={s.currentRevisionId ? '截图中' : '生成中'} />
                 )}
                 {live && <iframe key={reloadKey} ref={iframeRef} className={`nowheel nopan${iframeReady ? '' : ' loading'}`} src={focusedSrc ?? s.previewUrl!} title={s.name} sandbox="allow-scripts allow-same-origin allow-forms" onLoad={onFrameLoad} />}
               </div>
+              {/* 截图取不到（v0.83）：盖在手势层之上、卡片正中，点了从头再取；聚焦时 iframe 接班，不出 */}
+              {!isFocused && s.screenshotUrl && shotFailed.has(s.id) && (
+                <button type="button" className="shot-retry nopan" data-testid="shot-retry" onPointerDown={(ev) => ev.stopPropagation()}
+                  onClick={(ev) => { ev.stopPropagation(); setShotRetry((m) => ({ ...m, [s.id]: (m[s.id] ?? 0) + 1 })); }}>截图没取到 · 重试</button>
+              )}
               {/* 同一张卡同时有未结清候选时错开一行：两者右上同位、同底色同尺寸，叠在一起会把角标整块盖住 */}
               {!isFocused && working && <span className={`working${s.pendingCandidates ? ' below' : ''}`} data-testid="card-working">局部修改中…</span>}
               {!isFocused && <div ref={gestureRef(s.id)} className={`gesture${panReady ? '' : ' nopan'}`} role="button" tabIndex={tabStop === s.id ? 0 : -1} aria-label={`${s.name} ${s.route}`}
@@ -1080,7 +1106,7 @@ export function CanvasView(p: CanvasProps) {
           const compFocused = p.focusedComponentId;
           const selected = marquee ? compHitSet.has(c.id) || (marquee.additive && selectedCompSet.has(c.id)) : selectedCompSet.has(c.id);
           return (
-            <div key={c.id} data-testid="component-card" data-name={c.name} data-ready={ready || undefined} className={`comp${ready ? ' live' : ''}${selected ? ' selected' : ''}${compFocused === c.id ? ' focused' : ''}${compDrag[c.id] ? ' dragging' : ''}`} style={{ width: box.w, height: box.h, transform: `translate(${q.x}px, ${q.y}px)` }}>
+            <div key={c.id} ref={watchOnscreen} data-testid="component-card" data-name={c.name} data-ready={ready || undefined} className={`comp${ready ? ' live' : ''}${selected ? ' selected' : ''}${compFocused === c.id ? ' focused' : ''}${compDrag[c.id] ? ' dragging' : ''}`} style={{ width: box.w, height: box.h, transform: `translate(${q.x}px, ${q.y}px)` }}>
               <div className="label"><b>{c.name}</b> · 用于 {c.usedBy.length} 屏</div>
               {/* 上报尺寸前：屏卡片那一套骨架垫着、iframe 透明，上报后 iframe 淡入（v0.76）。iframe 恒按整个设备渲染、平移到根元素左上角，由卡片裁切 */}
               <div className="card-clip">
@@ -1126,16 +1152,17 @@ export function CanvasView(p: CanvasProps) {
   );
 }
 
-// 屏卡片的占位：设备线框 + 光带；status 给了就是「截图中 / 生成中」这类状态标签（没有截图时），没给就是截图还在下载
-function CardSkeleton({ desktop, delay, status }: { desktop: boolean; delay: number; status?: string }) {
+// 屏卡片的占位：设备线框 + 光带；status 给了就是「截图中 / 生成中」这类状态标签（没有截图时），没给就是截图还在下载。
+// failed = 截图重试到头仍取不到（v0.83）：线框不动、不带光带与标签，说明与「重试」由卡片盖在手势层之上给（shot-retry）
+function CardSkeleton({ desktop, delay, status, failed }: { desktop: boolean; delay: number; status?: string; failed?: boolean }) {
   return (
-    <div className={`skeleton${desktop ? ' desktop' : ''}`} style={{ animationDelay: `${delay}ms` }} role="img" aria-label={status === '生成中' ? '生成中' : status ? '截图生成中' : '截图加载中'}>
+    <div className={`skeleton${desktop ? ' desktop' : ''}${failed ? ' failed' : ''}`} style={{ animationDelay: `${delay}ms` }} role="img" aria-label={failed ? '截图没取到' : status === '生成中' ? '生成中' : status ? '截图生成中' : '截图加载中'}>
       {desktop ? (
         <><div className="sk sk-side" /><div className="sk sk-topbar" /><div className="sk sk-title" /><div className="sk sk-grid"><i /><i /><i /></div><div className="sk sk-table" /></>
       ) : (
         <><div className="sk sk-appbar" /><div className="sk sk-hero" /><div className="sk sk-line" /><div className="sk sk-line short" /><div className="sk sk-card" /><div className="sk sk-card" /><div className="sk sk-cta" /><div className="sk sk-tabbar"><i /><i /><i /><i /></div></>
       )}
-      <div className="sk-sweep" />
+      {!failed && <div className="sk-sweep" />}
       {status && <div className="sk-label"><span className="sk-dot" />{status}</div>}
     </div>
   );
@@ -1143,24 +1170,42 @@ function CardSkeleton({ desktop, delay, status }: { desktop: boolean; delay: num
 
 // 卡片截图（v0.76）：截图地址变了（出新截图、签名换窗口）时新图叠在旧图上、透明，解码完成才接班；没有旧图时 fallback（骨架）留到那一刻——
 // decoding=async 的图解码前那几帧画的是卡片白底，深色屏会闪一下白。仍是 loading=lazy：只有进了视野的卡才取图。
-// 取图失败（多半是签名过期）交给父页静默重取签名，旧图或骨架留着
-function CardShot({ url, width, height, alt, fallback, onError }: { url: string; width: number; height: number; alt: string; fallback: ReactNode; onError?: () => void }) {
-  const [shown, setShown] = useState<string | null>(null);
+// 取图失败（多半是签名过期）交给父页静默重取签名；地址没变时那一下换不来新请求，所以同一地址自己隔 2 s、6 s 各再取一次（v0.83，DATA-006 退避限次）。
+// 还取不到就收手：有旧图留旧图，没有就换成不动的 failed 并经 onGiveUp 报给卡片。地址变了或 retryKey 变了（点了「重试」）从头再来
+const SHOT_RETRY_MS = [2000, 6000];
+function CardShot({ url, width, height, alt, fallback, failed, retryKey, onError, onGiveUp }: { url: string; width: number; height: number; alt: string; fallback: ReactNode; failed: ReactNode; retryKey: number; onError?: () => void; onGiveUp?: (failed: boolean) => void }) {
+  // 正显示的那一张：key 沿用它还在取时那个 <img> 的 key，接班时同一个元素换 class，不重挂（重挂的话 decoding=async 又要空一帧）
+  const [shown, setShown] = useState<{ src: string; key: string } | null>(null);
+  const key = `${retryKey}|${url}`;
+  const [tries, setTries] = useState({ key, n: 0, gaveUp: false });
+  const cur = tries.key === key ? tries : { key, n: 0, gaveUp: false };
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), [key]);
+  const gaveUp = cur.gaveUp && shown?.src !== url;
+  useEffect(() => { onGiveUp?.(gaveUp && !shown); }, [gaveUp, shown]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onGiveUp?.(false), []); // eslint-disable-line react-hooks/exhaustive-deps
   // 已经完成的图不会再触发 onLoad（缓存命中可能早于事件挂上，PERF-009）：挂上时再查一次 complete
-  const settle = (img: HTMLImageElement | null, src: string) => {
+  const settle = (img: HTMLImageElement | null, src: string, k: string) => {
     if (!img || !img.complete || img.naturalWidth === 0) return;
-    void img.decode().catch(() => {}).then(() => setShown(src));
+    void img.decode().catch(() => {}).then(() => setShown({ src, key: k }));
   };
-  const layers = !shown || shown === url ? [url] : [shown, url];
+  const fail = () => {
+    onError?.();
+    window.clearTimeout(timer.current);
+    if (cur.n >= SHOT_RETRY_MS.length) { setTries({ ...cur, gaveUp: true }); return; }
+    timer.current = window.setTimeout(() => setTries({ key, n: cur.n + 1, gaveUp: false }), SHOT_RETRY_MS[cur.n]);
+  };
+  // 还要去取的那一张：旧图在时叠在上面、透明；重试换 key 让 <img> 重挂，同一地址才会再发一次请求
+  const want = shown?.src === url || gaveUp ? null : url;
+  const wantKey = cur.n ? `${url}#${cur.n}` : url;
   return (
     <>
-      {!shown && fallback}
-      {layers.map((src) => src === shown ? (
-        <img key={src} src={src} className="shot" width={width} height={height} decoding="async" alt={alt} draggable={false} />
-      ) : (
-        <img key={src} src={src} className="shot pending" width={width} height={height} loading="lazy" decoding="async" alt="" draggable={false}
-          ref={(el) => settle(el, src)} onLoad={(e) => settle(e.currentTarget, src)} onError={onError} />
-      ))}
+      {!shown && (gaveUp ? failed : fallback)}
+      {shown && <img key={shown.key} src={shown.src} className="shot" width={width} height={height} decoding="async" alt={alt} draggable={false} />}
+      {want && (
+        <img key={wantKey} src={want} className="shot pending" width={width} height={height} loading="lazy" decoding="async" alt="" draggable={false}
+          ref={(el) => settle(el, want, wantKey)} onLoad={(e) => settle(e.currentTarget, want, wantKey)} onError={fail} />
+      )}
     </>
   );
 }

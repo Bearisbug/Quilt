@@ -5,7 +5,8 @@ import { launch, seed, seedJson, apiJson, EVIDENCE, WEB, eventually, pickOption,
 import { startOpenAiStub } from './openai-stub.ts';
 
 // docs/TEST.md 画布加载与数据新鲜度（v0.76）用例 TC-CORE-050~056 的 AI 执行脚本：组件卡首帧、首次适配、适配视图下限、
-// 聚焦过渡与热更新基线、截图换图、项目事件流断线、加载失败与外壳常驻、切项目不串状态、对话记录一致性。
+// 聚焦过渡与热更新基线、截图换图、项目事件流断线、加载失败与外壳常驻、切项目不串状态、对话记录一致性；
+// v0.83 的 TC-CORE-075~078：不存在的项目、窄视口 toast 与失败角标、骨架动画与截图取不到、路由错误页。
 // 全部走 stub：composer 发出的请求经路由把通道改成 stub（种子会按 .env 建一条真实 Gemini 通道并设为缺省）。
 const RUN = process.env.RUN ?? '001';
 await mkdir(EVIDENCE, { recursive: true });
@@ -71,8 +72,8 @@ const switchTo = async (page: Page, name: string) => {
 
 seed('seed');
 const browser = await launch();
-const newPage = async (opts: { clock?: boolean } = {}) => {
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+const newPage = async (opts: { clock?: boolean; viewport?: { width: number; height: number }; reduced?: boolean } = {}) => {
+  const ctx = await browser.newContext({ viewport: opts.viewport ?? { width: 1440, height: 1000 }, reducedMotion: opts.reduced ? 'reduce' : 'no-preference' });
   // tsx 编出来的函数带 __name(...) 包装，传进页面的采样函数里有具名内部函数时页面侧要有这个名字
   await ctx.addInitScript('window.__name = window.__name || ((f) => f);');
   const page = await ctx.newPage();
@@ -551,6 +552,297 @@ await step('TC-CORE-056', async () => {
     await apiJson(`/v1/channels/${ch.body.channel.id}`, { method: 'DELETE' });
   } finally { await stub.close(); }
   return '晚到的旧消息快照不抹掉刚发的一轮（出现 1 次）；别处发起的一轮在作业结束前出现';
+});
+
+// ---------- v0.83 画布与面板的前端收尾：TC-CORE-075~078 ----------
+// 一条用例里的几处检查跑完再一起报：修复前的复现轮要看到每一处现象，不被第一处挡住
+const soft = () => {
+  const errs: string[] = [];
+  return {
+    check: async (f: () => unknown) => { try { await f(); } catch (e) { errs.push((e as Error).message.split('\n')[0].slice(0, 220)); } },
+    done: () => { if (errs.length) throw new Error(`${errs.length} 处不符：${errs.join(' ｜ ')}`); },
+  };
+};
+// 一段时间里反复看某个元素出没出现过：「没有发生」不能用 eventually 判
+const everShown = async (page: Page, testId: string, ms: number) => { const end = Date.now() + ms; while (Date.now() < end) { if (await page.getByTestId(testId).count()) return true; await sleep(200); } return false; };
+const openDock = async (page: Page) => {
+  const dock = page.getByTestId('chat-dock');
+  if ((await dock.getAttribute('data-state')) === 'collapsed') await dock.getByRole('button', { name: /^展开对话记录/ }).click();
+  return dock;
+};
+// 点击区下限 24 px：按画布缩放反算出来的尺寸会落在 23.99 这类亚像素上，量的时候留 0.5 px
+const HIT = 23.5;
+const withView = async (page: Page, pid: string, view: { x: number; y: number; zoom: number }) => page.addInitScript(([k, v]) => { localStorage.setItem(k, v); }, [`quilt:view:${pid}`, JSON.stringify(view)]);
+
+// ---------- TC-CORE-075 不存在的项目：不订阅事件流、不显示重连、对话记录不出示例 ----------
+await step('TC-CORE-075', async () => {
+  const S = soft();
+  const eventsOf = (page: Page, pid: string, t0: number) => {
+    const at: number[] = [];
+    page.on('request', (r) => { if (new URL(r.url()).pathname === `/v1/projects/${pid}/events`) at.push(Date.now() - t0); });
+    return at;
+  };
+  const NOT_FOUND = '这个项目不存在或已被删除';
+  // 1 打开不存在的项目：转到「不存在」态之后不再连事件流、顶栏不写「重连中」，对话记录不出空态示例
+  const ghost = '22222222-3333-4444-8555-666666666666';
+  const page = await newPage();
+  const t0 = Date.now();
+  const evs = eventsOf(page, ghost, t0);
+  await page.goto(`${WEB}/p/${ghost}`);
+  await page.getByTestId('canvas-pending').getByText(NOT_FOUND).waitFor({ timeout: 8000 });
+  const at = Date.now() - t0;
+  const shown = await everShown(page, 'live-status', 5000);
+  const later = evs.filter((t) => t > at + 200);
+  await S.check(() => expect(!shown, '① 不存在的项目 5 s 内顶栏出现了「实时更新已断开 · 重连中」'));
+  await S.check(() => expect(later.length === 0, `① 转到「不存在」态之后 5 s 里又连了 ${later.length} 次事件流（${later.join(', ')} ms）`));
+  const text = (await (await openDock(page)).innerText()).replace(/\s+/g, ' ');
+  await S.check(() => expect(!text.includes('试试这样描述') && !/(^|\D)0 条/.test(text), `① 对话记录不该出空态示例或「0 条」：${text.slice(0, 120)}`));
+  await page.context().close();
+  // 2 加载过的项目在别处被删：画布转到「不存在」态，同样不再连、不写「重连中」、不出示例
+  const { projectId: pid } = seedProject('Doomed', '--device', 'mobile', '--screens', '1', '--messages', '2', '--no-shot');
+  const p2 = await newPage();
+  const t1 = Date.now();
+  const evs2 = eventsOf(p2, pid, t1);
+  await p2.goto(`${WEB}/p/${pid}`);
+  await p2.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+  await sleep(500);
+  const del = await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' });
+  expect(del.status === 204, `删项目 ${del.status}`);
+  await S.check(() => p2.getByTestId('canvas-pending').getByText(NOT_FOUND).waitFor({ timeout: 8000 }));
+  const at2 = Date.now() - t1;
+  const shown2 = await everShown(p2, 'live-status', 5000);
+  const later2 = evs2.filter((t) => t > at2 + 200);
+  await S.check(() => expect(!shown2, '② 项目被删后 5 s 内顶栏出现了「实时更新已断开 · 重连中」'));
+  await S.check(() => expect(later2.length === 0, `② 项目被删、转到「不存在」态之后 5 s 里又连了 ${later2.length} 次事件流`));
+  const text2 = (await (await openDock(p2)).innerText()).replace(/\s+/g, ' ');
+  await S.check(() => expect(!text2.includes('试试这样描述'), `② 对话记录不该出空态示例：${text2.slice(0, 120)}`));
+  current = p2;
+  S.done();
+  await p2.context().close();
+  return `不存在的项目与加载后被删的项目：转到「不存在」态后 5 s 内事件流 0 次、无「重连中」，对话记录无示例`;
+});
+
+// ---------- TC-CORE-076 窄视口 toast 让开折叠横条；失败角标的点击区 ----------
+await step('TC-CORE-076', async () => {
+  const S = soft();
+  const { projectId: pid } = seedProject('Toasts', '--device', 'mobile', '--screens', '2', '--no-shot');
+  const { projectId: wide } = seedProject('Toasts Desk', '--device', 'desktop', '--screens', '1', '--no-shot');
+  const stub = startOpenAiStub({ port: 3994, apiKey: 'good-key-0076', holdMs: 1500, reply: 'OK' });
+  const channels: string[] = [];
+  const mk = async (label: string, apiKey: string) => { const id = (await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label, endpoint: stub.url, model: 'stub-76', apiKey }) })).body.channel.id; channels.push(id); return id; };
+  try {
+    // 输入框里选一条验证过的桩通道（stub 轮次的缺省通道是本机 agent、发不出去），发出去的那一轮改走坏 Key 通道：作业以 401 失败
+    const good = await mk('Stub 76', 'good-key-0076');
+    expect((await apiJson<{ ok: boolean }>(`/v1/runners/channel:${good}/probe`, { method: 'POST' })).body.ok, '桩通道验证未通过');
+    const bad = await mk('坏 Key 76', 'wrong-key-0076');
+    const box = async (page: Page, sel: string) => (await page.locator(sel).first().boundingBox())!;
+    const failJobs = (page: Page) => page.route(`**/v1/projects/${pid}/jobs`, (route) => (route.request().method() === 'POST' ? route.fulfill({ status: 500, contentType: 'application/problem+json', body: JSON.stringify({ type: '/errors/internal', title: '导出没发出去（测试）', status: 500, requestId: 't' }) }) : route.fallback()));
+    // 1 390×844：对话记录折叠、停在输入框上方；一轮造屏失败，toast 的底边在横条之上
+    const page = await newPage({ viewport: { width: 390, height: 844 } });
+    await page.route(`**/v1/projects/${pid}/messages`, async (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      const body = JSON.parse(route.request().postData() ?? '{}');
+      await route.continue({ postData: JSON.stringify({ ...body, runner: { kind: 'channel', channelId: bad } }) });
+    });
+    await page.goto(`${WEB}/p/${pid}`);
+    await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+    const dock = page.getByTestId('chat-dock');
+    if ((await dock.getAttribute('data-state')) !== 'collapsed') await dock.getByRole('button', { name: '折叠对话记录' }).click();
+    await pickOption(page, '[data-testid="runner-select"]', 'Stub 76');
+    await page.locator('#chat-input').fill('造一个设置页');
+    await page.locator('#chat-input').press('Enter');
+    const t1 = page.getByText(/^造屏失败/).first();
+    await t1.waitFor({ timeout: 30000 });
+    const [tb, db, cb] = [await t1.boundingBox(), await box(page, '[data-testid="chat-dock"]'), await box(page, 'form.composer')];
+    await S.check(() => expect(tb && tb.y + tb.height <= db.y + 1, `① 390 宽下失败 toast 压住了折叠横条：toast 底 ${tb && Math.round(tb.y + tb.height)}，横条顶 ${Math.round(db.y)}`));
+    await S.check(() => expect(tb && tb.y + tb.height <= cb.y + 1, `① toast 压住了输入框：toast 底 ${tb && Math.round(tb.y + tb.height)}，输入框顶 ${Math.round(cb.y)}`));
+    await eventually(async () => expect((await page.getByText(/^造屏失败/).count()) === 0, 'toast 没自行消失'), 6000);
+    // 1b 收起输入框（⌘/）：横条落到底部，toast 仍在它上方
+    await page.keyboard.press('ControlOrMeta+Slash');
+    await page.locator('form.composer').waitFor({ state: 'hidden', timeout: 3000 });
+    await failJobs(page);
+    await page.getByRole('button', { name: '导出原型' }).click();
+    const t2 = page.getByText('导出没发出去（测试）').first();
+    await t2.waitFor({ timeout: 8000 });
+    const [tb2, db2] = [await t2.boundingBox(), await box(page, '[data-testid="chat-dock"]')];
+    await S.check(() => expect(tb2 && tb2.y + tb2.height <= db2.y + 1, `①b 输入框收起时 toast 压住了落底的横条：toast 底 ${tb2 && Math.round(tb2.y + tb2.height)}，横条顶 ${Math.round(db2.y)}`));
+    await page.context().close();
+    // 1c 1440×900：横条不在 toast 底下，toast 照旧紧贴输入框上方（不被多推高）
+    const p3 = await newPage({ viewport: { width: 1440, height: 900 } });
+    await p3.goto(`${WEB}/p/${pid}`);
+    await p3.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+    const dock3 = p3.getByTestId('chat-dock');
+    if ((await dock3.getAttribute('data-state')) !== 'collapsed') await dock3.getByRole('button', { name: '折叠对话记录' }).click();
+    await failJobs(p3);
+    await p3.getByRole('button', { name: '导出原型' }).click();
+    const t3 = p3.getByText('导出没发出去（测试）').first();
+    await t3.waitFor({ timeout: 8000 });
+    const [tb3, cb3] = [await t3.boundingBox(), await box(p3, 'form.composer')];
+    const gap = tb3 ? cb3.y - (tb3.y + tb3.height) : NaN;
+    await S.check(() => expect(gap >= 8 && gap <= 24, `①c 1440 宽下 toast 应紧贴输入框上方（间距 8～24 px）：${Math.round(gap)} px`));
+    await p3.context().close();
+    // 2 失败角标的点击区：预览文档一直回 403（签名过期的样子）→ 换签名重载一次仍不行 →「加载失败 · 重试」；手机屏 1:1、桌面屏聚焦缩放 < 1 各量一次
+    for (const [proj, label] of [[pid, '手机屏'], [wide, '桌面屏']] as const) {
+      const d = await detail(proj);
+      const sid = d.screens[0].id;
+      const pg = await newPage();
+      await pg.route(new RegExp(`/p/${proj}/${sid}\\?`), (route) => (route.request().resourceType() === 'document' ? route.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"expired"}' }) : route.continue()));
+      await pg.goto(`${WEB}/p/${proj}`);
+      await pg.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+      await pg.locator('[data-testid="screen-card"] .gesture').first().dblclick();
+      const retry = pg.getByTestId('frame-retry');
+      await retry.waitFor({ timeout: 20000 });
+      await sleep(400);
+      const rb = (await retry.boundingBox())!;
+      const hit = await pg.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('[data-testid="frame-retry"]') !== null, [rb.x + rb.width / 2, rb.y + rb.height / 2]);
+      const zoom = await pg.evaluate(() => Number((document.querySelector('.world') as HTMLElement).style.transform.match(/scale\(([-\d.]+)\)/)?.[1]));
+      await S.check(() => expect(rb.width >= HIT && rb.height >= HIT && hit, `② ${label}（缩放 ${zoom.toFixed(2)}）的「加载失败 · 重试」点击区 ${rb.width.toFixed(1)}×${rb.height.toFixed(1)} px，应不小于 24×24${hit ? '' : '，中心点也点不到它'}`));
+      current = pg;
+      await pg.context().close();
+    }
+  } finally { await stub.close(); for (const id of channels) await apiJson(`/v1/channels/${id}`, { method: 'DELETE' }).catch(() => {}); }
+  S.done();
+  return '390 宽：失败 toast 在折叠横条与输入框之上，收起输入框后仍在落底横条之上；1440 宽 toast 紧贴输入框；手机屏与桌面屏聚焦时「加载失败 · 重试」点击区 ≥ 24×24';
+});
+
+// ---------- TC-CORE-077 骨架动画只在卡片可见时运行；截图取不到有出口 ----------
+await step('TC-CORE-077', async () => {
+  const S = soft();
+  const { projectId: pid } = seedProject('Shots77', '--device', 'mobile', '--screens', '8');
+  const d0 = await detail(pid);
+  const url = Object.fromEntries(d0.screens.map((s) => [s.route, s.screenshotUrl ?? '']));
+  expect(Object.values(url).every(Boolean), '种子屏没有截图');
+  const VIEW = { x: 100, y: 100, zoom: 0.6 };   // /s1~/s4 整张、/s5 半张在视口里，/s6~/s8 在视口外
+  // 正在跑的骨架动画各属于哪张卡、那张卡在不在画布视口里
+  const anim = (page: Page) => page.evaluate(() => {
+    const vp = document.querySelector('[data-testid="canvas"]')!.getBoundingClientRect();
+    const inView = (el: Element) => { const b = el.getBoundingClientRect(); return b.right > vp.left && b.left < vp.right && b.bottom > vp.top && b.top < vp.bottom; };
+    const r = { on: 0, off: 0, offCards: [] as string[] };
+    for (const a of document.getAnimations()) {
+      const t = (a.effect as KeyframeEffect | null)?.target;
+      if (!t?.closest('.skeleton') || a.playState !== 'running') continue;
+      const card = t.closest('.card, .comp')!;
+      if (inView(card)) r.on += 1; else { r.off += 1; r.offCards.push(card.getAttribute('data-route') ?? '?'); }
+    }
+    return { ...r, offCards: [...new Set(r.offCards)] };
+  });
+  // 1 截图一直不到（懒加载的图还没取回来）：视口里的卡在动，视口外的不动；平移后换成新进视口的卡在动
+  const held: (() => void)[] = [];
+  const holdShots = (page: Page) => page.route((u) => u.pathname.startsWith('/v1/objects/'), async (route) => { await new Promise<void>((r) => held.push(r)); await route.continue().catch(() => {}); });
+  const page = await newPage();
+  await withView(page, pid, VIEW);
+  await holdShots(page);
+  await page.goto(`${WEB}/p/${pid}`);
+  await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+  await sleep(800);
+  const a1 = await anim(page);
+  await S.check(() => expect(a1.on > 0 && a1.off === 0, `① 视口外的卡片骨架也在动：视口内 ${a1.on} 个动画、视口外 ${a1.off} 个（${a1.offCards.join(' ')}）`));
+  const vb = (await page.getByTestId('canvas').boundingBox())!;
+  await page.mouse.move(vb.x + vb.width / 2, vb.y + vb.height / 2);
+  for (let i = 0; i < 4; i++) { await page.mouse.wheel(500, 0); await sleep(60); }
+  await sleep(700);
+  const a2 = await anim(page);
+  await S.check(() => expect(a2.on > 0 && a2.off === 0, `① 平移后视口外的卡片骨架仍在动：视口内 ${a2.on}、视口外 ${a2.off}（${a2.offCards.join(' ')}）`));
+  for (const r of held.splice(0)) r();
+  await page.context().close();
+  // 1b 减少动态效果：骨架一个动画都不跑
+  const pr = await newPage({ reduced: true });
+  await withView(pr, pid, VIEW);
+  await holdShots(pr);
+  await pr.goto(`${WEB}/p/${pid}`);
+  await pr.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+  await sleep(800);
+  const a3 = await anim(pr);
+  await S.check(() => expect(a3.on + a3.off === 0, `①b 减少动态效果下仍有 ${a3.on + a3.off} 个骨架动画在跑`));
+  for (const r of held.splice(0)) r();
+  await pr.context().close();
+  // 2 截图取不到：/s1 前两次失败、之后正常 → 自己重试后换上；/s2 一直失败 → 不再无限转圈，停在不动的「截图没取到」
+  const p2 = await newPage();
+  await withView(p2, pid, VIEW);
+  const hits: Record<string, number> = {};
+  let s2Ok = false;
+  await p2.route((u) => u.href === url['/s1'] || u.href === url['/s2'], (route) => {
+    const r = route.request().url() === url['/s1'] ? '/s1' : '/s2';
+    hits[r] = (hits[r] ?? 0) + 1;
+    return (r === '/s2' && !s2Ok) || (r === '/s1' && hits[r] <= 2) ? route.abort() : route.continue();
+  });
+  await p2.goto(`${WEB}/p/${pid}`);
+  const card = (r: string) => p2.locator(`[data-testid="screen-card"][data-route="${r}"]`);
+  const shot = (r: string) => card(r).locator('img').evaluateAll((els) => els.some((i) => { const im = i as HTMLImageElement; return im.complete && im.naturalWidth > 0 && getComputedStyle(im).opacity === '1'; }));
+  await S.check(() => eventually(async () => expect(await shot('/s1'), `② /s1 的截图前两次没取到之后一直没换上（取了 ${hits['/s1'] ?? 0} 次）`), 15000));
+  await S.check(() => eventually(async () => expect((await card('/s2').innerText()).includes('截图没取到'), `② /s2 的截图一直取不到，卡片应停在「截图没取到」：${(await card('/s2').innerText()).replace(/\s+/g, ' ')}`), 20000));
+  const running = await card('/s2').evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.playState === 'running').length);
+  await S.check(() => expect(running === 0, `② /s2 停在失败态时还有 ${running} 个动画在跑`));
+  const tries = hits['/s2'] ?? 0;
+  await sleep(4000);
+  await S.check(() => expect((hits['/s2'] ?? 0) === tries && tries <= 4, `② /s2 应在有限次重试后停下：共取了 ${hits['/s2'] ?? 0} 次（4 s 前 ${tries} 次）`));
+  // 2b 失败态给显式重试：点击区不小于 24×24；服务恢复后点它，截图换上
+  current = p2;
+  const retryBtn = card('/s2').getByTestId('shot-retry');
+  await S.check(async () => {
+    const rb = (await retryBtn.boundingBox())!;
+    const hit = await p2.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('[data-testid="shot-retry"]') !== null, [rb.x + rb.width / 2, rb.y + rb.height / 2]);
+    expect(rb.width >= HIT && rb.height >= HIT && hit, `②b「截图没取到 · 重试」点击区 ${rb.width.toFixed(1)}×${rb.height.toFixed(1)} px，应不小于 24×24${hit ? '' : '，中心点也点不到它'}`);
+  });
+  s2Ok = true;
+  await S.check(async () => { await retryBtn.click({ timeout: 3000 }); await eventually(async () => expect(await shot('/s2'), '②b 点「重试」后 /s2 的截图没换上'), 10000); });
+  // 3 已有截图的卡换新地址、新地址一直取不到：旧图留着，不退成骨架或失败态
+  let roll = false;
+  await p2.route(`**/v1/projects/${pid}`, async (route) => {
+    if (!roll || route.request().method() !== 'GET') return route.fallback();
+    const res = await route.fetch();
+    const d = (await res.json()) as Detail;
+    for (const s of d.screens) if (s.route === '/s3' && s.screenshotUrl) s.screenshotUrl += '&roll=1';
+    await route.fulfill({ response: res, json: d });
+  });
+  let rolled = 0;
+  await p2.route(/roll=1/, (route) => { rolled += 1; return route.abort(); });
+  await eventually(async () => expect(await shot('/s3'), '/s3 的旧截图没加载出来'), 15000);
+  roll = true;
+  await editText(pid, d0.screens.find((s) => s.route === '/s1')!.id, 'toggle', '换个地址');   // 另一屏出新截图 → 项目事件 → 整体重取，/s3 的截图地址随之变
+  await eventually(() => expect(rolled > 0, '/s3 的新地址没被请求'), 30000);
+  await sleep(10000);
+  const s3 = { img: await shot('/s3'), text: (await card('/s3').innerText()).replace(/\s+/g, ' ') };
+  await S.check(() => expect(s3.img && !s3.text.includes('截图没取到') && rolled <= 4, `③ 新地址取不到时 /s3 应留着旧图：有图 ${s3.img}，文字「${s3.text}」，新地址取了 ${rolled} 次`));
+  await p2.context().close();
+  S.done();
+  return `视口内 ${a1.on} 个骨架动画在跑、视口外 0；平移后同样；减少动态效果 0 个；/s1 失败两次后自己换上；/s2 取 ${tries} 次后停在「截图没取到」；/s3 新地址取不到留旧图`;
+});
+
+// ---------- TC-CORE-078 根路由以外的中文错误页与 404 ----------
+await step('TC-CORE-078', async () => {
+  const S = soft();
+  const ENGLISH = /Unexpected Application Error|404 Not Found|Hey developer/;
+  const page = await newPage();
+  // 1 未知路径
+  await page.goto(`${WEB}/no-such-page`);
+  await S.check(() => page.getByText('没有这个页面').waitFor({ timeout: 8000 }));
+  await S.check(async () => expect(!(await page.getByText(ENGLISH).count()), '① 未知路径仍是路由库的英文默认页'));
+  await S.check(async () => { await page.getByRole('button', { name: '回到最近的项目' }).click({ timeout: 3000 }); await page.waitForURL(/\/p\//, { timeout: 8000 }); });
+  // 2 /settings 取项目列表失败
+  await page.route('**/v1/projects', (route) => (route.request().method() === 'GET' ? route.abort() : route.fallback()));
+  await page.goto(`${WEB}/settings`);
+  await S.check(() => page.getByText('没连上 Quilt 服务').waitFor({ timeout: 8000 }));
+  await S.check(async () => expect(!(await page.getByText(ENGLISH).count()), '② /settings 取列表失败仍是英文默认错误页'));
+  await page.unroute('**/v1/projects');
+  await S.check(async () => { await page.getByRole('button', { name: '重试' }).click({ timeout: 3000 }); await page.waitForURL(/\/p\/[^/?]+\?settings=usage/, { timeout: 8000 }); });
+  // 3 画布页渲染时抛异常（详情回包缺设计系统）
+  const { projectId: pid } = seedProject('Broken', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const DETAIL = `**/v1/projects/${pid}`;
+  await page.route(DETAIL, async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const res = await route.fetch();
+    const j = await res.json();
+    await route.fulfill({ response: res, json: { ...j, designSystem: null } });
+  });
+  await page.goto(`${WEB}/p/${pid}`);
+  await S.check(() => page.getByText('页面出错了').waitFor({ timeout: 8000 }));
+  await S.check(async () => expect(!(await page.getByText(ENGLISH).count()), '③ 画布页渲染异常仍是英文默认错误页'));
+  await page.unroute(DETAIL);
+  await S.check(async () => { await page.getByRole('button', { name: '重新加载' }).click({ timeout: 3000 }); await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 10000 }); });
+  S.done();
+  await page.context().close();
+  return '未知路径「没有这个页面」+ 回到最近的项目；/settings 取列表失败「没连上 Quilt 服务」+ 重试落到设置；画布页渲染异常「页面出错了」+ 重新加载';
 });
 
 console.log('\n| 用例 | 结果 | 备注 |\n| --- | --- | --- |');

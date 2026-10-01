@@ -7,7 +7,7 @@ import { Overlay, useModal } from '@/ui/modal';
 import { AssetsSection, PaletteSection } from '@/panels/BrandSections';
 import { PresetsSection } from '@/panels/PresetsSection';
 import { FONTS, SYSTEM_FONTS, FONT_SOURCE_OPTIONS, RADIUS } from './designOptions';
-import { SAVE_KEYS, drafts, rebase, same, savedFields, type Fields } from './designDraft';
+import { SAVE_KEYS, drafts, normalized, rebase, same, sameFields, savedFields, type Fields } from './designDraft';
 
 // 设计系统面板（REQ-CORE-010 只读展示 / REQ-EDIT-003 编辑与回刷 / REQ-CORE-016 应用简介与样板屏）。
 // 设计系统是唯一的持久记忆且只显式改：约定条目只经「用一句话改设计系统」→ 提炼 → 预览确认写入，这里可删不可手写。
@@ -55,15 +55,17 @@ export function DesignPanel({ ds, project, screens, assets, busy, onClose, onSav
   useEffect(() => {
     const id = ds.projectId;
     return () => {
-      if (same(formRef.current, baseRef.current) && !instructionRef.current) drafts.delete(id);
+      if (sameFields(formRef.current, baseRef.current) && !instructionRef.current) drafts.delete(id);
       else drafts.set(id, { form: formRef.current, base: baseRef.current, instruction: instructionRef.current });
     };
   }, [ds.projectId]);
-  // 只有这几项会改 tokens，进而改每屏 HTML 的 prelude；designMd 只进生成 prompt，回刷它产出的是逐字节相同的新修订
-  const tokenDirty = seed !== saved.seed || font !== saved.font || radius !== saved.radius
-    || fontSource !== saved.fontSource || (fontSource === 'url' && fontUrl.trim() !== saved.fontUrl)
-    || !same(palette, saved.palette) || colorMode !== saved.colorMode;
-  const dirty = tokenDirty || md !== saved.md;
+  // 只有这几项会改 tokens，进而改每屏 HTML 的 prelude；designMd 只进生成 prompt，回刷它产出的是逐字节相同的新修订。
+  // 两边都先规范化（v0.83）：种子色只差大小写、字体名只多空格，保存出去也是同一份，不算改动、也不因它问回刷
+  const [n, sv] = [normalized(form), normalized(saved)];
+  const tokenDirty = n.seed !== sv.seed || n.font !== sv.font || n.radius !== sv.radius
+    || n.fontSource !== sv.fontSource || (n.fontSource === 'url' && n.fontUrl !== sv.fontUrl)
+    || !same(n.palette, sv.palette) || n.colorMode !== sv.colorMode;
+  const dirty = tokenDirty || n.md !== sv.md;
   // 放弃改动：「保存」管的那几格回到已保存的值（简介有自己的保存键，不动）。按钮随之消失，焦点交给面板的「关闭」，
   // 不让它掉到 body——那时按 Esc 会被画布接走去取消在跑作业
   const discard = () => {

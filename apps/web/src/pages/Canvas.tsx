@@ -90,6 +90,8 @@ export function CanvasPage() {
   const loadPreviewOrigin = useCallback(() => loadConfig().then((c) => { setConfigFailed(false); setPreviewOrigin(c.previewOrigin); }).catch(() => setConfigFailed(true)), []);
   useEffect(() => { void loadPreviewOrigin(); }, [loadPreviewOrigin]);
   const [loadFailure, setLoadFailure] = useState<LoadFailure>(null);
+  // 项目不存在（详情 404，含加载后在别处被删）：不再订阅项目事件流、不写断线状态，对话记录也不当成空项目（v0.83）
+  const gone = loadFailure?.kind === 'not-found';
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   // 目标标签（REQ-CORE-006）与画布选中是两个状态：选中变化会写进目标，但清空选中（点空白 / Esc）不动目标。
   // 目标只经标签 × 与「清空」减少——发完一条、点空白看结果、追加指令，是最高频的用法，标签一清就会误造一张新屏。
@@ -279,7 +281,8 @@ export function CanvasPage() {
   // 项目级事件（API-CORE-030 v0.34）：本机会话经 MCP 回写、别处建的作业、截图就绪都会到这里——刷新项目（聚焦中的屏走热更新），作业终态再刷消息
   // 一个标签页只开这一条长连接（API-CORE-030 / §16 连接预算）：浏览器对同源 HTTP/1.1 只给 6 条并发、
   // 且所有标签页共用，按作业各开一条的话多开两三个项目就把额度占满、普通请求全部排队。
-  useEffect(() => subscribeProjectEvents(projectId, (e) => {
+  // 项目不存在时不连：事件流对它回 404，连着只会按退避一直重连、3 s 后顶栏写「重连中」
+  useEffect(() => gone ? undefined : subscribeProjectEvents(projectId, (e) => {
     scheduleRefresh();
     if (e.type !== 'job_changed') return;
     const p = e.data as { jobId?: string; type?: string; seq?: number; data?: unknown } | undefined;
@@ -294,7 +297,7 @@ export function CanvasPage() {
     // 事件不续传：断过之后重新连上就整体重取一次，补上断线期间丢掉的作业终态、截图就绪与回写
     if (st !== 'open') { feedBroken.current = true; return; }
     if (feedBroken.current) { feedBroken.current = false; void refresh({ quiet: true }); void refreshMessages(); }
-  }), [projectId, scheduleRefresh, refreshMessages, refresh, feedEpoch]);
+  }), [projectId, scheduleRefresh, refreshMessages, refresh, feedEpoch, gone]);
   // 处理器放 ref：闭包每帧刷新，订阅不动
   const onJobEvent = useRef<(job: JobDto, e: JobEventDto) => void>(() => {});
   onJobEvent.current = (job, e) => {
@@ -667,7 +670,7 @@ export function CanvasPage() {
   };
 
   // 对话记录折叠与输入框显隐（useComposerChrome）：输入框高度换算成画布底部占位 --chrome-bottom
-  const { chatCollapsed, toggleChat, composerVisible, showComposer, toggleComposer, composerH, setComposerH, shellStyle } = useComposerChrome(focusedId, composerRef);
+  const { chatCollapsed, toggleChat, composerVisible, showComposer, toggleComposer, composerH, setComposerH, shellStyle, dockRef } = useComposerChrome(focusedId, composerRef, !!panel);
   const openDesign = () => { if (panel === 'design') setPanel(null); else { setSelectedIds([]); setPanel('design'); } };
   // 批注（REQ-EDIT-004）：入口与选择元素同源——选中一屏或已聚焦都能进
   const toggleAnnotate = () => {
@@ -858,7 +861,7 @@ export function CanvasPage() {
       <div ref={laneRef} aria-hidden="true" data-testid="composer-lane" className="pointer-events-none absolute bottom-0 left-[var(--composer-left)] right-[var(--chrome-right)] h-0" />
       {/* 顶栏在 DOM 里排在画布之前（v0.80）：Tab 序从项目切换器开始。层级靠 z-index，不靠 DOM 顺序 */}
       <TopNav floating right={<>
-        {feedShown && feed !== 'open' && (
+        {feedShown && feed !== 'open' && !gone && (
           <span role="status" data-testid="live-status" className="min-w-0 truncate whitespace-nowrap rounded-full border border-warn/60 px-2 py-0.5 text-[11px] text-warn">
             实时更新已断开 · {feed === 'offline'
               ? <button type="button" onClick={() => { setFeed('reconnecting'); setFeedEpoch((n) => n + 1); }} className="underline underline-offset-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">重连</button>
@@ -921,10 +924,10 @@ export function CanvasPage() {
       {/* 多选排列条（REQ-CORE-018）：选中 ≥ 2 屏且没聚焦时出现在画布顶部中央；候选就地展开时让位。排版与键盘在 ArrangeBar，算位在 arrange.ts，落库在 positions.ts */}
       {selectedScreens.length >= 2 && !focusedId && !inspectArmed && !annotateArmed && !candidates && <ArrangeBar count={selectedScreens.length} yieldToPanel={!!panelBody} onArrange={(k) => void arrange(k, selectedScreens)} />}
       {settingsSection && <SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} returnTo={settingsBtnRef} onCatalog={applyCatalog} />}
-      <ChatDock messages={messages} progress={progress} status={jobStatus} collapsed={chatCollapsed} onToggle={() => { if (chatCollapsed) setUnseenFailures(0); toggleChat(); }} onRemember={rememberConvention} busy={busy}
+      <ChatDock boxRef={dockRef} messages={messages} progress={progress} status={jobStatus} collapsed={chatCollapsed} onToggle={() => { if (chatCollapsed) setUnseenFailures(0); toggleChat(); }} onRemember={rememberConvention} busy={busy}
         onRetry={(u) => void retryRound(u)} onEdit={(u) => void editRound(u)} runningJobIds={runningJobIds} retrying={retrying} followSeq={followSeq} failed={unseenFailures}
-        // 项目不存在时消息自然也取不到：那不是「没加载出来」，画布区已经说明了
-        loadState={msgState === 'ok' || loadFailure?.kind === 'not-found' ? undefined : msgState} onReload={() => { setMsgState('loading'); void refreshMessages(); }} />
+        // 项目不存在时消息自然也取不到：那不是「没加载出来」，也不是还没聊过的空项目，画布区已经说明了
+        loadState={gone ? 'missing' : msgState === 'ok' ? undefined : msgState} onReload={() => { setMsgState('loading'); void refreshMessages(); }} />
       <Composer
         handle={composerRef} laneRef={laneRef} running={running} blockedReason={blockedReason} targets={targetScreens} totalScreens={screens.length} anchor={anchor} maxTargets={MAX_TARGETS}
         componentTargets={targetComponents}

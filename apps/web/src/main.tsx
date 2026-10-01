@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider, redirect } from 'react-router';
 import { api } from '@/lib/api';
 import { ToastProvider } from '@/lib/toast';
-import { FirstProjectPage, RootError } from '@/pages/Projects';
+import { FirstProjectPage, NotFoundPage, RouteError } from '@/pages/Projects';
 import { CanvasRoute } from '@/pages/Canvas';
 import './styles.css';
 
@@ -14,8 +14,10 @@ async function latestProjectId(): Promise<string | null> {
   return latest?.id ?? null;
 }
 
-const router = createBrowserRouter([
-  { path: '/', loader: async () => { const id = await latestProjectId(); return id ? redirect(`/p/${id}`) : null; }, element: <FirstProjectPage />, errorElement: <RootError /> },
+// 全部路由挂在一个无路径的父路由下，共用一个中文错误页（v0.83）：loader 取不到、页面渲染时抛异常都落到它，不落到路由库的英文默认错误页；
+// 没有匹配的地址是「没有这个页面」
+const router = createBrowserRouter([{ errorElement: <RouteError />, children: [
+  { path: '/', loader: async () => { const id = await latestProjectId(); return id ? redirect(`/p/${id}`) : null; }, element: <FirstProjectPage /> },
   { path: '/projects', loader: () => redirect('/') },
   { path: '/p/:projectId', element: <CanvasRoute /> },
   // 旧的设置页路径：设置现在是画布上的弹层。从某个画布页点进来的（loader 跑的时候地址栏还是原页面）留在那个项目里，
@@ -25,7 +27,8 @@ const router = createBrowserRouter([
     const id = from ?? await latestProjectId();
     return redirect(id ? `/p/${id}?settings=usage` : '/');
   } },
-]);
+  { path: '*', element: <NotFoundPage /> },
+] }]);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

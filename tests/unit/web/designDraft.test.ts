@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { withConventions } from '@quilt/core';
-import { rebase, type Fields } from '../../../apps/web/src/panels/designDraft.ts';
+import { rebase, sameFields, type Fields } from '../../../apps/web/src/panels/designDraft.ts';
 
 // 设计系统面板的草稿（REQ-EDIT-003 v0.78）：已保存的那份变了，只同步没动过的格子
 const md0 = withConventions('# App\n\nIntro', ['按钮一律圆角胶囊', '标题一律 text-xl']);
@@ -37,4 +37,19 @@ test('刚保存的那几格强制取服务端的值（种子色被转成大写�
   const out = rebase(form, base, next, ['seed', 'md']);
   assert.equal(out.seed, '#ABCDEF');
   assert.deepEqual(out, next);
+});
+
+// v0.83：比较前按保存时的同一规则规范化——种子色不分大小写、字体族名与样式表地址去首尾空格
+test('只差大小写 / 首尾空格的两份算同一份，真改了的不算', () => {
+  assert.ok(sameFields({ ...base, seed: '#3b5bdb', font: '  Inter ', fontUrl: ' https://fonts.example/a.css ' }, { ...base, fontUrl: 'https://fonts.example/a.css' }));
+  assert.ok(!sameFields({ ...base, seed: '#3b5bdc' }, base));
+  assert.ok(!sameFields({ ...base, md: `${base.md} ` }, base));
+});
+
+test('只差大小写 / 空格的格子算没动过：已保存的那份变了照样跟上新值', () => {
+  const form = { ...base, seed: '#3b5bdb', font: 'Inter ' };
+  const next = { ...base, seed: '#123456', font: 'Manrope' };
+  const out = rebase(form, base, next, []);
+  assert.equal(out.seed, '#123456');
+  assert.equal(out.font, 'Manrope');
 });

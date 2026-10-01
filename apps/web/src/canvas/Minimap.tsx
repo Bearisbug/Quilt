@@ -22,6 +22,17 @@ function boxOf(rects: Rect[]): Box {
   return { x0, y0, scale, ox: (W - 2 * PAD - (x1 - x0) * scale) / 2, oy: (H - 2 * PAD - (y1 - y0) * scale) / 2 };
 }
 const toMini = (b: Box, x: number, y: number) => [PAD + b.ox + (x - b.x0) * b.scale, PAD + b.oy + (y - b.y0) * b.scale] as const;
+// 冻结的外接框装不下视口时只向外扩到刚好装下（v0.83）：这一幅小地图（含内边距）对应的世界矩形并上视口，按小地图宽高等比放进去、居中。
+// 视口框刚碰到边时扩出来的正是原来那一幅，之后随镜头连续变化，不跳
+function grow(b: Box, v: ViewInfo): Box {
+  const mx = b.x0 - (PAD + b.ox) / b.scale; const my = b.y0 - (PAD + b.oy) / b.scale;
+  const r = worldView(v);
+  const x0 = Math.min(mx, r.x); const y0 = Math.min(my, r.y);
+  const x1 = Math.max(mx + W / b.scale, r.x + r.w); const y1 = Math.max(my + H / b.scale, r.y + r.h);
+  if (x0 === mx && y0 === my && x1 === mx + W / b.scale && y1 === my + H / b.scale) return b;
+  const scale = Math.min(W / (x1 - x0), H / (y1 - y0));
+  return { x0, y0, scale, ox: (W - (x1 - x0) * scale) / 2 - PAD, oy: (H - (y1 - y0) * scale) / 2 - PAD };
+}
 
 export function Minimap({ rects, onView, onPanTo, onMoveView }: {
   rects: MiniRect[]; onView: (cb: (v: ViewInfo) => void) => () => void;
@@ -33,8 +44,9 @@ export function Minimap({ rects, onView, onPanTo, onMoveView }: {
   rectsRef.current = rects;
   // 拖视口框期间外接框冻结：它把视口框也算在内，视口一移出内容区外接框就跟着变大、比例跟着变，
   // 按实时外接框换算的话同一个指针位置对应的世界坐标一直在漂，镜头会自己越跑越远。
-  // 松手后仍用冻结的那个，直到下一次别的镜头变化或卡片变化（v0.80）：松手就按新视口重算的话，整幅小地图一步重新缩放、框跳走；
-  // 卡片变了（新屏落地、卡片挪动）不重算的话，冻结的外接框装不下它，画出小地图外
+  // 松手之后也一直用冻结的那幅（v0.83）：之后的平移缩放只在视口框要出小地图时让它向外扩到刚好装下（grow）——一有镜头变化就按新视口重算的话，
+  // 那一下整幅重新缩放、框跳 11–14 px。卡片变了（新屏落地、卡片挪动）才按新内容重算，
+  // 不重算的话冻结的外接框装不下它，画出小地图外
   const drag = useRef<{ mx: number; my: number; vx: number; vy: number; zoom: number } | null>(null);
   const frozen = useRef<Box | null>(null);
   const box = useCallback(() => frozen.current ?? boxOf(view.current ? [...rectsRef.current, worldView(view.current)] : rectsRef.current), []);
@@ -69,10 +81,12 @@ export function Minimap({ rects, onView, onPanTo, onMoveView }: {
 
   useEffect(() => {
     let raf = 0;
-    const off = onView((v) => { if (!drag.current) frozen.current = null; view.current = v; if (!raf) raf = requestAnimationFrame(() => { raf = 0; draw(); }); });
+    const off = onView((v) => { if (!drag.current && frozen.current) frozen.current = grow(frozen.current, v); view.current = v; if (!raf) raf = requestAnimationFrame(() => { raf = 0; draw(); }); });
     return () => { off(); if (raf) cancelAnimationFrame(raf); };
   }, [onView, draw]);
-  useEffect(() => { if (!drag.current) frozen.current = null; draw(); }, [rects, draw]);
+  // 按卡片的几何判断「变了」：每次重取项目详情 rects 都是新数组，按引用判的话一次与卡片无关的重取（截图就绪、签名续取）也会让外接框重算、框跳一下
+  const rectsKey = rects.map((r) => `${r.id}:${r.x},${r.y},${r.w},${r.h}`).join('|');
+  useEffect(() => { if (!drag.current) frozen.current = null; draw(); }, [rectsKey, draw]);
 
   const at = (e: ReactPointerEvent<HTMLCanvasElement>) => { const r = ref.current!.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top] as const; };
   // 点空白处镜头平移到那一点（缩放不变）；按在视口框上是抓住它拖：从抓住的那一点起按位移 1:1 平移，框不跳到指针下（MOTION-017）。

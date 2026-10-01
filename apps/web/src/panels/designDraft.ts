@@ -10,11 +10,16 @@ export const savedFields = (ds: DesignSystemDto, project: ProjectDto): Fields =>
   return { seed: ds.seedColor, font: t.typography.fontFamily, fontSource: t.typography.fontSource ?? 'google', fontUrl: t.typography.fontUrl ?? '', radius: RADIUS.find((r) => r.md === t.radius.md)?.key ?? 'default', md: ds.designMd, palette: ds.palette, colorMode: ds.colorMode, brief: project.brief };
 };
 export const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+// 按保存时的同一规则规范化（v0.83）：种子色存大写（保存时 toUpperCase）、字体族名与样式表地址去首尾空格（fontFamilySchema / fontUrlSchema 的 trim）。
+// 判断有没有改动、要不要问回刷、格子动没动过，都先过这一道：只差这些的值保存出去也是同一份，算没改
+export const normalized = (f: Fields): Fields => ({ ...f, seed: f.seed.toUpperCase(), font: f.font.trim(), fontUrl: f.fontUrl.trim() });
+export const sameFields = (a: Fields, b: Fields) => same(normalized(a), normalized(b));
 // 已保存的那份从 prev 变成 next（删约定、确认提案、别处保存）：没动过的格子跟上 next，动过的留着草稿；
 // DESIGN.md 草稿里的约定节只由系统维护，换成 next 的——不换的话保存草稿会把刚删掉的约定写回去
 export function rebase(form: Fields, prev: Fields, next: Fields, force: (keyof Fields)[]): Fields {
   const out: Record<string, unknown> = { ...form };
-  for (const k of Object.keys(next) as (keyof Fields)[]) if (force.includes(k) || same(form[k], prev[k])) out[k] = next[k];
+  const [f, p] = [normalized(form), normalized(prev)];
+  for (const k of Object.keys(next) as (keyof Fields)[]) if (force.includes(k) || same(f[k], p[k])) out[k] = next[k];
   if (!force.includes('md') && form.md !== prev.md && !same(parseConventions(prev.md), parseConventions(next.md))) out.md = withConventions(form.md, parseConventions(next.md));
   return out as Fields;
 }
