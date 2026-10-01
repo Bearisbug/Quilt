@@ -2571,9 +2571,12 @@ await step('TC-CORE-044', async () => {
     await S.check(async () => expect((await page.getByText('Unexpected Application Error').count()) === 0, '④ 列表截短后整页崩了'));
     if ((await page.getByText('Unexpected Application Error').count()) === 0) {
       drop = new Set([withImg[0].jobId!, withImg[1].jobId!]);
+      // 说明是一条 3.2 s 的 toast，在 nudge 之前就开始等：页面在这一轮作业刚建出来时就补取消息、关掉预览（v0.76），
+      // 而 nudge 要等作业跑完、轮询间隔 3 s，回来再找 toast 可能已经消失
+      const closedNote = page.getByText(/预览已关闭/).first().waitFor({ timeout: 15000 }).then(() => true, () => false);
       await nudge();
       await S.check(() => viewer.waitFor({ state: 'detached', timeout: 8000 }));
-      await S.check(() => eventually(async () => expect((await page.getByText(/预览已关闭/).count()) > 0, '④ 图不在了应关闭预览并说明')));
+      await S.check(async () => expect(await closedNote, '④ 图不在了应关闭预览并说明'));
       await S.check(async () => expect((await page.getByText('Unexpected Application Error').count()) === 0 && (await page.getByTestId('chat-dock').count()) === 1, '④ 关闭预览后页面应完好'));
     }
     await shot(page, 'CORE-044');
@@ -3397,7 +3400,7 @@ await step('TC-CORE-049', async () => {
     await page.locator('form.composer').waitFor();
     await page.waitForTimeout(900);
   };
-  // 逐帧记输入框的左缘与宽度，从它出现的第一帧起；只在带了标记的那一次加载里记。
+  // 逐帧记输入框的左缘、宽度与通道触发器在不在，从它出现的第一帧起；只在带了标记的那一次加载里记。
   // 写成字符串：tsx 编译出的函数体带 __name 辅助调用，序列化进页面就是未定义
   await page.addInitScript(`(() => {
     if (sessionStorage.getItem('quilt:probe-composer') !== '1') return;
@@ -3405,7 +3408,7 @@ await step('TC-CORE-049', async () => {
     const t0 = performance.now();
     const tick = () => {
       const f = document.querySelector('form.composer');
-      if (f) { const r = f.getBoundingClientRect(); window.__frames.push([Math.round(performance.now() - t0), Math.round(r.left), Math.round(r.width)]); }
+      if (f) { const r = f.getBoundingClientRect(); window.__frames.push([Math.round(performance.now() - t0), Math.round(r.left), Math.round(r.width), document.querySelector('[data-testid="runner-select"]') ? 1 : 0]); }
       if (window.__frames.length < 90 && performance.now() - t0 < 10000) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -3413,6 +3416,8 @@ await step('TC-CORE-049', async () => {
   try {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${WEB}/p/${projectId}`);
+    // 前置：先完整打开一次，让通道清单在本机留底（v0.81）——测的是之后每次打开的首帧
+    await page.getByTestId('runner-select').waitFor({ timeout: 10000 });
     await page.evaluate(() => { localStorage.removeItem('quilt:chat-collapsed'); localStorage.setItem('quilt:minimap', '1'); sessionStorage.setItem('quilt:probe-composer', '1'); });
     // 1 首帧就是终值：从出现起每一帧的宽与左缘都等于最后一帧
     await load();
@@ -3421,8 +3426,8 @@ await step('TC-CORE-049', async () => {
     await page.evaluate(() => sessionStorage.removeItem('quilt:probe-composer'));
     expect(frames?.length > 0, '没采到输入框的逐帧几何');
     const last = frames.at(-1)!;
-    const off = frames.filter((f) => Math.abs(f[1] - last[1]) > 2 || Math.abs(f[2] - last[2]) > 2);
-    await S.check(() => expect(frames.length > 10 && off.length === 0, `① 输入框应首帧即终值（${frames.length} 帧，终值 左 ${last[1]} 宽 ${last[2]}）：偏离的帧 ${JSON.stringify(off.slice(0, 4))}`));
+    const off = frames.filter((f) => Math.abs(f[1] - last[1]) > 2 || Math.abs(f[2] - last[2]) > 2 || !f[3]);
+    await S.check(() => expect(frames.length > 10 && off.length === 0, `① 输入框应首帧即终值、通道触发器从第一帧起就在（${frames.length} 帧，终值 左 ${last[1]} 宽 ${last[2]}）：偏离的帧 [毫秒, 左, 宽, 触发器] ${JSON.stringify(off.slice(0, 4))}`));
     // 2 1440 下开设计系统面板：先截通道名，工具条不折行、高度不变、不压面板
     const c0 = await box('form.composer');
     const trig0 = (await box('[data-testid="runner-select"]')).width;

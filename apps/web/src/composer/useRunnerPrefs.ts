@@ -9,6 +9,16 @@ const RUNNER_KEY = 'quilt:runner';
 const SESSION_KEY: Record<AgentTool, string> = { 'claude-code': 'quilt:agent-session', codex: 'quilt:agent-session:codex' };
 const MODE_KEY = 'quilt:composer-mode';
 const read = (key: string) => { try { return localStorage.getItem(key) ?? ''; } catch { return ''; } };
+// 通道清单在本机留底（v0.81）：外壳常驻（v0.76）后输入框比清单先画出来，通道位空着时量出的宽度偏窄、清单一到就变宽；
+// 首帧先按上一次取到的那份画（INT-021），取到新的就换成新的
+const CATALOG_KEY = 'quilt:runners';
+type Catalog = { items: RunnerOptionDto[]; default: string };
+const NO_CATALOG: Catalog = { items: [], default: '' };
+const readCatalog = (): Catalog => {
+  try { const c = JSON.parse(read(CATALOG_KEY) || 'null') as Catalog | null; return c && Array.isArray(c.items) && typeof c.default === 'string' ? c : NO_CATALOG; } catch { return NO_CATALOG; }
+};
+// 记住的通道还在清单里且可用就用它，否则用清单的缺省项
+const resolve = (id: string, c: Catalog) => (id && c.items.some((x) => x.id === id && x.available) ? id : c.default);
 
 export type SessionList = { items: AgentSessionDto[] | null; reason?: string };
 
@@ -16,20 +26,25 @@ export type SessionList = { items: AgentSessionDto[] | null; reason?: string };
 export function useRunnerPrefs() {
   const toast = useToast();
   // 生成通道（REQ-CORE-011）：清单来自服务端，选择作为跨会话偏好记在本机（INT-007 / INT-021）
-  const [runners, setRunners] = useState<RunnerOptionDto[]>([]);
-  const [runnerId, setRunnerId] = useState(() => read(RUNNER_KEY));
+  const [catalog, setCatalog] = useState(readCatalog);
+  const runners = catalog.items;
+  // picked 是记住的选择；清单到之前按留底解析出首帧要画的那一项，到了之后 applyCatalog 把 picked 落成解析结果，两者一致
+  const [picked, setPicked] = useState(() => read(RUNNER_KEY));
+  const runnerId = resolve(picked, catalog);
   // 清单落地只有这一条路径：挂载时取一次，之后由通道管理器在增删改后回传（保住当前选择，它还可用就不动）
   const applyCatalog = useCallback((items: RunnerOptionDto[], defaultId: string) => {
-    setRunners(items);
-    setRunnerId((cur) => (cur && items.some((x) => x.id === cur && x.available) ? cur : defaultId));
+    const next = { items, default: defaultId };
+    setCatalog(next);
+    setPicked((cur) => resolve(cur, next));
+    try { localStorage.setItem(CATALOG_KEY, JSON.stringify(next)); } catch { /* 无痕模式写不了 */ }
   }, []);
-  // 取不到清单要说出来（v0.76）：当成空的话通道选择器整块消失，用户不知道通道去哪了
+  // 取不到清单要说出来（v0.76）：当成空的话通道选择器整块消失，用户不知道通道去哪了。留底也不再用——通道位写的是没加载出来，发送就不能走留底里的通道
   const [runnersFailed, setRunnersFailed] = useState(false);
-  const loadRunners = useCallback(() => api.runners().then((r) => { setRunnersFailed(false); applyCatalog(r.items, r.default); }).catch(() => setRunnersFailed(true)), [applyCatalog]);
+  const loadRunners = useCallback(() => api.runners().then((r) => { setRunnersFailed(false); applyCatalog(r.items, r.default); }).catch(() => { setCatalog(NO_CATALOG); setRunnersFailed(true); }), [applyCatalog]);
   useEffect(() => { void loadRunners(); }, [loadRunners]);
   // 空值不落（同 onSessionChange）：切「聊天」再切回「造 / 改」时通道清单换批，Radix Select 隐藏的原生 <select> 在那一帧回报 ''，
   // 照写会把选中的通道清掉、下一轮静默走默认通道（v0.74）
-  const onRunnerChange = (id: string) => { if (!id) return; setRunnerId(id); try { localStorage.setItem(RUNNER_KEY, id); } catch { /* 无痕模式写不了 */ } };
+  const onRunnerChange = (id: string) => { if (!id) return; setPicked(id); try { localStorage.setItem(RUNNER_KEY, id); } catch { /* 无痕模式写不了 */ } };
   const runner = runners.find((r) => r.id === runnerId)?.runner;
   const agentTool = runner?.kind === 'agent' ? runner.tool : null;
   // 投递会话（REQ-AGENT-003 v0.34 / v0.68）：通道是本机 agent 时还要选投给哪个会话，选择按工具跨会话记忆（INT-007 / INT-021）；
