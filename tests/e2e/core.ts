@@ -383,6 +383,42 @@ await step('TC-CORE-081', async () => {
   } finally { await hiCtx.close(); }
 });
 
+// TC-CORE-082 事件流假死时作业照样收尾（v0.88）：经 Vite 代理时 API 重启，代理不关浏览器这一侧，EventSource 停在 open、
+// 再也收不到任何事件（连 ping 都没有）；作业在服务端早结束了，行还挂着「排队中…」。无头下用包一层 EventSource 的探针
+// 把当前这条流冻住（只丢事件、不断开），模拟代理那一侧的假死
+await step('TC-CORE-082', async () => {
+  const { projectId } = seedJson<{ projectId: string }>('seed:project', '--name', 'Frozen', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const fctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await fctx.addInitScript(`(() => { const O = window.EventSource; window.__sseCount = 0; function W(u, i) { const es = new O(u, i); window.__sseCount += 1; window.__sseLast = es; const add = es.addEventListener.bind(es); es.addEventListener = (t, fn, o) => add(t, (ev) => { if (!es.__frozen) fn(ev); }, o); return es; } W.prototype = O.prototype; W.CONNECTING = 0; W.OPEN = 1; W.CLOSED = 2; window.EventSource = W; window.__freezeSse = () => { window.__sseLast.__frozen = true; }; })()`);
+  const fp = await fctx.newPage();
+  try {
+    await fp.goto(`${WEB}/p/${projectId}`);
+    await fp.locator('[data-testid="screen-card"]').first().waitFor();
+    await useStubChannel(fp, { port: 3981, label: 'Stub 假死 82', holdMs: 1500 });
+    await fp.waitForFunction('window.__sseLast && window.__sseLast.readyState === 1');
+    const before = (await fp.evaluate('window.__sseCount')) as number;
+    await fp.evaluate('window.__freezeSse()');
+    await fp.locator('[data-testid="screen-card"]').first().locator('.gesture').click();
+    await fp.fill('#chat-input', '标题改成「假死测试」');
+    const created = fp.waitForResponse((r) => r.request().method() === 'POST' && /\/v1\/projects\/[^/]+\/messages$/.test(r.url()));
+    await fp.keyboard.press('Enter');
+    const jobId = ((await (await created).json()) as { job: { id: string } }).job.id;
+    const row = fp.locator(`[data-testid="running-job"][data-job-id="${jobId}"]`);
+    await row.waitFor({ timeout: 5000 });
+    const t0 = Date.now();
+    await eventually(async () => expect((await apiJson<{ job: { status: string } }>(`/v1/jobs/${jobId}`)).body.job.status === 'succeeded', '作业没在服务端跑完'), 30_000);
+    // 流冻住时画布收不到终态：要靠自己发现这条流死了、重连后对账把行撤掉
+    await row.waitFor({ state: 'detached', timeout: 60_000 }).catch(() => {});
+    const secs = Math.round((Date.now() - t0) / 1000);
+    const after = (await fp.evaluate('window.__sseCount')) as number;
+    const stuck = (await row.count()) ? (await row.innerText()).replace(/\s+/g, ' ') : '';
+    expect(!stuck, `作业在服务端早已 succeeded，${secs} s 后行还挂着「${stuck}」（流冻住后开流 ${before} → ${after} 次）`);
+    expect(after > before, '行撤掉了，但冻住的事件流没有重建');
+    await eventually(async () => expect(!(await fp.locator('aside[aria-label="对话记录"]').innerText()).includes('排队中'), '对话记录这一轮还停在「排队中…」'), 10_000);
+    return `流冻住后 ${secs} s 撤掉作业行（开流 ${before} → ${after} 次），对话记录这一轮补上回执`;
+  } finally { await fctx.close(); }
+});
+
 await step('TC-CORE-023', async () => {
   const { projectId } = seedJson<{ projectId: string }>('seed:project', '--name', 'ShellCheck', '--device', 'mobile', '--screens', '4');
   await page.setViewportSize({ width: 1440, height: 900 });

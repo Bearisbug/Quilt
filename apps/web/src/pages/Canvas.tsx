@@ -188,6 +188,8 @@ export function CanvasPage() {
   activeJobsRef.current = activeJobs;
   const finishedRef = useRef(new Set<string>());
   const seenRef = useRef(new Set<string>());
+  // 本页建的作业开始跟踪时的详情请求序号（v0.88）：之后发出的详情请求里它不在进行中，就是已经结束了——对账靠它撤掉从没被哪次详情列出过的作业
+  const trackedAt = useRef(new Map<string, number>());
   // 每个作业开始跟踪那一刻的屏集合：generate 成功后用它从结果里挑出「这一轮新造的屏」
   const beforeRef = useRef(new Map<string, Set<string>>());
   // 刚写出去、服务端还没回声的坐标（拖动与排列）归本地，服务端跟上即出栈——见 positions.ts 的 usePositionDrafts
@@ -211,14 +213,15 @@ export function CanvasPage() {
       setDetail(drafts.reconcile(d));
       const live = new Set(d.activeJobs.map((j) => j.id));
       for (const id of live) seenRef.current.add(id);
-      // 只剔除服务端确认过（某次 GET 列出过）的作业：刚建的作业可能还没进这次 GET 的快照，
-      // 无条件剔除会让它的行闪一下又回来，重连的订阅还会从 seq 0 重放一遍
-      const gone = activeJobsRef.current.filter((j) => !live.has(j.id) && seenRef.current.has(j.id));
+      // 只剔除服务端确认过（某次 GET 列出过）、或在这次 GET 发出之前就已跟踪的作业：比作业先发出的 GET 快照里没有它，
+      // 无条件剔除会让它的行闪一下又回来，重连的订阅还会从 seq 0 重放一遍。只认「列出过」不够（v0.88）：事件流假死时
+      // 本页建的作业从建到结束都没被哪次 GET 列出过，重连后的整体重取也撤不掉它，行一直挂着「排队中…」
+      const gone = activeJobsRef.current.filter((j) => !live.has(j.id) && (seenRef.current.has(j.id) || (trackedAt.current.get(j.id) ?? Infinity) < seq));
       if (gone.length) {
         const dead = new Set(gone.map((j) => j.id));
         setActiveJobs((prev) => prev.filter((j) => !dead.has(j.id)));
         setProgress((m) => { const next = { ...m }; for (const id of dead) delete next[id]; return next; });
-        for (const id of dead) seenRef.current.delete(id);
+        for (const id of dead) { seenRef.current.delete(id); trackedAt.current.delete(id); }
         refreshMessages();
       }
       const tracked = new Set(activeJobsRef.current.map((j) => j.id));
@@ -312,6 +315,7 @@ export function CanvasPage() {
     if (e.type === 'succeeded' || e.type === 'failed' || e.type === 'cancelled') {
       finishedRef.current.add(job.id);
       seenRef.current.delete(job.id);
+      trackedAt.current.delete(job.id);
       const before = beforeRef.current.get(job.id) ?? new Set<string>();
       beforeRef.current.delete(job.id);
       setActiveJobs((prev) => prev.filter((j) => j.id !== job.id));
@@ -432,6 +436,7 @@ export function CanvasPage() {
   // 追加而不是替换：并行作业各自成行，且 job.input 里带着目标屏，冲突判定不必等下一次 refresh
   const trackJob = (job: JobDto) => {
     if (!beforeRef.current.has(job.id)) beforeRef.current.set(job.id, new Set(screensRef.current.map((s) => s.id)));
+    if (!trackedAt.current.has(job.id)) trackedAt.current.set(job.id, detailSeq.current);
     setActiveJobs((prev) => (prev.some((j) => j.id === job.id) ? prev : [...prev, job]));
   };
   const startJob = async (body: unknown, fallback: string) => {

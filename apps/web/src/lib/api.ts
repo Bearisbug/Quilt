@@ -146,20 +146,31 @@ export const api = {
 export type LiveState = 'open' | 'reconnecting' | 'offline';
 const RETRY_MS = [1000, 2000, 5000, 10000, 30000];
 const MAX_RETRIES = 20;
+// 假死（v0.88）：服务端每 15 s 写一个 ping。经 Vite 代理时 API 重启，代理不关浏览器这一侧，EventSource 一直停在 open、
+// 什么都收不到，onerror 也不来——35 s（两个 ping 加余量）里什么都没收到就当这条流已死，关掉重建，按断线处理
+const STALE_MS = 35_000;
 export function subscribeProjectEvents(projectId: string, onEvent: (e: ProjectEventDto) => void, onState?: (s: LiveState) => void): () => void {
   let es: EventSource | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
   let failures = 0;
   let stopped = false;
-  const handler = (ev: MessageEvent) => { try { onEvent(JSON.parse(ev.data) as ProjectEventDto); } catch { /* ignore */ } };
   const connect = () => {
     const cur = new EventSource(`/v1/projects/${projectId}/events`);
     es = cur;
+    const alive = () => {
+      clearTimeout(watchdog);
+      watchdog = setTimeout(() => { if (stopped || es !== cur) return; cur.close(); onState?.('reconnecting'); connect(); }, STALE_MS);
+    };
+    const handler = (ev: MessageEvent) => { alive(); try { onEvent(JSON.parse(ev.data) as ProjectEventDto); } catch { /* ignore */ } };
     for (const t of ['screen_changed', 'job_changed']) cur.addEventListener(t, handler as EventListener);
-    cur.onopen = () => { failures = 0; onState?.('open'); };
+    cur.addEventListener('ping', alive);
+    cur.onopen = () => { failures = 0; alive(); onState?.('open'); };
+    alive();
     cur.onerror = () => {
       if (stopped) return;
       if (cur.readyState !== EventSource.CLOSED) { onState?.('reconnecting'); return; }   // 浏览器自己在重连
+      clearTimeout(watchdog);
       cur.close();
       if (failures >= MAX_RETRIES) { onState?.('offline'); return; }
       onState?.('reconnecting');
@@ -168,5 +179,5 @@ export function subscribeProjectEvents(projectId: string, onEvent: (e: ProjectEv
     };
   };
   connect();
-  return () => { stopped = true; clearTimeout(timer); es?.close(); };
+  return () => { stopped = true; clearTimeout(timer); clearTimeout(watchdog); es?.close(); };
 }
