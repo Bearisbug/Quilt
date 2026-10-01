@@ -350,6 +350,39 @@ await step('TC-CORE-080', async () => {
   } finally { await hiCtx.close(); }
 });
 
+// TC-CORE-081 高速缩小不缺图块（v0.86）：手势中栅格比例冻在开始时的缩放上，从放大态快速缩小，新露出来的区域按高比例现画，
+// 显存放不下也来不及画，卡片整块空着。无头下抽帧看得见但不好断言，改数性能追踪里每帧的 missing tiles
+await step('TC-CORE-081', async () => {
+  const { projectId } = seedJson<{ projectId: string }>('seed:project', '--name', 'FastZoom', '--device', 'desktop', '--screens', '25');
+  const { body: { screens } } = await apiJson<{ screens: { id: string }[] }>(`/v1/projects/${projectId}`);
+  for (const [i, s] of screens.entries()) await apiJson(`/v1/screens/${s.id}`, { method: 'PATCH', body: JSON.stringify({ x: (i % 5) * 1700, y: Math.floor(i / 5) * 1400 }) });
+  const hiCtx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+  const hi = await hiCtx.newPage();
+  try {
+    await hi.goto(`${WEB}/p/${projectId}`);
+    await hi.locator('[data-testid="screen-card"]').first().waitFor();
+    await hi.keyboard.press('f');
+    await eventually(async () => expect((await hi.locator('[data-testid="screen-card"] img.shot:not(.pending)').count()) === 25, '25 张截图还没都解码'), 120_000);
+    await hi.waitForTimeout(1500);
+    const cdp = await hiCtx.newCDPSession(hi);
+    const wheel = (dy: number, x: number, y: number) => cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: 0, deltaY: dy, modifiers: 2 });
+    await browser.startTracing(hi, { categories: ['benchmark'] });
+    for (const [x, y] of [[500, 380], [900, 500], [700, 300]]) {
+      for (let i = 0; i < 30; i++) { await wheel(-12, x, y); await hi.waitForTimeout(8); }
+      await hi.waitForTimeout(400);
+      for (let i = 0; i < 30; i++) { await wheel(12, x, y); await hi.waitForTimeout(8); }
+      await hi.waitForTimeout(400);
+    }
+    const trace = JSON.parse((await browser.stopTracing()).toString()) as { traceEvents: { name: string; args?: Record<string, number> }[] };
+    await cdp.detach();
+    const frames = trace.traceEvents.filter((e) => e.name === 'LayerTreeHostImpl::CalculateRenderPasses' && e.args && 'missing tiles' in e.args);
+    const bad = frames.map((e) => e.args!['missing tiles']).filter((n) => n > 0);
+    expect(frames.length > 0, '追踪里没有 CalculateRenderPasses（类别没开对）');
+    expect(bad.length <= 2 && Math.max(0, ...bad) <= 16, `${frames.length} 帧里 ${bad.length} 帧缺图块，单帧最多 ${Math.max(0, ...bad)} 块（卡片整块空着）`);
+    return `三轮快速放大—缩小共 ${frames.length} 帧，缺图块 ${bad.length} 帧${bad.length ? `、单帧最多 ${Math.max(...bad)} 块` : ''}`;
+  } finally { await hiCtx.close(); }
+});
+
 await step('TC-CORE-023', async () => {
   const { projectId } = seedJson<{ projectId: string }>('seed:project', '--name', 'ShellCheck', '--device', 'mobile', '--screens', '4');
   await page.setViewportSize({ width: 1440, height: 900 });

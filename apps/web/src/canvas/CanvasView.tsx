@@ -101,6 +101,8 @@ const STYLE_GUIDE_POS = { x: -(STYLE_GUIDE_SIZE.w + 80), y: 0 };
 // 缩放下限（v0.76）：25 张桌面屏横排约 34000 px，下限取 0.1 的话适配视图有 6 屏整张在视口外。
 // 适配视图、画布与屏内捏合、存储镜头校验都用它
 const MIN_ZOOM = 0.02;
+// 手势中往小缩到冻结栅格比例的这个倍数以下就重画一次（v0.86，见 applyTransform）
+const RERASTER_RATIO = 0.7;
 // 组件卡尺寸没记过时的紧凑占位高度（v0.76）：按设备整屏占位的话，每次加载都是一块 844 高的白板
 const COMP_PLACEHOLDER_H = 64;
 // 存下来的镜头要按当前数据校验再用（INT-019）：缩放超出 panzoom 的 [MIN_ZOOM, 2] 或存进去的是 NaN / 旧格式，
@@ -266,6 +268,10 @@ export function CanvasView(p: CanvasProps) {
   // 平移缩放进行中给世界层挂 will-change 让它独立合成：不挂的话每改一次 transform 整层（跨越大片区域的连线 SVG 尤其贵）都要重新光栅化，
   // 100 屏时 GPU 每帧超预算。常驻又不行——独立合成层按挂上时的比例光栅化，放大后文字发虚；停下 200 ms 摘掉，按最终比例清晰重画一次
   const movingTimer = useRef<number | null>(null);
+  // 挂着 moving 时栅格比例冻在挂上那一刻的缩放（zoom）。往小缩时新露出来的区域都要按这个比例现画：从 200% 一路缩到全景，
+  // 一帧要现画几百块图块，显存放不下也画不完，这几帧卡片整块空着（25 屏 2 倍屏实测一次快速缩小缺块的帧 3～4 个、单帧最多 408 块）。
+  // 缩到冻结比例的 RERASTER_RATIO 以下就摘掉 moving 一帧，让浏览器按当前比例重画，下一帧再挂上（pending 期间不重挂）
+  const raster = useRef({ zoom: 0, pending: false });
   const viewSubs = useRef(new Set<(v: ViewInfo) => void>());
   const onView = useCallback((cb: (v: ViewInfo) => void) => {
     viewSubs.current.add(cb);
@@ -285,7 +291,18 @@ export function CanvasView(p: CanvasProps) {
     const world = worldRef.current;
     if (world) {
       world.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
-      world.classList.add('moving');
+      const r = raster.current;
+      if (!r.pending) {
+        if (!world.classList.contains('moving')) { world.classList.add('moving'); r.zoom = v.zoom; }
+        else if (v.zoom < r.zoom * RERASTER_RATIO) {
+          // 两层 rAF：这一帧要带着「没有 moving」提交出去才会重画，单层 rAF 可能在同一帧的样式计算之前就把它挂回去
+          world.classList.remove('moving'); r.pending = true;
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            r.pending = false;
+            if (movingTimer.current) { world.classList.add('moving'); r.zoom = vp.current.zoom; }
+          }));
+        }
+      }
       if (movingTimer.current) clearTimeout(movingTimer.current);
       // 停下时顺手写 --canvas-zoom（v0.80）：选中描边与卡片焦点环按它保持屏幕像素宽度。逐帧写的话每帧全部卡片重算样式
       movingTimer.current = window.setTimeout(() => { world.classList.remove('moving'); world.style.setProperty('--canvas-zoom', String(vp.current.zoom)); movingTimer.current = null; }, 200);
