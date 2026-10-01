@@ -312,6 +312,59 @@ await step('TC-CORE-008', async () => {
   } finally { await hiCtx.close(); }
 });
 
+// TC-CORE-083 屏里的 dark: 变体按屏自己的配色判（v0.89）：Play CDN 默认按看的人的系统偏好判，亮色项目在暗色系统里开交互态，
+// 白色 logo（hidden dark:block）落在白底上；截图浏览器是亮色偏好，截出来又是黑色那版
+await step('TC-CORE-083', async () => {
+  const { projectId } = seedJson<{ projectId: string }>('seed:project', '--name', 'DarkVariant', '--device', 'mobile', '--screens', '0', '--no-shot');
+  const html = '<div class="min-h-dvh bg-background p-6"><div data-v="light" class="w-24 h-24 bg-primary dark:hidden"></div><div data-v="dark" class="hidden w-24 h-24 bg-error dark:block"></div></div>';
+  const bad: string[] = [];
+  const screenOf = async (sid: string) => (await apiJson<{ screens: { id: string; previewUrl: string; screenshotUrl: string | null; currentRevisionId: string }[]; designSystem: { tokens: { colors: Record<string, string> } } }>(`/v1/projects/${projectId}`)).body;
+  // 预览文档在给定系统偏好下哪一版显示（等 Tailwind 生效：w-24 = 96px）
+  const shownIn = async (url: string, scheme: 'light' | 'dark') => {
+    const c = await browser.newContext({ colorScheme: scheme });
+    try {
+      const p = await c.newPage(); await p.goto(url);
+      await p.waitForFunction(`getComputedStyle(document.querySelector('[data-v=light]')).width === '96px'`, null, { timeout: 20_000 });
+      return (await p.evaluate(`['light', 'dark'].filter((v) => getComputedStyle(document.querySelector('[data-v=' + v + ']')).display !== 'none').join(',')`)) as string;
+    } finally { await c.close(); }
+  };
+  // 截图里方块中心（p-6 + w-24 的中心 = 72 CSS px，截图 2 倍）的颜色更接近哪个 token
+  const shotVariant = async (shotUrl: string, colors: Record<string, string>) => {
+    const b64 = Buffer.from(await (await fetch(shotUrl)).arrayBuffer()).toString('base64');
+    const rgb = (await page.evaluate(`new Promise((r) => { const i = new Image(); i.onload = () => { const c = document.createElement('canvas'); c.width = i.width; c.height = i.height; const g = c.getContext('2d'); g.drawImage(i, 0, 0); r(Array.from(g.getImageData(144, 144, 1, 1).data.slice(0, 3))); }; i.src = 'data:image/png;base64,${b64}'; })`)) as number[];
+    const dist = (hex: string) => { const n = parseInt(hex.slice(1), 16); return Math.abs((n >> 16) - rgb[0]) + Math.abs(((n >> 8) & 255) - rgb[1]) + Math.abs((n & 255) - rgb[2]); };
+    return dist(colors.primary) <= dist(colors.error) ? 'light' : 'dark';
+  };
+  const waitShot = async (sid: string, rev: string) => {
+    for (let i = 0; i < 60; i++) { const d = await screenOf(sid); const s = d.screens.find((x) => x.id === sid)!; if (s.currentRevisionId === rev && s.screenshotUrl) return { s, d }; await new Promise((r) => setTimeout(r, 1000)); }
+    throw new Error('截图 60 s 内未就绪');
+  };
+  const mcp = await connectMcp();
+  try {
+    const created = await callTool(mcp, 'quilt.create_screen', { projectId, name: 'Variant', route: '/variant', html });
+    expect(!created.isError, `推屏失败：${created.text.slice(0, 200)}`);
+    const { screenId: sid, revisionId } = created.json as { screenId: string; revisionId: string };
+    // 1 亮色配色：系统暗色、亮色偏好下都只显示亮色那版；截图同样
+    let { s, d } = await waitShot(sid, revisionId);
+    for (const scheme of ['dark', 'light'] as const) { const v = await shownIn(s.previewUrl, scheme); if (v !== 'light') bad.push(`亮色配色、系统${scheme === 'dark' ? '暗色' : '亮色'}偏好下显示的是「${v}」`); }
+    const v1 = await shotVariant(s.screenshotUrl!, d.designSystem.tokens.colors);
+    if (v1 !== 'light') bad.push(`亮色配色的截图里是「${v1}」那版`);
+    // 2 切到暗色色板并回刷：两种系统偏好下都只显示暗色那版；截图同样
+    const ds = (await apiJson<{ designSystem: { version: number } }>(`/v1/projects/${projectId}`)).body.designSystem;
+    const put = await apiJson(`/v1/projects/${projectId}/design-system`, { method: 'PUT', body: JSON.stringify({ palette: { light: {}, dark: { background: '#111820', onBackground: '#E1E2E8' } }, colorMode: 'dark', expectedVersion: ds.version }) });
+    expect(put.status === 200, `切暗色色板 ${put.status}`);
+    const job = await apiJson<{ job: { id: string } }>(`/v1/projects/${projectId}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ kind: 'apply_design_system', input: { screenIds: 'all' } }) });
+    expect((await waitJob(job.body.job.id, 90)).status === 'succeeded', '回刷作业没成功');
+    const rev2 = (await screenOf(sid)).screens.find((x) => x.id === sid)!.currentRevisionId;
+    ({ s, d } = await waitShot(sid, rev2));
+    for (const scheme of ['light', 'dark'] as const) { const v = await shownIn(s.previewUrl, scheme); if (v !== 'dark') bad.push(`暗色配色、系统${scheme === 'dark' ? '暗色' : '亮色'}偏好下显示的是「${v}」`); }
+    const v2 = await shotVariant(s.screenshotUrl!, d.designSystem.tokens.colors);
+    if (v2 !== 'dark') bad.push(`暗色配色的截图里是「${v2}」那版`);
+    expect(!bad.length, `${bad.length} 处不符：${bad.join('；')}`);
+    return '亮色配色两种系统偏好下与截图都是亮色那版；切暗色色板回刷后都是暗色那版';
+  } finally { await mcp.close(); }
+});
+
 // TC-CORE-080 缩放不建拆合成层、内容不拆碎、视口外骨架不占层（v0.84）。整屏闪白本身无头下只能抽帧碰运气，
 // 这里断言它的成因：手势一开始世界层若是新建的，第一帧图块没栅格化，整块画布被画成白色
 await step('TC-CORE-080', async () => {

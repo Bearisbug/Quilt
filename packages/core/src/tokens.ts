@@ -27,6 +27,12 @@ export const rgbTriplet = (hex: string): string => { const n = parseInt(hex.repl
 /** :root 里的颜色变量：--color-x（原值）与 --color-x-rgb（三元组），prelude 与导出共用 */
 export const colorVarsCss = (colors: Record<string, string>): string => Object.entries(colors).map(([k, v]) => `--color-${kebab(k)}:${v};--color-${kebab(k)}-rgb:${rgbTriplet(v)}`).join(';');
 
+// 配色是不是暗色（v0.89 ADR-005）：底色比正文暗。屏只有一套配色，Tailwind 的 dark: 变体按它判（见 prelude.ts）
+export function isDarkPalette(colors: { background: string; onBackground: string }): boolean {
+  const lum = (hex: string) => { const [r, g, b] = rgbTriplet(hex).split(" ").map(Number); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  return lum(colors.background) < lum(colors.onBackground);
+}
+
 export const kebab = (s: string): string => s.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
 export const COLOR_CLASS_NAMES: string[] = TOKEN_COLOR_KEYS.map(kebab);
 

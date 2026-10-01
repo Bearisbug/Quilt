@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { chromium, type Browser, type BrowserContextOptions, type Page } from 'playwright';
-import { withOverlayStyle, withScreenCsp } from '@quilt/core';
+import { withOverlayStyle, withPaletteDarkMode, withScreenCsp } from '@quilt/core';
 import { config } from '../config.ts';
 
 // 服务端截图（ADR-002）：单浏览器实例复用，按屏开 page。
@@ -151,7 +151,9 @@ export async function screenshotHtml(html: string, size: { w: number; h: number 
     // 屏的脚本在这里同样会执行，带上与预览域同一份 CSP（§15）：不带的话它一入库就能往本机 API 发写请求。
     // 不能改成 context.route 拦截一个固定地址来带响应头——拦截返回的文档没有对端 IP，Chromium 按公网算，
     // 本地网络访问限制会把屏里引用的预览域素材（回环地址）整张拦掉
-    await page.setContent(withScreenCsp(opts.overlay ? withOverlayStyle(html) : html), { waitUntil: 'networkidle', timeout: timeoutMs }).catch(() => {});
+    // dark: 按配色判（v0.89）：v0.89 之前写入的修订补上，截图与交互态才是同一个样子
+    const doc = withPaletteDarkMode(html);
+    await page.setContent(withScreenCsp(opts.overlay ? withOverlayStyle(doc) : doc), { waitUntil: 'networkidle', timeout: timeoutMs }).catch(() => {});
     await settle(page, timeoutMs);
     return await page.screenshot({ type: 'png', fullPage: false, omitBackground: !!opts.overlay });
   });

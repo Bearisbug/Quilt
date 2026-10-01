@@ -1,6 +1,10 @@
-import { kebab, colorVarsCss, type Tokens } from './tokens.ts';
+import { kebab, colorVarsCss, isDarkPalette, type Tokens } from './tokens.ts';
 import { fontFace } from './fonts.ts';
 import { RUNTIME_JS } from './runtime.ts';
+
+// 屏只有一套配色，Tailwind 的 dark: 变体按这套配色判、不按看的人的系统偏好（v0.89 ADR-005）：配置写 darkMode:'class'，
+// 暗色配色在 <head> 里给 <html> 加 dark 类。Play CDN 默认按系统偏好，亮色项目在暗色系统里开交互态会命中 dark:，截图浏览器却命中不到
+const DARK_CLASS_SCRIPT = '<script data-quilt-dark>document.documentElement.classList.add("dark")</script>';
 
 // 每版 HTML 的 <head> 由服务端拼装（ADR-005）：token CSS 变量 + Tailwind 映射 + 内联运行时。模型不生成这部分。
 export function buildPrelude(tokens: Tokens): string {
@@ -14,7 +18,8 @@ export function buildPrelude(tokens: Tokens): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     ...(font.link ? [font.link] : []),
     '<script src="https://cdn.tailwindcss.com"></script>',
-    `<script>tailwind.config={theme:{extend:{colors:{${twColors}},borderRadius:{${twRadius}},fontFamily:{sans:${JSON.stringify(font.families)}}}}}</script>`,
+    `<script>tailwind.config={darkMode:'class',theme:{extend:{colors:{${twColors}},borderRadius:{${twRadius}},fontFamily:{sans:${JSON.stringify(font.families)}}}}}</script>`,
+    ...(isDarkPalette(tokens.colors) ? [DARK_CLASS_SCRIPT] : []),
     `<style>:root{${colorVars};${radiusVars}}html,body{margin:0;min-height:100%;background:var(--color-background);color:var(--color-on-background);font-family:${font.stack};-webkit-font-smoothing:antialiased}::view-transition-old(root),::view-transition-new(root){animation-duration:220ms}</style>`,
     '<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>',
     `<script data-quilt-runtime>${RUNTIME_JS}</script>`,
@@ -44,4 +49,14 @@ export function withOverlayStyle(html: string): string {
 const RUNTIME_BLOCK = /<script data-quilt-runtime>[\s\S]*?<\/script>|<script>\(function \(\) \{\s*var state = \(window\.__quiltState[\s\S]*?<\/script>/;
 export function withCurrentRuntime(html: string): string {
   return html.replace(RUNTIME_BLOCK, () => `<script data-quilt-runtime>${RUNTIME_JS}</script>`);
+}
+
+// v0.89 之前写入的修订：<head> 里是 Play CDN 默认的按系统偏好判 dark:。预览下发与截图时补成按配色判——配置加 darkMode:'class'，
+// 修订自己 :root 里的底色比正文暗就补上 dark 类。不重写修订；新写法（已带 darkMode）原样返回
+export function withPaletteDarkMode(html: string): string {
+  if (!html.includes('tailwind.config={theme:')) return html;
+  const out = html.replace('tailwind.config={theme:', "tailwind.config={darkMode:'class',theme:");
+  const bg = /--color-background:(#[0-9a-fA-F]{6})/.exec(html)?.[1];
+  const fg = /--color-on-background:(#[0-9a-fA-F]{6})/.exec(html)?.[1];
+  return bg && fg && isDarkPalette({ background: bg, onBackground: fg }) ? out.replace('</head>', `${DARK_CLASS_SCRIPT}\n</head>`) : out;
 }

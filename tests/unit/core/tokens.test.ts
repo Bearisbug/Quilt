@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { tokensFromSeed, TOKEN_COLOR_KEYS, fontFace, buildPrelude, withCurrentRuntime, withOverlayStyle, rgbTriplet, colorVarsCss, RUNTIME_JS } from '@quilt/core';
+import { tokensFromSeed, TOKEN_COLOR_KEYS, fontFace, buildPrelude, withCurrentRuntime, withOverlayStyle, withPaletteDarkMode, isDarkPalette, rgbTriplet, colorVarsCss, RUNTIME_JS } from '@quilt/core';
 
 test('tokensFromSeed：26 个色键齐全、品牌色板逐键覆盖、暗色底座、圆角档位、字体来源', () => {
   const t = tokensFromSeed('#3B5BDB');
@@ -48,4 +48,24 @@ test('token 色带 RGB 三元组，Tailwind 颜色走 <alpha-value>，透明度�
   assert.equal(colorVarsCss({ primary: '#000000', onPrimary: '#ffffff' }), '--color-primary:#000000;--color-primary-rgb:0 0 0;--color-on-primary:#ffffff;--color-on-primary-rgb:255 255 255');
   const pre = buildPrelude(tokensFromSeed('#3B5BDB'));
   assert.ok(pre.includes("'primary':'rgb(var(--color-primary-rgb) / <alpha-value>)'") && pre.includes('--color-primary-rgb:'), pre.slice(0, 300));
+});
+
+test('dark: 变体按配色判（v0.89）：Tailwind 用 class 策略，暗色配色给 <html> 加 dark；存量修订补同样两处', () => {
+  const light = tokensFromSeed('#3B5BDB');
+  const dark = tokensFromSeed('#3B5BDB', { colorMode: 'dark' });
+  assert.equal(isDarkPalette(light.colors), false);
+  assert.equal(isDarkPalette(dark.colors), true);
+  const pl = buildPrelude(light); const pd = buildPrelude(dark);
+  assert.ok(pl.includes("tailwind.config={darkMode:'class',theme:") && pd.includes("tailwind.config={darkMode:'class',theme:"));
+  assert.ok(!pl.includes('data-quilt-dark'), '亮色配色不该挂 dark 类');
+  assert.ok(pd.includes('data-quilt-dark') && pd.indexOf('data-quilt-dark') < pd.indexOf('<style>:root'), '暗色配色要在 head 里尽早挂 dark 类');
+  // 存量修订：v0.89 之前的 prelude 没有 darkMode
+  const legacy = (p: string) => `<!doctype html><html lang="en"><head>${p.replace("darkMode:'class',", '').replace(/<script data-quilt-dark>[^<]*<\/script>/, '')}</head><body><div class="dark:hidden"></div></body></html>`;
+  const oldLight = legacy(pl); const oldDark = legacy(pd);
+  assert.ok(!oldLight.includes('darkMode') && !oldDark.includes('data-quilt-dark'));
+  const fixedLight = withPaletteDarkMode(oldLight); const fixedDark = withPaletteDarkMode(oldDark);
+  assert.ok(fixedLight.includes("darkMode:'class'") && !fixedLight.includes('data-quilt-dark'));
+  assert.ok(fixedDark.includes("darkMode:'class'") && fixedDark.includes('data-quilt-dark') && fixedDark.indexOf('data-quilt-dark') < fixedDark.indexOf('</head>'));
+  const fresh = `<html><head>${pd}</head><body></body></html>`;
+  assert.equal(withPaletteDarkMode(fresh), fresh, '新写法原样返回');
 });

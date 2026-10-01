@@ -1,4 +1,4 @@
-import { colorVarsCss, type Tokens } from './tokens.ts';
+import { colorVarsCss, isDarkPalette, type Tokens } from './tokens.ts';
 import { fontFace } from './fonts.ts';
 
 // 导出单文件原型（REQ-PROTO-004 / ADR-003）：全部屏放进 <template>，hash 路由在同一文档内换 DOM，
@@ -75,8 +75,9 @@ export function buildPrototypeDocument(args: { title: string; tokens: Tokens; sc
   const font = fontFace(tokens.typography);
   const start = args.startRoute ?? (args.screens.find((s) => s.presentation !== 'overlay') ?? args.screens[0])?.route ?? '/';
   const templates = args.screens.map((s) => `<template data-route="${escapeAttr(s.route)}" data-name="${escapeAttr(s.name)}" data-presentation="${s.presentation ?? 'push'}">${s.body}</template>`).join('\n');
+  // dark: 变体按配色判（v0.89 ADR-005）：抽出来的 Tailwind CSS 是 .dark 祖先写法，暗色配色给 <html> 挂上 dark
   return `<!doctype html>
-<html lang="en">
+<html lang="en"${isDarkPalette(tokens.colors) ? ' class="dark"' : ''}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

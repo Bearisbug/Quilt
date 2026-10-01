@@ -6,7 +6,7 @@ import { requestSource } from '../lib/origin.ts';
 import { UUID } from './app.ts';
 import { verifyPreview } from '../lib/signing.ts';
 import { storage } from '../lib/storage.ts';
-import { withCurrentRuntime, withOverlayStyle, buildPrelude, SCREEN_CSP, type Tokens } from '@quilt/core';
+import { withCurrentRuntime, withPaletteDarkMode, withOverlayStyle, buildPrelude, SCREEN_CSP, type Tokens } from '@quilt/core';
 import { readAsset } from '../services/assets.ts';
 import { componentPreviewDocument } from '../services/components.ts';
 
@@ -39,7 +39,7 @@ previewApp.get('/p/:projectId/:screenId', async (c) => {
     .where(and(eq(schema.screenRevisions.id, rev), eq(schema.screenRevisions.screenId, screenId), eq(schema.screens.projectId, projectId)));
   if (!row) return problem(c, 404, '/errors/not-found', '修订不存在');
   // 叠层屏（v0.63）：呈现方式是元数据，下发时临时注入透明背景，压在别的屏上时露出底下那一屏
-  const raw = withCurrentRuntime((await storage.get(row.htmlKey)).toString('utf8'));
+  const raw = withPaletteDarkMode(withCurrentRuntime((await storage.get(row.htmlKey)).toString('utf8')));
   const html = row.presentation === 'overlay' ? withOverlayStyle(raw) : raw;
   c.header('Content-Type', 'text/html; charset=utf-8');
   // 修订本身不可变，但这份响应不是：运行时每次下发都换成当前版本（上一行）。标成 immutable 时浏览器 10 分钟内
