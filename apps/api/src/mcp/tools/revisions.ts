@@ -43,7 +43,7 @@ export function registerRevisionTools(c: ToolCtx) {
     const html = (await storage.get(source.htmlKey)).toString('utf8');
     const rev = await db.transaction(async (tx) => {
       if (await hasActiveJob(tx, project.id, screen.id)) throw problems.screenBusy();
-      const r = await createRevision(tx, { projectId: project.id, screenId: screen.id, html, sourceKind: 'restore', lintReport: source.lintReport, expectedRevisionId: a.expectedRevisionId as string });
+      const r = await createRevision(tx, { projectId: project.id, screenId: screen.id, html, sourceKind: 'restore', lintReport: source.lintReport, expectedRevisionId: a.expectedRevisionId as string, parentRevisionId: source.id });
       if (!r) throw problems.revisionConflict();
       await deriveLinks(tx, project.id);
       return r;

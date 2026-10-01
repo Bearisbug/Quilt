@@ -5,7 +5,7 @@ import { notifyCanvas } from '../lib/events.ts';
 import { storage, objectKeys } from '../lib/storage.ts';
 import { config } from '../config.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
-import { extractLinks, extractBody, outlineBody, componentNamesIn, type RevisionDto, type SourceKind, type CandidatesDto, DEVICE_SIZE, type DeviceType, type Presentation } from '@quilt/core';
+import { extractLinks, extractBody, outlineBody, componentNamesIn, screenInstructionHistory, type RevisionDto, type SourceKind, type CandidatesDto, DEVICE_SIZE, type DeviceType, type Presentation } from '@quilt/core';
 import { ownedProject, type ScreenRow, type RevisionRow, type ProjectRow } from './projects.ts';
 
 type Tx = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -24,7 +24,7 @@ export async function hasActiveJob(tx: Tx, projectId: string, screenId: string):
 }
 
 // 新修订（ADR-014 修订树）：先锁屏行再取号——并行落候选时两笔事务会算出同一 seq 撞唯一键（RUN-059）。
-// parentRevisionId 默认取此刻的 current；候选批要显式传同一个父版（第 1 版落库后 current 已变）。
+// parentRevisionId 默认取此刻的 current；候选批要显式传同一个父版（第 1 版落库后 current 已变），回溯传被回溯到的那一版（v0.87）。
 // advanceCurrent=false 只落修订不推进 current（候选批由调用方在全部落完后统一指向第 1 版）。
 // 返回 null 表示 expectedRevisionId 已过期。
 export async function createRevision(tx: Tx, args: {
@@ -130,22 +130,14 @@ export async function getRevision(screenId: string, revisionId: string): Promise
   return r;
 }
 
-// 屏级历史意图（ADR-012）：沿 current 的 parentRevisionId 祖先链回溯，经 jobId 反查那一轮的用户指令。
-// 按祖先链而不是时间序——回溯掉的分支上的指令不该再带进来。
-export async function priorInstructions(screenId: string, currentRevisionId: string | null, limit = 5): Promise<string[]> {
+// 屏级历史指令（ADR-012 v0.87）：取这屏的修订树与树上出现过的作业，由 screenInstructionHistory 沿 current 的父链选、截、排。
+// 按祖先链而不是时间序——回溯掉的分支上的指令不该再带进来
+export async function priorInstructions(screenId: string, currentRevisionId: string | null): Promise<string[]> {
   if (!currentRevisionId) return [];
-  const revs = await db.select({ id: schema.screenRevisions.id, parent: schema.screenRevisions.parentRevisionId, jobId: schema.screenRevisions.jobId }).from(schema.screenRevisions).where(eq(schema.screenRevisions.screenId, screenId));
-  const byId = new Map(revs.map((r) => [r.id, r]));
-  const jobIds: string[] = [];
-  for (let cur = byId.get(currentRevisionId); cur && jobIds.length < limit * 2; cur = cur.parent ? byId.get(cur.parent) : undefined) {
-    if (cur.jobId && !jobIds.includes(cur.jobId)) jobIds.push(cur.jobId);
-  }
-  if (!jobIds.length) return [];
-  const msgs = await db.select({ jobId: schema.messages.jobId, content: schema.messages.content }).from(schema.messages)
-    .where(and(inArray(schema.messages.jobId, jobIds), eq(schema.messages.role, 'user')));
-  const byJob = new Map(msgs.map((m) => [m.jobId!, m.content]));
-  // 最近的在前；只保留用户真写的指令（补链 / 批注的固定指令也算意图，照带）
-  return jobIds.map((j) => byJob.get(j)).filter((c): c is string => !!c).slice(0, limit);
+  const revs = await db.select({ id: schema.screenRevisions.id, parentRevisionId: schema.screenRevisions.parentRevisionId, jobId: schema.screenRevisions.jobId }).from(schema.screenRevisions).where(eq(schema.screenRevisions.screenId, screenId));
+  const jobIds = Array.from(new Set(revs.map((r) => r.jobId).filter((j): j is string => !!j)));
+  const jobs = jobIds.length ? await db.select({ id: schema.generationJobs.id, kind: schema.generationJobs.kind, input: schema.generationJobs.input }).from(schema.generationJobs).where(inArray(schema.generationJobs.id, jobIds)) : [];
+  return screenInstructionHistory(currentRevisionId, revs, jobs);
 }
 
 // 样板屏（REQ-CORE-016）：projects.exemplarScreenId 的 current；没钦定或已删则回落到最早一张 lint 通过的屏

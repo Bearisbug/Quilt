@@ -448,6 +448,57 @@ await step('TC-AGENT-012', async () => {
   return `列表只含用户线程且标出应用 / 打开与否；打开的线程只 queue、未打开的 queue 后开深链接；回执 / 面板写明 Codex；exec 线程与不存在 400、队列失败 failed(agent)；打不开线程时作业仍 running、提示打开，打开后收口；选择按工具记忆；Codex 订阅通道 exec 参数与记账`;
 });
 
+// v0.87（ADR-012）：投递给本机会话的改屏 / 局部重生成提示词带目标屏此前已生效的用户指令。假会话收到 HANG 不动手，看完提示词就取消
+await step('TC-AGENT-023', async () => {
+  const DIR = process.env.QUILT_CLAUDE_SESSIONS_DIR ?? '';
+  if (!DIR) return '跳过：未设 QUILT_CLAUDE_SESSIONS_DIR（API 与本脚本都要以同一目录启动，§3）';
+  if (!claudeRunner.available) return `跳过：本机 claude 不可用（${claudeRunner.unavailableReason ?? ''}）`;
+  const { startFakeSession } = await import('./agent-stub.ts');
+  const fake = await startFakeSession({ dir: DIR, name: 'Stub 历史', nameSource: 'user' });
+  // 每分钟 10 个作业的限流（§15）：前面的用例刚建过一批，撞上 429 就等 5 s 再发
+  const post = async <T,>(p: string, body: unknown) => { for (let i = 0; ; i++) { const r = await apiJson<T>(p, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(body) }); if (r.status !== 429 || i >= 15) return r; await sleep(5000); } };
+  const HEAD = 'EARLIER INSTRUCTIONS ALREADY APPLIED TO SCREEN "Screen 1" (/s1)';
+  const block = (prompt: string): string[] | null => {
+    const i = prompt.indexOf(HEAD);
+    if (i < 0) return null;
+    const items: string[] = [];
+    for (const l of prompt.slice(i).split('\n').slice(1)) { const m = /^\d+\. (.*)$/.exec(l); if (!m) break; items.push(m[1]); }
+    return items;
+  };
+  const deliver = async (path_: string, body: unknown) => {
+    const n0 = fake.received.length;
+    const r = await post<{ job: { id: string } }>(path_, body);
+    expect(r.status === 202, `投递作业 ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
+    for (let i = 0; i < 40 && fake.received.length === n0; i++) await sleep(250);
+    await post(`/v1/jobs/${r.body.job.id}/cancel`, {});
+    expect(fake.received.length > n0, '假会话没收到投递');
+    return fake.received[n0];
+  };
+  try {
+    await sleep(2100); // 服务端会话列表缓存 2 s
+    const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'AgentHistory', '--device', 'mobile', '--screens', '1', '--no-shot');
+    const s1 = r.screens[0].id;
+    const agent = { kind: 'agent', tool: 'claude-code', sessionId: fake.sessionId };
+    // 1 两轮模型改屏
+    for (const content of ['A1 卡片改成两列', 'A2 加一个筛选栏']) {
+      const m = await post<{ job: { id: string } }>(`/v1/projects/${r.projectId}/messages`, { content, targetScreenIds: [s1], runner: { kind: 'model', driver: 'stub', model: 'stub' } });
+      expect(m.status === 202, `发「${content}」${m.status}`);
+      expect((await waitJob(m.body.job.id, 60)).status === 'succeeded', `「${content}」没成功`);
+    }
+    const want = ['A2 加一个筛选栏', 'A1 卡片改成两列'];
+    // 2 交给假会话改屏：提示词带这屏的历史
+    const p2 = await deliver(`/v1/projects/${r.projectId}/messages`, { content: 'HANG A3 换成深色', targetScreenIds: [s1], runner: agent });
+    expect(JSON.stringify(block(p2)) === JSON.stringify(want), `② 改屏投递的历史块应为 ${JSON.stringify(want)}：${JSON.stringify(block(p2))}`);
+    // 3 交给假会话局部重生成：同一份历史，取消掉的 A3 没有修订、不在里面
+    const cur = (await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${r.projectId}`)).body.screens.find((s) => s.id === s1)!.currentRevisionId;
+    const rev = (await apiJson<{ revision: { htmlUrl: string } }>(`/v1/screens/${s1}/revisions/${cur}`)).body.revision;
+    const qid = /<h1[^>]*data-qid="(q\d+)"/.exec(await (await fetch(rev.htmlUrl)).text())?.[1];
+    const p3 = await deliver(`/v1/projects/${r.projectId}/jobs`, { kind: 'regenerate_subtree', input: { screenId: s1, qid, prompt: 'HANG A4 标题加粗', expectedRevisionId: cur, runner: agent } });
+    expect(JSON.stringify(block(p3)) === JSON.stringify(want) && !p3.includes('A3'), `③ 局部重生成投递的历史块应为 ${JSON.stringify(want)} 且不含 A3：${JSON.stringify(block(p3))}`);
+    return '改屏与局部重生成的投递提示词都带目标屏的历史，从新到旧；取消掉的那轮不在';
+  } finally { await fake.close().catch(() => {}); }
+});
+
 await browser.close();
 console.log(`\n=== RUN-${RUN} AGENT ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));
 console.log(results.map((r) => `${r.tc} ${r.result} ${r.note}`).join('\n'));

@@ -5,9 +5,9 @@ import { emitJobEvent } from '../lib/events.ts';
 import { findSession, injectMessage } from '../lib/claudeSessions.ts';
 import { findCodexThread, openCodexThread, queueCodexMessage } from '../lib/codexSessions.ts';
 import { registerAgentHooks } from '../services/jobs.ts';
-import { deriveLinks } from '../services/screens.ts';
+import { deriveLinks, priorInstructions } from '../services/screens.ts';
 import type { JobRow } from '../services/projects.ts';
-import type { AgentTool } from '@quilt/core';
+import { priorInstructionsBlock, type AgentTool } from '@quilt/core';
 
 // 本机 agent 投递（REQ-AGENT-003 / ADR-015 v0.34）：runner=agent 的作业由这里投递到用户选定的本机 Claude Code 会话——
 // 往它的 inbox socket 写一行用户消息；会话在自己的窗口里做、经 MCP 回写，最后调 quilt.finish_job 收口。
@@ -35,11 +35,16 @@ async function buildPrompt(job: JobRow): Promise<string> {
   const scope = job.kind === 'regenerate_subtree' && input.qid
     ? `Scope: rewrite ONLY the element with data-qid="${input.qid}" (and its subtree) on the target screen. Keep every other element identical: change it with quilt.patch_screen (find = that element's current HTML from quilt.get_screen, replace = the new HTML) instead of resending the whole screen.`
     : '';
+  // 每个目标屏此前已生效的用户指令（ADR-012 v0.87）：别的通道、批注、MCP 改过的轮次不在这个会话的记忆里
+  const history = job.kind === 'edit_screens' || job.kind === 'regenerate_subtree'
+    ? (await Promise.all(screens.map(async (s) => priorInstructionsBlock(`SCREEN "${s.name}" (${s.route})`, await priorInstructions(s.id, s.currentRevisionId)).trim()))).filter(Boolean).join('\n\n')
+    : '';
   return [
     `[Quilt] The Quilt canvas delivered a job to this session (job ${job.id}).`,
     `You are working on the Quilt project "${project.name}" (projectId ${project.id}, ${project.deviceType}) through the Quilt MCP server "quilt" at ${mcpUrl()}. ${MCP_SETUP[toolOf(job)](mcpUrl())}`,
     project.brief ? `App brief: ${project.brief}` : '',
     `Instruction from the user:\n${input.prompt}`,
+    history,
     scope,
     `Target screens:\n${targets}`,
     `Rules: pass jobId="${job.id}" on EVERY quilt.update_screen / quilt.create_screen call; for update_screen pass the expectedRevisionId listed above. If you get 409 revision-conflict, call quilt.get_screen and redo the change on the current version.`,

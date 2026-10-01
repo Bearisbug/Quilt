@@ -87,7 +87,7 @@ export async function send(user: UserRow, projectId: string, annotationIds: stri
     for (const [screenId, items] of byScreen) {
       const { job } = await createJob({
         user, projectId, requestId, idempotencyKey: null,
-        input: { kind: 'edit_screens', input: { prompt: annotationsPrompt(items.map((i) => ({ qid: i.qid, note: i.note, anchorText: i.anchorText }))), screenIds: [screenId], versions: 1 } },
+        input: { kind: 'edit_screens', input: { prompt: annotationsPrompt(items.map((i) => ({ qid: i.qid, note: i.note, anchorText: i.anchorText }))), screenIds: [screenId], versions: 1, annotations: items.map((i) => ({ anchorText: i.anchorText, note: i.note })) } },
       });
       jobs.push(job);
       await db.update(schema.annotations).set({ status: 'sent', sentJobId: job.id, updatedAt: new Date() }).where(inArray(schema.annotations.id, items.map((i) => i.id)));

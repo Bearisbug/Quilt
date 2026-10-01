@@ -8,7 +8,7 @@ import { signPreview, stableExpiry } from '../lib/signing.ts';
 import { emitProjectEvent, notifyCanvas } from '../lib/events.ts';
 import {
   assembleDocument, buildPrelude, extractBody, lintScreenBody, expandComponents, extractComponent, findComponentMatch, replaceWithPlaceholder,
-  componentSummary, componentSlots, componentPlacement, componentOf, validateComponentHtml, classifyComponentHtml, applyElementOps, injectQids, MAX_COMPONENTS_PER_PROJECT,
+  componentSummary, componentSlots, componentPlacement, componentOf, validateComponentHtml, classifyComponentHtml, applyElementOps, injectQids, componentInstructionHistory, MAX_COMPONENTS_PER_PROJECT,
   type ComponentDto, type SharedComponent, type SharedComponentCard, type Tokens, type ElementOp,
 } from '@quilt/core';
 import { ownedProject, type ProjectRow, type ScreenRow } from './projects.ts';
@@ -91,6 +91,13 @@ export async function ownedComponent(ownerId: string, componentId: string): Prom
   if (!component) throw problems.notFound();
   const project = await ownedProject(ownerId, component.projectId);
   return { component, project };
+}
+
+// 组件级历史指令（ADR-012 v0.87）：组件没有修订表、HTML 原地覆盖，取本项目成功的改组件作业，由 componentInstructionHistory 按组件选、截、排
+export async function componentInstructions(projectId: string, componentId: string): Promise<string[]> {
+  const jobs = await db.select({ id: schema.generationJobs.id, kind: schema.generationJobs.kind, input: schema.generationJobs.input, status: schema.generationJobs.status, createdAt: schema.generationJobs.createdAt })
+    .from(schema.generationJobs).where(and(eq(schema.generationJobs.projectId, projectId), eq(schema.generationJobs.kind, 'edit_component'), eq(schema.generationJobs.status, 'succeeded')));
+  return componentInstructionHistory(componentId, jobs);
 }
 
 // 直改 / 批注的锁（API-EDIT-001）：元素在某个还存在的组件实例里就拒，唯一放行的是「脱离共享」

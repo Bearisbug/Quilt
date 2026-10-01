@@ -1008,6 +1008,148 @@ await step('TC-EDIT-024', async () => {
   return '只差大小写 / 空格不标未保存、保存置灰；连同 DESIGN.md 一起保存不问回刷、保存后各格是规范化后的值；真换种子色照常问回刷、库里存大写';
 });
 
+// TC-EDIT-025 / 026 历史指令（ADR-012 v0.87）：OpenAI 兼容桩截获发给模型的用户提示，看「此前已生效的用户指令」那一块收了哪些轮、按什么顺序。
+// 两条共用一个项目、一个桩与一条通道（026 接着 025 的项目往下走），按需建一次，跑完关桩、删通道
+type History = { pid: string; s1: string; compId: string; channelId: string; stub: ReturnType<typeof import('./openai-stub.ts').startOpenAiStub> };
+let hist: History | null = null;
+const HIST_SCREEN = '<div class="min-h-dvh flex flex-col bg-background text-on-background"><header class="h-14 flex items-center px-4 bg-surface border-b border-outline-variant"><h1 class="text-lg font-semibold">History</h1></header><main class="flex-1 px-4 py-6 space-y-6"><button type="button" class="inline-flex items-center justify-center h-12 px-6 rounded-full bg-primary text-on-primary font-semibold">Primary action</button></main></div>';
+const HIST_NAV = '<nav class="grid grid-cols-2 bg-surface border-t border-outline-variant"><a href="/s1" aria-current="page" class="flex items-center justify-center py-3 text-primary">Home</a><a href="/s1" class="flex items-center justify-center py-3 text-on-surface-variant">More</a></nav>';
+const histSleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// 每分钟 10 个作业的限流（§15）：本组一口气建十几个，撞上 429 就等 5 s 再发
+const until429 = async <T,>(f: () => Promise<{ status: number; body: T }>) => { for (let i = 0; ; i++) { const r = await f(); if (r.status !== 429 || i >= 15) return r; await histSleep(5000); } };
+const histPost = <T,>(p: string, body: unknown) => until429(() => apiJson<T>(p, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(body) }));
+const histJob = async (id: string, maxSec = 90) => {
+  for (let i = 0; i < maxSec * 2; i++) { const j = (await apiJson<{ job: { status: string; output: Record<string, unknown> | null } }>(`/v1/jobs/${id}`)).body.job; if (['succeeded', 'failed', 'cancelled'].includes(j.status)) return j; await histSleep(500); }
+  throw new Error(`作业 ${id} ${maxSec} s 没结束`);
+};
+// 「EARLIER INSTRUCTIONS ALREADY APPLIED TO THIS <subject>」之后的编号列表；没有这一块返回 null
+const historyIn = (user: string, subject: 'SCREEN' | 'COMPONENT'): string[] | null => {
+  const i = user.indexOf(`EARLIER INSTRUCTIONS ALREADY APPLIED TO THIS ${subject}`);
+  if (i < 0) return null;
+  const items: string[] = [];
+  for (const l of user.slice(i).split('\n').slice(1)) { const m = /^\d+\. (.*)$/.exec(l); if (!m) break; items.push(m[1]); }
+  return items;
+};
+async function historySetup(): Promise<History> {
+  if (hist) return hist;
+  const { startOpenAiStub } = await import('./openai-stub.ts');
+  const stub = startOpenAiStub({
+    port: 3976, apiKey: 'good-key-0087',
+    reply: (h) => (h.user.startsWith('Revise the shared component') ? HIST_NAV : h.user.startsWith('Within the screen') ? '<h1 class="text-xl font-semibold">History</h1>' : HIST_SCREEN),
+    fail: (h) => (h.user.includes('FAILME') ? 400 : null),
+  });
+  const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'History', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const ch = await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label: 'Stub 历史', endpoint: stub.url, model: 'stub-hist', apiKey: 'good-key-0087' }) });
+  expect(ch.status === 201, `建桩通道 ${ch.status}`);
+  expect((await apiJson<{ ok: boolean }>(`/v1/runners/channel:${ch.body.channel.id}/probe`, { method: 'POST' })).body.ok, '桩通道探测未通过');
+  const comp = await histPost<{ component: { id: string } }>(`/v1/projects/${pid}/components`, { name: 'TabBar', html: HIST_NAV });
+  expect(comp.status === 201, `建组件 ${comp.status}`);
+  hist = { pid, s1: screens[0].id, compId: comp.body.component.id, channelId: ch.body.channel.id, stub };
+  return hist;
+}
+// 发一轮并等它结束，返回这一轮桩收到的、用户提示里含 marker 的那次请求（没调到模型时为 undefined）
+async function histRound(h: History, body: Record<string, unknown>, marker: string) {
+  const from = h.stub.hits.length;
+  const r = await histPost<{ job: { id: string } }>(`/v1/projects/${h.pid}/messages`, { runner: { kind: 'channel', channelId: h.channelId }, ...body });
+  expect(r.status === 202, `发「${marker}」${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
+  const job = await histJob(r.body.job.id);
+  return { job, hit: h.stub.hits.slice(from).find((x) => x.user.includes(marker)) };
+}
+
+await step('TC-EDIT-025', async () => {
+  const h = await historySetup();
+  const S = softly();
+  const comp = { targetComponentIds: [h.compId] };
+  const version = async () => (await apiJson<{ components: { id: string; version: number }[] }>(`/v1/projects/${h.pid}`)).body.components.find((c) => c.id === h.compId)!.version;
+  try {
+    const r1 = await histRound(h, { ...comp, content: 'H1 点击的背景高亮就行，不需要下面的那个圆点' }, 'H1 点击');
+    await S.check(() => expect(r1.job.status === 'succeeded' && r1.hit && !r1.hit.user.includes('EARLIER INSTRUCTIONS'), `① 首轮应成功且没有历史块：${r1.job.status}`));
+    const v1 = await version();
+    const r2 = await histRound(h, { ...comp, content: 'H2 FAILME 切换加 200ms 过渡' }, 'H2 FAILME');
+    await S.check(async () => expect(r2.job.status === 'failed' && (await version()) === v1, `② 桩回 400 时应失败、组件版本不变：${r2.job.status}`));
+    const r3 = await histRound(h, { ...comp, content: 'H3 选中项文字加粗' }, 'H3 选中项');
+    const b3 = r3.hit ? historyIn(r3.hit.user, 'COMPONENT') : null;
+    await S.check(() => expect(r3.job.status === 'succeeded' && JSON.stringify(b3) === JSON.stringify(['H1 点击的背景高亮就行，不需要下面的那个圆点']), `③ 历史块应只有 H1：${JSON.stringify(b3)}`));
+    const r4 = await histRound(h, { ...comp, content: 'H4 图标换成线性风格' }, 'H4 图标');
+    const b4 = r4.hit ? historyIn(r4.hit.user, 'COMPONENT') : null;
+    await S.check(() => expect(JSON.stringify(b4) === JSON.stringify(['H3 选中项文字加粗', 'H1 点击的背景高亮就行，不需要下面的那个圆点']), `④ 历史块应依次 H3、H1：${JSON.stringify(b4)}`));
+    await S.check(() => expect(r4.hit && !r4.hit.user.includes('H2') && !r4.hit.user.includes('改组件：'), '④ 提示词里不该有失败的 H2 与「改组件：」'));
+  } catch (e) { S.fail(e); }
+  S.done();
+  return '首轮无历史；失败的一轮不进；第 3、4 轮带此前成功的原话、从新到旧';
+});
+
+await step('TC-EDIT-026', async () => {
+  const h = await historySetup();
+  const S = softly();
+  const scr = { targetScreenIds: [h.s1] };
+  const currentOf = async () => (await detail(h.pid)).screens.find((s) => s.id === h.s1)!.currentRevisionId;
+  try {
+    expect((await apiJson<{ default: string }>('/v1/runners')).body.default === `channel:${h.channelId}`, '账号默认通道不是桩通道（批注作业要走它）：先确认没有别的已验证通道（GEMINI_API_KEY= 运行）');
+    // 1 对话改
+    const r1 = await histRound(h, { ...scr, content: 'S1 标题改成「我的订单」' }, 'S1 标题');
+    await S.check(() => expect(r1.job.status === 'succeeded' && r1.hit && !r1.hit.user.includes('EARLIER INSTRUCTIONS'), `① 首轮应成功且没有历史块：${r1.job.status}`));
+    // 2 批注改
+    const btn = qidOf((await revisionHtml(h.s1, await currentOf())).html, 'type="button"');
+    const anno = await apiJson<{ annotation: { id: string } }>(`/v1/screens/${h.s1}/annotations`, { method: 'POST', body: JSON.stringify({ qid: btn, note: 'S2 按钮圆角改小', anchorText: 'Primary action', rect: { x: 0, y: 0, w: 10, h: 10 } }) });
+    expect(anno.status === 201, `挂批注 ${anno.status}`);
+    const sent = await histPost<{ jobs: { id: string }[] }>(`/v1/projects/${h.pid}/annotations/send`, { annotationIds: [anno.body.annotation.id] });
+    expect(sent.status === 202, `发批注 ${sent.status}`);
+    const aj = await histJob(sent.body.jobs[0].id);
+    const annos = (await apiJson<{ items: { id: string; status: string }[] }>(`/v1/screens/${h.s1}/annotations`)).body.items;
+    await S.check(() => expect(aj.status === 'succeeded' && annos.find((a) => a.id === anno.body.annotation.id)?.status === 'resolved', `② 批注作业应成功、批注 resolved：${aj.status}`));
+    // 3 MCP 改
+    const { connectMcp, callTool } = await import('./mcp-client.ts');
+    const mcp = await connectMcp();
+    let mj: { id: string } | null = null;
+    try {
+      for (let i = 0; i < 16 && !mj; i++) {
+        const r = await callTool(mcp, 'quilt.edit_screens', { projectId: h.pid, screenIds: [h.s1], prompt: 'S3 底部加一行版权说明', runner: { kind: 'channel', channelId: h.channelId } });
+        if (!r.isError) mj = r.json as { id: string };
+        else if ((r.json as { type?: string }).type === '/errors/rate-limited') await histSleep(5000);
+        else throw new Error(`③ MCP edit_screens：${r.text.slice(0, 160)}`);
+      }
+    } finally { await mcp.close(); }
+    expect(mj, '③ MCP edit_screens 一直被限流');
+    await S.check(async () => expect((await histJob(mj!.id)).status === 'succeeded', '③ MCP 改屏应成功'));
+    // 4 设计系统回刷 + 不写附加要求的补链
+    const ap = await histPost<{ job: { id: string } }>(`/v1/projects/${h.pid}/jobs`, { kind: 'apply_design_system', input: { screenIds: 'all' } });
+    await S.check(async () => expect(ap.status === 202 && (await histJob(ap.body.job.id)).status === 'succeeded', `④ 回刷应成功：${ap.status}`));
+    const lr = await histRound(h, { ...scr, content: '', preset: 'link_repair' }, 'Connect every navigation action');
+    await S.check(() => expect(lr.job.status === 'succeeded', `④ 补链应成功：${lr.job.status}`));
+    // 5 再改：历史块 = MCP、批注、对话三轮，从新到旧；回刷与补链不进、不带 qid
+    const r5 = await histRound(h, { ...scr, content: 'S4 列表项加分隔线' }, 'S4 列表项');
+    const b5 = r5.hit ? historyIn(r5.hit.user, 'SCREEN') : null;
+    const want5 = ['S3 底部加一行版权说明', '批注：「Primary action」→ S2 按钮圆角改小', 'S1 标题改成「我的订单」'];
+    await S.check(() => expect(JSON.stringify(b5) === JSON.stringify(want5), `⑤ 历史块应为 ${JSON.stringify(want5)}：${JSON.stringify(b5)}`));
+    await S.check(() => expect(b5 && !/data-qid|回刷|补链|Apply the following/.test(b5.join('\n')), `⑤ 历史块里混进了 qid / 系统描述：${JSON.stringify(b5)}`));
+    const rev4 = await currentOf();
+    // 6 改一轮再回溯：回溯修订的父修订是被回溯到的那一版
+    const r6 = await histRound(h, { ...scr, content: 'S5 顶部加一条促销横幅' }, 'S5 顶部');
+    expect(r6.job.status === 'succeeded', `⑥ S5 应成功：${r6.job.status}`);
+    const rev5 = await currentOf();
+    const back = await apiJson<{ revision: { id: string; parentRevisionId: string | null } }>(`/v1/screens/${h.s1}/revisions/${rev4}/restore`, { method: 'POST', body: JSON.stringify({ expectedRevisionId: rev5 }) });
+    await S.check(() => expect(back.status === 201 && back.body.revision.parentRevisionId === rev4, `⑥ 回溯应 201 且父修订是被回溯到的那一版：${back.status} parent=${back.body.revision?.parentRevisionId} 期望 ${rev4}`));
+    // 7 回溯之后再改：被撤销的 S5 不在
+    const r7 = await histRound(h, { ...scr, content: 'S6 标题居中' }, 'S6 标题');
+    const b7 = r7.hit ? historyIn(r7.hit.user, 'SCREEN') : null;
+    await S.check(() => expect(b7?.[0] === 'S4 列表项加分隔线' && r7.hit && !r7.hit.user.includes('S5'), `⑦ 历史块第 1 条应是 S4、不含 S5：${JSON.stringify(b7)}`));
+    // 8 局部重生成也带历史
+    const html8 = (await revisionHtml(h.s1, await currentOf())).html;
+    const h1 = /<h1[^>]*data-qid="(q\d+)"/.exec(html8)?.[1] ?? /data-qid="(q\d+)"[^>]*>History<\/h1>/.exec(html8)?.[1];
+    const from = h.stub.hits.length;
+    const sub = await histPost<{ job: { id: string } }>(`/v1/projects/${h.pid}/jobs`, { kind: 'regenerate_subtree', input: { screenId: h.s1, qid: h1, prompt: 'S7 标题字号加大', expectedRevisionId: await currentOf(), runner: { kind: 'channel', channelId: h.channelId } } });
+    expect(sub.status === 202, `⑧ 局部重生成 ${sub.status} ${JSON.stringify(sub.body).slice(0, 160)}`);
+    await histJob(sub.body.job.id);
+    const hit8 = h.stub.hits.slice(from).find((x) => x.user.includes('S7 标题字号'));
+    const b8 = hit8 ? historyIn(hit8.user, 'SCREEN') : null;
+    await S.check(() => expect(b8?.[0] === 'S6 标题居中' && hit8 && !hit8.user.includes('S5'), `⑧ 局部重生成的历史块第 1 条应是 S6、不含 S5：${JSON.stringify(b8)}`));
+  } catch (e) { S.fail(e); }
+  S.done();
+  return '对话 / 批注 / MCP 三类进历史、回刷与补链不进、不带 qid；回溯修订的父修订是被回溯到的那一版，撤销的那轮不在改屏与局部重生成的历史里';
+});
+if (hist) { await hist.stub.close(); await apiJson(`/v1/channels/${hist.channelId}`, { method: 'DELETE' }).catch(() => {}); }
+
 await browser.close();
 console.log(`\n=== RUN-${RUN} EDIT ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));
 console.log(results.map((r) => `${r.tc} ${r.result} ${r.note}`).join('\n'));

@@ -14,7 +14,7 @@ import { createRevision, deriveLinks, pointCurrentToFirstCandidate, priorInstruc
 import { screenDtos } from '../services/projects.ts';
 import { timeoutFor, modelAborts, enqueueScreenshot } from '../services/jobs.ts';
 import { runChatTurn, ChatFailure } from './chat.ts';
-import { sharedComponentsOf, componentCards, reflowComponent } from '../services/components.ts';
+import { sharedComponentsOf, componentCards, reflowComponent, componentInstructions } from '../services/components.ts';
 import {
   buildPrelude, lintScreenBody, injectQids, assembleDocument, extractBody, stripFences, buildPrototypeDocument, replaceSubtree, extractLinks,
   expandComponents, validateComponentHtml, classifyComponentHtml, componentSummary, componentSystemPrompt, componentUserPrompt,
@@ -281,7 +281,7 @@ async function runGenerate(ctx: Ctx) {
   if (entry?.currentRevisionId && !ctx.signal.aborted) {
     try {
       const before = (await currentBody(entry.id)) ?? '';
-      const prompt = editUserPrompt(entry.name, entry.route, before, linkRepairPrompt(created.map((c) => c.s.route)));
+      const prompt = editUserPrompt(entry.name, entry.route, before, linkRepairPrompt(created.map((c) => c.s.route)), await priorInstructions(entry.id, entry.currentRevisionId));
       const { body } = await produceScreen(ctx, { screenId: entry.id, system, prompt, sourceKind: 'edit', expectedRevisionId: entry.currentRevisionId });
       const had = new Set(extractLinks(before).map((l) => l.href));
       const added = Array.from(new Set(extractLinks(body).map((l) => l.href).filter((h) => !had.has(h))));
@@ -356,7 +356,7 @@ async function runProposeDesignSystem(ctx: Ctx): Promise<DesignProposalDto> {
   };
 }
 
-// REQ-EDIT-002：子树重生成——只发选中元素，整段替换，兄弟节点 qid 不变（ADR-007）
+// REQ-EDIT-002：子树重生成——只发选中元素（+ 这屏的历史指令，ADR-012 v0.87），整段替换，兄弟节点 qid 不变（ADR-007）
 async function runRegenerateSubtree(ctx: Ctx) {
   const input = ctx.job.input as { screenId: string; qid: string; prompt: string; expectedRevisionId: string };
   const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, input.screenId));
@@ -371,7 +371,7 @@ async function runRegenerateSubtree(ctx: Ctx) {
   const el = document.querySelector(`[data-qid="${input.qid}"]`);
   if (!el) throw new JobFailure('validation', 'element not found');
   const exact = el.outerHTML.replace(/ data-qid="q\d+"/g, '');
-  const newFrag = stripFences(await llmCall(ctx, system, subtreeUserPrompt(screen.name, screen.route, exact, input.prompt)));
+  const newFrag = stripFences(await llmCall(ctx, system, subtreeUserPrompt(screen.name, screen.route, exact, input.prompt, await priorInstructions(screen.id, screen.currentRevisionId))));
   const replaced = replaceSubtree(body, input.qid, newFrag);
   if (!replaced) throw new JobFailure('validation', 'replacement produced no element');
   // 共享组件（REQ-EDIT-006）：新片段里放的占位在这里展开；实例根沿用 qid、新子树接着编号
@@ -405,7 +405,7 @@ async function runApplyDesignSystem(ctx: Ctx) {
   });
 }
 
-// 改共享组件（REQ-EDIT-006）：一次模型调用只产出组件的单根元素 → 校验 → 升版落库 → 所有用它的屏确定性回刷（零 LLM）
+// 改共享组件（REQ-EDIT-006）：一次模型调用只产出组件的单根元素（上下文带这个组件此前改成功的指令，ADR-012 v0.87）→ 校验 → 升版落库 → 所有用它的屏确定性回刷（零 LLM）
 async function runEditComponent(ctx: Ctx): Promise<{ component: string; applied: number; skipped: string[] }> {
   const input = ctx.job.input as { componentId: string; prompt: string };
   const [comp] = await db.select().from(schema.components).where(and(eq(schema.components.id, input.componentId), eq(schema.components.projectId, ctx.project.id)));
@@ -413,7 +413,7 @@ async function runEditComponent(ctx: Ctx): Promise<{ component: string; applied:
   const uses = await db.select({ name: schema.screens.name }).from(schema.componentUses).innerJoin(schema.screens, eq(schema.screens.id, schema.componentUses.screenId))
     .where(and(eq(schema.componentUses.projectId, ctx.project.id), eq(schema.componentUses.name, comp.name)));
   const system = componentSystemPrompt({ app: app(ctx, 'existing app being revised'), device: ctx.device, tokens: ctx.tokens, designMd: ctx.ds.designMd, registry: await registry(ctx) });
-  const prompt = componentUserPrompt({ name: comp.name, instruction: input.prompt, currentHtml: comp.html, usedBy: uses.map((u) => u.name) });
+  const prompt = componentUserPrompt({ name: comp.name, instruction: input.prompt, currentHtml: comp.html, usedBy: uses.map((u) => u.name), prior: await componentInstructions(ctx.project.id, comp.id) });
   let out = stripFences(await llmCall(ctx, system, prompt, undefined, true));
   let v = validateComponentHtml(out);
   // 结构不对（多根 / 带 script）修一回合：这是硬要求，不是设计偏离

@@ -85,7 +85,8 @@ export const jobInputSchemas = {
     variantName: variantNameSchema.optional(),
     presentation: z.enum(PRESENTATIONS).optional(),
   }).refine((v) => !!v.variantOf === !!v.variantName, { path: ['variantName'], message: 'variantOf 与 variantName 要一起给' }),
-  edit_screens: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).min(1).max(20), versions: versionsSchema.default(1), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), componentIds: componentIdsSchema }),
+  // annotations（v0.87）：批注发出的作业由 API-EDIT-003 填上每条批注的锚点文字与说明，只用来把这一轮写进历史指令（ADR-012），本轮指令仍是 prompt
+  edit_screens: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).min(1).max(20), versions: versionsSchema.default(1), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), componentIds: componentIdsSchema, annotations: z.array(z.object({ anchorText: z.string().max(200), note: z.string().min(1).max(2000) })).max(50).optional() }),
   // 改共享组件（REQ-EDIT-006）：一次一个；成功后所有用到它的屏确定性回刷（零 LLM）
   edit_component: z.object({ componentId: z.uuid(), prompt: z.string().trim().min(1).max(8000), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional() }),
   // 子树重生成（REQ-EDIT-002）：runner 可单独选（检查器里有自己的通道 / 会话选择器，记忆独立于输入框）

@@ -160,11 +160,17 @@ export function annotationsPrompt(items: { qid: string; note: string; anchorText
   return `Apply the following element-level change requests to this screen. Each item names the element by its data-qid (and the visible text it had when the note was written):\n${list}\n\nChange only what these items ask for; keep every other element's text, layout, classes and links identical. If an element no longer exists, use its recorded text to locate the equivalent element, and skip the item if there is none.`;
 }
 
+// 历史指令块（ADR-012 v0.87）：改屏 / 局部重生成 / 改组件 / 本机 agent 投递共用；items 已按新到旧排好（history.ts）。
+// subject 如 THIS SCREEN、THIS COMPONENT、SCREEN "首页" (/home)；没有历史时为空串
+export function priorInstructionsBlock(subject: string, items: string[]): string {
+  return items.length
+    ? `EARLIER INSTRUCTIONS ALREADY APPLIED TO ${subject} (most recent first; keep honoring them unless the new instruction overrides one):\n${items.map((p, i) => `${i + 1}. ${p}`).join('\n')}\n`
+    : '';
+}
+
 // 改屏（REQ-CORE-006）：目标屏当前 HTML + 本次指令 + 该屏 current 祖先链上的历史指令（ADR-012：已应用过的意图，不是时间序）
 export function editUserPrompt(screenName: string, route: string, currentBody: string, instruction: string, priorInstructions: string[] = []): string {
-  const prior = priorInstructions.length
-    ? `\nEARLIER INSTRUCTIONS ALREADY APPLIED TO THIS SCREEN (keep honoring them unless the new instruction overrides):\n${priorInstructions.map((p, i) => `${i + 1}. ${p}`).join('\n')}\n`
-    : '';
+  const prior = priorInstructions.length ? `\n${priorInstructionsBlock('THIS SCREEN', priorInstructions)}` : '';
   return `Revise the screen "${screenName}" at route ${route} according to this instruction:\n${instruction}\n${prior}\nKeep the design system, recipes and all links intact unless the instruction says otherwise. Return the complete revised root element HTML only.\n\nCURRENT HTML:\n${currentBody}`;
 }
 
@@ -256,12 +262,13 @@ APP CONTEXT
 - App: ${args.app.name}${args.app.brief?.trim() ? ` — ${args.app.brief.trim()}` : ''}
 - ALLOWED ROUTES: ${routes}`;
 }
-export function componentUserPrompt(args: { name: string; instruction: string; currentHtml: string; usedBy: string[] }): string {
+export function componentUserPrompt(args: { name: string; instruction: string; currentHtml: string; usedBy: string[]; prior?: string[] }): string {
   const where = args.usedBy.length ? `It is used on ${args.usedBy.length} screen${args.usedBy.length > 1 ? 's' : ''}: ${args.usedBy.join(', ')}.` : 'No screen uses it yet.';
-  return `Revise the shared component "${args.name}" according to this instruction:\n${args.instruction}\n${where}\nReturn the complete revised root element HTML only.\n\nCURRENT HTML:\n${args.currentHtml}`;
+  return `Revise the shared component "${args.name}" according to this instruction:\n${args.instruction}\n${where}\n${priorInstructionsBlock('THIS COMPONENT', args.prior ?? [])}Return the complete revised root element HTML only.\n\nCURRENT HTML:\n${args.currentHtml}`;
 }
-export function subtreeUserPrompt(screenName: string, route: string, fragment: string, instruction: string): string {
-  return `Within the screen "${screenName}" at route ${route}, regenerate ONLY the following element according to this instruction:\n${instruction}\n\nReturn the complete replacement HTML for this single element (one root element, same role in the layout), nothing else. Keep the design system, recipes and any links intact unless the instruction says otherwise.\n\nCURRENT ELEMENT:\n${fragment}`;
+export function subtreeUserPrompt(screenName: string, route: string, fragment: string, instruction: string, priorInstructions: string[] = []): string {
+  const prior = priorInstructions.length ? `\n${priorInstructionsBlock('THIS SCREEN', priorInstructions)}` : '';
+  return `Within the screen "${screenName}" at route ${route}, regenerate ONLY the following element according to this instruction:\n${instruction}\n${prior}\nReturn the complete replacement HTML for this single element (one root element, same role in the layout), nothing else. Keep the design system, recipes and any links intact unless the instruction says otherwise.\n\nCURRENT ELEMENT:\n${fragment}`;
 }
 
 export function repairUserPrompt(original: string, violations: { rule: string; message: string; sample?: string }[]): string {

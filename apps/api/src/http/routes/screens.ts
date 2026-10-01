@@ -99,7 +99,8 @@ screenRoutes.get('/v1/screens/:screenId/revisions/:revisionId', async (c) => {
   return c.json({ revision: await revisionDto(rev) });
 });
 
-// API-CORE-015：以旧版内容建新修订（source_kind=restore）。截图重拍：旧版的截图可能是按另一种呈现方式拍的（v0.63 切过整屏 / 叠层）
+// API-CORE-015：以旧版内容建新修订（source_kind=restore），父修订是被回溯到的那一版——沿父链取历史指令时不经过已放弃的分支（ADR-012 v0.87）。
+// 截图重拍：旧版的截图可能是按另一种呈现方式拍的（v0.63 切过整屏 / 叠层）
 screenRoutes.post('/v1/screens/:screenId/revisions/:revisionId/restore', async (c) => {
   const user = requireUser(c);
   const { screen, project } = await ownedScreen(user.id, c.req.param('screenId'));
@@ -108,7 +109,7 @@ screenRoutes.post('/v1/screens/:screenId/revisions/:revisionId/restore', async (
   const html = (await storage.get(source.htmlKey)).toString('utf8');
   const rev = await db.transaction(async (tx) => {
     if (await hasActiveJob(tx, project.id, screen.id)) throw problems.screenBusy();
-    const r = await createRevision(tx, { projectId: project.id, screenId: screen.id, html, sourceKind: 'restore', lintReport: source.lintReport, expectedRevisionId });
+    const r = await createRevision(tx, { projectId: project.id, screenId: screen.id, html, sourceKind: 'restore', lintReport: source.lintReport, expectedRevisionId, parentRevisionId: source.id });
     if (!r) throw problems.revisionConflict();
     await deriveLinks(tx, project.id);
     return r;
