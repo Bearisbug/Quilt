@@ -230,8 +230,15 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) tran
 /* 选择元素 / 批注模式已开、尚未进任何一屏：光标提示「点一屏进去」 */
 .viewport.armed { cursor: crosshair; }
 .viewport.armed .card .gesture { cursor: crosshair; }
-.world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-.world.moving { will-change: transform; }  /* 只在平移缩放进行中挂，理由见 CanvasView applyTransform */
+/* 世界层常驻独立合成层（will-change: opacity 只为保住这一层，不冻结栅格比例）：合成层要是随手势开始才建、停下就拆，
+   新层第一帧的图块还没栅格化，浏览器会把整块画布画成一片白（缩放闪屏：Omnivia 25 屏，用户录屏 4.6 s 里 9 帧整块白）。
+   不能常驻 will-change: transform——那会把栅格比例钉在挂上那一刻，放大后文字发虚 */
+.world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: opacity; }
+.world.moving { will-change: transform, opacity; }  /* 只在平移缩放进行中加 transform，理由见 CanvasView applyTransform */
+/* 世界层独立合成后，浏览器嫌卡片、连线散得太开（合并后的空洞面积远大于实际内容），会把它们拆成上百个合成层：
+   Omnivia 25 屏从 22 层涨到 133 层、约 12 亿像素，放大时显存超预算、卡片整块画不出来。
+   垫一块铺满的近透明底（与画布同色、1% 不透明，看不出来），让整层内容连成一片、合成一层 */
+.world::before { content: ""; position: absolute; left: -50000px; top: -50000px; width: 100000px; height: 100000px; background: color-mix(in srgb, var(--color-canvas) 1%, transparent); pointer-events: none; }
 /* 平移缩放进行中骨架卡的循环动画暂停：上百张骨架卡同时在动时，动画自身就占满每帧的 GPU 预算，镜头跟不上手 */
 .world.moving .card .skeleton, .world.moving .card .skeleton::before, .world.moving .card .skeleton *, .world.moving .comp .skeleton::before, .world.moving .comp .skeleton * { animation-play-state: paused; }
 /* 卡片底白是恒定色，不跟工具主题走：这块白属于用户的设计稿，是他们 APP 的画布底，
@@ -251,7 +258,7 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) tran
 /* 生成中占位：设备线框 + 斜向光带扫过 + 状态标签；多张卡按 animation-delay 错开相位。
    这一层是 Quilt 在替尚未存在的用户界面占位，所以用品牌的浅承载面 Paper→Line 灰阶，
    而不是卡片本身的纯白（那块白属于用户的设计稿）。 */
-.card .skeleton, .comp .skeleton { position: relative; isolation: isolate; width: 100%; height: 100%; overflow: hidden; background: var(--brand-paper); display: flex; flex-direction: column; gap: 14px; padding: 0 16px 0; }
+.card .skeleton, .comp .skeleton { position: relative; isolation: isolate; width: 100%; height: 100%; overflow: hidden; background: var(--brand-paper); display: flex; flex-direction: column; gap: 14px; padding: 0 16px 0; content-visibility: auto; }
 /* 呼吸与扫光只动 opacity / transform：动 background-color、background-position 的话每一帧都要重绘，100 张骨架卡同时在动时 GPU 每帧超预算 */
 .card .skeleton::before, .comp .skeleton::before { content: ""; position: absolute; inset: 0; z-index: -1; background: color-mix(in srgb, var(--brand-line) 30%, var(--brand-paper)); opacity: 0; animation: sk-breathe 2.4s ease-in-out infinite; animation-delay: inherit; pointer-events: none; }
 .card .skeleton .sk { flex: none; border-radius: 10px; background: color-mix(in srgb, var(--brand-line) 55%, var(--brand-paper)); }

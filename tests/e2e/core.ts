@@ -312,6 +312,44 @@ await step('TC-CORE-008', async () => {
   } finally { await hiCtx.close(); }
 });
 
+// TC-CORE-080 缩放不建拆合成层、内容不拆碎、视口外骨架不占层（v0.84）。整屏闪白本身无头下只能抽帧碰运气，
+// 这里断言它的成因：手势一开始世界层若是新建的，第一帧图块没栅格化，整块画布被画成白色
+await step('TC-CORE-080', async () => {
+  const { projectId } = seedJson<{ projectId: string }>('seed:project', '--name', 'Layers', '--device', 'desktop', '--screens', '25');
+  // 摊开成稀疏的大画布（行列间隔 2800，同 Omnivia 那种分组摆法）：内容越分散，浏览器越倾向于把独立合成的世界层拆碎；
+  // 也让大部分卡落在懒加载的距离之外、显示骨架
+  const { body: { screens } } = await apiJson<{ screens: { id: string }[] }>(`/v1/projects/${projectId}`);
+  for (const [i, s] of screens.entries()) await apiJson(`/v1/screens/${s.id}`, { method: 'PATCH', body: JSON.stringify({ x: (i % 5) * 2800, y: Math.floor(i / 5) * 2800 }) });
+  const hiCtx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+  const hi = await hiCtx.newPage();
+  try {
+    await hi.goto(`${WEB}/p/${projectId}`);
+    await hi.locator('[data-testid="screen-card"]').first().waitFor();
+    await eventually(async () => expect((await hi.locator('[data-testid="screen-card"] img.shot:not(.pending)').count()) > 0, '截图还没出来'), 120_000);
+    const layers = async () => {
+      const c = await hiCtx.newCDPSession(hi);
+      await c.send('LayerTree.enable');
+      const ev = await new Promise<{ layers?: unknown[] }>((res) => { c.once('LayerTree.layerTreeDidChange', (e: { layers?: unknown[] }) => res(e)); setTimeout(() => res({}), 3000); });
+      await c.detach();
+      return ev.layers?.length ?? -1;
+    };
+    // 1 放大到 100%、只看得见一两张卡：其余卡的截图懒加载没取、显示骨架，它们不该各占合成层
+    await hi.evaluate(`localStorage.setItem('quilt:view:${projectId}', JSON.stringify({ x: 40, y: 60, zoom: 1 }))`);
+    await hi.reload(); await hi.locator('[data-testid="screen-card"]').first().waitFor(); await hi.waitForTimeout(1500);
+    const zoomedIn = await layers();
+    // 2 适配视图后静止 vs 手势中（世界层挂上 moving 类 = 平移缩放进行中的状态）
+    await hi.keyboard.press('f'); await hi.waitForTimeout(1200);
+    const rest = await layers();
+    await hi.evaluate(`document.querySelector('.world').classList.add('moving')`); await hi.waitForTimeout(300);
+    const moving = await layers();
+    await hi.evaluate(`document.querySelector('.world').classList.remove('moving')`);
+    await hi.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-core-080.png`) });
+    expect(zoomedIn > 0 && zoomedIn <= 40, `放大到 100% 时合成层 ${zoomedIn} 个（> 40：视口外的骨架卡各占了层）`);
+    expect(rest > 0 && Math.abs(moving - rest) <= 2, `合成层静止 ${rest}、手势中 ${moving}（放大到 100% 时 ${zoomedIn}）：手势一开始就新建、拆碎合成层，第一帧画布整块闪白`);
+    return `25 屏（2 倍屏）放大到 100% 时 ${zoomedIn} 层；适配视图静止 ${rest} 层、手势中 ${moving} 层`;
+  } finally { await hiCtx.close(); }
+});
+
 await step('TC-CORE-023', async () => {
   const { projectId } = seedJson<{ projectId: string }>('seed:project', '--name', 'ShellCheck', '--device', 'mobile', '--screens', '4');
   await page.setViewportSize({ width: 1440, height: 900 });
