@@ -28,7 +28,9 @@ export function failureText(kind: JobKind | null | undefined, errorClass?: Error
   if (errorClass === 'provider') {
     const status = Number(msg.match(/\b([45]\d\d)\b/)?.[1] ?? 0);
     next = RETRY;
-    if (status === 401 || status === 403) { why = `通道的 Key 被拒绝（HTTP ${status}）`; next = '到「设置 → 生成通道」检查这条通道的 Key，或换一个通道再发'; }
+    // 先于状态码判：本机 Claude 订阅的报文是「exceeded the 32000 output token maximum」，上限数字可能恰好是三位数
+    if (/output hit the token limit|output token maximum/.test(msg)) { why = '模型这次要写的内容超过了单次输出上限，结果不完整，没有保存'; next = '把这次的要求拆成几次发'; }
+    else if (status === 401 || status === 403) { why = `通道的 Key 被拒绝（HTTP ${status}）`; next = '到「设置 → 生成通道」检查这条通道的 Key，或换一个通道再发'; }
     else if (status === 429) why = '通道限流（HTTP 429）';
     else if (status >= 500) why = `模型服务暂时不可用（HTTP ${status}）`;
     else if (status >= 400) { why = `通道拒绝了这次请求（HTTP ${status}）`; next = '换一个通道再发；到「设置 → 生成通道」重新验证这条通道可以看到具体原因'; }

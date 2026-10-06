@@ -10,6 +10,8 @@ import { codexBin } from './agentCli.ts';
 // | gemini | openai（兼容端点）| stub（测试故障注入/回放）。
 export type LlmResult = { text: string; tokensIn: number; tokensOut: number; model: string; ms: number };
 export class ProviderError extends Error { constructor(msg: string, public retryable: boolean) { super(msg); } }
+// 输出到上限被截断（§17，v0.90）：截掉的是屏的后半段与收尾脚本，原样返回会被存成一版残屏；同样的请求重试还会截在同一处
+const cutOff = (driver: string, reason: string) => new ProviderError(`${driver} output hit the token limit (${reason})`, false);
 
 // 参考图（REQ-CORE-012）：正文以 base64 随请求走，不给模型发 URL——签名 URL 会过期，
 // 而且让供应商回源取图等于把可用性押在我们的对象存储上。
@@ -46,9 +48,11 @@ class AnthropicLlm implements Llm {
         },
         { signal, timeout: 120_000 },
       );
+      if (msg.stop_reason === 'max_tokens') throw cutOff('anthropic', 'stop_reason=max_tokens');
       const text = msg.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('');
       return { text, tokensIn: msg.usage.input_tokens + (msg.usage.cache_read_input_tokens ?? 0) + (msg.usage.cache_creation_input_tokens ?? 0), tokensOut: msg.usage.output_tokens, model, ms: Date.now() - t0 };
     } catch (e) {
+      if (e instanceof ProviderError) throw e;
       const status = (e as { status?: number }).status;
       throw new ProviderError(`anthropic ${status ?? ''} ${(e as Error).message}`, status === 429 || (status ?? 500) >= 500);
     }
@@ -81,24 +85,35 @@ class AgentSdkLlm implements Llm {
         })()
       : prompt;
     const q = query({ prompt: promptArg, options: { systemPrompt: { type: 'custom', prompt: system }, tools: [], maxTurns: 1, model, permissionMode: 'dontAsk', settingSources: [], env, abortController: abort } });
-    for await (const m of q) {
-      if (m.type === 'result') return { ...agentSdkOutput(m), model, ms: Date.now() - t0 };
-    }
-    throw new ProviderError('agent-sdk: no result', true);
+    return { ...await agentSdkTurn(q), model, ms: Date.now() - t0 };
   }
+}
+
+type AgentSdkReply = { type: 'assistant'; error?: string; message: { content: { type: string; text?: string }[] } };
+/** 一轮的产出（§17，v0.90）：输出超过单次上限时 SDK 自带的 Claude Code 发「接着写」续上（最多 3 次），
+ *  result 只装最后一段——文字取这一轮所有回答按序拼接；合成的报错消息（带 error）不算 */
+export async function agentSdkTurn(q: AsyncIterable<{ type: string; subtype?: string }>): Promise<{ text: string; tokensIn: number; tokensOut: number }> {
+  const texts: string[] = [];
+  for await (const m of q) {
+    if (m.type === 'assistant' && !(m as AgentSdkReply).error) {
+      for (const b of (m as AgentSdkReply).message.content) if (b.type === 'text' && b.text) texts.push(b.text);
+    }
+    if (m.type === 'result') return agentSdkOutput(m as AgentSdkResult, texts);
+  }
+  throw new ProviderError('agent-sdk: no result', true);
 }
 
 type AgentSdkResult = { subtype: string; is_error?: boolean; api_error_status?: number | null; result?: string; usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; output_tokens?: number } };
 /** SDK 的 result 消息 → 产出。API 报错（模型要求更新的 Claude Code、额度用完、过载）时 subtype 仍是 success，
  *  只在 is_error / api_error_status 上标出、错误原文在 result 里——不拦下的话它会被当成模型产出往下传（§17，v0.71） */
-export function agentSdkOutput(r: AgentSdkResult): { text: string; tokensIn: number; tokensOut: number } {
+export function agentSdkOutput(r: AgentSdkResult, texts: string[] = []): { text: string; tokensIn: number; tokensOut: number } {
   if (r.subtype !== 'success') throw new ProviderError(`agent-sdk ${r.subtype}`, true);
   if (r.is_error) {
     const status = r.api_error_status ?? 0;
     throw new ProviderError(`agent-sdk: ${String(r.result ?? '').trim().slice(0, 300)}`, status === 429 || status >= 500);
   }
   const u = r.usage ?? {};
-  return { text: String(r.result ?? ''), tokensIn: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), tokensOut: u.output_tokens ?? 0 };
+  return { text: texts.length ? texts.join('') : String(r.result ?? ''), tokensIn: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), tokensOut: u.output_tokens ?? 0 };
 }
 
 // 本机 Codex 订阅（v0.68 ADR-020）：每次拉起本机 codex exec，复用它的 ChatGPT 登录态。
@@ -186,6 +201,7 @@ class GeminiLlm implements Llm {
         model, contents: [{ role: 'user', parts }],
         config: { systemInstruction: system, maxOutputTokens: maxTokens + 8000, abortSignal: signal, httpOptions: { timeout: 120_000 } },
       });
+      if (r.candidates?.[0]?.finishReason === 'MAX_TOKENS') throw cutOff('gemini', 'finishReason=MAX_TOKENS');
       const text = r.text ?? '';
       if (!text) throw new ProviderError(`gemini empty response (${r.candidates?.[0]?.finishReason ?? 'no candidate'})`, true);
       const u = r.usageMetadata ?? {};
@@ -224,7 +240,8 @@ class OpenAiCompatLlm implements Llm {
       const body = (await res.text().catch(() => '')).slice(0, 300);
       throw new ProviderError(`openai-compatible ${res.status} ${body}`, res.status === 429 || res.status >= 500);
     }
-    const data = await res.json() as { choices?: { message?: { content?: string | { type: string; text?: string }[] } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+    const data = await res.json() as { choices?: { message?: { content?: string | { type: string; text?: string }[] }; finish_reason?: string }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+    if (data.choices?.[0]?.finish_reason === 'length') throw cutOff('openai-compatible', 'finish_reason=length');
     const raw = data.choices?.[0]?.message?.content;
     const text = typeof raw === 'string' ? raw : Array.isArray(raw) ? raw.map((p) => p.text ?? '').join('') : '';
     if (!text) throw new ProviderError('openai-compatible empty response', true);

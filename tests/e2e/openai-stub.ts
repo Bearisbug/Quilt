@@ -6,7 +6,8 @@ export type StubHit = { model: string; hasImage: boolean; auth: string | undefin
 // holdMs：收到请求后拖这么久再回（TC-CORE-042 要一个在跑一阵子的作业），Key 不对的 401 也一样拖（TC-CORE-045 要画布先认领作业、再收到失败）；
 // 请求照样立刻记进 hits。给函数就按每次请求定
 // fail：按请求定一个错误状态码（返回 null 照常回），造「一批里有一次调用失败」（TC-CORE-067）
-export function startOpenAiStub(opts: { port: number; apiKey: string; reply: string | ((hit: StubHit) => string); holdMs?: number | ((hit: StubHit) => number); fail?: (hit: StubHit, n: number) => number | null }): { server: Server; hits: StubHit[]; url: string; close: () => Promise<void> } {
+// cut：按请求回 `finish_reason: "length"`，造「输出到上限被截断」（TC-EDIT-027）
+export function startOpenAiStub(opts: { port: number; apiKey: string; reply: string | ((hit: StubHit) => string); holdMs?: number | ((hit: StubHit) => number); fail?: (hit: StubHit, n: number) => number | null; cut?: (hit: StubHit) => boolean }): { server: Server; hits: StubHit[]; url: string; close: () => Promise<void> } {
   const hits: StubHit[] = [];
   const server = createServer((req, res) => {
     let body = '';
@@ -25,7 +26,7 @@ export function startOpenAiStub(opts: { port: number; apiKey: string; reply: str
       setTimeout(() => {
         if (status) { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: `stub ${status}` } })); return; }
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ choices: [{ message: { content: text } }], usage: { prompt_tokens: 42, completion_tokens: 7 } }));
+        res.end(JSON.stringify({ choices: [{ message: { content: text }, finish_reason: opts.cut?.(hit) ? 'length' : 'stop' }], usage: { prompt_tokens: 42, completion_tokens: 7 } }));
       }, typeof opts.holdMs === 'function' ? opts.holdMs(hit) : opts.holdMs ?? 0);
     });
   });

@@ -1037,6 +1037,7 @@ async function historySetup(): Promise<History> {
     port: 3976, apiKey: 'good-key-0087',
     reply: (h) => (h.user.startsWith('Revise the shared component') ? HIST_NAV : h.user.startsWith('Within the screen') ? '<h1 class="text-xl font-semibold">History</h1>' : HIST_SCREEN),
     fail: (h) => (h.user.includes('FAILME') ? 400 : null),
+    cut: (h) => h.user.includes('CUTME'),
   });
   const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'History', '--device', 'mobile', '--screens', '1', '--no-shot');
   const ch = await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label: 'Stub 历史', endpoint: stub.url, model: 'stub-hist', apiKey: 'good-key-0087' }) });
@@ -1147,6 +1148,30 @@ await step('TC-EDIT-026', async () => {
   } catch (e) { S.fail(e); }
   S.done();
   return '对话 / 批注 / MCP 三类进历史、回刷与补链不进、不带 qid；回溯修订的父修订是被回溯到的那一版，撤销的那轮不在改屏与局部重生成的历史里';
+});
+
+// TC-EDIT-027 输出到上限被截断（§17 LLM 一行，v0.90）：桩对带 CUTME 的请求回 finish_reason=length，截断的文字不能落成一版残屏
+await step('TC-EDIT-027', async () => {
+  const h = await historySetup();
+  const S = softly();
+  const screenOf = async () => (await detail(h.pid)).screens.find((s) => s.id === h.s1)!;
+  try {
+    const before = await screenOf();
+    const revs0 = (await apiJson<{ items: unknown[] }>(`/v1/screens/${h.s1}/revisions`)).body.items.length;
+    const from = h.stub.hits.length;
+    const r = await histRound(h, { targetScreenIds: [h.s1], content: 'C1 CUTME 加一张很长的数据表' }, 'C1 CUTME');
+    const out = r.job.output as { errorClass?: string; message?: string } | null;
+    await S.check(() => expect(r.job.status === 'failed' && out?.errorClass === 'provider' && /output hit the token limit/.test(out?.message ?? ''), `① 应按 provider 失败、报输出上限：${r.job.status} ${JSON.stringify(out)}`));
+    const after = await screenOf();
+    const revs1 = (await apiJson<{ items: unknown[] }>(`/v1/screens/${h.s1}/revisions`)).body.items.length;
+    await S.check(() => expect(after.currentRevisionId === before.currentRevisionId && revs1 === revs0, `① 当前修订与修订数应不变：${revs0} → ${revs1}`));
+    const msgs = (await apiJson<{ items: { role: string; jobId: string | null; content: string }[] }>(`/v1/projects/${h.pid}/messages`)).body.items;
+    const reply = msgs.find((m) => m.role === 'assistant' && m.jobId === (r.job as unknown as { id: string }).id)?.content ?? '';
+    await S.check(() => expect(reply.startsWith('改屏失败：模型这次要写的内容超过了单次输出上限，结果不完整，没有保存。') && reply.includes('拆成几次'), `① 回执文案：${reply}`));
+    await S.check(() => expect(h.stub.hits.slice(from).filter((x) => x.user.includes('C1 CUTME')).length === 1, '② 带 CUTME 的请求应只发 1 次（不重试）'));
+  } catch (e) { S.fail(e); }
+  S.done();
+  return '输出到上限的半截不落修订、当前版不变；回执说输出超限并建议拆开发；不重试';
 });
 if (hist) { await hist.stub.close(); await apiJson(`/v1/channels/${hist.channelId}`, { method: 'DELETE' }).catch(() => {}); }
 

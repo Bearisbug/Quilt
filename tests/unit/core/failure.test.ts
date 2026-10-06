@@ -31,3 +31,11 @@ test('failureText：改组件不再叫「生成失败」；校验类给中文原
   assert.ok(failureText('generate', 'provider', 'gemini 503 x', 2).includes('已保留 2 屏'));
   assert.ok(failureText('regenerate_subtree', undefined, undefined).startsWith('重做这一块失败'));
 });
+
+test('failureText：输出到上限被截断单列原因，报文里的上限数字不当成 HTTP 状态', () => {
+  const a = failureText('edit_screens', 'provider', 'gemini output hit the token limit (finishReason=MAX_TOKENS)');
+  assert.ok(a.startsWith('改屏失败：模型这次要写的内容超过了单次输出上限，结果不完整，没有保存。'), a);
+  assert.ok(a.includes('拆成几次'), a);
+  const b = failureText('edit_screens', 'provider', "agent-sdk: API Error: Claude's response exceeded the 500 output token maximum. To configure this behavior, set the CLAUDE_CODE_MAX_OUTPUT_TOKENS environment variable.");
+  assert.ok(b.startsWith('改屏失败：模型这次要写的内容超过了单次输出上限'), b);
+});
