@@ -36,6 +36,23 @@ export function isDarkPalette(colors: { background: string; onBackground: string
 export const kebab = (s: string): string => s.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
 export const COLOR_CLASS_NAMES: string[] = TOKEN_COLOR_KEYS.map(kebab);
 
+// 新建项目的中性色板（ADR-028 v0.92）：以「品牌色板」的逐键覆盖写进新项目，种子色只管强调色。
+// 中性色不带种子色相（M3 派生的中性色带一层紫调）；发丝线 outlineVariant 对表面约 1.25:1（M3 派生约 1.66:1，1px 也显得粗）；
+// 输入框边框 outline ≥ 3:1、次要文字 ≥ 4.5:1；页面 background 比卡片 surface 暗一档，分区先靠底色、不靠线。
+// 警告色换成琥珀（派生的 #795900 偏橄榄）。存量项目不受影响；在设计系统面板清空色板即回到纯派生
+export const NEUTRAL_PALETTE: { light: Partial<Record<TokenColorKey, string>>; dark: Partial<Record<TokenColorKey, string>> } = {
+  light: {
+    background: '#fafafa', onBackground: '#18181b', surface: '#ffffff', onSurface: '#18181b',
+    surfaceVariant: '#f4f4f5', onSurfaceVariant: '#6b6b74', outline: '#8a8a93', outlineVariant: '#e4e4e7',
+    secondaryContainer: '#ededef', onSecondaryContainer: '#18181b', warning: '#b45309', onWarning: '#ffffff',
+  },
+  dark: {
+    background: '#0c0c0e', onBackground: '#f4f4f5', surface: '#151518', onSurface: '#f4f4f5',
+    surfaceVariant: '#212125', onSurfaceVariant: '#a1a1aa', outline: '#71717a', outlineVariant: '#2a2a2f',
+    secondaryContainer: '#2a2a2f', onSecondaryContainer: '#f4f4f5', warning: '#fbbf24', onWarning: '#1c1917',
+  },
+};
+
 export const RADIUS_SCALES = {
   sharp: { sm: '2px', md: '4px', lg: '8px', full: '9999px' },
   default: { sm: '6px', md: '12px', lg: '20px', full: '9999px' },

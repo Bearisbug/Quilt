@@ -5,7 +5,7 @@ import { problems } from '../lib/errors.ts';
 import { storage } from '../lib/storage.ts';
 import { notifyCanvas } from '../lib/events.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
-import { tokensFromSeed, defaultDesignMd, DEFAULT_COMPONENTS, DEVICE_SIZE, type DeviceType, type ProjectDto, type ProjectDetailDto, type DesignSystemDto, type ScreenDto, type LinkDto, type JobDto, type JobRunner, RADIUS_SCALES, type Palette, type ColorMode, type FontSource, type Presentation } from '@quilt/core';
+import { tokensFromSeed, newProjectDesign, DEVICE_SIZE, type DeviceType, type ProjectDto, type ProjectDetailDto, type DesignSystemDto, type ScreenDto, type LinkDto, type JobDto, type JobRunner, RADIUS_SCALES, type Palette, type ColorMode, type FontSource, type Presentation } from '@quilt/core';
 
 export type ProjectRow = typeof schema.projects.$inferSelect;
 export type ScreenRow = typeof schema.screens.$inferSelect;
@@ -22,15 +22,17 @@ export async function createProject(ownerId: string, input: { name: string; devi
   const seedColor = preset?.seedColor ?? input.seedColor ?? DEFAULT_SEED;
   const created = await db.transaction(async (tx) => {
     const [project] = await tx.insert(schema.projects).values({ ownerId, name: input.name, deviceType: input.deviceType }).returning();
-    const palette = (preset?.palette as Palette | null) ?? null;
+    // 没选预设时用新建项目的设计系统（ADR-028 v0.92）：中性色板、sharp 圆角档、按设备的配方与 DESIGN.md
+    const fresh = preset ? null : newProjectDesign(input.name, input.deviceType, seedColor);
+    const palette = (preset?.palette as Palette | null) ?? fresh?.palette ?? null;
     const colorMode = (preset?.colorMode as ColorMode) ?? 'light';
     const tokens = preset
       ? tokensFromSeed(seedColor, { fontFamily: preset.fontFamily, fontSource: preset.fontSource as FontSource, fontUrl: preset.fontUrl, radiusScale: preset.radiusScale as keyof typeof RADIUS_SCALES, palette: palette?.[colorMode], colorMode })
-      : tokensFromSeed(seedColor);
+      : fresh!.tokens;
     const [ds] = await tx.insert(schema.designSystems).values({
       projectId: project.id, seedColor, tokens, palette, colorMode,
-      designMd: preset?.designMd ?? defaultDesignMd(input.name, seedColor, input.deviceType),
-      components: preset?.components ?? DEFAULT_COMPONENTS,
+      designMd: preset?.designMd ?? fresh!.designMd,
+      components: preset?.components ?? fresh!.components,
     }).returning();
     return { project, designSystem: ds };
   });

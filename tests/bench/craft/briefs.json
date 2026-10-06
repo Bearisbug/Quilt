@@ -1,0 +1,8 @@
+[
+  { "id": "pawpals", "name": "Pawpals", "device": "mobile", "prompt": "宠物社交 APP：主人给猫狗建主页、发动态和短视频，附近的宠物主可以约遛狗、互相关注和私信。" },
+  { "id": "ledgerly", "name": "Ledgerly", "device": "desktop", "prompt": "记账网站：个人和家庭记账，按账户和分类记录收支，月度预算、报表图表和账单提醒。" },
+  { "id": "fitstreak", "name": "FitStreak", "device": "mobile", "prompt": "健身打卡 APP：每天打卡训练，记录动作的组数和重量，显示连续打卡天数、周目标和好友排行榜。" },
+  { "id": "shelfswap", "name": "Shelfswap", "device": "desktop", "prompt": "二手书交易网站：卖家上架二手书（品相、价格、ISBN），买家搜索筛选、下单、和卖家沟通，有订单和评价。" },
+  { "id": "stillwater", "name": "Stillwater", "device": "mobile", "prompt": "冥想 APP：引导冥想课程、睡眠故事和呼吸练习，记录每天的正念分钟数和连续天数。" },
+  { "id": "relaygate", "name": "Relaygate Admin", "device": "desktop", "prompt": "企业 AI 网关管理后台：管理员查看各部门员工的模型用量和额度、上游账号池的健康状况、请求成功率和待处理的异常。" }
+]

@@ -1,5 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { NEUTRAL_PALETTE, tokensFromSeed } from '@quilt/core';
 import { launch, openApp, seed, seedJson, apiJson, EVIDENCE, WEB, pickOption, selectedValue, eventually } from './lib.ts';
 
 // docs/TEST.md EDIT 域（TC-EDIT-001~006）AI 执行脚本。
@@ -448,12 +449,13 @@ await step('TC-EDIT-009', async () => {
 await step('TC-EDIT-010', async () => {
   // 品牌色板（REQ-EDIT-005）：逐键覆盖种子派生值，亮 / 暗两套，改完按原路回刷
   const { projectId } = seedJson<{ projectId: string }>('seed:project', '--name', 'Palette', '--device', 'mobile', '--screens', '2', '--no-shot');
-  type DS = { designSystem: { version: number; colorMode: string; palette: unknown; tokens: { colors: Record<string, string> } } };
+  type DS = { designSystem: { version: number; seedColor: string; colorMode: string; palette: unknown; tokens: { colors: Record<string, string> } } };
   const ds = async () => (await apiJson<DS>(`/v1/projects/${projectId}`)).body.designSystem;
   const put = (body: unknown) => apiJson<DS>(`/v1/projects/${projectId}/design-system`, { method: 'PUT', body: JSON.stringify(body) });
   const before = await ds();
-  // 1 任何项目都有语义色：没挂色板也能用 success / warning
+  // 1 任何项目都有语义色：没挂色板也能用 success / warning；新建项目默认挂中性色板（ADR-028）
   expect(!!before.tokens.colors.success && !!before.tokens.colors.warning && !!before.tokens.colors.onSuccess, '种子派生的 token 缺语义色');
+  expect(before.tokens.colors.background === NEUTRAL_PALETTE.light.background, `新建项目没挂中性色板：background=${before.tokens.colors.background}`);
   const derivedSecondary = before.tokens.colors.secondary;
   // 2 挂三键品牌色板：这三键取原值，其余仍是派生值
   const r1 = await put({ palette: { light: { primary: '#284CCA', background: '#F4F1EA', success: '#1D7153' } }, expectedVersion: before.version });
@@ -483,10 +485,11 @@ await step('TC-EDIT-010', async () => {
   expect(bad.status === 400, `无暗色色板时切暗色应 400，实际 ${bad.status}`);
   const r2 = await put({ palette: { light: { primary: '#284CCA' }, dark: { primary: '#AFCBFF', background: '#111820' } }, colorMode: 'dark', expectedVersion: cur.version });
   expect(r2.status === 200 && r2.body.designSystem.tokens.colors.primary === '#AFCBFF' && r2.body.designSystem.tokens.colors.background === '#111820', '切暗色后没用暗色色板');
-  // 5 清空回到纯派生
+  // 5 清空回到纯派生（不是第 1 步的值：那时挂着中性色板）
   cur = await ds();
   const r3 = await put({ palette: null, colorMode: 'light', expectedVersion: cur.version });
-  expect(r3.status === 200 && r3.body.designSystem.tokens.colors.primary === before.tokens.colors.primary && r3.body.designSystem.tokens.colors.background === before.tokens.colors.background, '清空后没回到种子派生');
+  const derived = tokensFromSeed(before.seedColor, { colorMode: 'light' }).colors;
+  expect(r3.status === 200 && r3.body.designSystem.tokens.colors.primary === derived.primary && r3.body.designSystem.tokens.colors.background === derived.background, '清空后没回到种子派生');
   // 6 面板：来源写明、26 键、清空按钮
   await page.goto(`${WEB}/p/${projectId}`);
   await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });

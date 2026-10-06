@@ -1,0 +1,652 @@
+{
+  "pawpals": {
+    "brief": "Pawpals 是一款面向猫狗主人的宠物社交 APP，主人可以为自己的宠物建立专属主页，发布图文动态和短视频，并通过关注与私信与其他宠物主互动。用户主要是城市里的养宠人群，尤其是想为爱犬寻找遛狗伙伴的附近主人。整体语气温暖、轻松、有趣，视觉上亲切活泼。核心流程包括：浏览动态与短视频、发现附近的宠物主并发起遛狗邀约、关注感兴趣的主人和宠物、在私信中沟通约定，以及维护自己和宠物的主页。",
+    "screens": [
+      {
+        "name": "Feed",
+        "route": "/feed",
+        "purpose": "浏览关注的宠物主发布的图文动态和短视频。",
+        "links": [
+          "/nearby",
+          "/pet-profile",
+          "/chat",
+          "/new-post"
+        ],
+        "sections": [
+          "顶部搜索与通知入口",
+          "宠物故事头像栏",
+          "动态与短视频信息流",
+          "点赞评论分享操作栏"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "Nearby",
+        "route": "/nearby",
+        "purpose": "发现附近的宠物主和遛狗邀约，可发起约遛。",
+        "links": [
+          "/feed",
+          "/pet-profile",
+          "/walk-invite",
+          "/chat"
+        ],
+        "sections": [
+          "当前位置与距离筛选",
+          "附近遛狗邀约列表",
+          "附近宠物主卡片",
+          "发起约遛按钮"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "Messages",
+        "route": "/messages",
+        "purpose": "查看所有私信会话和遛狗约定的沟通。",
+        "links": [
+          "/chat",
+          "/nearby",
+          "/feed"
+        ],
+        "sections": [
+          "搜索会话",
+          "新粉丝与互动通知",
+          "私信会话列表"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "My Profile",
+        "route": "/me",
+        "purpose": "管理自己和宠物的主页、动态与关注关系。",
+        "links": [
+          "/feed",
+          "/pet-profile",
+          "/new-post",
+          "/messages"
+        ],
+        "sections": [
+          "主人资料与关注统计",
+          "我的宠物卡片切换",
+          "动态与视频网格",
+          "编辑主页入口"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "Pet Profile",
+        "route": "/pet-profile",
+        "purpose": "查看某只猫或狗的主页，并关注主人或发起私信。",
+        "links": [
+          "/chat",
+          "/walk-invite",
+          "/nearby",
+          "/feed"
+        ],
+        "sections": [
+          "宠物头像与基本信息",
+          "品种年龄性格标签",
+          "关注与私信按钮",
+          "宠物动态与视频网格"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "Walk Invite",
+        "route": "/walk-invite",
+        "purpose": "在底部弹层中选择时间和地点，向附近宠物主发送遛狗邀约。",
+        "links": [
+          "/nearby",
+          "/chat"
+        ],
+        "sections": [
+          "选择参与的宠物",
+          "日期与时间选择",
+          "集合地点",
+          "留言与发送邀约"
+        ],
+        "presentation": "overlay"
+      }
+    ]
+  },
+  "ledgerly": {
+    "brief": "Ledgerly 是一个面向个人和家庭的记账网站，帮助用户按账户和分类记录日常收入与支出。用户可以设置月度预算、查看报表图表，并通过账单提醒避免错过缴费日期。整体风格简洁、清晰、可信赖，数据一目了然，适合家庭成员日常快速录入与定期复盘。主要流程包括：在总览查看本月收支和预算进度，快速记一笔账，在账户与分类中管理资金来源和去向，通过报表分析趋势，以及管理账单提醒。",
+    "screens": [
+      {
+        "name": "总览",
+        "route": "/home",
+        "purpose": "展示本月收支概况、预算进度和近期账单提醒的首页。",
+        "links": [
+          "/transactions",
+          "/budget-reports",
+          "/bills",
+          "/add-transaction"
+        ],
+        "sections": [
+          "本月结余与收支摘要",
+          "月度预算进度条",
+          "近期交易列表",
+          "即将到期的账单提醒"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "账目",
+        "route": "/transactions",
+        "purpose": "按时间、账户和分类浏览并筛选所有收支记录。",
+        "links": [
+          "/home",
+          "/add-transaction",
+          "/accounts"
+        ],
+        "sections": [
+          "搜索与筛选栏",
+          "按日期分组的交易列表",
+          "账户与分类标签",
+          "新增记账入口"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "预算与报表",
+        "route": "/budget-reports",
+        "purpose": "设置月度预算并通过图表分析收支趋势与分类占比。",
+        "links": [
+          "/home",
+          "/transactions"
+        ],
+        "sections": [
+          "月份切换器",
+          "分类预算设置与进度",
+          "收支趋势图表",
+          "分类占比饼图",
+          "家庭成员支出对比"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "账单提醒",
+        "route": "/bills",
+        "purpose": "管理周期性账单并查看即将到期和已缴状态。",
+        "links": [
+          "/home",
+          "/add-bill",
+          "/accounts"
+        ],
+        "sections": [
+          "即将到期账单",
+          "本月已缴账单",
+          "周期性账单列表",
+          "添加账单入口"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "记一笔",
+        "route": "/add-transaction",
+        "purpose": "以浮层形式快速录入一笔收入或支出，选择账户、分类和成员。",
+        "links": [
+          "/transactions",
+          "/home"
+        ],
+        "sections": [
+          "收入/支出切换",
+          "金额输入",
+          "账户与分类选择",
+          "日期、成员与备注",
+          "保存按钮"
+        ],
+        "presentation": "overlay"
+      },
+      {
+        "name": "账户管理",
+        "route": "/accounts",
+        "purpose": "查看并管理现金、银行卡、信用卡等账户及其余额。",
+        "links": [
+          "/transactions",
+          "/bills",
+          "/home"
+        ],
+        "sections": [
+          "总资产与负债概览",
+          "账户列表与余额",
+          "账户类型分组",
+          "添加账户入口"
+        ],
+        "presentation": "push"
+      }
+    ]
+  },
+  "fitstreak": {
+    "brief": "FitStreak 是一款面向日常健身人群的打卡 App，帮助用户每天坚持训练并养成习惯。用户可以在训练中记录每个动作的组数和重量，完成后打卡，并查看连续打卡天数和本周目标进度。好友排行榜让用户看到朋友的坚持情况，从而互相激励。整体风格积极、有活力、简洁明快，强调数字和进度反馈。主要流程是：首页查看今日状态，开始训练并记录组数重量，完成后查看总结并打卡，再到排行榜和个人页查看成果。",
+    "screens": [
+      {
+        "name": "首页",
+        "route": "/home",
+        "purpose": "展示今日打卡状态、连续打卡天数和本周目标进度，并作为开始训练的入口。",
+        "links": [
+          "/workout",
+          "/leaderboard",
+          "/profile"
+        ],
+        "sections": [
+          "连续打卡天数",
+          "本周目标进度环",
+          "今日训练计划",
+          "开始训练按钮",
+          "最近一次训练"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "训练",
+        "route": "/workout",
+        "purpose": "记录当前训练中每个动作的组数和重量，并在完成后结束训练。",
+        "links": [
+          "/set-editor",
+          "/workout-summary",
+          "/home"
+        ],
+        "sections": [
+          "训练计时与标题",
+          "动作列表",
+          "每个动作的组数与重量",
+          "添加动作按钮",
+          "完成训练按钮"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "排行榜",
+        "route": "/leaderboard",
+        "purpose": "按本周训练次数和连续打卡天数展示好友排名。",
+        "links": [
+          "/home",
+          "/profile"
+        ],
+        "sections": [
+          "周榜与连续榜切换",
+          "前三名展示",
+          "好友排名列表",
+          "我的排名",
+          "邀请好友"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "我的",
+        "route": "/profile",
+        "purpose": "管理个人资料、周目标设置，并查看打卡历史和统计。",
+        "links": [
+          "/home",
+          "/workout-summary"
+        ],
+        "sections": [
+          "个人资料头部",
+          "周目标设置",
+          "打卡日历",
+          "累计统计",
+          "历史训练列表"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "训练总结",
+        "route": "/workout-summary",
+        "purpose": "展示一次训练的完成情况并确认打卡成功。",
+        "links": [
+          "/home",
+          "/leaderboard"
+        ],
+        "sections": [
+          "打卡成功提示",
+          "训练时长与总容量",
+          "动作完成明细",
+          "连续天数更新",
+          "返回首页与查看排行榜按钮"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "记录组数",
+        "route": "/set-editor",
+        "purpose": "以底部弹层的形式输入或修改某个动作的组数、次数和重量。",
+        "links": [
+          "/workout"
+        ],
+        "sections": [
+          "动作名称",
+          "重量输入",
+          "次数输入",
+          "组数调整",
+          "保存按钮"
+        ],
+        "presentation": "overlay"
+      }
+    ]
+  },
+  "stillwater": {
+    "brief": "Stillwater 是一款安静、克制的冥想应用，面向希望缓解压力、改善睡眠并养成每日正念习惯的普通用户。应用提供引导冥想课程、睡眠故事和呼吸练习，并记录每天的正念分钟数与连续天数。整体语气温柔、平静、不说教，视觉留白充足、色调柔和。主要流程：在首页查看今日推荐并开始练习，在冥想、睡眠、呼吸页中挑选内容，进入播放页完成练习，结束后在进度页查看分钟数和连续天数。",
+    "screens": [
+      {
+        "name": "Home",
+        "route": "/home",
+        "purpose": "展示今日推荐练习和当前连续天数，作为开始练习的入口。",
+        "links": [
+          "/meditate",
+          "/sleep",
+          "/breathe",
+          "/player",
+          "/progress"
+        ],
+        "sections": [
+          "问候语与今日日期",
+          "连续天数与今日正念分钟卡片",
+          "今日推荐练习",
+          "快速开始：冥想、睡眠、呼吸",
+          "最近播放"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "Meditate",
+        "route": "/meditate",
+        "purpose": "浏览并选择引导冥想课程。",
+        "links": [
+          "/player",
+          "/home",
+          "/course-detail"
+        ],
+        "sections": [
+          "分类标签（压力、专注、感恩等）",
+          "精选课程",
+          "入门系列课程",
+          "按时长筛选的课程列表"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "Sleep",
+        "route": "/sleep",
+        "purpose": "浏览睡眠故事和助眠内容。",
+        "links": [
+          "/player",
+          "/home",
+          "/sleep-timer"
+        ],
+        "sections": [
+          "今晚推荐故事",
+          "睡眠故事列表",
+          "助眠音景",
+          "定时关闭入口"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "Breathe",
+        "route": "/breathe",
+        "purpose": "选择并进行呼吸练习，并查看每日正念记录。",
+        "links": [
+          "/player",
+          "/home",
+          "/progress"
+        ],
+        "sections": [
+          "呼吸节奏动画预览",
+          "练习方式列表（4-7-8、方块呼吸等）",
+          "时长选择",
+          "开始按钮"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "Progress",
+        "route": "/progress",
+        "purpose": "查看每天的正念分钟数、连续天数和历史记录。",
+        "links": [
+          "/home",
+          "/player"
+        ],
+        "sections": [
+          "连续天数大卡片",
+          "本周每日分钟数图表",
+          "月度日历打卡",
+          "累计正念分钟与完成次数"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "Player",
+        "route": "/player",
+        "purpose": "播放选定的冥想、睡眠故事或呼吸练习，并在结束后记录时长。",
+        "links": [
+          "/home",
+          "/progress",
+          "/sleep-timer"
+        ],
+        "sections": [
+          "练习标题与封面",
+          "进度条与播放控制",
+          "呼吸引导动画或音频波形",
+          "结束后记录分钟数提示"
+        ],
+        "presentation": "push"
+      }
+    ]
+  },
+  "relaygate": {
+    "brief": "Relaygate Admin 是一款企业 AI 网关的管理后台，供平台管理员和运维人员使用，用来统一监控各部门员工对大模型的调用情况。管理员可以查看各部门及员工的模型用量与额度、上游账号池的健康状况、请求成功率，并处理待办的异常事件。整体语气专业、冷静、数据密集，以清晰的图表、状态标签和表格为主，界面文案使用简体中文。主要流程：从总览发现问题，进入用量页面查看部门与员工的额度消耗，进入账号池页面排查上游账号状态，在异常页面查看并处理告警，最后在详情页深入分析单个部门或异常的具体信息。",
+    "screens": [
+      {
+        "name": "总览",
+        "route": "/overview",
+        "purpose": "集中展示网关整体运行状态，帮助管理员快速发现需要关注的问题。",
+        "links": [
+          "/usage",
+          "/accounts",
+          "/incidents"
+        ],
+        "sections": [
+          "核心指标卡片（今日请求量、成功率、Token 消耗）",
+          "请求成功率趋势图",
+          "额度消耗最高的部门",
+          "待处理异常摘要"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "用量与额度",
+        "route": "/usage",
+        "purpose": "按部门和员工查看模型用量及额度使用情况。",
+        "links": [
+          "/overview",
+          "/department-detail",
+          "/accounts"
+        ],
+        "sections": [
+          "时间范围与模型筛选",
+          "部门用量排行",
+          "员工用量列表",
+          "额度预警标记"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "账号池",
+        "route": "/accounts",
+        "purpose": "监控上游模型账号池的健康状况与可用额度。",
+        "links": [
+          "/overview",
+          "/usage",
+          "/incidents"
+        ],
+        "sections": [
+          "账号池健康概览",
+          "上游账号列表与状态",
+          "各账号剩余额度与限流情况",
+          "最近健康检查记录"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "异常中心",
+        "route": "/incidents",
+        "purpose": "集中查看并处理待处理的异常和告警。",
+        "links": [
+          "/overview",
+          "/incident-detail",
+          "/accounts"
+        ],
+        "sections": [
+          "异常状态筛选",
+          "待处理异常列表",
+          "严重程度分布",
+          "最近已处理记录"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "部门详情",
+        "route": "/department-detail",
+        "purpose": "深入查看单个部门的额度、用量趋势和员工明细。",
+        "links": [
+          "/usage",
+          "/incidents"
+        ],
+        "sections": [
+          "部门额度概况",
+          "用量趋势图",
+          "员工用量明细",
+          "该部门相关异常"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "异常详情",
+        "route": "/incident-detail",
+        "purpose": "查看单个异常的详细信息并执行处理操作。",
+        "links": [
+          "/incidents",
+          "/accounts"
+        ],
+        "sections": [
+          "异常标题与严重程度",
+          "影响范围与相关请求",
+          "时间线与错误日志",
+          "处理操作与备注"
+        ],
+        "presentation": "push"
+      }
+    ]
+  },
+  "shelfswap": {
+    "brief": "Shelfswap 是一个二手书交易网站，面向希望出让闲置书籍的卖家和想以实惠价格淘书的读者。卖家上架时填写 ISBN、品相和价格，买家可以搜索、按品相和价格筛选、下单，并在下单前后与卖家沟通。完成交易后，买卖双方可以互相评价，积累信誉。整体风格温暖、朴实、有书卷气，界面清爽，重点突出书封、品相和价格。主要流程：搜索找书、查看详情、咨询卖家、下单购买、完成订单后评价；卖家流程：上架书籍、回复消息、处理订单。",
+    "screens": [
+      {
+        "name": "发现",
+        "route": "/home",
+        "purpose": "买家搜索并筛选二手书，浏览在售书籍。",
+        "links": [
+          "/book-detail",
+          "/sell",
+          "/messages",
+          "/orders"
+        ],
+        "sections": [
+          "搜索栏（书名、作者、ISBN）",
+          "筛选条（品相、价格区间、排序）",
+          "推荐分类标签",
+          "在售书籍列表（封面、品相、价格）"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "上架",
+        "route": "/sell",
+        "purpose": "卖家录入 ISBN、品相和价格，上架一本二手书。",
+        "links": [
+          "/home",
+          "/orders",
+          "/book-detail"
+        ],
+        "sections": [
+          "ISBN 输入与自动填充书目信息",
+          "照片上传",
+          "品相选择与瑕疵说明",
+          "价格与运费设置",
+          "我的在售书籍列表"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "消息",
+        "route": "/messages",
+        "purpose": "查看与买家或卖家的所有会话。",
+        "links": [
+          "/chat",
+          "/home",
+          "/orders"
+        ],
+        "sections": [
+          "会话搜索",
+          "未读会话置顶",
+          "会话列表（书籍缩略图、对方、最新消息）"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "订单",
+        "route": "/orders",
+        "purpose": "管理我买到和卖出的订单，并对已完成订单评价。",
+        "links": [
+          "/book-detail",
+          "/chat",
+          "/home",
+          "/messages"
+        ],
+        "sections": [
+          "买入／卖出切换与状态标签",
+          "订单列表（状态、书籍、金额）",
+          "待发货／待收货操作按钮",
+          "已完成订单的评分与评价输入",
+          "我收到的评价"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "书籍详情",
+        "route": "/book-detail",
+        "purpose": "查看单本书的品相、价格和卖家信息，并下单或联系卖家。",
+        "links": [
+          "/chat",
+          "/orders",
+          "/home"
+        ],
+        "sections": [
+          "书封图集与基本信息（书名、作者、ISBN）",
+          "品相说明与价格",
+          "卖家信息与历史评价",
+          "下单摘要（收货地址、运费、总价）",
+          "联系卖家与立即购买按钮"
+        ],
+        "presentation": "push"
+      },
+      {
+        "name": "聊天",
+        "route": "/chat",
+        "purpose": "就某本书与对方一对一沟通议价和交接细节。",
+        "links": [
+          "/messages",
+          "/book-detail",
+          "/orders"
+        ],
+        "sections": [
+          "顶部书籍卡片（封面、价格）",
+          "消息记录",
+          "快捷回复（还在吗、能否小刀）",
+          "输入框与发送按钮"
+        ],
+        "presentation": "push"
+      }
+    ]
+  }
+}

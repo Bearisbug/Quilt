@@ -1,4 +1,4 @@
-import { COLOR_CLASS_NAMES, type Tokens } from './tokens.ts';
+import { COLOR_CLASS_NAMES, NEUTRAL_PALETTE, tokensFromSeed, type Tokens } from './tokens.ts';
 import { DEVICE_SIZE, type DeviceType, type Presentation } from './device.ts';
 import { componentPlacement, sharedComponentsSection, type SharedComponentCard } from './components.ts';
 
@@ -13,22 +13,76 @@ export type RegistryEntry = { route: string; name: string; purpose?: string };
 /** 情境层参考屏（ADR-012）：样板屏 / 来源屏 */
 export type ReferenceScreen = { label: string; body: string };
 
-export const DEFAULT_COMPONENTS: ComponentRecipe[] = [
-  { name: 'AppBar', html: '<header class="h-14 flex items-center justify-between px-4 bg-surface border-b border-outline-variant">', note: 'title text-lg font-semibold; icon buttons w-10 h-10 flex items-center justify-center rounded-full' },
-  { name: 'TabBar', html: '<nav class="sticky bottom-0 mt-auto grid grid-cols-4 bg-surface border-t border-outline-variant">', note: 'mobile main screens only; each tab <a class="flex flex-col items-center gap-1 py-2 text-xs text-on-surface-variant">, active tab text-primary; scrolling content lives in <main class="flex-1 overflow-y-auto"> above it' },
-  { name: 'Sidebar', html: '<aside class="w-60 shrink-0 h-dvh sticky top-0 flex flex-col bg-surface border-r border-outline-variant">', note: 'desktop only; nav list <nav class="flex-1 overflow-y-auto p-3 space-y-1">, active link bg-primary-container text-on-primary-container rounded-md' },
-  { name: 'Card', html: '<div class="bg-surface rounded-lg border border-outline-variant p-4">' },
-  { name: 'ListItem', html: '<a class="flex items-center gap-3 py-3 border-b border-outline-variant">', note: 'w-12 h-12 rounded-md image/avatar, flex-1 text block, trailing chevron-right icon' },
-  { name: 'PrimaryButton', html: '<button type="button" class="inline-flex items-center justify-center h-12 px-6 rounded-full bg-primary text-on-primary font-semibold">' },
-  { name: 'SecondaryButton', html: '<button type="button" class="inline-flex items-center justify-center h-12 px-6 rounded-full border border-outline text-primary font-semibold">' },
-  { name: 'Chip', html: '<span class="inline-flex items-center h-8 px-3 rounded-full bg-secondary-container text-on-secondary-container text-sm">' },
-  { name: 'Input', html: '<input class="w-full h-12 px-4 rounded-md bg-surface border border-outline-variant text-on-surface placeholder:text-on-surface-variant">', note: 'always with a visible <label for> or aria-label' },
-  { name: 'ProgressBar', html: '<div class="h-2 rounded-full bg-surface-variant"><div class="h-2 w-3/5 rounded-full bg-primary"></div></div>', note: 'widths via fraction classes w-1/12 … w-11/12 / w-full; bar charts are flex rows of such bars; never inline style' },
+// 新建项目的组件配方（ADR-028 v0.92，按设备各一套）：克制的现代风格——圆角按角色取小档（新项目用 sharp 档：
+// rounded-md 4px、rounded-lg 8px），rounded-full 只给头像、计数徽标与进度条；分隔先靠留白与底色，线只在行与行之间。
+// 配方随项目存（design_systems.components），改这里只影响新建项目
+const MOBILE_COMPONENTS: ComponentRecipe[] = [
+  { name: 'AppBar', html: '<header class="h-14 flex items-center justify-between px-4 bg-background">', note: 'title text-on-surface: main screens text-2xl font-semibold tracking-tight, detail screens text-base font-semibold; icon buttons w-11 h-11 -mr-2 flex items-center justify-center rounded-lg text-on-surface-variant; no bottom border' },
+  { name: 'TabBar', html: '<nav class="sticky bottom-0 mt-auto grid grid-cols-4 bg-background border-t border-outline-variant">', note: 'mobile main screens only; each tab <a class="flex flex-col items-center gap-1 pt-2 pb-3 text-xs text-on-surface-variant">, the active tab text-primary font-medium (icon and label); scrolling content lives in <main class="flex-1 overflow-y-auto"> above it' },
+  { name: 'Card', html: '<div class="bg-surface rounded-lg border border-outline-variant p-4">', note: 'one standalone object without a photo (a chart panel, a summary with 3+ facts and an action); an item with a photo is the photo with its text below on the page, never a photo inset in a bordered box; at most two per screen; never nested, never around a list or a form' },
+  { name: 'ListItem', html: '<a class="flex items-center gap-3 py-3">', note: 'rows live in <ul class="divide-y divide-outline-variant"> (directly on the page; only a settings or form group sits in a bg-surface rounded-lg border border-outline-variant px-4 block); leading Avatar or w-10 h-10 rounded-lg thumbnail, a flex-1 min-w-0 text block, a trailing value or chevron-right w-4 h-4 text-on-surface-variant' },
+  { name: 'PrimaryButton', html: '<button type="button" class="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-primary text-on-primary text-sm font-medium">' },
+  { name: 'SecondaryButton', html: '<button type="button" class="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-outline-variant bg-surface text-on-surface text-sm font-medium">' },
+  { name: 'Chip', html: '<span class="inline-flex items-center h-8 px-3 rounded-lg bg-surface-variant text-on-surface-variant text-sm">', note: 'filters; the one selected filter is bg-primary text-on-primary font-medium; categories, breeds and statuses are text, not chips' },
+  { name: 'Input', html: '<input class="w-full h-11 px-3 rounded-lg bg-surface border border-outline text-base text-on-surface placeholder:text-on-surface-variant">', note: 'label text-sm font-medium above it, hint or error text-sm below' },
+  { name: 'Avatar', html: '<span class="inline-flex items-center justify-center w-10 h-10 shrink-0 rounded-full bg-surface-variant text-on-surface-variant text-sm font-medium">', note: 'initials; a photo only from PROJECT ASSETS' },
+  { name: 'Badge', html: '<span class="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-primary text-on-primary text-xs font-medium tabular-nums">', note: 'unread / open counts on tabs, nav items and rows' },
+  { name: 'ProgressBar', html: '<div class="h-1.5 rounded-full bg-surface-variant"><div class="h-1.5 w-3/5 rounded-full bg-primary"></div></div>', note: 'widths via fraction classes w-1/12 … w-11/12 / w-full; bar charts are flex rows of such bars; the fill turns bg-warning from 85% of a limit and bg-error past it; never inline style' },
 ];
+const DESKTOP_COMPONENTS: ComponentRecipe[] = [
+  { name: 'Sidebar', html: '<aside class="w-60 shrink-0 h-dvh sticky top-0 flex flex-col bg-background border-r border-outline-variant">', note: 'brand row h-14 px-4 (the PROJECT ASSETS logo plus the app name, else the app name alone, text-sm font-semibold); nav <nav class="flex-1 overflow-y-auto p-2 flex flex-col gap-0.5">, each link <a class="flex items-center gap-2 h-8 px-2 rounded-md text-sm text-on-surface-variant"> with a w-4 h-4 icon, the active link bg-surface-variant text-on-surface font-medium; counts as a Badge at the end of the link' },
+  { name: 'PageHeader', html: '<header class="flex items-start justify-between gap-6 pb-6">', note: 'left: h1 text-xl font-semibold tracking-tight plus one line of facts text-sm text-on-surface-variant; right: actions at natural width; filters or tabs directly below' },
+  { name: 'Card', html: '<div class="bg-surface rounded-lg border border-outline-variant">', note: 'a dashboard panel: header row px-5 py-4 (title text-base font-semibold, an action link right, no rule under it), body px-5 pb-5; never nested, never around a whole page section, a full-width table, a list or a filter row' },
+  { name: 'StatRow', html: '<div class="grid grid-cols-4 gap-8">', note: 'headline figures: each a label text-sm text-on-surface-variant, a value text-2xl font-semibold tabular-nums, a delta text-xs below; no boxes, icons or dividers between figures' },
+  { name: 'Table', html: '<table class="w-full text-sm">', note: 'thead th h-9 px-3 text-left text-xs font-medium text-on-surface-variant border-b border-outline-variant whitespace-nowrap, no fill; tbody tr border-b border-outline-variant last:border-0, td h-11 px-3; numbers, dates, statuses and actions whitespace-nowrap, numbers text-right tabular-nums; the first column is the record name font-medium with secondary facts (provider, ID, owner) as a text-xs text-on-surface-variant line under it, not extra columns; at most 7 columns (4 in a half-width panel); one action per row (a text link or a more-horizontal icon button); a full-width table sits on the page under its heading, no Card around it' },
+  { name: 'ListItem', html: '<a class="flex items-center gap-3 py-2.5">', note: 'rows live in <ul class="divide-y divide-outline-variant">; leading Avatar or w-8 h-8 rounded-md thumbnail, a flex-1 min-w-0 text block, a trailing value' },
+  { name: 'PrimaryButton', html: '<button type="button" class="inline-flex items-center justify-center gap-2 h-9 px-3.5 rounded-md bg-primary text-on-primary text-sm font-medium">' },
+  { name: 'SecondaryButton', html: '<button type="button" class="inline-flex items-center justify-center gap-2 h-9 px-3.5 rounded-md border border-outline-variant bg-surface text-on-surface text-sm font-medium">' },
+  { name: 'Chip', html: '<span class="inline-flex items-center h-6 px-2 rounded-md bg-surface-variant text-on-surface-variant text-xs font-medium">', note: 'filters; the one selected filter is bg-primary text-on-primary; categories and statuses are text, not chips' },
+  { name: 'Input', html: '<input class="w-full h-9 px-3 rounded-md bg-surface border border-outline text-sm text-on-surface placeholder:text-on-surface-variant">', note: 'label text-sm font-medium above it, hint or error text-xs below; form fields and search only: a filter dropdown in a toolbar is a SecondaryButton with a trailing chevron-down w-4 h-4' },
+  { name: 'Avatar', html: '<span class="inline-flex items-center justify-center w-8 h-8 shrink-0 rounded-full bg-surface-variant text-on-surface-variant text-xs font-medium">', note: 'initials; a photo only from PROJECT ASSETS' },
+  { name: 'Badge', html: '<span class="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-surface-variant text-on-surface-variant text-xs font-medium tabular-nums">', note: 'counts on nav items, tabs and rows; bg-primary text-on-primary only for something that needs action' },
+  { name: 'ProgressBar', html: '<div class="h-1.5 rounded-full bg-surface-variant"><div class="h-1.5 w-3/5 rounded-full bg-primary"></div></div>', note: 'widths via fraction classes w-1/12 … w-11/12 / w-full; the fill turns bg-warning from 85% of a limit and bg-error past it; never inline style' },
+];
+export function defaultComponents(device: DeviceType): ComponentRecipe[] {
+  return device === 'mobile' ? MOBILE_COMPONENTS : DESKTOP_COMPONENTS;
+}
 
 // 稳定前缀（ADR-012 v0.31）：规则 → DESIGN.md（含约定）→ 配方 → 应用简介 → 屏注册表；参考屏放在最后（每作业可变）。
 // 同一作业里多屏并行共用这一份 system，prompt cache 命中的就是这个前缀。
 export type ProjectAsset = { name: string; url: string; width: number; height: number };
+
+// 美学基线（ADR-028，v0.92 接替 v0.91 的 CRAFT DEFAULTS）：克制的现代风格——中性灰承担界面，一个强调色标出重点，
+// 结构靠对齐与留白，不靠框、线和特效。具体颜色、字体、圆角数值仍由项目 token 定；第一行写优先级。
+// 只随设备变、不随项目变，放在稳定前缀里输出规则之后（ADR-012 v0.91 修订）。文字经过真实模型盲评（TEST.md TC-CORE-084），改动要重跑
+const CRAFT_LINES = [
+  `AESTHETIC BASELINE (restrained, modern; the tokens set the actual values)`,
+  `- Precedence: the request (incl. planned sections and EARLIER INSTRUCTIONS), APP BRIEF, DESIGN SYSTEM and its 约定, recipes, shared components and PROJECT ASSETS override any line here. REFERENCE SCREENS set density and component usage, not what the Lines, Radius and Never lines rule out. When revising or making a state variant, apply this only to what changes.`,
+  `- The look: calm and precise; neutral greys carry the screen, one accent marks what matters, structure comes from alignment and spacing.`,
+  `- Lines and boxes: separate by spacing first, then by a bg-surface-variant block, lines last. A line is 1px border-outline-variant, only between rows of one list or table, under a sticky bar, or around an input or one panel. A section is its heading plus content on the page, not a box; never box every section, stack a border, a divider and a fill on one block, or use border-2+; no rule between gapped columns or on a list's outer edge.`,
+  `- Radius (small, set by role): controls and thumbnails use the recipes' radius, containers rounded-lg; rounded-full only for avatars, status dots, count badges, toggles and progress tracks. No pill-shaped buttons, chips or tabs, no rounded-xl or larger; an inner corner is never rounder than its container.`,
+  `- Type: hierarchy by size and weight, not colour or boxes; page title, section heading and row title each a size step apart; titles and key figures font-semibold (page titles tracking-tight), labels and buttons font-medium, secondary text text-on-surface-variant; at most 5 sizes; tabular-nums on figures and numeric cells only; no all-caps or letter-spaced labels.`,
+  `- Colour: primary only for the primary action, links, the selected filter or tab, the active item and the main data series (a second series in the outline grey); everything else neutral. No tinted section backgrounds, no icon tiles of any colour. Status colours only for real status, as a dot, text or bar fill with a word; outside a status column mark only the exceptions.`,
+  `- Space: 4px grid; within a group gap-1 or gap-2, between groups gap-3 or gap-4, between sections gap-8 (mobile gap-6); one value per tier per screen; a heading sits closer to its content than to what comes before it.`,
+  `- Focus: the first viewport holds the title, what the user came for and its primary action. Only overview, report and monitoring screens open with 2-4 headline figures (text-2xl font-semibold tabular-nums over a text-sm label) before any chart or list; key totals never hide in a subtitle.`,
+  `- Components: at most one PrimaryButton, other actions SecondaryButton or text-primary links; each action appears once per screen; metadata is text, not chips.`,
+  `- Fit: figures with units, prices, times, statuses, chips, button and link labels and table headers whitespace-nowrap; facts on one line are one text run joined by ' · '; truncate meta, IDs, emails and previews, never a name or price; titles wrap or line-clamp-2; in rows the text column is flex-1 min-w-0 and trailing values share one right edge.`,
+  `- Data and copy: specific, realistic, internally consistent (every count, total and 'X of Y' matches what is shown); every figure has its unit, currency or period. Headings name the content, buttons start with a verb. No greetings, emoji, taglines, buzzwords, New or AI pills, or text explaining the UI.`,
+  `- Icons: lucide, w-4 h-4 in rows and buttons, w-5 h-5 in bars, in the colour of their text, only where they help scanning; never one on every heading, stat or card.`,
+  `- Never unless the request or DESIGN SYSTEM asks: gradients, glows, coloured or large shadows, glass or backdrop-blur, text-shadow, hero banners on app screens, icon + title + blurb card trios, letter-tile logos, decorative illustrations. Asked to make it nicer: fix hierarchy, spacing and copy, remove decoration, never add boxes, shadows, badges or icons.`,
+  `- States: keep the chrome. Empty: one muted w-8 h-8 icon, a title, one sentence, one action. Loading: bg-surface-variant blocks shaped like the content, motion-safe:animate-pulse. Error: inline, saying what failed and the fixing action.`,
+];
+const CRAFT_DEVICE: Record<DeviceType, string> = {
+  mobile: `- Mobile: one column with px-4 on bg-background; lists are divide-y ListItem rows on the page under their heading; at most two Cards; controls h-11; 8-10 rows per list. Feed media runs edge to edge (-mx-4, no radius) with text below. Carousels: -mx-4 px-4 py-1 flex gap-3 overflow-x-auto inside a px-4 block, items shrink-0. A flow screen (no TabBar) pins its primary action in a sticky bottom-0 bar (px-4 py-3 bg-background border-t border-outline-variant) as the root's last child, or for a submit the last child of its <form class="flex-1 flex flex-col">; never inside an overflow-y-auto box.`,
+  desktop: `- Desktop: denser. Body text-sm, controls h-9. The page opens with the PageHeader (title and one line of facts left, actions right, filters below). Records compared field by field go in the Table recipe (8-12 rows, at most 7 columns); feeds and messages stay rows in a max-w-3xl column; card grids only for visual objects. Dashboards: the StatRow of headline figures, then panels (the Card recipe) in a 2-3 column grid; panels in one row of similar length, none stretched. Forms: a max-w-2xl field column with a w-80 summary or preview aside on the right (sticky top-8) that holds the primary action; never one narrow column with the right half empty.`,
+};
+export function craftRules(device: DeviceType): string {
+  return [...CRAFT_LINES, CRAFT_DEVICE[device]].join('\n');
+}
+// 图片（ADR-027 ④）：picsum 只给随机照片，种子只保证稳定——照片不能承载含义，头像与 logo 另有来源。
+// 出屏提示词与 get_design_contract 共用这一句
+export const PICSUM_PHOTO_NOTE = 'picsum returns a RANDOM photo: the seed keeps it stable (reuse it for the same item on every screen) but never picks the subject, so a photo must not carry meaning. Use photos where any real-world photo fits (feed media, covers, places), with titles beside or below, never on top.';
+const IMAGES_RULE = `- Images: <img src="https://picsum.photos/seed/ITEM-ID/W/H" class="... object-cover" alt="..."> in a fixed frame (w-*/h-*, aspect-square, aspect-video, or w-full with a fixed h-* for other ratios), W/H about 2× the frame and at most 1600. ${PICSUM_PHOTO_NOTE} Avatars are initials (bg-surface-variant text-on-surface-variant) unless PROJECT ASSETS has the photo; logos come only from PROJECT ASSETS, else the app name alone as a text wordmark (no letter tile).`;
 
 // shared（REQ-EDIT-006）：项目的共享组件卡——每张都进前缀（名字 / 摘要 / 占位写法），与本次相关的附完整 HTML
 export function screenSystemPrompt(app: AppContext, device: DeviceType, tokens: Tokens, designMd: string, components: ComponentRecipe[], registry: RegistryEntry[], refs: ReferenceScreen[], assets: ProjectAsset[] = [], shared: SharedComponentCard[] = []): string {
@@ -53,17 +107,19 @@ OUTPUT RULES (structure is required; the rest is the house vocabulary — see WH
 - Root element: <div class="min-h-dvh flex flex-col bg-background text-on-background"> ... </div>
 - Default to Tailwind utility classes. COLORS: prefer the token classes bg-X / text-X / border-X / ring-X where X is one of: ${COLOR_CLASS_NAMES.join(', ')}. These tokens are what makes a theme change sweep every screen at once, so stay inside them unless the design genuinely needs something they cannot express.
 - Semantic colors: bg-success/text-success for completed & confirmed states, bg-warning/text-warning for caution, bg-error/text-error for failure — never repurpose primary for these. Pair each with its on-* class for text on top.
-- Radius: rounded-sm, rounded-md, rounded-lg, rounded-full are the house scale. Shadows: shadow-sm by default.
+- Radius: small and set by role (see AESTHETIC BASELINE): the recipes' radius for controls, rounded-lg for containers, rounded-full only for avatars, dots, count badges, toggles and progress tracks. Shadows: none on in-flow content; shadow-sm only on layers that float over it (sheets, menus, FABs) unless the DESIGN SYSTEM's Elevation says otherwise.
 - Simple progress bars: the ProgressBar recipe (fraction widths) needs no script. Real data visualisation may pull in a charting library — see LIBRARIES.
 - Typography: text-xs … text-3xl, font-medium / font-semibold / font-bold. ${tokens.typography.fontFamily} is ${tokens.typography.fontSource === 'system' ? 'the device font (installed locally, no webfont to load)' : 'preloaded'}.
-- Icons: <i data-lucide="icon-name" class="w-5 h-5"></i> using lucide icon names (home, search, heart, user, plus, chevron-left, chevron-right, settings, bell, message-circle, camera, map-pin, calendar, clock, star, bookmark, filter, more-horizontal, check, x, play, pause, wallet, trending-up, receipt, dumbbell, flame, book-open, moon, sun).
-- Images: <img src="https://picsum.photos/seed/UNIQUE-WORD/W/H" class="... object-cover" alt="..."> with explicit w-*/h-* or aspect classes.
+- Icons: <i data-lucide="icon-name" class="w-5 h-5"></i> using any lucide icon name that fits the meaning (e.g. home, search, bell, settings, user, users, calendar, clock, map-pin, message-circle, wallet, receipt, credit-card, shopping-cart, utensils, car, book-open, chart-line, wind, moon, heart, star, plus, check, x, chevron-left, chevron-right, more-horizontal).
+${IMAGES_RULE}
 - Navigation: every tappable element that leads to another screen MUST navigate to a route from ALLOWED ROUTES only. Links, cards and button-like actions are <a href="/route"> (style them with the button recipes). Every <form> MUST have action="/route" (the screen shown after submitting) and its primary action MUST be <button type="submit"> — never type="button" for Log in / Sign up / Send / Save / Continue. A button that must stay a <button> but leads somewhere carries data-href="/route". If the destination screen is NOT in ALLOWED ROUTES (a tab or action that has no screen yet), write href="#" — a dead link the prototype explains to the user — and NEVER point it at an unrelated existing screen. Only buttons that truly do nothing (toggles, steppers) are <button type="button"> without data-href.
-- Forms: every <input>/<select>/<textarea> has a meaningful name, a visible <label for> (or aria-label for search fields), and autocomplete/inputmode where relevant. Tap targets are at least h-11 (44px). Disabled controls use the disabled attribute plus opacity-50, never color alone.
+- Forms: every <input>/<select>/<textarea> has a meaningful name, a visible <label for> (or aria-label for search fields), and autocomplete/inputmode where relevant. Tap targets are at least h-11 (44px) on mobile and h-8 (32px) on desktop; recipes keep their own sizes. Disabled controls use the disabled attribute plus opacity-50, never color alone.
 ${deviceRules}
 - LIBRARIES: <script> tags and any https: CDN are allowed (Chart.js, ECharts, your own component library…). Load them inside the screen's root element, keep the screen self-contained, and remember the screen must still render something sensible if the CDN is slow — no blank screens waiting on network. The player re-runs a screen's inline scripts every time it is shown in the same page: bind listeners to elements inside the root (not to document/window), so they do not pile up across visits.
 - WHEN TO BREAK THEM: the tokens and recipes above are this project's shared vocabulary, not a fence. If the design you are asked for needs a colour, spacing, shape or effect they cannot express — you are exploring a NEW visual direction, not filling in the current one — write it directly (hex, inline style, arbitrary values, your own CSS in a <style> tag). Nothing is rejected for it. Know the price and take it deliberately: hardcoded colours will NOT follow a later theme change, and screens that lean on a CDN degrade when it is unavailable. Quilt records every deviation per screen so the designer can see what drifted.
 - Content: realistic and specific (real-sounding names, prices, dates, counts). No lorem ipsum. English UI copy.
+
+${craftRules(device)}
 
 DESIGN SYSTEM
 ${designMd.trim()}
@@ -208,6 +264,8 @@ HOW TO REPLY
 - Say what you changed (screen names) and any decision you made on the designer's behalf; if you took a deviation from the design system or hit a conflict, say so. If you changed nothing, say that.
 - Earlier turns of this conversation are in your context: "刚才那个", "the one before", "put it back" refer to them.
 
+${craftRules(args.device)}
+
 DESIGN SYSTEM
 ${args.designMd.trim()}
 
@@ -310,31 +368,46 @@ export function proposeDesignSystemUserPrompt(args: { instruction: string; desig
   return `INSTRUCTION:\n${args.instruction}\n\nCURRENT CONVENTIONS:\n${args.existing.length ? args.existing.map((c) => `- ${c}`).join('\n') : '(none)'}\n\nCURRENT TOKENS: seedColor=${args.tokens.colors.primary} fontFamily=${args.tokens.typography.fontFamily} radius.md=${args.tokens.radius.md}\n\nDESIGN.md:\n${args.designMd.trim()}${sample}`;
 }
 
+// 新建项目的 DESIGN.md（ADR-028 v0.92）：与新配方、中性色板、sharp 圆角档同一口径；DESIGN.md 在提示词里压过美学基线，两边不能打架。
+// 存量项目存着的那份不改
 export function defaultDesignMd(appName: string, seedColor: string, device: DeviceType): string {
+  const mobile = device === 'mobile';
   return `# ${appName} Design System
 
 ## Overview
-${appName} uses a calm, content-first visual language: generous whitespace, one accent color for primary actions, and neutral surfaces that let photos and data stand out. Target: ${device === 'mobile' ? 'mobile app screens (390×844)' : 'desktop web app (1280×800)'}.
+${appName} uses a restrained, modern visual language: neutral greys carry the interface, one accent color marks the primary action and the current selection, and structure comes from alignment and spacing rather than boxes, lines or effects. Target: ${mobile ? 'mobile app screens (390×844)' : 'desktop web app (1280×800)'}.
 
 ## Colors
-Seed color ${seedColor} drives a Material HCT palette. Use \`primary\` for the single most important action per screen, \`primary-container\` for soft emphasis, \`surface\` for cards, \`surface-variant\` for inset areas, \`outline-variant\` for hairlines, \`error\` only for destructive or invalid states.
+Seed color ${seedColor} drives the accent (\`primary\`, \`primary-container\`); the neutrals are plain greys. \`background\` is the page, \`surface\` raised panels and cards, \`surface-variant\` insets, selected rows and skeletons, \`outline-variant\` the only hairline color, \`outline\` input borders. Use \`primary\` only for the single most important action per screen, links, the active item and the main data series. \`success\` / \`warning\` / \`error\` only for real status, as a dot or text with a word.
 
 ## Typography
-One sans family. Scale: text-xs (captions), text-sm (secondary), text-base (body), text-lg (card titles), text-xl (section titles), text-2xl/3xl (screen titles). Weights: medium for labels, semibold for titles, bold for numbers that matter.
+One sans family. ${mobile ? 'Screen titles text-2xl font-semibold tracking-tight (in the AppBar on main screens), section titles text-lg font-semibold, row titles text-base font-medium, body text-base, secondary text-sm, captions text-xs.' : 'Page titles text-xl font-semibold tracking-tight, section and panel titles text-base font-semibold, body and table cells text-sm, captions and table headers text-xs.'} Key figures text-2xl/3xl font-semibold tabular-nums. Weights: medium for labels and buttons, semibold for titles and figures. At most 5 sizes per screen; no all-caps labels.
 
 ## Layout
-${device === 'mobile' ? 'Single column, 16px horizontal padding, 24px between sections, 12px between list rows. Sticky bottom TabBar on main screens; back-arrow AppBar on detail screens.' : 'Left Sidebar (240px) + main area with 32px padding; content max-width 1040px; cards in 2–3 column grids with 24px gaps.'}
+${mobile ? 'Single column with 16px side padding (px-4), 24px between sections. Lists sit on the page with hairlines between rows; only settings and form groups sit in one bordered surface block. Feed media runs edge to edge; an item with a photo is the photo with its text below, not a card. Sticky bottom TabBar on main screens; back-arrow AppBar on detail screens.' : 'Left Sidebar (240px) + main area with 32px padding. Each page opens with the PageHeader (title and facts left, actions right). Records in the Table recipe (at most 7 columns, on the page, not in a card) or divided lists; card grids only for visual objects (products, places, media); dashboards are the StatRow of headline figures above a 2–3 column grid of panels.'}
 
 ## Elevation
-Flat by default. Cards separate by hairline (\`border-outline-variant\`) not shadow. \`shadow-sm\` only for floating elements (bottom sheets, FABs).
+Flat. Separate by spacing first, then by tone (\`surface\` on \`background\`, \`surface-variant\` insets), and only then by a 1px \`outline-variant\` hairline. \`shadow-sm\` only on menus, sheets and dialogs.
 
 ## Shapes
-Radius tokens: rounded-sm for chips/inputs, rounded-md for cards/list thumbnails, rounded-lg for sheets/hero images, rounded-full for buttons and avatars.
+${mobile ? 'rounded-lg for controls, cards, sheets and inset media (edge-to-edge feed media is square)' : 'rounded-md for controls (buttons, inputs, tags, thumbnails), rounded-lg for panels, cards, dialogs and media'}; rounded-full only for avatars, status dots, count badges, toggles and progress tracks. No pill buttons, no larger radii.
 
 ## Components
-Reuse the component recipes verbatim: AppBar, TabBar${device === 'desktop' ? ', Sidebar' : ''}, Card, ListItem, PrimaryButton, SecondaryButton, Chip, Input, ProgressBar. One PrimaryButton per screen at most.
+Reuse the component recipes verbatim: ${defaultComponents(device).map((c) => c.name).join(', ')}. At most one PrimaryButton per screen.
 
 ## Do's and Don'ts
-Do: real content, consistent 8px rhythm, one accent per screen, visible labels. Don't: multiple competing primary buttons, lorem ipsum. Reach past the tokens (hex, arbitrary values, inline styles) only when this system cannot express the design — those values stop following theme changes.
+Do: real, specific content; a consistent 4px rhythm; one accent; visible labels; hairlines only between rows. Don't: a box around every section, dark or thick dividers, pill buttons, large radii, tinted section backgrounds, icon tiles of any colour, letter-tile logos, chips for metadata, gradients, emoji, lorem ipsum. Reach past the tokens (hex, arbitrary values, inline styles) only when this system cannot express the design — those values stop following theme changes.
 `;
+}
+
+// 新建项目的设计系统（ADR-028 v0.92）：没选设计预设时 createProject 用它。中性色板以逐键覆盖写进 palette、圆角取 sharp 档——
+// 都是存量机制里能存住的输入，下次写设计系统重算 token 时照样保留；存量项目不受影响
+export function newProjectDesign(appName: string, device: DeviceType, seedColor: string) {
+  const palette = { light: { ...NEUTRAL_PALETTE.light }, dark: { ...NEUTRAL_PALETTE.dark } };
+  return {
+    tokens: tokensFromSeed(seedColor, { radiusScale: 'sharp', palette: palette.light, colorMode: 'light' }),
+    palette, colorMode: 'light' as const,
+    designMd: defaultDesignMd(appName, seedColor, device),
+    components: defaultComponents(device),
+  };
 }

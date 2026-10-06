@@ -3,7 +3,7 @@ import { db, schema } from '../db/client.ts';
 import { problems, isUniqueViolation } from '../lib/errors.ts';
 import { config } from '../config.ts';
 import { storage } from '../lib/storage.ts';
-import { assembleDocument, buildPrelude, extractBody, injectQids, reconcileQids, overwrittenInstances, lintScreenBody, expandComponents, OVERLAY_SCREEN_NOTE, COLOR_CLASS_NAMES, DEVICE_SIZE, type DeviceType, type Tokens, type LintReport, type Presentation } from '@quilt/core';
+import { assembleDocument, buildPrelude, extractBody, injectQids, reconcileQids, overwrittenInstances, lintScreenBody, expandComponents, OVERLAY_SCREEN_NOTE, PICSUM_PHOTO_NOTE, craftRules, COLOR_CLASS_NAMES, DEVICE_SIZE, type DeviceType, type Tokens, type LintReport, type Presentation } from '@quilt/core';
 import { assetsForPrompt } from './assets.ts';
 import { ownedProject } from './projects.ts';
 import { createRevision, deriveLinks, hasActiveJob, setFamilyPresentation } from './screens.ts';
@@ -106,8 +106,10 @@ export async function designContract(ownerId: string, projectId: string) {
       ...(sharedComponents.length ? [`Shared components (sharedComponents[]) are project-level fragments every screen places by reference: emit exactly the "placement" tag (empty except data-slot content) wherever that component belongs — Quilt fills in the HTML and overwrites any hand-written copy on the next write. To change how one looks everywhere, call quilt.update_component; to make a new one, quilt.create_component.`] : []),
       'REQUIRED: output ONLY the screen root element HTML — <div class="min-h-dvh flex flex-col bg-background text-on-background">…</div>, a single root, no <html>/<head>/<body> wrapper. Everything below is the default vocabulary, not a gate: deviations are recorded per screen, never rejected.',
       `Colors: prefer the token classes (bg-/text-/border-/ring- + one of: ${COLOR_CLASS_NAMES.join(', ')}) — they are what makes one theme change sweep every screen. Hex, rgb(), inline style, arbitrary values and your own <style> are allowed where the tokens cannot express the design; the price is that those values will NOT follow a later theme change.`,
-      `Radius: rounded-sm/md/lg/full; icons via <i data-lucide="…">; images: ${assets.length ? 'wherever a logo or brand mark belongs use the exact url of the matching entry in assets[] (these are the project\'s real files), other photos via https://picsum.photos/seed/…' : 'via https://picsum.photos/seed/…'}; navigation via <a href="/route"> with routes from the app map, href="#" for destinations that have no screen yet.`,
+      `Radius: rounded-sm/md/lg/full; icons via <i data-lucide="…">; images: ${assets.length ? 'wherever a logo or brand mark belongs use the exact url of the matching entry in assets[] (these are the project\'s real files), other photos via https://picsum.photos/seed/…' : 'via https://picsum.photos/seed/…'} in a fixed frame (w-*/h-*, aspect-square or aspect-video) — ${PICSUM_PHOTO_NOTE} Avatars are initials unless assets[] has the photo; logos come only from assets[], else the app name alone as a text wordmark (no letter tile); navigation via <a href="/route"> with routes from the app map, href="#" for destinations that have no screen yet.`,
       `Overlay screens (routes[].presentation = "overlay", or create_screen with presentation "overlay"): ${OVERLAY_SCREEN_NOTE}`,
+      // 做工规则（ADR-027）：与出屏提示词同一段，本机会话与外部 agent 只读契约
+      craftRules(project.deviceType as DeviceType),
       'Component recipes are the house defaults — reuse them for consistency, diverge where the design calls for it. <script> tags and any https: CDN are allowed (Chart.js, ECharts, your own component library); keep the screen renderable when the CDN is slow.',
     ],
     routes: screens,
