@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ScreenDto, ComponentDto, RunnerOptionDto, AgentTool, Runner } from '@quilt/core';
+import type { ScreenDto, ComponentDto, RunnerOptionDto, AgentTool, Runner, Tokens } from '@quilt/core';
 import type { SessionList } from '@/composer/useRunnerPrefs';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button, EmptyState, Input, Panel } from '@/ui/ui';
 import { Select } from '@/ui/Select';
 import { RunnerSelect, SessionSelect } from '@/composer/Composer';
+import { ClassList } from './ClassList';
+import { sameClasses, splitClasses } from '@/lib/twClass';
 
 // Radix Select 不接受空字符串作为选项值（空串是「未选中」的内部语义），空态用哨兵值代替
 const NO_LINK = '__none__';
@@ -15,7 +17,8 @@ const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator
 // 元素检查器（REQ-EDIT-001 / REQ-EDIT-002）：本地直改零 token；AI 只重生成选中子树。
 // component（REQ-EDIT-006）：元素所在的共享组件名——在组件里的元素不直改，给「改组件 / 脱离共享」两个出口
 export type ElementSel = { qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number } };
-type ElementDraft = { base: string; text?: string; classes?: string; link?: string; prompt?: string };
+// classes 按行存（v0.96 一行一个）：打到一半的空行、带空格的行要能留着，保存时才规范化
+type ElementDraft = { base: string; text?: string; classes?: string[]; link?: string; prompt?: string };
 // 直改落库后报给画布的撤销栈（v0.95）：屏的直改记下改前改后两版，⌘Z 回溯到改前那一版；组件的直改撤不了，只报一声占住这一步
 export type DirectEdit = { screenId: string; before: string; after: string; label: string } | { componentName: string };
 // 检查器的键盘等价物（v0.95）：⌘S、Delete / Backspace 由画布的键位表调这两个；没有可直改的选中元素时为 null
@@ -29,7 +32,7 @@ const COMPONENT_NAME_BY_TAG: Record<string, string> = { nav: 'TabBar', header: '
 // 目标是一张屏，或一个共享组件（v0.57 `REQ-EDIT-006`）——组件也能选元素直改，op 与屏同一套，
 // 只是落在组件自己的 HTML 上、乐观并发用版本号，改完由服务端回刷所有用它的屏。
 // 组件没有 AI 子树重生成（整块重写走输入框的「改组件」）、没有批注、也不能再「记为共享组件」。
-export function InspectorPanel({ screen, component, sel, routes = [], busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent, keysRef, onDirectEdit }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes?: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void; keysRef?: { current: InspectorKeys | null }; onDirectEdit?: (e: DirectEdit) => void }) {
+export function InspectorPanel({ screen, component, sel, routes = [], busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent, keysRef, onDirectEdit, tokens }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes?: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void; keysRef?: { current: InspectorKeys | null }; onDirectEdit?: (e: DirectEdit) => void; tokens?: Tokens }) {
   const toast = useToast();
   // 改了没存的文案 / 类名 / 跳转与重生成说明按元素暂存（v0.78）：点别的元素再点回来还在。
   // 直改三格记着起草时元素的原值：元素本身变了（保存后热更新重选、别处改了它）就作废、回到新值；说明不随元素内容作废
@@ -39,7 +42,7 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
   const draft = drafts[draftKey];
   const fresh = draft?.base === base ? draft : undefined;
   const text = fresh?.text ?? sel?.text ?? '';
-  const classes = fresh?.classes ?? sel?.classes ?? '';
+  const classRows = fresh?.classes ?? splitClasses(sel?.classes ?? '');
   const link = fresh?.link ?? sel?.href ?? '';
   const prompt = draft?.prompt ?? '';
   const edit = (patch: Omit<ElementDraft, 'base'>) => setDrafts((m) => ({ ...m, [draftKey]: { ...(m[draftKey]?.base === base ? m[draftKey] : { prompt: m[draftKey]?.prompt }), ...patch, base } }));
@@ -115,7 +118,7 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
     if (!sel) return;
     const ops: Parameters<typeof apply>[0] = [];
     if (text !== sel.text) ops.push({ type: 'text', value: text });
-    if (classes !== sel.classes) ops.push({ type: 'classes', value: classes });
+    if (!sameClasses(classRows.join(' '), sel.classes)) ops.push({ type: 'classes', value: splitClasses(classRows.join(' ')).join(' ') });
     if (link !== (sel.href ?? '')) ops.push({ type: 'link', value: link || null });
     if (ops.length) void apply(ops); else toast('没有改动');
   };
@@ -173,8 +176,8 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
             <input id="el-text" value={text} onChange={(e) => edit({ text: e.target.value })} className="h-9 w-full rounded-md border border-line bg-canvas px-2 text-sm" placeholder="（无直接文本）" />
           </div>
           <div className="space-y-1.5">
-            <label htmlFor="el-classes" className="block text-xs font-medium text-muted">类名（Tailwind，只能用 token 色）</label>
-            <textarea id="el-classes" value={classes} onChange={(e) => edit({ classes: e.target.value })} rows={4} className="w-full resize-y rounded-md border border-line bg-canvas p-2 font-mono text-xs [overflow-wrap:anywhere]" />
+            <div id="el-classes-label" className="text-xs font-medium text-muted">类名（Tailwind，一行一个，只能用 token 色）</div>
+            <ClassList rows={classRows} onChange={(rows) => edit({ classes: rows })} tokens={tokens} labelledBy="el-classes-label" />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="el-link" className="block text-xs font-medium text-muted">跳转到（{sel.tag === 'a' ? 'href' : sel.tag === 'form' ? '提交后 action' : 'data-href'}）</label>

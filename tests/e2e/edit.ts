@@ -1335,6 +1335,81 @@ await step('TC-EDIT-029', async () => {
   return '点了屏里的元素焦点就到检查器、直接 ⌘S 保存、Tab 进文案框；焦点在屏里时 ⌘S / Delete / ⌘Z 经运行时转发、⌘S 拦掉浏览器保存；文案框里 Backspace 只删字；⌘Z 连撤删除与保存；被别的写入改过后不撤；组件直改提示撤销不了';
 });
 
+// TC-EDIT-030 检查器的类名一行一个（REQ-EDIT-001 v0.96 PAGE-CANVAS「类名编辑」）：按原顺序一行一个、每个类配说明且按本项目取值；
+// ‹ › 换档、到头不可点；颜色下拉换 token；× 删、末行加（多个类拆成多行）、行里打空格失焦拆行；未收录 / 非 token 色有标注；打字时输入框不横跳；⌘S 按行序存回
+await step('TC-EDIT-030', async () => {
+  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Classes', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const pid = r.projectId; const sid = r.screens[0].id;
+  const S = softly();
+  const rows = page.locator('[data-testid="class-row"]');
+  const row = (cls: string) => page.locator(`[data-testid="class-row"][data-class="${cls}"]`);
+  const classesNow = async () => rows.evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.class));
+  const desc = async (cls: string) => (await row(cls).locator('[data-testid="class-desc"]').innerText()).trim();
+  try {
+    await page.goto(`${WEB}/p/${pid}`);
+    const card = page.locator('[data-testid="screen-card"][data-route="/s1"]');
+    await card.waitFor({ timeout: 15000 });
+    await page.keyboard.press('ControlOrMeta+e');
+    await page.getByTestId('armed-hint').waitFor({ timeout: 5000 });
+    await card.locator('.gesture').click();
+    await page.locator('.card.focused .badge', { hasText: '选择元素中' }).waitFor({ timeout: 20000 });
+    const fl = page.frameLocator('.card.focused iframe');
+    await fl.locator('#toggle').waitFor({ timeout: 15000 });
+    await page.waitForTimeout(300);
+    await fl.locator('#toggle').click();
+    await rows.first().waitFor({ timeout: 5000 });
+    // 1 按原顺序一行一个，说明按本项目取值
+    const orig = ['inline-flex', 'items-center', 'justify-center', 'h-12', 'px-6', 'rounded-full', 'bg-primary', 'text-on-primary', 'font-semibold'];
+    await S.check(async () => expect(JSON.stringify(await classesNow()) === JSON.stringify(orig), `① 行序不对：${JSON.stringify(await classesNow())}`));
+    const want: [string, string][] = [['px-6', '左右内边距 24px'], ['h-12', '高度 48px'], ['items-center', '子元素纵向居中'], ['rounded-full', '圆角：全圆'], ['bg-primary', '背景色 primary'], ['font-semibold', '字重 600']];
+    for (const [cls, d] of want) await S.check(async () => expect((await desc(cls)) === d, `① ${cls} 的说明：${await desc(cls)}`));
+    await S.check(async () => expect((await row('bg-primary').getByTestId('class-color').getAttribute('data-value')) === 'primary', '① bg-primary 的色板下拉应选中 primary'));
+    // 2 换档：px-6 › → px-7（28px），‹ ‹ → px-5；rounded-full 已是最大一档，› 不可点
+    await row('px-6').getByTestId('class-up').click();
+    await S.check(async () => expect((await desc('px-7')) === '左右内边距 28px', '② › 后应是 px-7 / 28px'));
+    await row('px-7').getByTestId('class-down').click();
+    await row('px-6').getByTestId('class-down').click();
+    await S.check(async () => expect((await row('px-5').count()) === 1, '② ‹ ‹ 后应是 px-5'));
+    await S.check(async () => expect((await row('rounded-full').getByTestId('class-up').getAttribute('aria-disabled')) === 'true', '② rounded-full 的 › 应不可点'));
+    // 3 颜色下拉：bg-primary → bg-secondary
+    await pickOption(page, '[data-testid="class-row"][data-class="bg-primary"] [data-testid="class-color"]', 'secondary');
+    await S.check(async () => expect((await row('bg-secondary').count()) === 1, '③ 换色后应是 bg-secondary'));
+    // 4 删 font-semibold；末行加 shadow-md、再一次加两个类
+    await row('font-semibold').getByTestId('class-remove').click();
+    const add = page.getByTestId('class-add');
+    await add.fill('shadow-md'); await add.press('Enter');
+    await add.fill('gap-2 tracking-wide'); await add.press('Enter');
+    await S.check(async () => expect(JSON.stringify((await classesNow()).slice(-3)) === JSON.stringify(['shadow-md', 'gap-2', 'tracking-wide']), `④ 末尾应加上三行：${JSON.stringify(await classesNow())}`));
+    // 5 打字时输入框不横跳：px-5 删成 px-（不能换档了），输入框的位置与宽度不变；再改成「px-5 py-3」失焦拆成两行
+    const input = row('px-5').locator('input');
+    const box0 = await input.boundingBox();
+    await input.fill('px-');
+    const box1 = await page.locator('[data-testid="class-row"][data-class="px-"] input').boundingBox();
+    await S.check(() => expect(!!box0 && !!box1 && box0.x === box1.x && box0.width === box1.width, `⑤ 打字时输入框横跳：${JSON.stringify(box0)} → ${JSON.stringify(box1)}`));
+    await page.locator('[data-testid="class-row"][data-class="px-"] input').fill('px-5 py-3');
+    await page.locator('[data-testid="class-row"][data-class="px-5 py-3"] input').blur();
+    await S.check(async () => expect((await row('px-5').count()) === 1 && (await row('py-3').count()) === 1, `⑤ 带空格的行失焦应拆成两行：${JSON.stringify(await classesNow())}`));
+    // 6 没收录 / 非 token 色的标注（看完删掉）
+    await add.fill('foo-bar bg-blue-500'); await add.press('Enter');
+    await S.check(async () => expect((await desc('foo-bar')) === '未收录', `⑥ foo-bar：${await desc('foo-bar')}`));
+    await S.check(async () => expect((await desc('bg-blue-500')).includes('非 token 色'), `⑥ bg-blue-500：${await desc('bg-blue-500')}`));
+    await row('foo-bar').getByTestId('class-remove').click();
+    await row('bg-blue-500').getByTestId('class-remove').click();
+    // 7 ⌘S：按行序存回
+    await page.locator('[data-testid="inspector-body"]').focus();
+    await page.keyboard.press('ControlOrMeta+s');
+    const expected = 'inline-flex items-center justify-center h-12 px-5 py-3 rounded-full bg-secondary text-on-primary shadow-md gap-2 tracking-wide';
+    await S.check(() => eventually(async () => {
+      const html = (await revisionHtml(sid, (await detail(pid)).screens[0].currentRevisionId)).html;
+      const tag = html.match(/<button[^>]*id="toggle"[^>]*>/)?.[0] ?? '';
+      expect(tag.includes(`class="${expected}"`), `⑦ 存回的类名：${tag.match(/class="([^"]*)"/)?.[1]}`);
+    }, 15000));
+  } catch (e) { S.fail(e); }
+  finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
+  S.done();
+  return '一行一个、说明按项目取值；‹ › 换档且到头不可点；颜色下拉换 token；删行 / 加行 / 失焦拆行；未收录与非 token 色有标注；打字不横跳；⌘S 按行序存回';
+});
+
 await browser.close();
 console.log(`\n=== RUN-${RUN} EDIT ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));
 console.log(results.map((r) => `${r.tc} ${r.result} ${r.note}`).join('\n'));

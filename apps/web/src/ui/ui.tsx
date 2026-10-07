@@ -29,10 +29,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 // 图标按钮：命中区固定 44px（A11Y-009），无障碍名走 aria-label、悬停提示只是补充（A11Y-010）。
 // 悬停态挂在几何恒定的外层 span 上，动的只有提示子元素，按钮盒子一帧不变（INT-018）。
 // 不可用时用 aria-disabled 而非原生 disabled：工具栏按钮要能被键盘发现、并在提示里说明为什么用不了（A11Y-007 / INT-013）。
-// 尺寸：xs 32px（面板角落的收起 / 关闭）、sm 40px（输入框的发送 / 取消）、md 44px（工具栏）。
+// 尺寸：2xs 24px（列表行内的小按钮，点击区下限 A11Y-009）、xs 32px（面板角落的收起 / 关闭）、sm 40px（输入框的发送 / 取消）、md 44px（工具栏）。
 // tone=invert 是反色实心钮，只给「此刻唯一的主动作」（发送 / 停止）用。
 type IconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'disabled'> & {
-  label: string; hint?: string; desc?: string; active?: boolean; tip?: 'left' | 'right' | 'top' | 'top-end' | 'bottom' | 'bottom-end' | 'none'; unavailable?: string | false; size?: 'xs' | 'sm' | 'md'; tone?: 'default' | 'danger' | 'invert';
+  label: string; hint?: string; desc?: string; active?: boolean; tip?: 'left' | 'right' | 'top' | 'top-end' | 'bottom' | 'bottom-end' | 'none'; unavailable?: string | false; size?: '2xs' | 'xs' | 'sm' | 'md'; tone?: 'default' | 'danger' | 'invert';
 };
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton({ label, hint, desc, active, tip = 'left', unavailable, size = 'md', tone = 'default', className, children, onClick, ...rest }, ref) {
   return (
@@ -45,7 +45,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
         onClick={(e) => { if (unavailable) { e.preventDefault(); return; } onClick?.(e); }}
         className={cn(
           'grid place-items-center rounded-full transition-[color,background-color,box-shadow,scale] duration-[var(--duration-fast)] ease-out active:scale-[0.96] focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:active:scale-100',
-          size === 'md' ? 'size-11' : size === 'sm' ? 'size-10' : 'size-8',
+          size === 'md' ? 'size-11' : size === 'sm' ? 'size-10' : size === 'xs' ? 'size-8' : 'size-6',
           active ? 'bg-accent text-white' : tone === 'invert' ? 'bg-fg text-canvas hover:ring-4 hover:ring-fg/15' : tone === 'danger' ? 'text-danger hover:bg-danger/10' : 'text-muted hover:bg-panel-2 hover:text-fg',
           className,
         )}
