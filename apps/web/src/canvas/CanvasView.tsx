@@ -197,6 +197,13 @@ export function CanvasView(p: CanvasProps) {
   // iframe 这一次实际加载的是哪一版（v0.76）：钉 src 时一并记下，就绪后作为热更新的基线——取「就绪那一刻的当前修订」的话，
   // 加载期间落地的新修订会被直接当成已显示，屏里停在旧版、检查器却按新版改
   const pinned = useRef<{ id: string; rev: string | null } | null>(null);
+  // iframe 里显示的（或已发出 swap、正在换成的）是哪一屏的哪一版（v0.94）：取新 HTML 的途中作废。
+  // 不等 quilt:swapped——运行时换 DOM 走 View Transition，过渡播完才回它，改完立刻退出时还没到；swap 一发出运行时就一定会换完
+  const [frameShows, setFrameShows] = useState<{ id: string; rev: string | null } | null>(null);
+  // 退出聚焦后留在卡片上的 iframe（v0.94 PAGE-CANVAS「退出聚焦的交接」）：等这一版的截图在卡片上解码完再撤
+  const [linger, setLinger] = useState<{ id: string; rev: string; src: string } | null>(null);
+  // 每张卡最近一张解码显示出来的截图地址（CardShot 接班时报上来）
+  const shotShown = useRef(new Map<string, string>());
   useEffect(() => { if (!p.focusedId) { setIframeReady(false); setFocusedSrc(null); } }, [p.focusedId]);
   useEffect(() => {
     if (!p.focusedId || focusedSrc) return;
@@ -228,6 +235,19 @@ export function CanvasView(p: CanvasProps) {
   const byId = useMemo(() => Object.fromEntries(p.screens.map((s) => [s.id, s])), [p.screens]);
   const selectedCompSet = useMemo(() => new Set(p.selectedComponentIds), [p.selectedComponentIds]);
   const focused = p.focusedId ? byId[p.focusedId] : null;
+  // 退出聚焦的那一次渲染里就定下要不要留（v0.94）：等 effect 再定，这次提交已经把 iframe 卸掉了，再挂回来就是重载
+  const [prevFocusedId, setPrevFocusedId] = useState(p.focusedId);
+  if (prevFocusedId !== p.focusedId) {
+    setPrevFocusedId(p.focusedId);
+    const left = !p.focusedId && prevFocusedId ? byId[prevFocusedId] : undefined;
+    setLinger(left?.currentRevisionId && iframeReady && focusedSrc && frameShows?.id === left.id && frameShows.rev === left.currentRevisionId
+      && !(left.screenshotUrl && shotShown.current.get(left.id) === left.screenshotUrl)
+      ? { id: left.id, rev: left.currentRevisionId, src: focusedSrc } : null);
+    // 留着时又聚焦回这一屏：换 key 重挂——签名在 30 分钟窗口里不变，同一个 src 不会重载，等不到 quilt:ready
+    if (p.focusedId && linger?.id === p.focusedId) setReloadKey((k) => k + 1);
+  }
+  // 当前修订又变了（它显示的已是旧版）或聚焦了任何一屏（同一时刻只有一个活 iframe）就不再留
+  const lingerOn = linger && !p.focusedId && byId[linger.id]?.currentRevisionId === linger.rev ? linger : null;
   const selectedSet = useMemo(() => new Set(p.selectedIds), [p.selectedIds]);
   // 每个默认屏有几个变体（v0.62）：卡片标签用
   const variantCount = useMemo(() => { const m = new Map<string, number>(); for (const s of p.screens) if (s.variantOf) m.set(s.variantOf, (m.get(s.variantOf) ?? 0) + 1); return m; }, [p.screens]);
@@ -618,13 +638,15 @@ export function CanvasView(p: CanvasProps) {
   // 热更新换完 DOM（quilt:swapped，或整份重写后的 quilt:ready）再按这个 qid 重选；跳转的 swap 不重选——同一 qid 在别的屏上是另一个元素
   const pendingReselect = useRef<string | null>(null);
   useEffect(() => {
-    if (!p.focusedId || !iframeReady || !shownId) { baseline.current = null; return; }
+    if (!p.focusedId || !iframeReady || !shownId) { baseline.current = null; setFrameShows(null); return; }
     const base = baseline.current ?? pinned.current;
     pinned.current = null;
     baseline.current = { id: shownId, rev: shownRev };
     shownRevs.current.set(shownId, shownRev);
     const cur = shownRef.current;
-    if (!base || base.id !== shownId || base.rev === shownRev || !cur?.previewUrl) return;
+    if (base && (base.id !== shownId || base.rev === shownRev)) { setFrameShows({ id: shownId, rev: shownRev }); return; }
+    setFrameShows(null);
+    if (!base || !cur?.previewUrl) return;
     let stale = false;
     // 正显示的是一层叠层：只换这一层，底下那一屏不动（swap 会把叠层全清掉、让它独占整页）
     const asLayer = cur.presentation === 'overlay' && propsRef.current.navStack.length > 0;
@@ -632,10 +654,25 @@ export function CanvasView(p: CanvasProps) {
       if (stale || html === null) return;
       pendingReselect.current = propsRef.current.selectedQid;
       if (asLayer) { postToPreview({ type: 'quilt:overlay-close' }); postToPreview({ type: 'quilt:overlay', html, route: cur.route }); }
-      else postToPreview({ type: 'quilt:swap', html, route: cur.route, keepScroll: true });
+      else { postToPreview({ type: 'quilt:swap', html, route: cur.route, keepScroll: true }); setFrameShows({ id: shownId, rev: shownRev }); }
     }).catch(() => { if (!stale) propsRef.current.onPreviewError?.(cur); });
     return () => { stale = true; };
   }, [p.focusedId, iframeReady, shownId, shownRev, postToPreview, htmlOf]);
+  useEffect(() => { if (linger && !lingerOn) setLinger(null); }, [linger, lingerOn]);
+  useEffect(() => {
+    if (!lingerOn) return;
+    postToPreview({ type: 'quilt:mode', mode: 'interact' });
+    // inert 之后焦点若还停在 iframe 上，父页收不到键盘（Esc、快捷键成了死键）
+    if (document.activeElement === iframeRef.current) iframeRef.current?.blur();
+    const url = propsRef.current.screens.find((x) => x.id === lingerOn.id)?.screenshotUrl;
+    if (url && shotShown.current.get(lingerOn.id) === url) setLinger(null);
+  }, [lingerOn, postToPreview]);
+  // 卡片截图解码完成：这一版的截图接班，留下的 iframe 在同一次提交里撤掉
+  const onShotShown = useCallback((id: string, src: string) => {
+    shotShown.current.set(id, src);
+    const s = propsRef.current.screens.find((x) => x.id === id);
+    setLinger((l) => (l && l.id === id && s?.currentRevisionId === l.rev && s.screenshotUrl === src ? null : l));
+  }, []);
   // 屏内标记：正显示的屏上有哪些 qid 在被改。作业结束 qid 离开集合 → 记为待「已更新」，等紧随其后的热更新换完 DOM 再打上；
   // 1.5 s 内没等到热更新（失败 / 取消）就作罢，只把「修改中」撤掉
   const workingQids = useMemo(() => p.workingSubtrees.filter((w) => w.screenId === shownId).map((w) => w.qid), [p.workingSubtrees, shownId]);
@@ -711,9 +748,9 @@ export function CanvasView(p: CanvasProps) {
     if (p.focusedId === id) return;   // 屏的 iframe 就绪时再把焦点移进去（quilt:ready）
     kbEntered.current = null; kbFocusPending.current = false;
     if (p.focusedId || p.focusedComponentId) return;   // 换进了别的卡：不动焦点
-    // 焦点已被放到别处（点了输入框、面板）就不抢；屏退出后 iframe 卸载，焦点在 body；组件卡的 iframe 常驻，焦点还在它上面
+    // 焦点已被放到别处（点了输入框、面板）就不抢；屏退出后 iframe 卸载或留在卡片上（inert），焦点在 body 或还挂在它上面；组件卡的 iframe 常驻，焦点还在它上面
     const a = document.activeElement;
-    if (a && a !== document.body && a !== compFrames.current.get(id)) return;
+    if (a && a !== document.body && a !== compFrames.current.get(id) && a !== iframeRef.current) return;
     requestAnimationFrame(() => gestures.current.get(id)?.focus({ preventScroll: true }));
   }, [p.focusedId, p.focusedComponentId]);
   useEffect(() => { propsRef.current.registerApi?.({ fitView, goBack, highlight, focus: focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView, enter: enterByKey }); }, [fitView, goBack, highlight, focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView, enterByKey]);
@@ -1037,6 +1074,7 @@ export function CanvasView(p: CanvasProps) {
           const q = pos(s);
           const isFocused = p.focusedId === s.id;
           const live = isFocused && !!s.previewUrl;
+          const lingering = lingerOn?.id === s.id;
           const dangling = danglingBySource.get(s.id);
           const working = p.workingSubtrees.some((w) => w.screenId === s.id);
           const desktop = s.width > 600;
@@ -1053,12 +1091,13 @@ export function CanvasView(p: CanvasProps) {
                     双击即撤掉截图的话，iframe 加载的 1 s 多里整张卡是白的，深色屏黑→白→黑 */}
                 {s.screenshotUrl ? (
                   <CardShot url={s.screenshotUrl} width={s.width} height={s.height} alt={s.name} onError={p.onShotError}
-                    retryKey={shotRetry[s.id] ?? 0} onGiveUp={(failed) => markShot(s.id, failed)}
+                    retryKey={shotRetry[s.id] ?? 0} onGiveUp={(failed) => markShot(s.id, failed)} onShown={(src) => onShotShown(s.id, src)}
                     fallback={<CardSkeleton desktop={desktop} delay={(idx % 6) * -230} />} failed={<CardSkeleton desktop={desktop} delay={0} failed />} />
                 ) : (
                   <CardSkeleton desktop={desktop} delay={(idx % 6) * -230} status={s.currentRevisionId ? '截图中' : '生成中'} />
                 )}
-                {live && <iframe key={reloadKey} ref={iframeRef} className={`nowheel nopan${iframeReady ? '' : ' loading'}`} src={focusedSrc ?? s.previewUrl!} title={s.name} sandbox="allow-scripts allow-same-origin allow-forms" onLoad={onFrameLoad} />}
+                {/* 退出聚焦后留下的那个（v0.94）：同一个元素、src 不变，不重载；inert，手势层照常在上面 */}
+                {(live || lingering) && <iframe key={reloadKey} ref={iframeRef} className={`nowheel nopan${iframeReady || lingering ? '' : ' loading'}`} src={lingering ? lingerOn.src : focusedSrc ?? s.previewUrl!} title={s.name} sandbox="allow-scripts allow-same-origin allow-forms" inert={lingering} tabIndex={lingering ? -1 : undefined} onLoad={onFrameLoad} />}
               </div>
               {/* 截图取不到（v0.83）：盖在手势层之上、卡片正中，点了从头再取；聚焦时 iframe 接班，不出 */}
               {!isFocused && s.screenshotUrl && shotFailed.has(s.id) && (
@@ -1190,7 +1229,7 @@ function CardSkeleton({ desktop, delay, status, failed }: { desktop: boolean; de
 // 取图失败（多半是签名过期）交给父页静默重取签名；地址没变时那一下换不来新请求，所以同一地址自己隔 2 s、6 s 各再取一次（v0.83，DATA-006 退避限次）。
 // 还取不到就收手：有旧图留旧图，没有就换成不动的 failed 并经 onGiveUp 报给卡片。地址变了或 retryKey 变了（点了「重试」）从头再来
 const SHOT_RETRY_MS = [2000, 6000];
-function CardShot({ url, width, height, alt, fallback, failed, retryKey, onError, onGiveUp }: { url: string; width: number; height: number; alt: string; fallback: ReactNode; failed: ReactNode; retryKey: number; onError?: () => void; onGiveUp?: (failed: boolean) => void }) {
+function CardShot({ url, width, height, alt, fallback, failed, retryKey, onError, onGiveUp, onShown }: { url: string; width: number; height: number; alt: string; fallback: ReactNode; failed: ReactNode; retryKey: number; onError?: () => void; onGiveUp?: (failed: boolean) => void; onShown?: (src: string) => void }) {
   // 正显示的那一张：key 沿用它还在取时那个 <img> 的 key，接班时同一个元素换 class，不重挂（重挂的话 decoding=async 又要空一帧）
   const [shown, setShown] = useState<{ src: string; key: string } | null>(null);
   const key = `${retryKey}|${url}`;
@@ -1204,7 +1243,7 @@ function CardShot({ url, width, height, alt, fallback, failed, retryKey, onError
   // 已经完成的图不会再触发 onLoad（缓存命中可能早于事件挂上，PERF-009）：挂上时再查一次 complete
   const settle = (img: HTMLImageElement | null, src: string, k: string) => {
     if (!img || !img.complete || img.naturalWidth === 0) return;
-    void img.decode().catch(() => {}).then(() => setShown({ src, key: k }));
+    void img.decode().catch(() => {}).then(() => { setShown({ src, key: k }); onShown?.(src); });
   };
   const fail = () => {
     onError?.();

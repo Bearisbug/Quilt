@@ -302,6 +302,107 @@ await step('TC-CORE-052', async () => {
   return `加载中 ${loading.length} 帧全有截图、iframe 透明；加载期间落地的新修订就绪后换入；换图 ${shots.length} 帧无空档`;
 });
 
+
+// ---------- TC-CORE-085 退出聚焦的交接（v0.94 PAGE-CANVAS「退出聚焦的交接」）：iframe 留到这一版的截图解码完，不出「截图中」 ----------
+await step('TC-CORE-085', async () => {
+  const { projectId: pid, screens } = seedProject('Linger85', '--device', 'mobile', '--screens', '2');
+  const [s1, s2] = screens;
+  const page = await newPage();
+  // 新修订的截图：delay = 对象响应推迟 1.5 s（截图本身不到 1 s，留存窗口要看得见）；hold = 扣住到放行
+  let gateRev = ''; let gateMode: 'delay' | 'hold' = 'delay'; let release: (() => void) | null = null;
+  await page.route(/\.png(\?|$)/, async (route) => {
+    if (!gateRev || !route.request().url().includes(`${gateRev}.png`)) return route.continue();
+    if (gateMode === 'delay') await sleep(1500); else await new Promise<void>((r) => { release = r; });
+    return route.continue();
+  });
+  let docs = 0;
+  await page.route(new RegExp(`/p/${pid}/${s1.id}\\?`), (route) => { if (route.request().resourceType() === 'document') docs += 1; return route.continue(); });
+  await page.goto(`${WEB}/p/${pid}`);
+  const card = page.locator('[data-testid="screen-card"][data-route="/s1"]');
+  const shotIs = (rev: string) => card.evaluate((el, r) => [...el.querySelectorAll('img')].some((i) => i.src.includes(`${r}.png`) && i.complete && i.naturalWidth > 0 && getComputedStyle(i).opacity === '1') && !el.querySelector('iframe'), rev);
+  await eventually(async () => expect(await card.locator('img').evaluateAll((els) => els.some((i) => (i as HTMLImageElement).complete && (i as HTMLImageElement).naturalWidth > 0)), '截图没加载出来'), 15000);
+  const focusS1 = async () => { await card.locator('.gesture').dblclick(); await page.locator('.card.focused .badge', { hasText: '交互中' }).waitFor({ timeout: 30000 }); };
+  const fl = page.frameLocator('.card.focused iframe');
+  const editAndWait = async (text: string) => {
+    const rev = await editText(pid, s1.id, 'toggle', text);
+    gateRev = rev;
+    await eventually(async () => expect((await fl.locator('#toggle').innerText()) === text, '热更新没换进来'), 15000);
+    return rev;
+  };
+  // 每帧记：聚焦与否、iframe 是否盖着（不透明）及 inert、有没有一张可见的解码好的截图
+  type F = { focused: boolean; frame: boolean; inert: boolean; shot: boolean; active: string };
+  const sample = () => card.evaluate((el) => {
+    const w = window as unknown as { __f: F[] };
+    w.__f = [];
+    const t0 = performance.now();
+    const tick = () => {
+      const f = el.querySelector('iframe');
+      const shot = [...el.querySelectorAll('img')].some((i) => { const cs = getComputedStyle(i); return i.complete && i.naturalWidth > 0 && cs.opacity === '1' && cs.visibility === 'visible'; });
+      w.__f.push({ focused: el.classList.contains('focused'), frame: !!f && getComputedStyle(f).opacity === '1', inert: !!f?.inert, shot, active: document.activeElement?.tagName ?? '' });
+      if (performance.now() - t0 < 30000) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  const frames = () => page.evaluate(() => (window as unknown as { __f: F[] }).__f);
+
+  // 1 改完退出：iframe 留在卡片上（inert、不重载、焦点不在它上面），新截图解码完才撤，中间没有一帧露骨架
+  await focusS1();
+  const rev1 = await editAndWait('留存一');
+  const docs1 = docs;
+  await sample();
+  await page.keyboard.press('Escape');
+  await page.locator('.card.focused').waitFor({ state: 'detached', timeout: 5000 });
+  const active = await page.evaluate(() => document.activeElement?.tagName ?? '');
+  await eventually(async () => expect(await shotIs(rev1), '新截图没接班'), 20000);
+  const f1 = (await frames()).filter((f) => !f.focused);
+  const kept = f1.filter((f) => f.frame);
+  const blank1 = f1.filter((f) => !f.frame && !f.shot).length;
+  expect(kept.length >= 30, `退出后 iframe 只留了 ${kept.length} 帧（截图推迟 1.5 s，应一直留到它到；退出后共采 ${f1.length} 帧，其中有截图 ${f1.filter((f) => f.shot).length} 帧）`);
+  expect(kept.every((f) => f.inert), '留下的 iframe 没有 inert');
+  expect(blank1 === 0, `退出后 ${f1.length} 帧里有 ${blank1} 帧既没有 iframe 也没有截图（露出骨架）`);
+  expect(docs === docs1, `退出时 iframe 重载了（文档请求 ${docs1} → ${docs}）`);
+  expect(active !== 'IFRAME', '退出后焦点还停在留下的 iframe 上');
+
+  // 2 截图已就绪时退出：不留，当场回截图
+  gateRev = '';
+  await focusS1();
+  await sleep(1500);
+  await sample();
+  await page.keyboard.press('Escape');
+  await page.locator('.card.focused').waitFor({ state: 'detached', timeout: 5000 });
+  await sleep(300);
+  const f2 = (await frames()).filter((f) => !f.focused);
+  expect(f2.length > 0 && f2.filter((f) => f.frame).length <= 2, `截图已就绪时退出，iframe 仍留了 ${f2.filter((f) => f.frame).length} 帧`);
+  expect(f2.every((f) => f.frame || f.shot), '截图已就绪时退出，有帧露出骨架');
+
+  // 3 留着时聚焦另一屏：留下的那个当场让位，画布上只有一个活 iframe；放行后 /s1 换上新截图
+  gateMode = 'hold';
+  await focusS1();
+  const rev3 = await editAndWait('留存三');
+  await page.keyboard.press('Escape');
+  await page.locator('.card.focused').waitFor({ state: 'detached', timeout: 5000 });
+  expect(await card.locator('iframe').count() === 1, '截图扣住时退出，iframe 应留在卡片上');
+  await page.locator('[data-testid="screen-card"][data-route="/s2"] .gesture').dblclick();
+  await page.locator('.card.focused .badge', { hasText: '交互中' }).waitFor({ timeout: 30000 });
+  expect(await card.locator('iframe').count() === 0, '聚焦 /s2 后 /s1 留下的 iframe 没让位');
+  expect(await page.locator('[data-testid="screen-card"] iframe').count() === 1, '画布上不止一个活 iframe');
+  await page.keyboard.press('Escape');
+  await page.locator('.card.focused').waitFor({ state: 'detached', timeout: 5000 });
+  (release as unknown as (() => void) | null)?.();
+  await eventually(async () => expect(await shotIs(rev3), '放行后 /s1 没换上新截图'), 20000);
+
+  // 4 留着时又聚焦回这一屏：照常进入交互态（不卡在「加载中」）
+  await focusS1();
+  await editAndWait('留存四');
+  await page.keyboard.press('Escape');
+  await page.locator('.card.focused').waitFor({ state: 'detached', timeout: 5000 });
+  expect(await card.locator('iframe').count() === 1, '第 4 步退出后 iframe 应留在卡片上');
+  await focusS1();
+  expect((await fl.locator('#toggle').innerText()) === '留存四', '重新聚焦后 iframe 里不是最新版');
+  await page.keyboard.press('Escape');
+  (release as unknown as (() => void) | null)?.();
+  return `退出后 iframe 留 ${kept.length} 帧至新截图接班、0 帧骨架；截图已就绪时不留；聚焦别屏时让位；留着时重新聚焦照常就绪`;
+});
 // ---------- TC-CORE-053 项目事件流断线重连（load-4 / cross-9） ----------
 await step('TC-CORE-053', async () => {
   const { projectId: pid } = seedProject('Live', '--device', 'mobile', '--screens', '1', '--no-shot');
