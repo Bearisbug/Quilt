@@ -1219,6 +1219,122 @@ await step('TC-EDIT-028', async () => {
   }
 });
 
+// TC-EDIT-029 检查器的键盘操作与直改撤销（REQ-EDIT-001 v0.95）：点了屏里的元素焦点挪到检查器；⌘S 保存（焦点在文案框、检查器或屏里都行，拦掉浏览器的保存）、
+// Delete 删选中元素（焦点在输入框里时只删字）、⌘Z 逐步撤销直改（连按不误判冲突；之后被别的写入改过就不撤）；组件里的直改撤不了
+await step('TC-EDIT-029', async () => {
+  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Keys', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const pid = r.projectId; const sid = r.screens[0].id;
+  const S = softly();
+  const cur = async () => (await detail(pid)).screens[0].currentRevisionId;
+  const htmlNow = async () => (await revisionHtml(sid, await cur())).html;
+  const toastSeen = (text: string) => page.getByText(text).last().waitFor({ timeout: 15000 });
+  // 记下 ⌘S 是否被拦：父页的处理挂在 window 上、运行时的挂在 document 上，探针挂在同一层、注册在它们之后才看得到结果
+  const record = (on: 'window' | 'document') => `const w = window; w.__s = []; ${on}.addEventListener('keydown', (e) => { if (e.code === 'KeyS') w.__s.push(e.defaultPrevented); });`;
+  // 保存后新内容换进 iframe 要过一段切换动画（约 250 ms），检查器的重选在那之后才到；之前输入的草稿挂在旧值上、重选一到就作废，所以新文案出现后再等 1 s
+  const settled = async (text: string) => { await fl.locator('#toggle', { hasText: text }).waitFor({ timeout: 15000 }); await page.waitForTimeout(1000); };
+  const fl = page.frameLocator('.card.focused iframe');
+  try {
+    await page.goto(`${WEB}/p/${pid}`);
+    const card = page.locator('[data-testid="screen-card"][data-route="/s1"]');
+    await card.waitFor({ timeout: 15000 });
+    await page.keyboard.press('ControlOrMeta+e');
+    await page.getByTestId('armed-hint').waitFor({ timeout: 5000 });
+    await card.locator('.gesture').click();
+    await page.locator('.card.focused .badge', { hasText: '选择元素中' }).waitFor({ timeout: 20000 });
+    await fl.locator('#toggle').waitFor({ timeout: 15000 });
+    await page.waitForTimeout(300);
+    await page.evaluate(record('window'));
+    // 1 焦点在检查器文案框里按 ⌘S：保存，并拦掉浏览器的保存
+    await fl.locator('#toggle').click();
+    await page.locator('#el-text').fill('快捷一');
+    await page.keyboard.press('ControlOrMeta+s');
+    await eventually(async () => expect((await htmlNow()).includes('>快捷一<'), '焦点在文案框里时 ⌘S 没保存'), 15000);
+    const s1 = await page.evaluate(() => (window as unknown as { __s: boolean[] }).__s);
+    await S.check(() => expect(s1.length === 1 && s1[0], `① ⌘S 应拦掉浏览器的保存：${JSON.stringify(s1)}`));
+    await settled('快捷一');
+    // 2 文案框里改了、再点回屏里的这个元素：焦点挪到检查器（不再停在 iframe 里），直接按 ⌘S 就保存；Tab 一下进文案框
+    await page.locator('#el-text').fill('快捷二');
+    await fl.locator('#toggle').click();
+    await S.check(() => eventually(async () => expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.testid) === 'inspector-body', '② 点了屏里的元素后焦点没挪到检查器'), 3000));
+    await page.keyboard.press('ControlOrMeta+s');
+    await eventually(async () => expect((await htmlNow()).includes('>快捷二<'), '点了屏里的元素后直接按 ⌘S 没保存'), 15000);
+    const s2 = await page.evaluate(() => (window as unknown as { __s: boolean[] }).__s);
+    await S.check(() => expect(s2.length === 2 && s2[1], `② ⌘S 应拦掉浏览器的保存：${JSON.stringify(s2)}`));
+    const r2 = await cur();
+    await settled('快捷二');
+    await page.locator('[data-testid="inspector-body"]').focus();
+    await page.keyboard.press('Tab');
+    await S.check(async () => expect(await page.evaluate(() => document.activeElement?.id) === 'el-text', '② 从检查器按 Tab 应进文案框'));
+    // 3 焦点在文案框里按 Backspace：只删字，不删元素
+    // 光标放到末尾（Tab 进来时整段是选中的；macOS 上 End 在输入框里不挪光标）
+    await page.locator('#el-text').evaluate((el) => { const i = el as HTMLInputElement; i.focus(); i.setSelectionRange(i.value.length, i.value.length); });
+    await page.keyboard.press('Backspace');
+    await page.waitForTimeout(800);
+    await S.check(async () => expect((await page.locator('#el-text').inputValue()) === '快捷' && (await cur()) === r2, `③ 文案框里的 Backspace 应只删字：${await page.locator('#el-text').inputValue()}，当前版 ${(await cur()) === r2 ? '未变' : '变了'}`));
+    await page.locator('#el-text').fill('快捷二');
+    // 4 焦点仍在屏里（运行时转发）：⌘S 没改动时提示「没有改动」、预览文档里拦掉浏览器的保存；Delete 删掉选中的元素
+    await fl.locator('#toggle').click();
+    await page.waitForTimeout(300);
+    const frame = page.frames().find((f) => f.url().includes(`/p/${pid}/${sid}`));
+    expect(frame, '找不到聚焦屏的预览文档');
+    await frame!.evaluate(record('document'));
+    await page.evaluate(() => (document.querySelector('.card.focused iframe') as HTMLIFrameElement).focus());
+    await page.keyboard.press('ControlOrMeta+s');
+    await toastSeen('没有改动');
+    const s4 = await frame!.evaluate(() => (window as unknown as { __s: boolean[] }).__s);
+    await S.check(() => expect(s4.length === 1 && s4[0], `④ 预览文档里的 ⌘S 应被拦掉：${JSON.stringify(s4)}`));
+    await page.keyboard.press('Delete');
+    await eventually(async () => expect(!(await htmlNow()).includes('id="toggle"'), '焦点在屏里时 Delete 没删元素'), 15000);
+    await eventually(async () => expect((await fl.locator('#toggle').count()) === 0, 'iframe 里元素还在'), 15000);
+    // 5 ⌘Z 撤销删除：元素回来、文案是「快捷二」
+    await page.keyboard.press('ControlOrMeta+z');
+    await toastSeen('已撤销删除元素');
+    await eventually(async () => expect((await htmlNow()).includes('>快捷二<'), '⌘Z 没撤销删除'), 15000);
+    await fl.locator('#toggle', { hasText: '快捷二' }).waitFor({ timeout: 15000 });
+    // 6 再按 ⌘Z 撤销第二次保存（连按不能判成冲突）：文案回到「快捷一」
+    await page.keyboard.press('ControlOrMeta+z');
+    await toastSeen('已撤销修改元素');
+    await eventually(async () => expect((await htmlNow()).includes('>快捷一<'), '第二次 ⌘Z 没撤销保存'), 15000);
+    await fl.locator('#toggle', { hasText: '快捷一' }).waitFor({ timeout: 15000 });
+    // 7 之后被别的写入改过（直接调直改接口，不经检查器）：⌘Z 不撤，提示去修订面板，当前版不动
+    const html7 = await htmlNow();
+    const q7 = qidOf(html7, 'id="toggle"')!;
+    const ext = await apiJson<{ revision: { id: string } }>(`/v1/screens/${sid}/elements/${q7}`, { method: 'POST', body: JSON.stringify({ ops: [{ type: 'text', value: '外部改' }], expectedRevisionId: await cur() }) });
+    expect(ext.status === 201, `外部直改 ${ext.status}`);
+    await fl.locator('#toggle', { hasText: '外部改' }).waitFor({ timeout: 15000 });
+    await page.keyboard.press('ControlOrMeta+z');
+    await toastSeen('这一屏之后又改过了，撤销不了这一步，去修订面板找回');
+    await page.waitForTimeout(500);
+    await S.check(async () => expect((await cur()) === ext.body.revision.id, '⑦ 被别的写入改过后 ⌘Z 不该动当前版'));
+    // 8 组件里的直改：保存（⌘S）后 ⌘Z 提示撤销不了
+    const headerQid = qidOf(await htmlNow(), 'class="h-14 flex')!;
+    const c = await apiJson<{ component: { id: string } }>(`/v1/projects/${pid}/components`, { method: 'POST', body: JSON.stringify({ name: 'AppBar', fromScreenId: sid, qid: headerQid, applyToScreens: false }) });
+    expect(c.status === 201, `建组件 ${c.status}`);
+    // 新组件卡默认落在左下，压在对话记录与输入框底下；挪到屏的右侧再进
+    await apiJson(`/v1/components/${c.body.component.id}`, { method: 'PATCH', body: JSON.stringify({ x: 460, y: 0 }) });
+    // 不用 reload：选择元素态记在地址里，reload 后仍在该模式，再按 ⌘E 就成了退出
+    await page.goto(`${WEB}/p/${pid}`);
+    const comp = page.locator('[data-testid="component-card"][data-name="AppBar"]');
+    await page.locator('[data-testid="component-card"][data-name="AppBar"][data-ready]').waitFor({ timeout: 20000 });
+    await comp.locator('.gesture').dblclick();
+    await eventually(async () => expect((await page.locator('.comp.focused').count()) === 1, '双击组件卡没进交互态'));
+    await page.keyboard.press('ControlOrMeta+e');
+    const cf = page.frameLocator('.comp.focused iframe');
+    await page.waitForTimeout(500);
+    // 检查器从右侧滑出会盖住组件卡；这一步验的是撤销而不是点选手感，直接在组件文档里派发点击
+    await cf.locator('h1').dispatchEvent('click');
+    await page.locator('#el-text').waitFor({ timeout: 8000 });
+    await page.locator('#el-text').fill('组件改');
+    await page.keyboard.press('ControlOrMeta+s');
+    await toastSeen('已更新组件「AppBar」');
+    await page.keyboard.press('ControlOrMeta+z');
+    await toastSeen('组件「AppBar」里的改动撤销不了，要改回去就再改一次组件');
+  } catch (e) { S.fail(e); }
+  finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
+  S.done();
+  return '点了屏里的元素焦点就到检查器、直接 ⌘S 保存、Tab 进文案框；焦点在屏里时 ⌘S / Delete / ⌘Z 经运行时转发、⌘S 拦掉浏览器保存；文案框里 Backspace 只删字；⌘Z 连撤删除与保存；被别的写入改过后不撤；组件直改提示撤销不了';
+});
+
 await browser.close();
 console.log(`\n=== RUN-${RUN} EDIT ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));
 console.log(results.map((r) => `${r.tc} ${r.result} ${r.note}`).join('\n'));

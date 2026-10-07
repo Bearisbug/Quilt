@@ -3,6 +3,7 @@ import type { ProjectDetailDto, ComponentDto, ScreenDto } from '@quilt/core';
 import { api } from '@/lib/api';
 import type { useToast } from '@/lib/toast';
 import { computeArrangement, type ArrangeKind } from './arrange';
+import type { UndoStep } from './undo';
 
 // 画布上一张卡（屏或组件）的位置，位置写回与撤销栈都用它
 export type PosEntry = { id: string; x: number; y: number };
@@ -31,15 +32,21 @@ export type PositionDrafts = ReturnType<typeof usePositionDrafts>;
 export function usePositionUndo(args: {
   drafts: PositionDrafts; screensRef: { current: ScreenDto[] }; components: ComponentDto[];
   setDetail: Dispatch<SetStateAction<ProjectDetailDto | null>>; refresh: () => unknown; toast: ReturnType<typeof useToast>;
+  pushStep: (step: UndoStep) => void;
 }) {
-  const { drafts: { dirtyPos, dirtyCompPos }, screensRef, components, setDetail, refresh, toast } = args;
-  // 位置撤销栈（v0.41）：拖动与对齐都是一步把屏挪走的动作，错了没有退路——每次动之前把「这几张原来在哪」压栈，⌘Z 逐步还原。
-  // 只管位置：屏内容的历史在修订树里，删屏有确认框，都不进这个栈。一步同时记屏与组件（v0.47 整组一起拖、整组一起还原）
-  const posUndo = useRef<{ label: string; screens: PosEntry[]; components: PosEntry[] }[]>([]);
+  const { drafts: { dirtyPos, dirtyCompPos }, screensRef, components, setDetail, refresh, toast, pushStep } = args;
+  // 位置撤销（v0.41）：拖动与对齐都是一步把屏挪走的动作，错了没有退路——每次动之前把「这几张原来在哪」压进画布撤销栈（undo.ts），⌘Z 逐步还原。
+  // 删屏有确认框，不进栈。一步同时记屏与组件（v0.47 整组一起拖、整组一起还原）
   const pushUndo = (label: string, screenIds: string[], componentIds: string[] = []) => {
     const pick = (list: PosEntry[], ids: string[]) => list.filter((x) => ids.includes(x.id)).map(({ id, x, y }) => ({ id, x, y }));
-    const entry = { label, screens: pick(screensRef.current, screenIds), components: pick(components, componentIds) };
-    if (entry.screens.length || entry.components.length) posUndo.current = [...posUndo.current.slice(-19), entry];
+    const entry = { screens: pick(screensRef.current, screenIds), components: pick(components, componentIds) };
+    if (!entry.screens.length && !entry.components.length) return;
+    pushStep({ label, run: async () => {
+      const failed = await writePositions(entry.screens, entry.components);
+      if (failed.length) { toast('撤销没能全部写回，已重取', 'error'); refresh(); return 'drop'; }
+      toast(`已撤销${label}`);
+      return 'done';
+    } });
   };
   // 位置写回（INT-019 文档级几何）：本地先行 + 在途坐标，屏与组件各走自己的 PATCH；等全部有结果再决定，
   // 失败的坐标交还服务端、成功的不回滚（口径同排列）。返回没写上的那几张的名字
@@ -53,13 +60,6 @@ export function usePositionUndo(args: {
     moved.forEach((e, i) => { if (done[i].status === 'rejected') { dirtyPos.current.delete(e.id); failed.push(screensRef.current.find((s) => s.id === e.id)?.name ?? e.id); } });
     movedComps.forEach((e, i) => { if (done[moved.length + i].status === 'rejected') { dirtyCompPos.current.delete(e.id); failed.push(components.find((c) => c.id === e.id)?.name ?? e.id); } });
     return failed;
-  };
-  const undoPos = async () => {
-    const last = posUndo.current.pop();
-    if (!last) { toast('没有可撤销的移动'); return; }
-    const failed = await writePositions(last.screens, last.components);
-    if (failed.length) { toast('撤销没能全部写回，已重取', 'error'); refresh(); return; }
-    toast(`已撤销${last.label}`);
   };
   // 松手落库：单张与整组同一条路（v0.47 多选批量移动）
   const onMove = async (moved: PosEntry[], movedComps: PosEntry[]) => {
@@ -88,5 +88,5 @@ export function usePositionUndo(args: {
     toast(`位置保存失败：${failed.map((s) => s.name).join('、')} 没排上，再点一次对齐`, 'error');
     refresh();
   };
-  return { pushUndo, writePositions, undoPos, onMove, arrange };
+  return { pushUndo, writePositions, onMove, arrange };
 }

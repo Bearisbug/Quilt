@@ -9,11 +9,17 @@ import { RunnerSelect, SessionSelect } from '@/composer/Composer';
 
 // Radix Select 不接受空字符串作为选项值（空串是「未选中」的内部语义），空态用哨兵值代替
 const NO_LINK = '__none__';
+// 按钮提示里的修饰键写法，与画布工具栏一致
+const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl+';
 
 // 元素检查器（REQ-EDIT-001 / REQ-EDIT-002）：本地直改零 token；AI 只重生成选中子树。
 // component（REQ-EDIT-006）：元素所在的共享组件名——在组件里的元素不直改，给「改组件 / 脱离共享」两个出口
 export type ElementSel = { qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number } };
 type ElementDraft = { base: string; text?: string; classes?: string; link?: string; prompt?: string };
+// 直改落库后报给画布的撤销栈（v0.95）：屏的直改记下改前改后两版，⌘Z 回溯到改前那一版；组件的直改撤不了，只报一声占住这一步
+export type DirectEdit = { screenId: string; before: string; after: string; label: string } | { componentName: string };
+// 检查器的键盘等价物（v0.95）：⌘S、Delete / Backspace 由画布的键位表调这两个；没有可直改的选中元素时为 null
+export type InspectorKeys = { save: () => void; remove: () => void };
 const SUBTREE_RUNNER_KEY = 'quilt:runner:subtree';
 // 子树重生成的投递会话按工具分开记（v0.68）：Claude Code 会话 id 与 Codex 线程 id 互不相干
 const SUBTREE_SESSION_KEY: Record<AgentTool, string> = { 'claude-code': 'quilt:agent-session:subtree', codex: 'quilt:agent-session:subtree:codex' };
@@ -23,7 +29,7 @@ const COMPONENT_NAME_BY_TAG: Record<string, string> = { nav: 'TabBar', header: '
 // 目标是一张屏，或一个共享组件（v0.57 `REQ-EDIT-006`）——组件也能选元素直改，op 与屏同一套，
 // 只是落在组件自己的 HTML 上、乐观并发用版本号，改完由服务端回刷所有用它的屏。
 // 组件没有 AI 子树重生成（整块重写走输入框的「改组件」）、没有批注、也不能再「记为共享组件」。
-export function InspectorPanel({ screen, component, sel, routes = [], busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes?: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void }) {
+export function InspectorPanel({ screen, component, sel, routes = [], busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent, keysRef, onDirectEdit }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes?: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void; keysRef?: { current: InspectorKeys | null }; onDirectEdit?: (e: DirectEdit) => void }) {
   const toast = useToast();
   // 改了没存的文案 / 类名 / 跳转与重生成说明按元素暂存（v0.78）：点别的元素再点回来还在。
   // 直改三格记着起草时元素的原值：元素本身变了（保存后热更新重选、别处改了它）就作废、回到新值；说明不随元素内容作废
@@ -79,7 +85,7 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
     if (!sel) return;
     if (component) {
       setSaving(true);
-      try { const r = await api.components.editElement(component.id, sel.qid, ops, component.version); toast(`已更新组件「${component.name}」${r.applied.length ? `，同步 ${r.applied.length} 屏` : ''}`); onEdited(sel.qid); }
+      try { const r = await api.components.editElement(component.id, sel.qid, ops, component.version); toast(`已更新组件「${component.name}」${r.applied.length ? `，同步 ${r.applied.length} 屏` : ''}`); onDirectEdit?.({ componentName: component.name }); onEdited(sel.qid); }
       catch (e) {
         if (e instanceof ApiError && e.type === '/errors/component-busy') toast(`组件「${component.name}」正在改，等这一轮完事`, 'error');
         else if (e instanceof ApiError && e.type === '/errors/version-conflict') toast('组件已被更新，重新选一次元素', 'error');
@@ -90,7 +96,12 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
     }
     if (!screen?.currentRevisionId) return;
     setSaving(true);
-    try { await api.screens.editElement(screen.id, sel.qid, ops, screen.currentRevisionId); toast(okText); onEdited(sel.qid); }
+    try {
+      const { revision } = await api.screens.editElement(screen.id, sel.qid, ops, screen.currentRevisionId);
+      toast(okText);
+      onDirectEdit?.({ screenId: screen.id, before: screen.currentRevisionId, after: revision.id, label: ops.some((o) => o.type === 'remove') ? '删除元素' : ops.some((o) => o.type === 'detach') ? '脱离共享' : '修改元素' });
+      onEdited(sel.qid);
+    }
     catch (e) {
       if (e instanceof ApiError && e.type === '/errors/lint-failed') toast('改动违反设计契约（只能用 token 色与预设类）', 'error');
       else if (e instanceof ApiError && e.type === '/errors/revision-conflict') toast('屏幕已被更新，请重新选择', 'error');
@@ -100,6 +111,27 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
       else toast('保存失败', 'error');
     } finally { setSaving(false); }
   };
+  const save = () => {
+    if (!sel) return;
+    const ops: Parameters<typeof apply>[0] = [];
+    if (text !== sel.text) ops.push({ type: 'text', value: text });
+    if (classes !== sel.classes) ops.push({ type: 'classes', value: classes });
+    if (link !== (sel.href ?? '')) ops.push({ type: 'link', value: link || null });
+    if (ops.length) void apply(ops); else toast('没有改动');
+  };
+  const remove = () => void apply([{ type: 'remove' }]);
+  // 点屏里的元素之后焦点停在 iframe 里（v0.95）：父页收不到 ⌘S / Delete，Tab 也进不了检查器，得先点一下面板。挪到检查器的内容区——
+  // 只在焦点确实在画布的 iframe 上（刚点过元素）时挪；保存后的重选、别处回写这类被动更新发生时焦点在别处，不抢（INT-008）。
+  // 不直接落进「文案」框：那样 Delete 就成了删字
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (sel && document.activeElement instanceof HTMLIFrameElement) bodyRef.current?.focus({ preventScroll: true }); }, [sel]);
+  // 键盘等价物（v0.95）：与按钮同样的可用条件——共享组件实例里的元素没有这两个操作，保存中或屏忙时不响应
+  const keyable = !!sel && !(sel.component && !component);
+  useEffect(() => {
+    if (!keysRef) return;
+    keysRef.current = keyable ? { save: () => { if (!busy && !saving) save(); }, remove: () => { if (!busy && !saving) remove(); } } : null;
+    return () => { keysRef.current = null; };
+  });
   const makeComponent = async () => {
     if (!sel) return;
     const name = compName.trim();
@@ -122,7 +154,7 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
     <Panel title={`检查器 · ${component ? component.name : screen?.name ?? ''}`} className="h-full" actions={<Button size="sm" onClick={onClose}>关闭</Button>}>
       {!sel ? <EmptyState title={component ? '在组件里点选一个元素' : '在屏幕里点选一个元素'} hint="选择模式下移动鼠标会高亮元素，点击即选中；Esc 退出交互。" /> : sel.component && !component ? (
         // 共享组件实例里的元素（REQ-EDIT-006）：直改会在下一次写入时被组件展开顶掉，所以不给字段，只给两个出口
-        <div className="scroll flex-1 space-y-4 p-3">
+        <div ref={bodyRef} tabIndex={-1} className="scroll flex-1 space-y-4 p-3 focus:outline-none">
           <div className="text-xs text-muted">&lt;{sel.tag}&gt; · {sel.qid}</div>
           <div className="space-y-2 rounded-md border border-line bg-panel-2 p-3 text-xs" data-testid="el-component-lock" data-component={sel.component}>
             <p className="leading-cn">这是共享组件「<b className="text-fg">{sel.component}</b>」的一部分——改它会同步到所有用它的屏。</p>
@@ -134,7 +166,7 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
           </div>
         </div>
       ) : (
-        <div className="scroll flex-1 space-y-4 p-3">
+        <div ref={bodyRef} tabIndex={-1} className="scroll flex-1 space-y-4 p-3 focus:outline-none" data-testid="inspector-body">
           <div className="text-xs text-muted">&lt;{sel.tag}&gt; · {sel.qid}</div>
           <div className="space-y-1.5">
             <label htmlFor="el-text" className="block text-xs font-medium text-muted">文案</label>
@@ -150,8 +182,8 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
               options={[{ value: NO_LINK, label: '不跳转' }, ...linkOptions.map((r) => ({ value: r, label: r, hint: routes.includes(r) ? undefined : '断链' }))]} />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="primary" pending={saving} disabled={busy} onClick={() => { const ops: Parameters<typeof apply>[0] = []; if (text !== sel.text) ops.push({ type: 'text', value: text }); if (classes !== sel.classes) ops.push({ type: 'classes', value: classes }); if (link !== (sel.href ?? '')) ops.push({ type: 'link', value: link || null }); if (ops.length) apply(ops); else toast('没有改动'); }}>保存（零 token）</Button>
-            <Button size="sm" variant="danger" pending={saving} disabled={busy} onClick={() => apply([{ type: 'remove' }])}>删除元素</Button>
+            <Button size="sm" variant="primary" pending={saving} disabled={busy} onClick={save} title={`保存（${MOD}S）`} aria-keyshortcuts="Meta+S Control+S">保存（零 token）</Button>
+            <Button size="sm" variant="danger" pending={saving} disabled={busy} onClick={remove} title="删除元素（Delete）" aria-keyshortcuts="Delete Backspace">删除元素</Button>
           </div>
           {/* 记为共享组件（REQ-EDIT-006）：把这个元素存成项目级组件，其他屏里对应的元素（同标签、同层级）可一并换成它。
               目标本身就是组件时不显示——组件里不能再套组件（validateComponentHtml 也会拒） */}

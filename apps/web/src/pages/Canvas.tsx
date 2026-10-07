@@ -21,11 +21,12 @@ import { useComposerChrome } from '@/composer/useComposerChrome';
 import { CandidateStack } from '@/canvas/CandidateStack';
 import { ArrangeBar } from '@/canvas/ArrangeBar';
 import { usePositionDrafts, usePositionUndo } from '@/canvas/positions';
+import { useUndoStack } from '@/canvas/undo';
 import { coveredScreens, jobLabel, roundPreset, presetView, presetBody, type JobInput, type RoundPreset } from '@/canvas/jobs';
 import { DeleteDialog, MissingDialog, NewComponentDialog, VariantDialog } from '@/canvas/dialogs';
 import { RevisionPanel } from '@/panels/RevisionPanel';
 import { DesignPanel } from '@/panels/DesignPanel';
-import { InspectorPanel, type ElementSel } from '@/panels/InspectorPanel';
+import { InspectorPanel, type ElementSel, type DirectEdit, type InspectorKeys } from '@/panels/InspectorPanel';
 import { AnnotationPanel } from '@/panels/AnnotationPanel';
 import { ProposalDialog } from '@/panels/ProposalDialog';
 import { AgentJobsPanel } from '@/panels/AgentJobsPanel';
@@ -543,8 +544,29 @@ export function CanvasPage() {
     }
   };
   const cancelNewest = () => { const j = runningJobs[0]; if (j) void cancelJob(j.id); };
-  // 位置撤销栈（⌘Z）、拖动落库、多选排列：都在 positions.ts 的 usePositionUndo，这里只接线
-  const { undoPos, onMove, arrange } = usePositionUndo({ drafts, screensRef, components, setDetail, refresh, toast });
+  // 画布撤销栈（⌘Z，undo.ts）：位置改动与检查器的直改共用。拖动落库、多选排列在 positions.ts 的 usePositionUndo，这里只接线
+  const undoStack = useUndoStack(toast);
+  const { onMove, arrange } = usePositionUndo({ drafts, screensRef, components, setDetail, refresh, toast, pushStep: undoStack.push });
+  // 检查器直改的撤销（v0.95）：回溯到改前那一版，expectedRevisionId 是这次直改落下的修订——之后被别的写入改过就不撤，免得把后来的改动一起冲掉。
+  // 回溯会新建一版（内容同改前那一版）：记下「改前那一版现在由哪一版接替」，连按 ⌘Z 时下一步按接替的那一版比，否则第二下必定判成冲突。
+  // 组件里的直改撤不了（会同步到所有用它的屏），也压一步：撤到它时说明，不越过它去撤更早的一步
+  const succeeded = useRef(new Map<string, string>());
+  const latest = (rev: string) => { let r = rev; while (succeeded.current.has(r)) r = succeeded.current.get(r)!; return r; };
+  const onDirectEdit = (e: DirectEdit) => undoStack.push('componentName' in e
+    ? { label: '改组件', run: async () => { toast(`组件「${e.componentName}」里的改动撤销不了，要改回去就再改一次组件`, 'error'); return 'drop'; } }
+    : { label: e.label, run: async () => {
+      try {
+        const { revision } = await api.screens.restore(e.screenId, e.before, latest(e.after));
+        succeeded.current.set(e.before, revision.id);
+        toast(`已撤销${e.label}`); refresh(); return 'done';
+      }
+      catch (err) {
+        if (err instanceof ApiError && err.type === '/errors/screen-busy') { toast('这一屏正在生成，等它完成再撤销', 'error'); return 'keep'; }
+        if (err instanceof ApiError && err.type === '/errors/revision-conflict') { toast('这一屏之后又改过了，撤销不了这一步，去修订面板找回', 'error'); return 'drop'; }
+        toast('撤销失败', 'error'); return 'keep';
+      }
+    } });
+  const inspectorKeys = useRef<InspectorKeys | null>(null);
   // 新建组件（REQ-EDIT-006）：先起名建一个占位组件，选成唯一目标，接着在输入框里描述它——第一句「改组件」就把它写出来
   const createComponent = async (name: string) => {
     const { component } = await api.components.create(projectId, { name, html: NEW_COMPONENT_HTML });
@@ -724,6 +746,10 @@ export function CanvasPage() {
   const blocked = confirmDelete || !!missing || !!proposal || !!settingsSection || newComponentOpen || finderOpen || !!variantFor;
   const closeModals = () => { setConfirmDelete(false); setMissing(null); setProposal(null); setNewComponentOpen(false); setFinderOpen(false); setVariantFor(null); if (settingsSection) setSettings(null); };
   const deletable = (selectedScreens.length > 0 || selectedComponents.length > 0) && !focusedId;
+  // 检查器的键盘等价物（v0.95）：选择元素态下选中了元素时 Delete / Backspace 删元素（优先于删屏 / 删组件）；⌘S 只要检查器里有选中元素
+  const elementDeletable = panel === 'inspect' && inspectMode && !!elementSel;
+  const removeElement = () => inspectorKeys.current?.remove();
+  const saveElement = panel === 'inspect' && elementSel ? () => inspectorKeys.current?.save() : undefined;
   // 适配视图：缩到下限仍装不下全部时说一声，不静默裁掉（v0.76）
   const fitAll = () => { if (canvasApi.current && !canvasApi.current.fitView()) toast(`内容太大，最小缩放也装不下全部，用小地图或找屏（${CMD}K）定位`); };
   // 恰好选中一屏（或只选了一个组件）时 Enter 进入交互（v0.80）：双击的键盘等价入口，iframe 就绪后焦点移进去
@@ -732,8 +758,8 @@ export function CanvasPage() {
     KeyF: () => fitAll(),
     Enter: enterTarget ? () => canvasApi.current?.enter(enterTarget.id) : undefined,
     KeyL: toggleLinks,
-    Delete: deletable ? () => setConfirmDelete(true) : undefined,
-    Backspace: deletable ? () => setConfirmDelete(true) : undefined,
+    Delete: elementDeletable ? removeElement : deletable ? () => setConfirmDelete(true) : undefined,
+    Backspace: elementDeletable ? removeElement : deletable ? () => setConfirmDelete(true) : undefined,
   };
   const alted: Record<string, (() => void) | undefined> = {
     KeyD: openDesign,
@@ -750,7 +776,7 @@ export function CanvasPage() {
   // 对话记录里「重试」要知道最后一轮还在不在跑：本页跟踪的作业 + 服务端列出的（含交给本机 agent 的）
   const runningJobIds = useMemo(() => new Set([...activeJobs, ...(detail?.activeJobs ?? [])].map((j) => j.id)), [activeJobs, detail?.activeJobs]);
   const keyState = {
-    plain, alted, toggleInspect, toggleComposer, undoPos, blocked, closeModals, openFinder: () => setFinderOpen(true), expanded: !!candidates, busy, cancel: cancelNewest,
+    plain, alted, toggleInspect, toggleComposer, undo: undoStack.undo, saveElement, blocked, closeModals, openFinder: () => setFinderOpen(true), expanded: !!candidates, busy, cancel: cancelNewest,
     focused: !!focusedId || !!focusedComponentId, exitFocus: () => { setFocusedId(null); setFocusedComponentId(null); },
     panel: !!panel, closePanel: () => setPanel(null),
     selection: selectedIds.length > 0 || selectedComponentIds.length > 0, clearSelection: () => { setSelectedIds([]); setSelectedComponentIds([]); },
@@ -783,13 +809,15 @@ export function CanvasPage() {
       if ((e.metaKey || e.ctrlKey) && e.code === 'Slash') { e.preventDefault(); if (!keyRef.current.blocked) keyRef.current.toggleComposer(); return; }
       // ⌘K 找屏（REQ-CORE-024）：正在输入框里打字也要能按
       if ((e.metaKey || e.ctrlKey) && e.code === 'KeyK') { e.preventDefault(); if (!keyRef.current.blocked) keyRef.current.openFinder(); return; }
+      // ⌘S 保存检查器（v0.95）：正在检查器的文案 / 类名框里改着时也要能按，同样放在这道门之前；检查器里没有选中元素时不拦浏览器
+      if ((e.metaKey || e.ctrlKey) && e.code === 'KeyS') { const save = keyRef.current.saveElement; if (!save) return; e.preventDefault(); if (!keyRef.current.blocked) save(); return; }
       if ((e.target as HTMLElement)?.closest('input, textarea, select, [contenteditable]')) return;
       const k = keyRef.current;
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.code === 'KeyE') { e.preventDefault(); if (!k.blocked) k.toggleInspect(); return; }
       if (mod && e.code === 'KeyA') { e.preventDefault(); if (!k.blocked) k.selectAll(); return; }
-      // ⌘Z 只撤销画布位置（拖动 / 对齐 / 等距）：屏内容的历史在修订树里，是另一套语义
-      if (mod && e.code === 'KeyZ' && !e.shiftKey) { e.preventDefault(); if (!k.blocked) void k.undoPos(); return; }
+      // ⌘Z 撤销画布位置（拖动 / 对齐 / 等距）与检查器的直改（v0.95）；对话改屏、回溯这些内容历史在修订树里，不进这个栈
+      if (mod && e.code === 'KeyZ' && !e.shiftKey) { e.preventDefault(); if (!k.blocked) void k.undo(); return; }
       if (mod || k.blocked) return;
       // Enter 只在焦点不在任何控件上时进入交互：按钮、链接、卡片上的 Enter 各有各的激活
       if (e.code === 'Enter' && e.target !== document.body) return;
@@ -854,8 +882,8 @@ export function CanvasPage() {
     : panel === 'design' ? <DesignPanel ds={detail.designSystem} project={detail.project} screens={screens} assets={detail.assets} busy={busy} onClose={() => setPanel(null)} onSaved={refresh} onApplyAll={applyDesignSystem} onPropose={(i) => propose(i)} />
     : panel === 'screens' ? <ScreensPanel screens={screens} links={detail.links} busy={busyScreens} onPick={(id) => reveal({ kind: 'screen', id })} onClose={() => setPanel(null)} />
     : panel === 'agent' ? <AgentJobsPanel projectId={projectId} screens={screens} runners={runners} onClose={() => setPanel(null)} onChanged={refresh} />
-    : panel === 'inspect' && focusedComponent ? <InspectorPanel component={focusedComponent} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyComponents.has(focusedComponent.id)} onClose={() => setPanel(null)} onEdited={() => { setElementSel(null); refresh(); }} />
-    : panel === 'inspect' && shownScreen ? <InspectorPanel screen={shownScreen} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyScreens.has(shownScreen.id)} runners={runners} composerRunnerId={runnerId} sessionLists={lists} onSessionsOpen={(tool) => void loadSessionsFor(tool)} workingQids={workingSubtrees.filter((w) => w.screenId === shownScreen.id).map((w) => w.qid)} onClose={() => setPanel(null)} onEdited={(qid) => { canvasApi.current?.markDone([qid]); refresh(); }} onRegenerate={regenerateSubtree} onEditComponent={onEditComponent} />
+    : panel === 'inspect' && focusedComponent ? <InspectorPanel component={focusedComponent} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyComponents.has(focusedComponent.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} onClose={() => setPanel(null)} onEdited={() => { setElementSel(null); refresh(); }} />
+    : panel === 'inspect' && shownScreen ? <InspectorPanel screen={shownScreen} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyScreens.has(shownScreen.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} runners={runners} composerRunnerId={runnerId} sessionLists={lists} onSessionsOpen={(tool) => void loadSessionsFor(tool)} workingQids={workingSubtrees.filter((w) => w.screenId === shownScreen.id).map((w) => w.qid)} onClose={() => setPanel(null)} onEdited={(qid) => { canvasApi.current?.markDone([qid]); refresh(); }} onRegenerate={regenerateSubtree} onEditComponent={onEditComponent} />
     : panel === 'annotate' && shownScreen ? <AnnotationPanel screen={shownScreen} sel={elementSel} items={screenAnnotations} busy={busyScreens.has(shownScreen.id)} onClose={() => { setPanel(null); setFocusedId(null); }} onAdd={addAnnotation} onUpdate={updateAnnotation} onRemove={removeAnnotation} onSend={sendAnnotations} />
     : null;
 
@@ -906,7 +934,7 @@ export function CanvasPage() {
             onNavigateMissing={(fromScreenId, href) => setMissing({ fromScreenId, hrefs: [href] })}
             onDanglingClick={(screenId, hrefs) => setMissing({ fromScreenId: screenId, hrefs })}
             onDeadLink={() => toast('这个交互还没有设计；想让它跳转，用「选择元素」给它连线')}
-            onShortcut={(code, alt) => { if (blocked) return; if (alt) alted[code]?.(); else if (code === 'KeyE') toggleInspect(); else if (code === 'Slash') toggleComposer(); else if (code === 'KeyK') setFinderOpen(true); }}
+            onShortcut={(code, alt) => { if (blocked) return; if (alt) alted[code]?.(); else if (code === 'KeyE') toggleInspect(); else if (code === 'Slash') toggleComposer(); else if (code === 'KeyK') setFinderOpen(true); else if (code === 'KeyS') saveElement?.(); else if (code === 'KeyZ') void undoStack.undo(); else if (code === 'Delete' || code === 'Backspace') plain[code]?.(); }}
             onAnchor={placeAnchor}
             onCandidates={(jobId, screenId) => setCandidates((c) => (c?.screenId === screenId ? null : { jobId, screenId }))}
             candidateStack={candidates && screens.some((s) => s.id === candidates.screenId) ? { screenId: candidates.screenId, node: <CandidateStack jobId={candidates.jobId} screen={screens.find((s) => s.id === candidates.screenId)!} onClose={() => setCandidates(null)} onAdopted={async () => { await refresh(); setCandidates(null); }} /> } : null}

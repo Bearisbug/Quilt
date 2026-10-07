@@ -820,7 +820,9 @@ export function CanvasView(p: CanvasProps) {
           // ⌘E / ⌘/ 同屏一样转发给父页的键位表：不转发的话焦点一落进组件 iframe，按 ⌘E 就是死键——
           // 模式退不掉，选中框与「tag · qid」标签留在卡片上（组件卡的 iframe 常驻，不像屏那样退出即卸载）
           if ((m.metaKey || m.ctrlKey) && m.code) { p.onShortcut?.(m.code); return; }
-          if (m.altKey && m.code) p.onShortcut?.(m.code, true);
+          if (m.altKey && m.code) { p.onShortcut?.(m.code, true); return; }
+          // 选择元素态下的 Delete / Backspace（v0.95）：运行时只在焦点不在输入框里时转发
+          if (m.key === 'Delete' || m.key === 'Backspace') p.onShortcut?.(m.key);
           return;
         }
         // 交互态组件卡上的捏合与滚轮（v0.80）：与屏同一条 quilt:wheel，按这张卡的 iframe 换算
@@ -854,6 +856,7 @@ export function CanvasView(p: CanvasProps) {
         else if (msg.key === 'ArrowLeft' && msg.altKey) goBack();
         else if ((msg.metaKey || msg.ctrlKey) && msg.code) p.onShortcut?.(msg.code);  // ⌘E / ⌘/：键位表在 Canvas.tsx
         else if (msg.altKey && msg.code) p.onShortcut?.(msg.code, true);  // ⌥N / ⌥D……（v0.80）
+        else if (msg.key === 'Delete' || msg.key === 'Backspace') p.onShortcut?.(msg.key);  // 选择元素态删元素（v0.95）
       }
       if (msg.type === 'quilt:dead') p.onDeadLink();
       if (msg.type === 'quilt:wheel') frameWheel(iframeRef.current, msg);

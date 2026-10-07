@@ -100,11 +100,13 @@ export const RUNTIME_JS = String.raw`(function () {
     if (action.charAt(0) === '/') { snapshotForms(); send({ type: 'quilt:navigate', href: action }); }
   }, true);
   // 画布级快捷键在预览文档里按下时转发给父页：Esc 退出、Alt+← 后退、⌘E 选择元素、⌘/ 输入框、⌘K 找屏，
-  // ⌥ + 字母（⌥N 批注、⌥D 设计系统……，v0.80）只在焦点不在可编辑元素上时——macOS 下它们在输入框里是打特殊字符的
+  // ⌥ + 字母（⌥N 批注、⌥D 设计系统……，v0.80）只在焦点不在可编辑元素上时——macOS 下它们在输入框里是打特殊字符的。
+  // v0.95：⌘S 保存检查器（一律拦掉浏览器的保存网页）；⌘Z 撤销、选择元素态下的 Delete / Backspace 删除元素，焦点在可编辑元素上时留给它自己
   document.addEventListener('keydown', function (e) {
     var mod = e.metaKey || e.ctrlKey;
     var editable = e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable]');
-    if (e.key === 'Escape' || (e.altKey && e.key === 'ArrowLeft') || (mod && (e.code === 'KeyE' || e.code === 'Slash' || e.code === 'KeyK')) || (e.altKey && !mod && /^Key[A-Z]$/.test(e.code) && !editable)) {
+    var del = (e.key === 'Delete' || e.key === 'Backspace') && !mod && !e.altKey && mode === 'inspect' && !editable;
+    if (e.key === 'Escape' || (e.altKey && e.key === 'ArrowLeft') || (mod && (e.code === 'KeyE' || e.code === 'Slash' || e.code === 'KeyK' || e.code === 'KeyS')) || (mod && e.code === 'KeyZ' && !e.shiftKey && !editable) || (e.altKey && !mod && /^Key[A-Z]$/.test(e.code) && !editable) || del) {
       e.preventDefault();
       send({ type: 'quilt:key', key: e.key, code: e.code, altKey: e.altKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey });
     }
