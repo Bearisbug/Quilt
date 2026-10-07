@@ -1,5 +1,5 @@
 import type { AssetDto, ColorMode, Palette, Tokens } from '@quilt/core';
-import { toneClass, useAssetTone } from '@/lib/assetTone';
+import { toneClass, toneColor, useAssetTone } from '@/lib/assetTone';
 
 export const STYLE_GUIDE_SIZE = { w: 420, h: 640 };
 // 有素材时卡片要长出一行来放它们；画布的适配视图按同一个函数算外接框，否则这一行会被框在视野外
@@ -7,13 +7,13 @@ export const ASSET_ROW_H = 86;
 export const styleGuideSize = (assetCount: number) => ({ w: STYLE_GUIDE_SIZE.w, h: STYLE_GUIDE_SIZE.h + (assetCount ? ASSET_ROW_H : 0) });
 
 // REQ-CORE-010：由 token 渲染的风格指南卡片（画布只读），颜色全部来自 tokens，永远同步。
-// 品牌素材瓦片：底色按图的亮度选，白色标志才不会变成一块空白。
+// 品牌素材瓦片：底色按图的亮度选，白色标志才不会变成一块空白；有项目色板时衬项目自己的浅底 / 深底（v0.98）。
 // 展示用 <img> 不加 crossOrigin：那会把普通图片请求升级成 CORS 请求，而 /a/ 的 ACAO 是常量 webOrigin，
 // 页面 origin 不等于它（127.0.0.1、局域网地址）时整张图加载失败，标志在画布上直接看不见
-function BrandTile({ asset, radius }: { asset: AssetDto; radius: string }) {
+function BrandTile({ asset, radius, colors }: { asset: AssetDto; radius: string; colors: Tokens['colors'] }) {
   const tone = useAssetTone(asset.url);
   return (
-    <div className={`${toneClass(tone)} flex h-14 flex-1 items-center justify-center overflow-hidden p-2`} style={{ borderRadius: radius }} data-asset={asset.name}>
+    <div className={`${toneClass(tone)} flex h-14 flex-1 items-center justify-center overflow-hidden p-2`} style={{ borderRadius: radius, backgroundColor: toneColor(tone, colors) }} data-asset={asset.name}>
       <img src={asset.url} alt={asset.name} className="max-h-full max-w-full object-contain" />
     </div>
   );
@@ -76,7 +76,7 @@ export function StyleGuideCard({ tokens, name, palette, colorMode = 'light', ass
         <div className="mt-auto flex flex-col gap-1.5" data-testid="guide-assets">
           <div style={{ fontSize: 11, color: c.onSurfaceVariant }}>Brand assets · {assets.length}</div>
           <div className="flex items-stretch gap-2">
-            {assets.slice(0, 4).map((a) => <BrandTile key={a.id} asset={a} radius={tokens.radius.md} />)}
+            {assets.slice(0, 4).map((a) => <BrandTile key={a.id} asset={a} radius={tokens.radius.md} colors={c} />)}
           </div>
         </div>
       )}

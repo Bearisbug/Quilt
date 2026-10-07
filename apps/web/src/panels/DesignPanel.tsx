@@ -194,7 +194,7 @@ export function DesignPanel({ ds, project, screens, assets, busy, onClose, onSav
         </div>
         <PresetsSection projectId={ds.projectId} version={ds.version} busy={busy || dirty}
           onApplied={() => { onSaved(); setAskApply(screens.length > 0); }} />
-        <AssetsSection projectId={ds.projectId} items={assets} onChanged={onSaved} />
+        <AssetsSection projectId={ds.projectId} items={assets} colors={tokens.colors} onChanged={onSaved} />
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
           <span>版本 {ds.version}{dirty ? ' · 有未保存改动' : ''}</span>
           <div className="flex gap-2">

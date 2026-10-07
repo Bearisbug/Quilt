@@ -1970,6 +1970,12 @@ await step('TC-CORE-035', async () => {
     expect((await guide.locator('[data-asset]').count()) === 1, '风格指南卡片没画出素材');
     expect(await guide.locator('img').first().evaluate((el) => (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0), '卡片上的素材没加载出来');
     expect(/asset-(on-light|on-dark|thumb)/.test(await guide.locator('[data-asset]').first().getAttribute('class') ?? ''), '素材瓦片没有按亮度选底');
+    // v0.98：底色取项目色板——第 1 步那块钴蓝判为深色标志，瓦片衬项目 background（新建项目的中性色板够亮）
+    await page.waitForFunction(() => /asset-on-(light|dark)/.test(document.querySelector('[data-testid="guide-assets"] [data-asset]')?.className ?? ''), undefined, { timeout: 10000 });
+    const bgHex = (await apiJson<{ designSystem: { tokens: { colors: { background: string } } } }>(`/v1/projects/${projectId}`)).body.designSystem.tokens.colors.background;
+    const bgRgb = `rgb(${[1, 3, 5].map((i) => parseInt(bgHex.slice(i, i + 2), 16)).join(', ')})`;
+    const tile = await guide.locator('[data-asset]').first().evaluate((el) => ({ cls: el.className, bg: getComputedStyle(el).backgroundColor }));
+    expect(tile.cls.includes('asset-on-light') && tile.bg === bgRgb, `深色素材的瓦片应衬项目 background ${bgRgb}，实为 ${tile.cls.match(/asset-\S+/)?.[0]} ${tile.bg}`);
     // 7 面板：列出、缩略图能加载、删除要确认
     await page.locator('.styleguide').click();
     await page.getByTestId('assets-panel').waitFor({ timeout: 5000 });

@@ -5,7 +5,7 @@ import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button } from '@/ui/ui';
 import { ConfirmDialog } from '@/ui/modal';
-import { toneClass, useAssetTone } from '@/lib/assetTone';
+import { toneClass, toneColor, useAssetTone } from '@/lib/assetTone';
 
 // 品牌色板（REQ-EDIT-005）：26 个 token 色键的色块表，逐键标出「派生 / 品牌」，可就地改一个键、可整份清空。
 // 色块底色是数据（用户的品牌色），只能走 inline style；工具自己的外壳仍然只用 token 类。
@@ -90,18 +90,18 @@ export function PaletteSection({ tokens, palette, colorMode, savedColorMode, onC
   );
 }
 
-// 素材瓦片：底色按该图亮度选，读不出就棋盘格。
+// 素材瓦片：底色按该图亮度选，优先取项目色板（toneColor，v0.98），读不出就棋盘格。
 // 展示用 <img> 不加 crossOrigin：那会把普通图片请求升级成 CORS 请求，而 /a/ 的 ACAO 是常量 webOrigin，
 // 页面 origin 不等于它（127.0.0.1、局域网地址）时整张图加载失败——标志本身不显示，比棋盘格更糟。
 // 取像素判亮度的那个离屏 Image 自带 crossOrigin，读不出来本就回落棋盘格（assetTone.ts）
-export function AssetTile({ asset, className }: { asset: AssetDto; className?: string }) {
+export function AssetTile({ asset, colors, className }: { asset: AssetDto; colors: Tokens['colors']; className?: string }) {
   const tone = useAssetTone(asset.url);
-  return <img src={asset.url} alt="" width={40} height={40} loading="lazy" className={`${toneClass(tone)} object-contain ${className ?? ''}`} />;
+  return <img src={asset.url} alt="" width={40} height={40} loading="lazy" className={`${toneClass(tone)} object-contain ${className ?? ''}`} style={{ backgroundColor: toneColor(tone, colors) }} />;
 }
 
 // 项目素材（REQ-CORE-019）：上传 / 复制引用地址 / 删除；清单随每次生成进 prompt。
 // 列表来自项目详情（与风格指南卡片同一份），增删后让父组件重取，避免两处各刷各的
-export function AssetsSection({ projectId, items, onChanged }: { projectId: string; items: AssetDto[]; onChanged: () => void }) {
+export function AssetsSection({ projectId, items, colors, onChanged }: { projectId: string; items: AssetDto[]; colors: Tokens['colors']; onChanged: () => void }) {
   const toast = useToast();
   const [uploading, setUploading] = useState(false);
   const [dropping, setDropping] = useState(false);
@@ -156,7 +156,7 @@ export function AssetsSection({ projectId, items, onChanged }: { projectId: stri
           {items.map((a) => (
             <li key={a.id} className="flex items-center gap-2 rounded-md border border-line p-1.5" data-testid="asset-item" data-name={a.name}>
               {/* 素材长宽不可控：固定方槽 + contain，logo 不能被裁（VIS-006 / PERF-003） */}
-              <AssetTile asset={a} className="size-10 shrink-0 rounded-sm p-0.5" />
+              <AssetTile asset={a} colors={colors} className="size-10 shrink-0 rounded-sm p-0.5" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-xs text-fg" title={a.name}>{a.name}</span>
                 <span className="block truncate text-[11px] text-muted">{a.mediaType.replace('image/', '').replace('+xml', '')} · {a.width && a.height ? `${a.width}×${a.height} · ` : ''}{Math.max(1, Math.round(a.bytes / 1024))} KB</span>
