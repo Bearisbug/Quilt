@@ -1178,6 +1178,47 @@ await step('TC-EDIT-027', async () => {
 });
 if (hist) { await hist.stub.close(); await apiJson(`/v1/channels/${hist.channelId}`, { method: 'DELETE' }).catch(() => {}); }
 
+// TC-EDIT-028 改元素之后截图及时换上（§17 Chromium 一行，v0.93）：截图浏览器在进程内缓存外网 CDN 的脚本、样式与字体，第二张起不再等外网；
+// 视口内的图一直等不到时按 4 s 软上限照常出图，不撞「载入到拍完」30 s 的上限
+await step('TC-EDIT-028', async () => {
+  const S = softly();
+  const http = await import('node:http');
+  const hold = http.createServer(() => { /* 不回 */ });
+  await new Promise<void>((r) => hold.listen(3988, '127.0.0.1', () => r()));
+  const pid = seedJson<{ projectId: string }>('seed:project', '--name', 'QuickShot', '--device', 'mobile', '--screens', '1', '--no-shot').projectId;
+  // 从调用返回起计时，等到这一版有截图
+  const shotIn = async (sid: string, rid: string, ms: number) => {
+    const t0 = Date.now();
+    await eventually(async () => expect((await revs082(sid)).find((x) => x.id === rid)?.screenshotUrl, 'shot'), ms, 200);
+    return Date.now() - t0;
+  };
+  try {
+    // 1 MCP 建一屏（prelude 带 Tailwind CDN 与 Google Fonts，屏里一个 lucide 图标）：首张截图从外网取，120 s 内出来
+    const [quick] = await mcpScreens(pid, [{ name: 'Quick', route: '/quick', html: '<div class="min-h-dvh bg-background p-6"><h1 id="title" class="text-xl">Quick</h1><i data-lucide="home" class="w-5 h-5"></i></div>' }]);
+    let cur = (await revs082(quick))[0].id;
+    const t1 = await shotIn(quick, cur, 120_000).catch(() => { throw new Error('① 首张截图 120 s 内没出来（外网 CDN 不可达时记环境）'); });
+    // 2 连改三次标题的类（检查器保存走的同一个接口）：每次的新修订 3 s 内有截图
+    const times: number[] = [];
+    for (const cls of ['text-2xl font-semibold', 'text-lg', 'text-xl font-bold']) {
+      const qid = qidOf((await revisionHtml(quick, cur)).html, 'id="title"')!;
+      const r = await apiJson<{ revision: { id: string } }>(`/v1/screens/${quick}/elements/${qid}`, { method: 'POST', body: JSON.stringify({ ops: [{ type: 'classes', value: cls }], expectedRevisionId: cur }) });
+      expect(r.status === 201, `改类返回 ${r.status}`);
+      cur = r.body.revision.id;
+      times.push(await shotIn(quick, cur, 40_000).catch(() => 40_000));
+    }
+    await S.check(() => expect(times.every((t) => t <= 3000), `② 改元素后的截图应各在 3 s 内换上：${times.join(' / ')} ms`));
+    // 3 MCP 建一屏，视口内一张图指向只收不回的服务：首张截图 30 s 内出来（等 networkidle 满 15 s、图片再等 4 s）
+    const [slow] = await mcpScreens(pid, [{ name: 'Slow', route: '/slow', html: '<div class="min-h-dvh bg-background p-6"><h1 class="text-xl">Slow</h1><img src="http://127.0.0.1:3988/hang.png" width="8" height="8" alt=""></div>' }]);
+    const t3 = await shotIn(slow, (await revs082(slow))[0].id, 30_000).catch(() => -1);
+    await S.check(() => expect(t3 >= 0, '③ 视口内的图等不到时，截图应在 30 s 内照常出来'));
+    S.done();
+    return `首张 ${t1} ms；改元素后 ${times.join(' / ')} ms；带等不到的图 ${t3} ms`;
+  } finally {
+    await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});
+    hold.closeAllConnections(); hold.close();
+  }
+});
+
 await browser.close();
 console.log(`\n=== RUN-${RUN} EDIT ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));
 console.log(results.map((r) => `${r.tc} ${r.result} ${r.note}`).join('\n'));

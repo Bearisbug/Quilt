@@ -10,7 +10,7 @@
 | Owner | @bug |
 | 关联设计文档 | `docs/DESIGN.md` |
 | 被测系统 | `~/Documents/Projects/Quilt`（Web 画布 + API/MCP 服务 + Worker + 预览域服务） |
-| 最后更新 | 2026-10-06（设计文档 v0.92） |
+| 最后更新 | 2026-10-06（设计文档 v0.93） |
 
 变更记录（登用例增改，不登执行轮次）：
 
@@ -18,12 +18,12 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-10-06 | 设计文档 v0.93（改完元素要等很久才换上截图）：新增 `TC-EDIT-028`（同一进程里第一张截图之后，改元素到换上截图每次 ≤ 3 s；视口内一张等不到的图时截图 30 s 内照常出来），在 `tests/e2e/edit.ts`；§3 截图链一条补它的环境要求 | @bug |
 | 2026-10-06 | `TC-CORE-084` 第 2、3 步（RUN-231～233 之后）：耗时不再设门槛、改看输出 token；加界面语言不漂移一项；两版候选直接对比时的门槛与说明经 `judge.workflow.js` 的 args 传入 | @bug |
 | 2026-10-06 | 设计文档 v0.92（新建项目默认采用克制的现代风格）：`TC-CORE-084` 改动——加机械指标一步（`harness.mts audit`：每屏粗线、胶囊、≥ 12px 圆角、阴影、渐变，按渲染后的 DOM 数），盲评维度加「AI 味」（`aiLook`），「基线」可以是带标签的已有产物（`gen base` 配 `AES_LABEL`；`pairs` / `audit` 认目录名），新建项目的设计系统按代码里的 `newProjectDesign` 取，机械指标加「折行短文本」，两版候选直接对比时的门槛；对应 `ADR-028`。`TC-EDIT-010` 第 1、6 步：新建项目默认挂中性色板，清空色板后对比纯种子派生值而不是第 1 步的值。单测 `core/contract` 两条改写：美学基线的位置与输出规则改句；新建项目的中性色板对比度（发丝线 < 1.5:1、输入框边框 ≥ 3:1、次要文字 ≥ 4.5:1，亮暗两套）、sharp 圆角、配方不带胶囊 / 大圆角 / 阴影且 lint 干净、DESIGN.md 与配方同口径 | @bug |
 | 2026-10-06 | 设计文档 v0.91（出屏提示词带做工规则）：新增 `TC-CORE-084`（真实模型 A/B 盲评：6 条需求 × 前 3 屏、两个通道、每对 3 票，事先登记的通过标准），脚本与冻结的需求、规划入库在 `tests/bench/craft/`；§5 加「提示词轮」；单测 `core/contract` 加两条（做工规则恰好一段且在输出规则与 DESIGN SYSTEM 之间、设备行只进本设备、聊天助手也带、规则里没有任意值 / hex / 内联样式、长度上限；默认 DESIGN.md 的四处改句） | @bug |
 | 2026-10-02 | 设计文档 v0.90（改完一屏只剩后半截）：新增 `TC-EDIT-027`（桩回 `finish_reason: "length"` 时改屏作业按 `provider` 失败、当前修订与修订数不变、回执说输出超限并建议拆开发、不重试），沿用 `TC-EDIT-025` 的项目、桩与通道，`openai-stub.ts` 加 `cut` 选项；单测 `api/agentSdk`（一轮多段回答按序拼接、续写用尽按失败）、`api/llm`（三家 API 类驱动停止原因为输出上限时不可重试地失败）、`core/failure`（输出超限的文案）各加一条 | @bug |
 | 2026-10-02 | 设计文档 v0.89（屏里的 `dark:` 变体跟着看的人的系统走）：新增 `TC-CORE-083`（同一屏在暗色 / 亮色系统偏好下与截图里显示同一版：亮色配色是亮色那版，挂暗色色板回刷后是暗色那版）；单测 `core/tokens` 加一条（`isDarkPalette`、prelude 的 `darkMode`、存量修订补丁） | @bug |
-| 2026-10-02 | 设计文档 v0.88（作业早已结束，画布还挂着「排队中…」）：新增 `TC-CORE-082`（探针冻住项目事件流后经输入框改一屏：60 s 内作业行撤掉、事件流重建、对话记录补上回执） | @bug |
 
 ## 2. 测试范围 / 不测什么
 
@@ -65,7 +65,7 @@
 - 单测（v0.60）：`pnpm test` 在 `tests/unit` 用 `node:test` 跑 `packages/core` 与前端纯函数的单测（不起库、不起浏览器，约 0.5 s）。TEST.md 不为单测逐条建 TC——测试文件名即覆盖范围（`core/inject`、`core/components`、`core/outline`、`core/lint`、`core/tokens`、`core/contract`、`core/failure`、`core/history`、`web/arrange`、`web/jobs`、`web/messages`、`web/designDraft`、`api/codex`、`api/agentSdk`、`api/origin`、`api/llm`、`api/bundle`），失败按「单测轮」登记。`api/bundle` 按 `apps/cli/build.mjs` 同样的参数打一遍打包入口，断言静态 import 图无环（v0.82：环会让打包形态冷启动时顶层 await 永不落定、退出码 13）。
 - LLM 故障注入：`LLM_STUB=503 pnpm dev` 让所有调用返回 503；`LLM_STUB=fixture` 回放固定 HTML（需要确定性时使用，用例中显式注明）。stub 驱动认指令里的 `[stub-hold:<毫秒>]`（写进系统提示或用户提示都算）：这次调用先拖这么久再回，且不理会中止信号——用来造「作业在跑的那一阵」与「模型已经在回来的路上时被取消」（`TC-EDIT-019`、`TC-CORE-065`，v0.79）。
 - 作业与 worker 健壮性（v0.79）：`TC-CORE-065` 要本机 docker 里的 `quilt-pg`，脚本用 `docker exec quilt-pg psql` 对被测库执行 `pg_terminate_backend`、只掐 `query ilike 'listen %'` 的连接（按 `current_database()` 过滤，别的库不受影响）。`TC-CORE-066` / `068` 在本机起**探针图**服务（3989 / 3988）：屏里一张指向它的图，探针回 404 时 `onerror` 挂一个不停清空 Tailwind 样式的定时器，截图的就绪判定等不到样式、这次拍摄失败；回 PNG 就一切正常——用它确定性地造「第一次拍摄失败」。`TC-CORE-068` 要重启被测 API：`QUILT_E2E_RESTART` 给一条命令，须以 SIGKILL 结束旧进程（模拟崩溃，`finally` 不执行）、再按本节的命令起新进程并轮询 `/v1/health` 到就绪（例如 `kill -9` 监听 API 端口的进程及其 `pnpm` / `tsx` 父进程后重起），未设时该用例失败并注明环境。`tests/e2e/openai-stub.ts` 的 `holdMs` 可以按请求给、`fail` 按请求回错误状态码；`codex-stub.mjs` 对 id 以 `eeee` 结尾的线程打开深链接失败（记 `open-failed`，模拟本机没装 Codex 桌面版）。真实调用会消耗额度，每条用例后置不做特殊清理。
-- 截图链与上传位（v0.82）：`TC-CORE-071` 要 `QUILT_E2E_RESTART` 与本机的 `ps` / `lsof`（按 `ppid` 与命令行里的 `--user-data-dir` 认截图浏览器）。`TC-EDIT-022` 的两张卡住的屏由屏自己的脚本造（把 `document.fonts.ready` 换成永不落定的 promise；页面加载完之后再调 `lucide.createIcons` 就死循环）。`TC-EDIT-023` 以 `QUILT_JOB_TIMEOUT_BASE_MS=1000 SCREEN_CONCURRENCY=1` 执行 `QUILT_E2E_RESTART`，要求重启命令把调用方的环境变量传给新进程（`stack.sh` 的 `env … pnpm` 即如此）；`QUILT_JOB_TIMEOUT_BASE_MS` 只在 `LLM_DRIVER=stub` 时生效，跑完不带它再重启一次；3987 端口起一个只收不回的服务当慢图。`TC-AGENT-022` 要被测 API 用 fs 存储、数据目录在本机（`/v1/config` 的 `home`），脚本直接拨上传位文件的修改时间。
+- 截图链与上传位（v0.82）：`TC-CORE-071` 要 `QUILT_E2E_RESTART` 与本机的 `ps` / `lsof`（按 `ppid` 与命令行里的 `--user-data-dir` 认截图浏览器）。`TC-EDIT-022` 的两张卡住的屏由屏自己的脚本造（把 `document.fonts.ready` 换成永不落定的 promise；页面加载完之后再调 `lucide.createIcons` 就死循环）。`TC-EDIT-023` 以 `QUILT_JOB_TIMEOUT_BASE_MS=1000 SCREEN_CONCURRENCY=1` 执行 `QUILT_E2E_RESTART`，要求重启命令把调用方的环境变量传给新进程（`stack.sh` 的 `env … pnpm` 即如此）；`QUILT_JOB_TIMEOUT_BASE_MS` 只在 `LLM_DRIVER=stub` 时生效，跑完不带它再重启一次；3987 端口起一个只收不回的服务当慢图。`TC-EDIT-028`（v0.93）在 3988 端口起同样的服务；它的第 1 步要截图浏览器能访问外网 CDN，第 2 步的 3 s 门槛靠同一进程里的外网缓存，API 重启后第一张照常走网络。`TC-AGENT-022` 要被测 API 用 fs 存储、数据目录在本机（`/v1/config` 的 `home`），脚本直接拨上传位文件的修改时间。
 - 工具：浏览器（自动化遵循运行环境既有约定：Playwright 驱动本机 Edge；帧率用页面内 rAF 计数 + `longtask` PerformanceObserver 采样；**在预览 iframe（跨域）内点击元素前必须先让画布处于该屏 1:1 聚焦态**——Playwright 不感知外层 CSS transform 缩放，非 1:1 下点击坐标会偏；键盘快捷键在焦点位于 iframe 内时由预览运行时转发，测试可直接对页面按键）；curl（不带凭据）；`pnpm mcp:call <tool> '<json>'` / `--resource <uri>` / `--list`（MCP 调用脚本，打印工具返回）。
 - 执行脚本：`tests/e2e/core.ts`（CORE）、`load.ts`（v0.76 画布加载与数据新鲜度 `TC-CORE-050`~`056`，v0.83 加 `075`~`078`）、`canvas.ts`（v0.80 画布交互与键盘 `TC-CORE-057`~`059`，v0.83 加 `079`）、`proto.ts`、`edit.ts`、`agent.ts`、`install.ts`（`TC-CORE-031`）、`smoke.ts`（开发冒烟）；环境变量 `RUN=轮次`、`ONLY=用例子集`、`LIVE_LLM=0` 跳过真实生成。各套件串行执行，不并行——每套开头的 `pnpm seed` 会清掉另一套正在用的数据。
 - 证据目录：`docs/test-runs/`（截图按 `run-NNN-tc-<域>-NNN.png`、响应体按 `.json` 命名；文中引用以项目根为基准）。
@@ -1654,6 +1654,18 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 后置：关桩、删通道。
 
+#### `TC-EDIT-028` 改元素之后截图及时换上 — 对应 `REQ-EDIT-001`、`REQ-CORE-004`（设计文档 §17 Chromium 一行，v0.93）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：`pnpm seed:project --name QuickShot --device mobile --screens 1 --no-shot`；截图浏览器能访问外网 CDN（Tailwind Play CDN、unpkg、Google Fonts）；本机 3988 端口起一个只收不回的服务。脚本 `tests/e2e/edit.ts`（`ONLY=TC-EDIT-028`），失败项攒齐一起报。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | MCP 建一屏 `Quick`（标题 `<h1 id="title">` 加一个 lucide 图标），轮询它的修订 | 120 s 内有截图（这一张从外网取 Tailwind、lucide 与字体；取不到记环境） |
+| 2 | 连改三次标题的类（`POST /v1/screens/<id>/elements/<qid>`，`classes` 依次为 `text-2xl font-semibold`、`text-lg`、`text-xl font-bold`，每次带上一版的修订 id），每次从返回起计时到新修订有截图 | 三次都返回 201，新修订各在 3 s 内有截图（修复前每次 4.2–4.8 s：每张截图重下 CDN） |
+| 3 | MCP 建一屏 `Slow`，视口内一张 8×8 的图指向 3988 端口 | 30 s 内有截图（等 `networkidle` 满 15 s、图片再等 4 s；修复前图片按 30 s 等，撞「载入到拍完」上限拍不成） |
+
+后置：删项目，关 3988 端口的服务。
+
 ### AGENT · MCP 与本机 agent
 
 > v0.32 本地单用户版：`TC-AGENT-002`（scope 不足）、`TC-AGENT-005`（长轮询领取）、`TC-AGENT-006`（租约过期）、`TC-AGENT-007`（deeplink）、`TC-AGENT-008`（伴侣进程）随 `REQ-AGENT-001` 的 OAuth 与 `REQ-AGENT-004/005` 推迟，用例正文移除；ID 保留不复用。
@@ -1998,6 +2010,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | RUN-231 | 2026-10-06 | 未提交工作树（v0.92）上的细节打磨候选 `cand093`：先跑细节审计（工作流 `wf_62dcb9c7-792`，6 个审计代理逐一看 v0.92 终稿的 36 屏、1 个合成代理），审计记 138 处细节问题（规则已写但被忽略 55、写得含糊 45、没覆盖 38），按跨应用出现的频次合成 12 类修订：标题行基线对齐、表格首尾列贴齐标题、两行式列表、导航每屏一致、数量与日期一种写法、具名对象不用随机照片、APP CONTEXT 带今天日期等；规则正文上限 4800 → 5500 字 | AI(Claude Code) | `TC-CORE-084` 第 1、2 步（对 v0.92 终稿产物，标签 `final092`）；事先登记的门槛见 bench-out `PROGRESS.md`：盲评总胜率 ≥ 60%、每通道 ≥ 50% 且均差 > 0，粗线 ≤ 3.0、胶囊 ≤ 0.5、≥ 12px 圆角 ≤ 0.5、折行短文本 ≤ 1.0，输出长度与耗时 ≤ +20%。证据 `docs/test-runs/run-231-craft-ab/` | 未过，未进盲评：折行短文本 0.4 → 1.9（Gemini 表格挤压、书封排版块里的书名），Sonnet 平均耗时 52 → 67 s（+29%，输出 token +13%）；粗线 1.05、胶囊 0.05、大圆角 0 过线，lint 偏离 Gemini 4.1 → 2.2、Sonnet 0.8 → 0.3。另发现界面语言漂移：中文屏 Sonnet 0 → 12、Gemini 13 → 16（见明细） |
 | RUN-232 | 2026-10-06 | 同 RUN-231，候选 `cand093b`：表格加回 `overflow-x-auto` 兜底、名字以外的单元格不折行；具名对象的无图占位改成图标块；面板回到 v0.92 的「不拉伸」；导航标签改为「用界面文案语言」 | AI(Claude Code) | `TC-CORE-084` 第 1、2 步；门槛在出屏前改登记：耗时改看输出 token，加界面语言漂移 ≤ 2 屏一项；另做三组消融（Sonnet，`relaygate` / `fitstreak`，各只改一处）。证据 `docs/test-runs/run-232-craft-ab/` | 未过，未进盲评：机械指标全过（粗线 0.75、胶囊 0.05、大圆角 0、折行 0.2；输出 token Gemini +1.5%、Sonnet +18.6%），界面语言未过：中文屏 Gemini 13 → 18、Sonnet 0 → 12。消融定位到两处成因（见明细） |
 | RUN-233 | 2026-10-06 | 同 RUN-231，候选 `cand093c`：`cand093b` 去掉中文标点一句与导航标签 / h1 绑定路由名的写法 | AI(Claude Code) | `TC-CORE-084` 全部三步，门槛同 RUN-232；盲评 36 对 × 3 票（工作流 `wf_848beb5e-167`，`minWin` 0.6 / `minChannelWin` 0.5）。证据 `docs/test-runs/run-233-craft-ab/` | 未过，保留 v0.92，代码从快照还原：机械与语言门槛全过（粗线 2.35、胶囊 0、大圆角 0、折行 0.4；输出 token Gemini −2%、Sonnet +9%；中文屏 Gemini 12、Sonnet 1），盲评 17 胜 19 负（47.2%），Gemini 9 / 9、Sonnet 8 / 10，手机 8 / 10、桌面 9 / 9；overall 均差 +0.01，layout +0.38、components +0.13、「AI 味」+0.18、content −0.14。19 个输局里 15 个是 0 : 3，集中在图片承载内容的屏（见明细） |
+| RUN-234 | 2026-10-06 | 未提交工作树（设计文档 v0.93，在未提交的 v0.92 之上） | AI(Claude Code) | 局部轮（改到截图链：§17 Chromium 一行）：typecheck；单测轮；截图链用例 `TC-CORE-052` / `066` / `068` / `071` / `083`、`TC-EDIT-022` / `023` / `028`、`TC-AGENT-018`；冒烟级 `TC-CORE-003` / `005` / `010` / `012` / `018` / `031`、`TC-PROTO-001`、`TC-AGENT-001`。隔离栈 3410 / 3411 + `quilt_test` + stub，`LIVE_LLM=0`、`GEMINI_API_KEY=`；install 套件停栈后用 `env -u npm_config_allow_scripts` 运行。`TC-EDIT-028` 先在修复前的代码上跑过一次：失败 2 处（改元素后的截图 4768 / 4179 / 4772 ms；带等不到的图的屏撞「载入与拍摄超过 30 s」） | typecheck 通过；单测 75/75；e2e 通过 15 · 失败 2：CORE 7/9（`005` / `012` 需真实模型，基线）、LOAD 1/1、EDIT 3/3、PROTO 1/1、AGENT 1/1、MCP 1/1、INSTALL 1/1（冷启动 3019 ms）；`core.ts` 固定输出的 `020` 待人工、`006` 跳过不在本轮范围。`TC-EDIT-028`：首张 6239 ms，改元素后 831 / 833 / 832 ms，带等不到的图 19442 ms |
 | RUN-114 | 2026-09-23 | 未提交工作树（设计文档 v0.65：审查缺陷回写） | AI(Claude Code) | 单测轮 34/34；e2e 局部轮：`TC-AGENT-011`（含新增 7c / 8a）、`TC-AGENT-003` / `004`；`TC-PROTO-001` / `012`（含新增 5～6b）；`TC-CORE-007` / `010` / `011` / `018` / `023` / `034` / `036` / `040` / `041`（含新增断言）；`TC-EDIT-001` / `005` / `007` / `012`。隔离栈 3200 / 3201 + `quilt_test` + stub + 打包形态，逐套串行 | 通过 18/19 · 失败 1（`TC-CORE-023`，与 RUN-112 同一步、HEAD 同现，判环境） |
 | RUN-113 | 2026-09-23 | 未提交工作树（设计文档 v0.64：MCP 写屏改小步——`patch_screen` / `append_upload`、`get_screen` 只给 body） | AI(Claude Code) | 局部轮（`REQ-AGENT-002` → `TC-AGENT-011` 全部步骤含新增 7b；`get_screen` 口径变化波及的 `TC-AGENT-003` / `004`）。隔离环境 3200 / 3201 + `quilt_test` + stub，纯 MCP / API，未托管前端 | 通过 2/3 · 失败 1（`TC-AGENT-003`：MCP 部分——`get_screen` 只给 body、截图就绪——已过，随后打开浏览器页 `locator.waitFor` 超时：本栈没托管前端，判环境） |
 | RUN-112 | 2026-09-23 | 未提交工作树（设计文档 v0.60 工程底座 + v0.61 找屏与总览 + v0.62 状态变体 + v0.63 叠层屏） | AI(Claude Code) | 单测轮 `pnpm test` 31/31；e2e 局部轮（新增 `TC-CORE-040` / `041`、`TC-PROTO-012`；重构影响面：`TC-CORE-003` / `007` / `012` / `018` / `023` / `034` / `036`、`TC-EDIT-001` / `005`、`TC-AGENT-001` / `003` / `004` / `011`）。隔离环境：3200 / 3201 + `quilt_test` + stub 驱动 + 打包形态（`WEB_DIST` + `WEB_ORIGIN=3200`，§3），3100 / 5173 归另一会话 | 通过 15/17 · 失败 1（`TC-CORE-023`，HEAD 同现、判环境）· 未跑 1（`TC-EDIT-008` 需真实模型）· 跳过 / 待人工 2（`TC-AGENT-009` / `010`） |
@@ -2059,6 +2072,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 | 轮次 | 用例 | 结果 | 现象 / 证据 | 跟进 |
 | --- | --- | --- | --- | --- |
+| RUN-234 | TC-CORE-005 / 012 | 失败 | `LIVE_LLM=0`，需真实模型 | 基线，与 RUN-200 同一批 |
 | RUN-233 | TC-CORE-084 | 失败 | 输局集中在图片承载内容的屏：二手书「发现」两个通道都 0 : 3、冥想三屏 Gemini 全输、宠物社交三屏输两到三屏。评审原话一致：灰色占位块与成排相同的图标块「像没做完的线框稿」「更像模板」，宁要主题对不上的真实照片（分析代理统计：picsum 照片 117 → 17 张、灰底图标占位 15 → 79 个，13 对评语说「线框稿 / 未完成」，其中 10 对判负）。第二个成因：手机 AppBar 改成吸顶且没有下边线，18 屏全部吸顶（v0.92 是 2 / 18），下滚截图里内容在标题栏下被硬切，10 对提到、其中 7 对判负。去掉二手书与冥想两个以图为主的应用后是 14 胜 10 负（58%）。桌面后台类屏有收益：layout +0.56、components +0.39（标题行对齐、表格首列贴齐标题、去掉「详情」列、两行式列表） | 分析代理给的修订稿（照片规则改回 v0.92、AppBar 不吸顶等 12 处）存在 `run-233-craft-ab/analysis-r6.json`，没有出屏验证 |
 | RUN-232 | TC-CORE-084 | 失败 → 消融 | 界面语言漂移的成因：① Content 行的「If copy is Chinese: full-width punctuation…」——去掉后 `fitstreak` 回到英文，`relaygate` 仍中文；② Sidebar / PageHeader 配方要求导航标签用屏名、h1 等于导航标签——屏名来自规划，是需求的语言（4 条需求是中文），换回 v0.92 原文后 `relaygate` 回到英文；只去掉「same people…as the brief」与日期行，`relaygate` 仍中文 | 两处在 `cand093c` 去掉；中文排版规则要等项目语言（`REQ-CORE-037`）落地后按语言追加 |
 | RUN-231 | TC-CORE-084 | 失败 | 折行短文本：Gemini `relaygate-1` 14、`relaygate-2` 19（表格禁了 `overflow-x-auto` 又写到 8 列，列宽被挤，名字、「280 ms」与操作都折行）、`shelfswap-0` 16（书封排版块里的书名本该多行，指标照样计入）；耗时：同一份冻结规划，Sonnet 每屏 52 → 67 s，输出 token 只多 13%，订阅端排队占多少分不出来 | 表格改回 `overflow-x-auto` 兜底（RUN-232）；耗时门槛改看输出 token（`TC-CORE-084` 第 2 步） |

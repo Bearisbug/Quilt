@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { chromium, type Browser, type BrowserContextOptions, type Page } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type BrowserContextOptions, type Page, type Request } from 'playwright';
 import { withOverlayStyle, withPaletteDarkMode, withScreenCsp } from '@quilt/core';
 import { config } from '../config.ts';
 
@@ -111,12 +111,32 @@ const within = <T>(work: Promise<T>, ms: number, step: string): Promise<T> => {
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
 };
 
+// 外网的脚本、样式与字体（Tailwind Play CDN、lucide、Google Fonts、屏自己引的库）按地址缓存在进程内：每张截图都是新上下文、没有 HTTP 缓存，
+// 不缓存的话每张都重下一遍（实测约 5 s，外网抖动时整张拍不成）。只存 https 上 200 的响应，跳转前的地址一并记上；没取到的不存，下次照常走网络
+const vendorCache = new Map<string, { body: Buffer; contentType?: string; cors?: string }>();
+const VENDOR_TYPES = new Set(['script', 'stylesheet', 'font']);
+async function useVendorCache(context: BrowserContext) {
+  await context.route(/^https:/, (route) => {
+    const hit = vendorCache.get(route.request().url());
+    return hit ? route.fulfill({ body: hit.body, contentType: hit.contentType, headers: hit.cors ? { 'access-control-allow-origin': hit.cors } : {} }) : route.continue();
+  });
+  context.on('response', (res) => {
+    const req = res.request();
+    if (res.status() !== 200 || !res.url().startsWith('https:') || !VENDOR_TYPES.has(req.resourceType()) || vendorCache.has(res.url())) return;
+    res.body().then((body) => {
+      const h = res.headers();
+      const entry = { body, contentType: h['content-type'], cors: h['access-control-allow-origin'] };
+      for (let r: Request | null = req; r; r = r.redirectedFrom()) vendorCache.set(r.url(), entry);
+    }, () => { /* 上下文已关，下次再存 */ });
+  });
+}
+
 // 一次截图 / 抽 CSS 的整条链分段设上限（§17 Chromium 一行）：建上下文 ≤ 5 s，载入到拍完 ≤ capMs，关上下文 ≤ 5 s。
 // 任何一段超时都抛错交给调用方的重试，调用方（作业里的回刷、截图队列）不跟着挂住；建或关上下文超时说明浏览器本身卡住了，换掉它
 async function inPage<T>(options: BrowserContextOptions, capMs: number, fn: (page: Page) => Promise<T>): Promise<T> {
   const b = await getBrowser();
   const context = await within(b.newContext(options), 5_000, '建上下文').catch((e: Error) => { discard(b); throw e; });
-  try { return await within(context.newPage().then(fn), capMs, '载入与拍摄'); }
+  try { return await within(useVendorCache(context).then(() => context.newPage()).then(fn), capMs, '载入与拍摄'); }
   finally { await within(context.close(), 5_000, '关上下文').catch(() => discard(b)); }
 }
 
@@ -134,11 +154,11 @@ const IMAGES_IN_VIEW = `Array.from(document.images).every((i) => { const b = i.g
 async function settle(page: import('playwright').Page, timeoutMs: number) {
   // 样式与图标是硬条件：CDN 慢到超时就抛，让 shotQueue 的重试与 screenshot.retry 补扫，
   // 不能把没有 preflight 的半成品存成缩略图——存下去就是永久的假图
-  await page.waitForFunction(STYLED, { timeout: Math.min(timeoutMs, 5_000) }).catch(() => { throw new Error('页面未就绪：Tailwind CDN 未生效或图标库未加载'); });
+  await page.waitForFunction(STYLED, undefined, { timeout: Math.min(timeoutMs, 5_000) }).catch(() => { throw new Error('页面未就绪：Tailwind CDN 未生效或图标库未加载'); });
   // 运行时在 DOMContentLoaded 时换过一遍；这里再换一遍，保证认得的图标都已是 svg（重复执行无害）
   await page.evaluate(ICONS).catch(() => {});
   // 图片与字体是软条件：外网占位图挂了、字体请求一直不回，也得出一张图
-  await page.waitForFunction(IMAGES_IN_VIEW, { timeout: 4_000 }).catch(() => {});
+  await page.waitForFunction(IMAGES_IN_VIEW, undefined, { timeout: 4_000 }).catch(() => {});
   await within(page.evaluate('document.fonts.ready'), 4_000, '等字体').catch(() => {});
   await page.waitForTimeout(120);
 }
