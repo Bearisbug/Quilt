@@ -1558,7 +1558,8 @@ await step('TC-CORE-032', async () => {
     const fl = page.frameLocator('.card.focused iframe');
     await fl.locator('#toggle').waitFor({ timeout: 15000 });
     await page.waitForTimeout(600);
-    expect((await page.getByTestId('stat').innerText()).endsWith('100%'), `聚焦后不是 1:1：${await page.getByTestId('stat').innerText()}`);
+    const zoom = Number((await page.locator('.world').evaluate((el) => (el as HTMLElement).style.transform)).match(/scale\(([\d.]+)\)/)?.[1] ?? 0);
+    expect(Math.abs(zoom - 1) < 0.005, `聚焦后不是 1:1：${zoom}`);
     const src0 = await iframe.getAttribute('src');
     expect(!(await page.locator('form.composer').isVisible()), '进入交互后输入框未自动收起');
     await fl.locator('body').evaluate(() => window.scrollTo(0, 100));
@@ -1739,7 +1740,22 @@ await step('TC-CORE-022', async () => {
   await modal.getByRole('tab', { name: '生成通道' }).click();
   const cmd = await modal.getByTestId('mcp-add').innerText();
   expect(/^claude mcp add --transport http quilt http:\/\/.+\/mcp$/.test(cmd.trim()), `MCP 接入命令不对：${cmd}`);
-  return `${usage.month}：${usage.screens} 屏 / ${usage.tokensIn + usage.tokensOut} token，按驱动 ${usage.byDriver.length} 行；MCP 命令可复制`;
+  // 3 入口（v0.97）：经地址打开的弹层 Esc 关闭后焦点落在工具栏的「设置」；顶栏没有屏数与缩放比例；
+  // 工具栏最末一个是「设置」，键盘按它打开弹层（本月用量），Esc 关闭后焦点回到它
+  const gearFocused = () => eventually(async () => expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.tool) === 'settings', '弹层关闭后焦点没回到工具栏的「设置」'), 3000);
+  await page.keyboard.press('Escape');
+  await modal.waitFor({ state: 'detached', timeout: 5000 });
+  await gearFocused();
+  expect((await page.locator('[data-testid="stat"]').count()) === 0 && !/\d+ 屏 · \d+%/.test(await page.locator('body').innerText()), '顶栏不该再有屏数与缩放比例');
+  const toolIds = await page.locator('[role="toolbar"][aria-label="画布工具"] [data-tool]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.tool));
+  expect(toolIds[toolIds.length - 1] === 'settings', `工具栏最末应是「设置」：${toolIds.join(',')}`);
+  await page.keyboard.press('Enter');
+  await modal.waitFor({ timeout: 5000 });
+  expect(page.url().includes('settings=usage'), `从工具栏打开应落在本月用量：${page.url()}`);
+  await page.keyboard.press('Escape');
+  await modal.waitFor({ state: 'detached', timeout: 5000 });
+  await gearFocused();
+  return `${usage.month}：${usage.screens} 屏 / ${usage.tokensIn + usage.tokensOut} token，按驱动 ${usage.byDriver.length} 行；MCP 命令可复制；入口在工具栏最末，关闭后焦点回到它`;
 });
 
 await step('TC-CORE-017', async () => {
@@ -2168,7 +2184,7 @@ await step('TC-CORE-040', async () => {
     return { dx: Math.abs(c.left + c.width / 2 - (a.left + a.width / 2)), dy: Math.abs(c.top + c.height / 2 - (a.top + a.height / 2)) };
   });
   expect(centered.dx <= 8 && centered.dy <= 8, `跳屏后卡片应在可用区中央（偏差 ${Math.round(centered.dx)}, ${Math.round(centered.dy)}）`);
-  const zoomPct = Number(((await page.getByTestId('stat').innerText()).match(/(\d+)%/) ?? [])[1]);
+  const zoomPct = Math.round(Number((await page.locator('.world').evaluate((el) => (el as HTMLElement).style.transform)).match(/scale\(([\d.]+)\)/)?.[1] ?? 0) * 100);
   expect(zoomPct <= 100, `跳屏缩放不该超过 1:1，实际 ${zoomPct}%`);
   // 2 ⌥S 屏列表：4 行；筛「断链」剩 /s1 一行且片上计数 1；点行 → /s1 单选
   await page.keyboard.press('Alt+s');

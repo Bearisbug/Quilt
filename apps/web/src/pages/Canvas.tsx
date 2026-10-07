@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
-import { ArrowLeft, Bot, Component, Crosshair, Download, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MessageSquarePlus, MousePointerClick, Palette, Plus, Search, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
+import { ArrowLeft, Bot, Component, Crosshair, Download, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MessageSquarePlus, MousePointerClick, Palette, Plus, Search, Settings, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
 import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, failureText, missingPagePrompt, type ProjectDetailDto, type MessageDto, type JobDto, type JobEventDto, type ScreenDto, type ComponentDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core';
 import { api, ApiError, loadConfig, subscribeProjectEvents, type LiveState } from '@/lib/api';
 import { mergeMessages } from '@/lib/messages';
@@ -52,19 +52,6 @@ const RENEW_MS = 4 * 60_000;
 type LoadFailure = { kind: 'not-found' } | { kind: 'failed'; reason: string } | null;
 
 // PAGE-CANVAS：画布 + 对话 + 修订/设计系统/检查器面板（面板状态进 URL，INT-020）
-// 顶栏的缩放百分比：缩放每帧都在变，放进页面 state 的话每一帧整页连同全部卡片重渲染一遍（100 屏时捏合缩放掉帧）。
-// 值放在页面外的小仓库里，只有这个百分比订阅它，且只在取整后的数字变了时才重画
-function zoomStore() {
-  let pct = 50; const subs = new Set<() => void>();
-  return {
-    set: (zoom: number) => { const next = Math.round(zoom * 100); if (next === pct) return; pct = next; subs.forEach((f) => f()); },
-    subscribe: (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; },
-    get: () => pct,
-  };
-}
-function ZoomPct({ store }: { store: ReturnType<typeof zoomStore> }) {
-  return <>{useSyncExternalStore(store.subscribe, store.get)}</>;
-}
 
 // 画布页按项目重挂（v0.76）：/p/:projectId 是同一个路由、切项目是客户端导航，不按项目换 key 的话选中、目标、锚点、版数、
 // 聚焦 / 交互态会带进下一个项目，上一个项目在途的详情晚到还会覆盖新项目、把画布卡在加载态。外壳在新页面的第一帧就画出来
@@ -116,7 +103,6 @@ export function CanvasPage() {
   // 组件卡的交互态（REQ-EDIT-006）：与屏的聚焦互斥——两边都是「活 iframe 吃掉指针」，同时开会分不清点的是谁
   const [focusedComponentId, setFocusedComponentId] = useState<string | null>(null);
   const [navStack, setNavStack] = useState<string[]>([]);
-  const zoomStat = useMemo(() => zoomStore(), []);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [missing, setMissing] = useState<{ fromScreenId: string; hrefs: string[] } | null>(null);
   // 候选就地展开（REQ-CORE-015）：一次只展开一屏；展开层不是弹窗，不拦画布快捷键，只吃 Esc
@@ -137,7 +123,7 @@ export function CanvasPage() {
   const settingsParam = params.get('settings');
   const settingsSection: SettingsSection | null = settingsParam ? (isSettingsSection(settingsParam) ? settingsParam : 'usage') : null;
   const setSettings = useCallback((v: SettingsSection | null) => setParams((q) => { if (v) q.set('settings', v); else q.delete('settings'); return q; }, { replace: true }), [setParams]);
-  const settingsBtnRef = useRef<HTMLButtonElement>(null);
+  const settingsTool = useMemo(() => ({ get current() { return document.querySelector<HTMLElement>('[data-tool="settings"]'); } }), []);
   // 侧面板关掉后焦点归还（A11Y-013，v0.78）：挂载时记下焦点所在（点工具栏按钮打开时就是那个按钮）。卸载时焦点若在面板里、
   // 且是键盘焦点（按面板自己的「关闭」），就还给它；它已不在（快捷键打开时焦点本不在工具栏上）就给工具栏上同名的工具。
   // 鼠标点的「关闭」不挪焦点：焦点停在工具栏按钮上，接着按空格就是点它，而不是平移画布
@@ -876,6 +862,10 @@ export function CanvasPage() {
     interact(true, () => { setFocusedId(null); setFocusedComponentId(null); }),
     { id: 'back', label: '后退', hint: 'Alt+←', desc: '退回屏内上一次跳转之前', icon: <ArrowLeft size={ICON} />, unavailable: navStack.length === 0 && '还没有在这一屏里跳转过', onSelect: () => canvasApi.current?.goBack() },
   ]);
+  // 设置（v0.97 从顶栏移来）：最末单独一组，排在上下文组之后
+  tools.push([
+    { id: 'settings', label: '设置', desc: '本月用量与生成通道：添加 / 验证 Key 与本机订阅，复制 MCP 接入命令', icon: <Settings size={ICON} />, testId: 'open-settings', onSelect: () => setSettings('usage') },
+  ]);
 
   const panelBody = !detail ? null
     : panel === 'revisions' && selected ? <RevisionPanel screen={selected} onClose={() => setPanel(null)} onRestored={refresh} />
@@ -901,9 +891,6 @@ export function CanvasPage() {
               : '重连中'}
           </span>
         )}
-        {detail && <span className="shrink-0 whitespace-nowrap text-xs text-muted tabular-nums" data-testid="stat">{screens.length} 屏 · <ZoomPct store={zoomStat} />%</span>}
-        <button ref={settingsBtnRef} type="button" data-testid="open-settings" aria-haspopup="dialog" aria-expanded={!!settingsSection} onClick={() => setSettings('usage')}
-          className="shrink-0 whitespace-nowrap rounded-md px-1.5 py-1 text-xs text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">设置</button>
       </>}>
         <ProjectSwitcher current={detail?.project ?? null} placeholder={failure?.kind === 'not-found' ? '项目不存在' : failure ? '项目没加载出来' : '加载中…'} onRenamed={(id) => { if (id === projectId) refresh(); }} />
         {detail && <span className="shrink-0 whitespace-nowrap rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">{detail.project.deviceType === 'mobile' ? '手机' : '桌面'}</span>}
@@ -944,7 +931,6 @@ export function CanvasPage() {
             workingSubtrees={workingSubtrees}
             annotations={annotations}
             onAnnotationClick={(id) => { const a = annotations.find((x) => x.id === id); if (a) { canvasApi.current?.focus(a.screenId); setPanel('annotate'); } }}
-            onStat={(s) => zoomStat.set(s.zoom)}
             registerApi={(a) => { canvasApi.current = a; }}
             minimap={minimapOn}
             onShown={setShownScreenId}
@@ -956,7 +942,7 @@ export function CanvasPage() {
       </div>
       {/* 多选排列条（REQ-CORE-018）：选中 ≥ 2 屏且没聚焦时出现在画布顶部中央；候选就地展开时让位。排版与键盘在 ArrangeBar，算位在 arrange.ts，落库在 positions.ts */}
       {selectedScreens.length >= 2 && !focusedId && !inspectArmed && !annotateArmed && !candidates && <ArrangeBar count={selectedScreens.length} yieldToPanel={!!panelBody} onArrange={(k) => void arrange(k, selectedScreens)} />}
-      {settingsSection && <SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} returnTo={settingsBtnRef} onCatalog={applyCatalog} />}
+      {settingsSection && <SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} returnTo={settingsTool} onCatalog={applyCatalog} />}
       <ChatDock boxRef={dockRef} messages={messages} progress={progress} status={jobStatus} collapsed={chatCollapsed} onToggle={() => { if (chatCollapsed) setUnseenFailures(0); toggleChat(); }} onRemember={rememberConvention} busy={busy}
         onRetry={(u) => void retryRound(u)} onEdit={(u) => void editRound(u)} runningJobIds={runningJobIds} retrying={retrying} followSeq={followSeq} failed={unseenFailures}
         // 项目不存在时消息自然也取不到：那不是「没加载出来」，也不是还没聊过的空项目，画布区已经说明了
@@ -976,8 +962,8 @@ export function CanvasPage() {
         sessions={sessionList.items} sessionsReason={sessionList.reason} sessionTool={agentTool} sessionId={sessionId} onSessionChange={onSessionChange} onSessionsOpen={loadSessions}
         hidden={!composerVisible} onResize={setComposerH}
       />
-      {/* 项目没到手时只留三个本机开关可用，其余写明为什么用不了 */}
-      <CanvasToolbar groups={ready ? tools : tools.map((g) => g.map((t) => (['composer', 'minimap', 'links'].includes(t.id) ? t : { ...t, unavailable: pendingReason })))} />
+      {/* 项目没到手时只留三个本机开关与设置可用，其余写明为什么用不了 */}
+      <CanvasToolbar groups={ready ? tools : tools.map((g) => g.map((t) => (['composer', 'minimap', 'links', 'settings'].includes(t.id) ? t : { ...t, unavailable: pendingReason })))} />
       {panelBody && <div key={panel} ref={panelRef} className="chrome slide-in-right absolute bottom-4 right-[var(--rail-w)] top-16 z-20 flex w-[var(--panel-w)] flex-col overflow-hidden rounded-xl">{panelBody}</div>}
       {proposal && detail && <ProposalDialog proposal={proposal} ds={detail.designSystem} busy={busy} screenCount={screens.length} batches={Math.ceil(screens.length / MAX_TARGETS)} onWrite={writeProposal} onFinish={finishProposal} onClose={() => setProposal(null)} />}
       {newComponentOpen && <NewComponentDialog onCreate={createComponent} onClose={() => setNewComponentOpen(false)} />}

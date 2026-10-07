@@ -25,7 +25,7 @@ await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 150
 await page.waitForTimeout(1500);
 const n = await page.locator('[data-testid="screen-card"]').count();
 const imgs = await page.locator('[data-testid="screen-card"] img').count();
-console.log('screen cards:', n, 'with screenshot:', imgs, 'stat:', await page.locator('[data-testid="stat"]').innerText());
+console.log('screen cards:', n, 'with screenshot:', imgs);
 console.log('style guide present:', await page.locator('[data-testid="style-guide"]').count());
 await page.screenshot({ path: path.join(EVIDENCE, 'smoke-canvas.png') });
 

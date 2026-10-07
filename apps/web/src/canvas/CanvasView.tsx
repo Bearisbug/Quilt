@@ -64,7 +64,6 @@ export type CanvasProps = {
   /** 未处理的批注：气泡画在画布层，按批注时记下的元素矩形定位（REQ-EDIT-004 / ADR-003） */
   annotations: AnnotationDto[];
   onAnnotationClick: (id: string) => void;
-  onStat?: (s: { zoom: number }) => void;
   /** 视图位置按项目记（quilt:view:<projectId>），刷新回到原处 */
   projectId: string;
   /** 正在交互的共享组件卡（REQ-EDIT-006）：与屏的聚焦互斥，但不动镜头 */
@@ -328,7 +327,6 @@ export function CanvasView(p: CanvasProps) {
       movingTimer.current = window.setTimeout(() => { world.classList.remove('moving'); world.style.setProperty('--canvas-zoom', String(vp.current.zoom)); movingTimer.current = null; }, 200);
     }
     candRef.current?.style.setProperty('--zoom', String(v.zoom));
-    propsRef.current.onStat?.({ zoom: v.zoom });
     if (viewSubs.current.size) { const node = viewportRef.current; const info = { ...v, w: node?.clientWidth ?? 0, h: node?.clientHeight ?? 0 }; for (const cb of viewSubs.current) cb(info); }
     if (!autoView.current) scheduleSave();
   }, [scheduleSave]);

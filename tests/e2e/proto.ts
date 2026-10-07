@@ -252,7 +252,7 @@ await step('TC-PROTO-011', async () => {
   await page.goto(`${WEB}/p/${formProject}`);
   await page.locator('[data-testid="screen-card"] img').first().waitFor({ timeout: 15000 });
   const fl = await focus('/s1');
-  const pct = async () => Number((await page.getByTestId('stat').innerText()).match(/(\d+)%/)?.[1] ?? 0);
+  const pct = async () => Math.round(Number((await page.locator('.world').evaluate((el) => (el as HTMLElement).style.transform)).match(/scale\(([\d.]+)\)/)?.[1] ?? 0) * 100);
   const z0 = await pct();
   const env = async () => page.evaluate('[window.scrollY, window.visualViewport ? window.visualViewport.scale : 1]') as Promise<[number, number]>;
   await fl.locator('h1').dispatchEvent('wheel', { deltaY: -100, ctrlKey: true, clientX: 100, clientY: 100, bubbles: true, cancelable: true });

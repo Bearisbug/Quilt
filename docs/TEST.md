@@ -10,7 +10,7 @@
 | Owner | @bug |
 | 关联设计文档 | `docs/DESIGN.md` |
 | 被测系统 | `~/Documents/Projects/Quilt`（Web 画布 + API/MCP 服务 + Worker + 预览域服务） |
-| 最后更新 | 2026-10-06（设计文档 v0.96） |
+| 最后更新 | 2026-10-07（设计文档 v0.97） |
 
 变更记录（登用例增改，不登执行轮次）：
 
@@ -18,12 +18,12 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-10-07 | 设计文档 v0.97（顶栏去掉屏数与缩放比例，设置移到工具栏最下方）：`TC-CORE-022` 加第 3 步（顶栏没有「N 屏 · N%」、工具栏最末是「设置」、按它打开设置弹层、关闭后焦点回到它）；`TC-CORE-040` 第 2 步、`TC-CORE-032` 第 1 步、`TC-PROTO-011` 的缩放改读世界层 `transform` 的 `scale`（此前读顶栏的百分比） | @bug |
 | 2026-10-06 | 设计文档 v0.96（检查器的类名一行一个、带说明与换档）：新增 `TC-EDIT-030`（一行一个且顺序不变、说明按本项目取值、‹ › 换档且到头不可点、颜色下拉换 token、删行 / 加行 / 失焦拆行、未收录与非 token 色有标注、打字时输入框不横跳、`⌘S` 按行序存回），在 `tests/e2e/edit.ts`；单测加 `web/twClass`（§3 清单与 §5 单测轮的纯函数清单同步） | @bug |
 | 2026-10-06 | 设计文档 v0.95（检查器的键盘操作与直改撤销）：新增 `TC-EDIT-029`（点了屏里的元素焦点挪到检查器、直接 `⌘S` 保存；焦点在文案框 / 检查器 / 屏里时 `⌘S` 都保存并拦掉浏览器保存；文案框里 `Backspace` 只删字；`Delete` 删元素；`⌘Z` 连撤删除与保存、之后被别的写入改过就不撤；组件里的直改提示撤销不了），在 `tests/e2e/edit.ts` | @bug |
 | 2026-10-06 | 设计文档 v0.94（退出交互态后不再等截图）：新增 `TC-CORE-085`（改完立即退出时 iframe 留到这一版的截图解码完、0 帧骨架、不重载、焦点移出；截图已就绪时不留；聚焦别屏时让位；留着时重新聚焦照常就绪），在 `tests/e2e/load.ts`；§3 执行脚本一条补上 | @bug |
 | 2026-10-06 | 设计文档 v0.93（改完元素要等很久才换上截图）：新增 `TC-EDIT-028`（同一进程里第一张截图之后，改元素到换上截图每次 ≤ 3 s；视口内一张等不到的图时截图 30 s 内照常出来），在 `tests/e2e/edit.ts`；§3 截图链一条补它的环境要求 | @bug |
 | 2026-10-06 | `TC-CORE-084` 第 2、3 步（RUN-231～233 之后）：耗时不再设门槛、改看输出 token；加界面语言不漂移一项；两版候选直接对比时的门槛与说明经 `judge.workflow.js` 的 args 传入 | @bug |
-| 2026-10-06 | 设计文档 v0.92（新建项目默认采用克制的现代风格）：`TC-CORE-084` 改动——加机械指标一步（`harness.mts audit`：每屏粗线、胶囊、≥ 12px 圆角、阴影、渐变，按渲染后的 DOM 数），盲评维度加「AI 味」（`aiLook`），「基线」可以是带标签的已有产物（`gen base` 配 `AES_LABEL`；`pairs` / `audit` 认目录名），新建项目的设计系统按代码里的 `newProjectDesign` 取，机械指标加「折行短文本」，两版候选直接对比时的门槛；对应 `ADR-028`。`TC-EDIT-010` 第 1、6 步：新建项目默认挂中性色板，清空色板后对比纯种子派生值而不是第 1 步的值。单测 `core/contract` 两条改写：美学基线的位置与输出规则改句；新建项目的中性色板对比度（发丝线 < 1.5:1、输入框边框 ≥ 3:1、次要文字 ≥ 4.5:1，亮暗两套）、sharp 圆角、配方不带胶囊 / 大圆角 / 阴影且 lint 干净、DESIGN.md 与配方同口径 | @bug |
 
 ## 2. 测试范围 / 不测什么
 
@@ -464,7 +464,7 @@
 | # | 操作 | 预期 |
 | --- | --- | --- |
 | 1 | `⌘K` | 跳屏面板（`screen-finder`）打开，焦点在搜索框（`finder-input`） |
-| 2 | 输入 `s3`，`Enter` | 列表只剩 /s3 一行（`finder-row` 的 `data-id`）；面板关闭，/s3 被单选（`.card.selected[data-route="/s3"]`），卡片中心与可用区（`safe-area`）中心相差 ≤ 8 px，顶栏缩放 ≤ 100% |
+| 2 | 输入 `s3`，`Enter` | 列表只剩 /s3 一行（`finder-row` 的 `data-id`）；面板关闭，/s3 被单选（`.card.selected[data-route="/s3"]`），卡片中心与可用区（`safe-area`）中心相差 ≤ 8 px，画布缩放 ≤ 1（世界层 `transform` 的 `scale`） |
 | 3 | `⌥S` | 屏列表面板（`screens-list`）滑出，4 行（`screens-row`） |
 | 4 | 点筛选片「断链」（`screens-filter-dangling`） | 只剩 /s1 一行，片 `aria-pressed=true` 且计数 1 |
 | 5 | 点那一行 | /s1 被单选并进入视野；再按 `⌥S` 收起面板 |
@@ -658,7 +658,7 @@
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
-| 1 | 双击 /s1 进交互，把屏内滚到 150 px；记录 iframe `src` | 角标「交互中」，顶栏缩放 100%（1:1）；输入框已自动收起 |
+| 1 | 双击 /s1 进交互，把屏内滚到 150 px；记录 iframe `src` | 角标「交互中」，画布缩放 1:1（世界层 `transform` 的 `scale` = 1）；输入框已自动收起 |
 | 2 | `⌘/` 叫出输入框，通道选桩，发送「改文案」 | 目标即 /s1（聚焦即选中）；作业完成后**不退出交互**，8 s 内 iframe 内 `#toggle` 文案变为「热更新」；iframe `src` 与步骤 1 相同（未重挂）；`scrollY` 仍为 150（±2）；角标仍「交互中」 |
 | 3 | 等页面上的在跑作业行撤掉，点 /s1 里的 `href=/s2` 链接（导航栈 s1 → s2），再按 `⌥D` 把种子色改为 `#C2410C` 保存并「回刷所有屏」 | 回刷完成后 iframe 内正显示的 /s2 原地更新：`#toggle` 背景色等于新 primary（`<head>` 变了走整份重写）；`src` 不变；角标仍显示 /s2 |
 | 4 | 按 Alt+← 回到 /s1 | /s1 也已是新色（回刷产生的新修订）且文案仍是「热更新」 |
@@ -851,6 +851,7 @@
 | --- | --- | --- |
 | 1 | 打开 `/p/<id>?settings=usage` | 设置弹层（`settings-modal`）落在「本月用量」节：三格汇总（`usage-totals`：生成屏数 / 输入 token / 输出 token）与 `GET /v1/me/usage` 一致；按驱动分列的表（`usage-by-driver`）行数等于 `byDriver.length`；弹层里没有 `role=meter` 进度条、没有「/300」这类上限文案 |
 | 2 | 切到「生成通道」一节，看底部「让本机 agent 接入 Quilt（MCP）」 | 一行可复制命令 `claude mcp add --transport http quilt http://<本机 API>/mcp`（`mcp-add`），点「复制」提示已复制 |
+| 3 | 按 `Esc` 关闭弹层；看顶栏与工具栏；焦点在工具栏「设置」上按 `Enter`，再按 `Esc`（v0.97） | 关闭后焦点落在工具栏的「设置」（`data-tool=settings`，经地址打开的也一样）；顶栏没有「N 屏 · N%」；工具栏最后一个工具是「设置」；按它打开设置弹层、落在本月用量（URL `settings=usage`），`Esc` 关闭后焦点回到它 |
 
 后置：无。
 
@@ -1347,12 +1348,12 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 #### `TC-PROTO-011` 聚焦屏内捏合缩放画布 — 对应 `REQ-PROTO-001` · 级别: 回归 · 执行者: 皆可
 
-前置：同 `TC-PROTO-010`；聚焦 /s1 后记录顶栏缩放百分比与 `window.scrollY` / `visualViewport.scale`。
+前置：同 `TC-PROTO-010`；聚焦 /s1 后记录画布缩放（世界层 `transform` 的 `scale`）与 `window.scrollY` / `visualViewport.scale`。
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
-| 1 | 指针在 iframe 内触发带 ctrlKey 的 wheel（deltaY = −100，触控板捏合放大） | 顶栏缩放百分比上升；`visualViewport.scale` 仍为 1，`window.scrollY` 仍为 0，顶栏可见 |
-| 2 | 同样操作 deltaY = +100 | 缩放百分比回落 |
+| 1 | 指针在 iframe 内触发带 ctrlKey 的 wheel（deltaY = −100，触控板捏合放大） | 画布缩放上升；`visualViewport.scale` 仍为 1，`window.scrollY` 仍为 0，顶栏可见 |
+| 2 | 同样操作 deltaY = +100 | 画布缩放回落 |
 
 后置：按 Esc 退出交互。
 
@@ -2060,6 +2061,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | RUN-235 | 2026-10-06 | 未提交工作树（设计文档 v0.94，在 v0.93 之上） | AI(Claude Code) | 局部轮（画布前端：聚焦退出与截图交接）：typecheck；单测轮；`load.ts`、`canvas.ts` 整套（含新增 `TC-CORE-085`）；`TC-EDIT-001` / `028`；冒烟级 `TC-CORE-003` / `005` / `010` / `012` / `018` / `031`、`TC-PROTO-001`、`TC-AGENT-001`。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态（`apps/web/dist` 重打），`LIVE_LLM=0`、`GEMINI_API_KEY=`；install 套件停栈后用 `env -u npm_config_allow_scripts` 运行。`TC-CORE-085` 先对改动前的前端包跑过一次：失败（退出后 iframe 0 帧）。另用无头 Edge 拍了交互态 / 按 Esc 后 700 ms / 截图接班后三张，证据 `docs/test-runs/run-235-linger-*.png` | typecheck 通过；单测 75/75；e2e 通过 24 · 失败 2：CORE 3/5（`005` / `012` 需真实模型，基线）、LOAD 12/12、CANVAS 4/4（`057` / `058` / `059` / `079` 各步全过）、EDIT 2/2、PROTO 1/1、AGENT 1/1、INSTALL 1/1（冷启动 3522 ms）；`core.ts` 固定输出的 `020` 待人工、`006` 跳过不在本轮范围。`TC-CORE-085`：退出后 iframe 留 129 帧至新截图接班、0 帧骨架 |
 | RUN-236 | 2026-10-06 | 未提交工作树（设计文档 v0.95，在 v0.94 之上） | AI(Claude Code) | 局部轮（检查器键盘操作与直改撤销、点元素后焦点交给检查器、位置撤销并入共用撤销栈、运行时转发 ⌘S / ⌘Z / Delete）：typecheck；单测轮；`load.ts`、`canvas.ts`、`edit.ts`、`components.ts` 整套（含新增 `TC-EDIT-029`）；用到 `⌘Z` 的 `TC-CORE-007` / `034` / `046`；冒烟级 `TC-CORE-003` / `005` / `010` / `012` / `018` / `031`、`TC-PROTO-001`、`TC-AGENT-001`。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态（重打），`LIVE_LLM=0`、`GEMINI_API_KEY=`；install 停栈后用 `env -u npm_config_allow_scripts` 运行。另把 `TC-CORE-046` 在 HEAD 的前端包上单跑一次对照（临时 worktree 打包，用完删掉），`TC-CORE-050` 单跑两次 | typecheck 通过；单测 75/75；e2e 通过 42 · 失败 8：CORE 5/8、LOAD 11/12、CANVAS 4/4（各步全过）、EDIT 18/22、COMPONENTS 1/1、PROTO 1/1、AGENT 1/1、INSTALL 1/1（冷启动 3520 ms）；`core.ts` 固定输出的 `020` 待人工、`006` 跳过。失败归因：需真实模型 4（`TC-CORE-005` / `012`、`TC-EDIT-003` / `008`）；HEAD 同现 3（`TC-EDIT-002` / `006` 同 RUN-230；`TC-CORE-046` 在 HEAD 前端包上同样失败，见明细）；不稳 1（`TC-CORE-050` 整套连跑失败、单跑 2/2 通过）。没有本次改动引入的失败 |
 | RUN-237 | 2026-10-06 | 未提交工作树（设计文档 v0.96，在 v0.95 之上） | AI(Claude Code) | 局部轮（检查器类名一行一个、说明与换档、颜色下拉；共享 `IconButton` 加 24px 的 `2xs` 档）：typecheck；单测轮（新增 `web/twClass` 8 条）；`edit.ts`、`components.ts`、`canvas.ts` 整套（含新增 `TC-EDIT-030`）；冒烟级 `TC-CORE-003` / `005` / `010` / `012` / `018` / `031`、`TC-PROTO-001`、`TC-AGENT-001`。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态（重打），`LIVE_LLM=0`、`GEMINI_API_KEY=`；install 停栈后用 `env -u npm_config_allow_scripts` 运行。另用无头 Edge 截了类名区，证据 `docs/test-runs/run-237-classlist.png` | typecheck 通过；单测 83/83；e2e 通过 30 · 失败 6：CORE 3/5、EDIT 19/23、COMPONENTS 1/1、CANVAS 4/4（25 步全过）、PROTO 1/1、AGENT 1/1、INSTALL 1/1（冷启动 4024 ms）；`core.ts` 固定输出的 `020` 待人工、`006` 跳过。失败归因：需真实模型 4（`TC-CORE-005` / `012`、`TC-EDIT-003` / `008`）、HEAD 同现 2（`TC-EDIT-002` / `006`），与 RUN-236 同一批。没有本次改动引入的失败 |
+| RUN-238 | 2026-10-07 | 未提交工作树（设计文档 v0.97，在 v0.96 之上） | AI(Claude Code) | 局部轮（顶栏去掉屏数与缩放比例、设置移到工具栏最下方）：typecheck；单测轮；改到的 `TC-CORE-022` / `032` / `040`、`TC-PROTO-011`（连同建它前置项目的 `TC-PROTO-007`）、`smoke.ts`；`canvas.ts`、`load.ts` 整套；冒烟级 `TC-CORE-003` / `005` / `010` / `012` / `018` / `031`、`TC-PROTO-001`、`TC-AGENT-001`。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态（重打），`LIVE_LLM=0`、`GEMINI_API_KEY=`；install 停栈后用 `env -u npm_config_allow_scripts` 运行 | typecheck 通过；单测 83/83；e2e 通过 27 · 失败 2：CORE 6/8（`005` / `012` 需真实模型，基线）、PROTO 3/3（`TC-PROTO-011` 首次与 001 一起单跑时缺前置项目失败，连同 `TC-PROTO-007` 重跑通过：100% → 200% → 50%）、CANVAS 4/4（25 步全过）、LOAD 12/12、AGENT 1/1、INSTALL 1/1（冷启动 3521 ms）；`smoke.ts` 只输出诊断，跑通；`core.ts` 固定输出的 `020` 待人工、`006` 跳过。没有本次改动引入的失败 |
 | RUN-114 | 2026-09-23 | 未提交工作树（设计文档 v0.65：审查缺陷回写） | AI(Claude Code) | 单测轮 34/34；e2e 局部轮：`TC-AGENT-011`（含新增 7c / 8a）、`TC-AGENT-003` / `004`；`TC-PROTO-001` / `012`（含新增 5～6b）；`TC-CORE-007` / `010` / `011` / `018` / `023` / `034` / `036` / `040` / `041`（含新增断言）；`TC-EDIT-001` / `005` / `007` / `012`。隔离栈 3200 / 3201 + `quilt_test` + stub + 打包形态，逐套串行 | 通过 18/19 · 失败 1（`TC-CORE-023`，与 RUN-112 同一步、HEAD 同现，判环境） |
 | RUN-113 | 2026-09-23 | 未提交工作树（设计文档 v0.64：MCP 写屏改小步——`patch_screen` / `append_upload`、`get_screen` 只给 body） | AI(Claude Code) | 局部轮（`REQ-AGENT-002` → `TC-AGENT-011` 全部步骤含新增 7b；`get_screen` 口径变化波及的 `TC-AGENT-003` / `004`）。隔离环境 3200 / 3201 + `quilt_test` + stub，纯 MCP / API，未托管前端 | 通过 2/3 · 失败 1（`TC-AGENT-003`：MCP 部分——`get_screen` 只给 body、截图就绪——已过，随后打开浏览器页 `locator.waitFor` 超时：本栈没托管前端，判环境） |
 | RUN-112 | 2026-09-23 | 未提交工作树（设计文档 v0.60 工程底座 + v0.61 找屏与总览 + v0.62 状态变体 + v0.63 叠层屏） | AI(Claude Code) | 单测轮 `pnpm test` 31/31；e2e 局部轮（新增 `TC-CORE-040` / `041`、`TC-PROTO-012`；重构影响面：`TC-CORE-003` / `007` / `012` / `018` / `023` / `034` / `036`、`TC-EDIT-001` / `005`、`TC-AGENT-001` / `003` / `004` / `011`）。隔离环境：3200 / 3201 + `quilt_test` + stub 驱动 + 打包形态（`WEB_DIST` + `WEB_ORIGIN=3200`，§3），3100 / 5173 归另一会话 | 通过 15/17 · 失败 1（`TC-CORE-023`，HEAD 同现、判环境）· 未跑 1（`TC-EDIT-008` 需真实模型）· 跳过 / 待人工 2（`TC-AGENT-009` / `010`） |
@@ -2121,6 +2123,8 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 | 轮次 | 用例 | 结果 | 现象 / 证据 | 跟进 |
 | --- | --- | --- | --- | --- |
+| RUN-238 | TC-PROTO-011 | 失败 → 通过 | 首次只带 `TC-PROTO-001` 单跑，它的项目由 `TC-PROTO-007` 建，单跑时为空、打开的是 `/p/` 空项目，等卡片超时；连同 `TC-PROTO-007` 重跑通过 | 用例依赖前置，非产品问题 |
+| RUN-238 | TC-CORE-005 / 012 | 失败 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-237 | TC-CORE-005 / 012、TC-EDIT-002 / 003 / 006 / 008 | 失败 | 需真实模型或 HEAD 同现，失败信息与 RUN-236 相同 | 基线 |
 | RUN-236 | TC-CORE-046 | 失败（HEAD 同现） | 第 1 步「切回造 / 改后通道应还是 Stub 通道」：通道选择器的值对，但本机记忆 `localStorage['quilt:runner']` 为空。用 HEAD 的前端包（临时 worktree 打包、替换测试栈的 `apps/web/dist` 后单跑）失败信息相同；本轮改动没碰输入框与通道记忆（`apps/web/src/composer` 无改动） | 不是本次改动引入；输入框通道记忆的回归另开一项查 |
 | RUN-236 | TC-CORE-050 | 失败（不稳） | 整套连跑时「量到终值后组件卡又变了」，单跑两次都通过；RUN-235 整套也通过 | 记一笔 |
