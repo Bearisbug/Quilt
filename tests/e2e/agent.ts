@@ -499,6 +499,108 @@ await step('TC-AGENT-023', async () => {
   } finally { await fake.close().catch(() => {}); }
 });
 
+// v0.99（REQ-EDIT-006 / REQ-AGENT-003）：改组件交给本机会话。假会话收到 HANG 不动手，脚本以会话身份经 MCP 写回与收口
+await step('TC-AGENT-024', async () => {
+  const DIR = process.env.QUILT_CLAUDE_SESSIONS_DIR ?? '';
+  if (!DIR) return '跳过：未设 QUILT_CLAUDE_SESSIONS_DIR（API 与本脚本都要以同一目录启动，§3）';
+  if (!claudeRunner.available) return `跳过：本机 claude 不可用（${claudeRunner.unavailableReason ?? ''}）`;
+  const { startFakeSession } = await import('./agent-stub.ts');
+  const fake = await startFakeSession({ dir: DIR, name: 'Stub 组件', nameSource: 'user' });
+  const post = async <T,>(p: string, body: unknown) => { for (let i = 0; ; i++) { const r = await apiJson<T>(p, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(body) }); if (r.status !== 429 || i >= 15) return r; await sleep(5000); } };
+  const mcp = await connectMcp();
+  let pid = '';
+  try {
+    await sleep(2100); // 服务端会话列表缓存 2 s
+    pid = seedJson<{ projectId: string }>('seed:project', '--name', 'AgentComponent', '--device', 'mobile', '--screens', '1', '--no-shot').projectId;
+    const agent = { kind: 'agent', tool: 'claude-code', sessionId: fake.sessionId };
+    type Comp = { id: string; name: string; version: number };
+    const mk = async (name: string, html: string) => { const c = await post<{ component: Comp }>(`/v1/projects/${pid}/components`, { name, html }); expect(c.status === 201, `建组件「${name}」${c.status}`); return c.body.component; };
+    const footer = await mk('Footer', '<footer class="p-4"><p>v1</p></footer>');
+    const other = await mk('Other', '<aside class="p-2"><p>other</p></aside>');
+    const made = await callTool(mcp, 'quilt.create_screen', { projectId: pid, name: 'Uses', route: '/uses', html: OK_HTML.replace('</main>', '</main><footer data-component="Footer"></footer>') });
+    expect(!made.isError, `建屏 Uses：${made.text.slice(0, 160)}`);
+    const usesId = (made.json as { screenId: string }).screenId;
+    const detail = async () => (await apiJson<{ components: Comp[]; activeJobs: { id: string }[] }>(`/v1/projects/${pid}`)).body;
+    const ver = async (id: string) => (await detail()).components.find((c) => c.id === id)!.version;
+    const send = (content: string, runner: unknown) => post<{ job: { id: string; kind: string; runner: string }; userMessage: { id: string } }>(`/v1/projects/${pid}/messages`, { content, targetComponentIds: [footer.id], runner });
+    const delivered = async (n0: number) => { for (let i = 0; i < 40 && fake.received.length === n0; i++) await sleep(250); expect(fake.received.length > n0, '假会话没收到投递'); return fake.received[n0]; };
+    const assistant = async (jid: string) => (await apiJson<{ items: { jobId: string | null; role: string; content: string }[] }>(`/v1/projects/${pid}/messages`)).body.items.find((m) => m.jobId === jid && m.role === 'assistant')?.content ?? '';
+    const HEAD = 'EARLIER INSTRUCTIONS ALREADY APPLIED TO COMPONENT "Footer"';
+    const history = (p: string): string[] | null => {
+      const i = p.indexOf(HEAD);
+      if (i < 0) return null;
+      const items: string[] = [];
+      for (const l of p.slice(i).split('\n').slice(1)) { const m = /^\d+\. (.*)$/.exec(l); if (!m) break; items.push(m[1]); }
+      return items;
+    };
+    const err = (r: { json: unknown }) => r.json as { type?: string; errors?: { path: string }[] };
+    // 前置：模型通道改一轮，作这个组件的历史
+    const c1 = await send('C1 加上版权年份', { kind: 'model', driver: 'stub', model: 'stub' });
+    expect(c1.status === 202 && (await waitJob(c1.body.job.id, 60)).status === 'succeeded', `C1 没成功（${c1.status}）`);
+    // 1 只选组件、交给假会话：建 runner=agent 的 edit_component，提示词写组件而不是屏
+    let n0 = fake.received.length;
+    const c2 = await send('HANG C2 文字改成 v2', agent);
+    expect(c2.status === 202 && c2.body.job.kind === 'edit_component' && c2.body.job.runner === 'agent', `① 应建 runner=agent 的 edit_component：${c2.status} ${JSON.stringify(c2.body).slice(0, 200)}`);
+    const jobId = c2.body.job.id;
+    const p2 = await delivered(n0);
+    const v = await ver(footer.id);
+    expect(p2.includes(`componentId=${footer.id}`) && p2.includes(`expectedVersion=${v}`) && p2.includes('placed on 1 screen: Uses (/uses)') && p2.includes('quilt.update_component') && p2.includes(`jobId="${jobId}"`) && !p2.includes('Target screens'), `① 投递提示词不对：${p2.slice(0, 700)}`);
+    expect(JSON.stringify(history(p2)) === JSON.stringify(['C1 加上版权年份']), `① 历史块应为 [C1]：${JSON.stringify(history(p2))}`);
+    // 2 在跑时进 activeJobs（画布据此把组件当成正在改）
+    expect((await detail()).activeJobs.some((j) => j.id === jobId), '② 在跑时项目详情的 activeJobs 里应有它');
+    // 3 别的组件带本 jobId 拒、过期版本拒，组件都不动
+    const wrong = await callTool(mcp, 'quilt.update_component', { componentId: other.id, html: '<aside class="p-2"><p>hacked</p></aside>', expectedVersion: other.version, jobId });
+    expect(wrong.isError && err(wrong).type === '/errors/validation' && err(wrong).errors?.[0]?.path === 'jobId', `③ 别的组件带本 jobId 应 400 path=jobId：${wrong.text.slice(0, 200)}`);
+    const stale = await callTool(mcp, 'quilt.update_component', { componentId: footer.id, html: '<footer class="p-4"><p>stale</p></footer>', expectedVersion: v - 1, jobId });
+    expect(stale.isError && err(stale).type === '/errors/version-conflict', `③ 过期版本应 409：${stale.text.slice(0, 200)}`);
+    expect((await ver(footer.id)) === v && (await ver(other.id)) === other.version, '③ 被拒的两次不该改组件');
+    // 4 正确写回：回刷到 Uses，修订 sourceKind=component
+    const ok = await callTool(mcp, 'quilt.update_component', { componentId: footer.id, html: '<footer class="p-4"><p>v2</p></footer>', expectedVersion: v, jobId });
+    expect(!ok.isError && (ok.json as { applied?: string[] }).applied?.includes(usesId), `④ 应回刷到 Uses：${ok.text.slice(0, 200)}`);
+    const rev = (await apiJson<{ items: { sourceKind: string; htmlUrl: string }[] }>(`/v1/screens/${usesId}/revisions`)).body.items[0];
+    expect(rev.sourceKind === 'component' && (await (await fetch(rev.htmlUrl)).text()).includes('>v2</p>'), `④ Uses 最新修订应是 component 且含 v2：${rev.sourceKind}`);
+    // 5 收口：作业输出与回执写组件；收口后再带这个 jobId 拒
+    const fin = await callTool(mcp, 'quilt.finish_job', { jobId, summary: '文字改成 v2' });
+    expect(!fin.isError, `⑤ 收口失败：${fin.text.slice(0, 160)}`);
+    const j2 = await jobOf(jobId);
+    const out = j2.output as { screenIds?: string[]; component?: string };
+    expect(j2.status === 'succeeded' && JSON.stringify(out.screenIds) === JSON.stringify([usesId]) && out.component === 'Footer', `⑤ 作业输出不对：${j2.status} ${JSON.stringify(out).slice(0, 200)}`);
+    const r2 = await assistant(jobId);
+    expect(r2 === '本机 agent 已更新组件「Footer」，同步 1 屏（Uses）：文字改成 v2', `⑤ 回执不对：${r2}`);
+    const late = await callTool(mcp, 'quilt.update_component', { componentId: footer.id, html: '<footer class="p-4"><p>v3</p></footer>', expectedVersion: v + 1, jobId });
+    expect(late.isError && err(late).type === '/errors/job-finished', `⑤ 收口后再带 jobId 应 409 job-finished：${late.text.slice(0, 160)}`);
+    // 6 会话没写组件就收口：回执写明、那一轮不进历史
+    n0 = fake.received.length;
+    const c3 = await send('HANG C3 背景改成深色', agent);
+    await delivered(n0);
+    expect(!(await callTool(mcp, 'quilt.finish_job', { jobId: c3.body.job.id, summary: '没动' })).isError, '⑥ C3 收口失败');
+    const r3 = await assistant(c3.body.job.id);
+    expect(r3.startsWith('本机 agent 已完成（没有改组件）'), `⑥ C3 回执不对：${r3}`);
+    n0 = fake.received.length;
+    const c4 = await send('HANG C4 字号加大', agent);
+    const p4 = await delivered(n0);
+    await post(`/v1/jobs/${c4.body.job.id}/cancel`, {});
+    expect(JSON.stringify(history(p4)) === JSON.stringify(['HANG C2 文字改成 v2', 'C1 加上版权年份']), `⑥ C4 的历史块应为 [C2, C1]、没有 C3：${JSON.stringify(history(p4))}`);
+    // 7 面板：新到旧是 C4、C3、C2
+    await page.goto(`${WEB}/p/${pid}?panel=agent`);
+    await page.locator('[data-testid="agent-jobs"]').waitFor({ timeout: 10000 });
+    await page.locator('[data-testid="agent-job"]').nth(2).waitFor({ timeout: 10000 });
+    const cards = await page.locator('[data-testid="agent-job"]').allInnerTexts();
+    expect(cards.length === 3, `⑦ 面板应列 3 条，实际 ${cards.length}`);
+    expect(cards[2].includes('改组件「Footer」') && cards[2].includes('改了组件，同步 1 屏'), `⑦ C2 那条不对：${cards[2]}`);
+    expect(cards[1].includes('改组件「Footer」') && cards[1].includes('没有改组件'), `⑦ C3 那条不对：${cards[1]}`);
+    // 8 重试 C2 那一轮，仍交给本机会话
+    const re = await post<{ job: { id: string; kind: string; runner: string } }>(`/v1/projects/${pid}/messages/${c2.body.userMessage.id}/retry`, { runner: agent });
+    expect(re.status === 202 && re.body.job.kind === 'edit_component' && re.body.job.runner === 'agent', `⑧ 重试应 202 且仍是交给本机的改组件：${re.status} ${JSON.stringify(re.body).slice(0, 200)}`);
+    await post(`/v1/jobs/${re.body.job.id}/cancel`, {});
+    return '只选组件交给本机会话：建 runner=agent 的 edit_component，提示词写组件、版本、用在哪屏与历史；别的组件 / 过期版本 / 收口后的写入都拒；写回回刷到 Uses 并记在作业名下，回执与面板写组件；没写组件的一轮回执写明、不进历史；重试可交给本机';
+  } finally {
+    await mcp.close().catch(() => {});
+    await fake.close().catch(() => {});
+    if (pid) await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});
+  }
+});
+
 await browser.close();
 console.log(`\n=== RUN-${RUN} AGENT ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));
 console.log(results.map((r) => `${r.tc} ${r.result} ${r.note}`).join('\n'));

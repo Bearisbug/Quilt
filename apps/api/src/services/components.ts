@@ -95,9 +95,10 @@ export async function ownedComponent(ownerId: string, componentId: string): Prom
 
 // 组件级历史指令（ADR-012 v0.87）：组件没有修订表、HTML 原地覆盖，取本项目成功的改组件作业，由 componentInstructionHistory 按组件选、截、排
 export async function componentInstructions(projectId: string, componentId: string): Promise<string[]> {
-  const jobs = await db.select({ id: schema.generationJobs.id, kind: schema.generationJobs.kind, input: schema.generationJobs.input, status: schema.generationJobs.status, createdAt: schema.generationJobs.createdAt })
+  const jobs = await db.select({ id: schema.generationJobs.id, kind: schema.generationJobs.kind, input: schema.generationJobs.input, status: schema.generationJobs.status, createdAt: schema.generationJobs.createdAt, runner: schema.generationJobs.runner, output: schema.generationJobs.output })
     .from(schema.generationJobs).where(and(eq(schema.generationJobs.projectId, projectId), eq(schema.generationJobs.kind, 'edit_component'), eq(schema.generationJobs.status, 'succeeded')));
-  return componentInstructionHistory(componentId, jobs);
+  // 本机会话收口成功却没写组件（v0.99）：那一轮没有生效，不算历史
+  return componentInstructionHistory(componentId, jobs.filter((j) => j.runner !== 'agent' || (j.output as { component?: string } | null)?.component));
 }
 
 // 直改 / 批注的锁（API-EDIT-001）：元素在某个还存在的组件实例里就拒，唯一放行的是「脱离共享」
@@ -254,8 +255,9 @@ export async function applyComponentElementEdit(ownerId: string, componentId: st
   return updateComponent(ownerId, componentId, { html: next, expectedVersion });
 }
 
-export async function updateComponent(ownerId: string, componentId: string, patch: { name?: string; html?: string; x?: number; y?: number; expectedVersion?: number }): Promise<ComponentResult> {
+export async function updateComponent(ownerId: string, componentId: string, patch: { name?: string; html?: string; x?: number; y?: number; expectedVersion?: number }, opts: { jobId?: string } = {}): Promise<ComponentResult> {
   const { component, project } = await ownedComponent(ownerId, componentId);
+  if (opts.jobId) await assertComponentJob(project.id, component.id, opts.jobId);
   const contentChange = patch.html !== undefined || patch.name !== undefined;
   if (!contentChange) {
     await db.update(schema.components).set({ ...(patch.x !== undefined ? { x: patch.x } : {}), ...(patch.y !== undefined ? { y: patch.y } : {}) }).where(eq(schema.components.id, component.id));
@@ -284,10 +286,23 @@ export async function updateComponent(ownerId: string, componentId: string, patc
     updated = rows[0];
   } catch (e) { if (isUniqueViolation(e)) throw problems.componentNameTaken(); throw e; }
   const rename = patch.name !== undefined && patch.name !== component.name ? { from: component.name, to: patch.name } : undefined;
-  const { applied, skipped } = await reflowComponent(project.id, updated, { rename, oldName: component.name });
+  const { applied, skipped } = await reflowComponent(project.id, updated, { rename, oldName: component.name, jobId: opts.jobId ?? null });
+  // 收口回执按它写「已更新组件「X」」；没记上就是会话没写组件
+  if (opts.jobId) await db.update(schema.generationJobs).set({ output: sql`coalesce(${schema.generationJobs.output}, '{}'::jsonb) || ${JSON.stringify({ componentId: updated.id, component: updated.name })}::jsonb` }).where(eq(schema.generationJobs.id, opts.jobId));
   await notifyApplied(project.id, applied);
   await notifyCanvas(project.id, { reason: 'components' });
   return { component: await dtoOf(project, updated.id), applied: applied.map((a) => a.screenId), skipped };
+}
+
+// 投递到本机会话的改组件作业（v0.99）：会话带 jobId 写回，回刷出的修订记在该作业名下。
+// 只认本项目里在跑的、runner=agent 的 edit_component，且就是这个组件——别的作业号带进来会把回刷算到不相干的作业上
+async function assertComponentJob(projectId: string, componentId: string, jobId: string): Promise<void> {
+  const [job] = await db.select().from(schema.generationJobs).where(and(eq(schema.generationJobs.id, jobId), eq(schema.generationJobs.projectId, projectId)));
+  if (!job) throw problems.notFound();
+  if (job.runner !== 'agent' || job.kind !== 'edit_component' || (job.input as { componentId?: string }).componentId !== componentId) {
+    throw problems.validation([{ path: 'jobId', message: '这个作业不是投递给本机会话改这个组件的作业' }]);
+  }
+  if (job.status !== 'running') throw problems.jobFinished();
 }
 
 // 删组件不动屏：已展开的 HTML 留在屏里，只是不再跟着变（展开时不认识的名字原样保留）

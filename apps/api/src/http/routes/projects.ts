@@ -125,8 +125,6 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
   if (preset && (!targets || pinned)) throw problems.validation([{ path: 'targetScreenIds', message: '补链 / 按新约定重生成要带目标屏' }]);
   const editComponent = !!compTargets && !targets && !body.anchor && !pinned;
   if (editComponent && compTargets!.length !== 1) throw problems.validation([{ path: 'targetComponentIds', message: '一次只能改一个组件' }]);
-  // 改组件只走模型通道：它是一次调用 + 确定性回刷，没有「投递到会话再收口」这条路
-  if (editComponent && body.runner?.kind === 'agent') throw problems.validation([{ path: 'runner', message: '改组件请换一个模型通道，本机会话不接这类作业' }]);
   // 参考图（REQ-CORE-012）：先把 id 解析成真实存在的对象，取不到就判非法——
   // 用户看得见自己贴了图，静默丢掉比报错更糟
   const attachments = await resolveForMessage(project.id, body.attachmentIds);
@@ -199,7 +197,6 @@ projectRoutes.post('/v1/projects/:projectId/messages/:messageId/retry', async (c
   const comps = [...(prev.componentId ? [prev.componentId] : []), ...(prev.componentIds ?? [])];
   if (comps.length) await assertOwnComponents(project.id, comps);
   const requested = body.runner ?? prev.runner;
-  if (old.kind === 'edit_component' && requested?.kind === 'agent') throw problems.validation([{ path: 'runner', message: '改组件请换一个模型通道，本机会话不接这类作业' }]);
   const attachments = await resolveForMessage(project.id, (msg.attachments as StoredAttachment[]).map((a) => a.id));
   if (attachments.length && requested?.kind === 'model' && !driverSupportsVision(requested.driver)) {
     throw problems.validation([{ path: 'runner', message: `「${requested.driver}」通道不支持参考图，换一个支持视觉的通道再发` }]);

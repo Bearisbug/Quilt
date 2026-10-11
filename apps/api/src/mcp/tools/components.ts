@@ -16,11 +16,11 @@ export function registerComponentTools(c: ToolCtx) {
   }));
 
   server.registerTool('quilt.update_component', {
-    description: 'Replace a shared component\'s HTML (and/or rename it). Every screen that places it is re-baked deterministically — returns applied (screen ids) and skipped (screens with a running job; they pick up the new version when that job lands). expectedVersion comes from sharedComponents[] in quilt.get_design_contract; 409 version-conflict when stale.',
-    inputSchema: { componentId: z.string().uuid(), html: z.string().min(1).max(MAX_COMPONENT_HTML_BYTES).optional(), name: componentNameSchema.optional(), expectedVersion: z.number().int().min(1) },
+    description: 'Replace a shared component\'s HTML (and/or rename it). Every screen that places it is re-baked deterministically — returns applied (screen ids) and skipped (screens with a running job; they pick up the new version when that job lands). expectedVersion comes from sharedComponents[] in quilt.get_design_contract; 409 version-conflict when stale. Pass jobId when the Quilt canvas delivered a component edit to you (it is in the prompt): the re-baked screens then count as that job\'s output.',
+    inputSchema: { componentId: z.string().uuid(), html: z.string().min(1).max(MAX_COMPONENT_HTML_BYTES).optional(), name: componentNameSchema.optional(), expectedVersion: z.number().int().min(1), jobId: z.string().uuid().optional() },
   }, wrap(async (a) => {
     write();
-    return updateComponent(user.id, a.componentId as string, { html: a.html as string | undefined, name: a.name as string | undefined, expectedVersion: a.expectedVersion as number });
+    return updateComponent(user.id, a.componentId as string, { html: a.html as string | undefined, name: a.name as string | undefined, expectedVersion: a.expectedVersion as number }, { jobId: a.jobId as string | undefined });
   }));
 
   server.registerTool('quilt.delete_component', {

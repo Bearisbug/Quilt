@@ -10,7 +10,7 @@
 | Owner | @bug |
 | 关联设计文档 | `docs/DESIGN.md` |
 | 被测系统 | `~/Documents/Projects/Quilt`（Web 画布 + API/MCP 服务 + Worker + 预览域服务） |
-| 最后更新 | 2026-10-07（设计文档 v0.98） |
+| 最后更新 | 2026-10-07（设计文档 v0.99） |
 
 变更记录（登用例增改，不登执行轮次）：
 
@@ -18,11 +18,11 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-10-07 | 设计文档 v0.99（改组件可以交给本机会话）：新增 `TC-AGENT-024`（只选组件交给假会话：提示词写组件、`expectedVersion`、用在哪几屏与组件历史；带别的组件或过期版本的 `update_component` 被拒；带 `jobId` 写回后回刷到的屏记在作业名下，收口回执「本机 agent 已更新组件「X」，同步 N 屏」；会话没写组件时回执「没有改组件」且那一轮不进历史；面板写「改组件「X」」；重试同一轮可交给本机会话），在 `tests/e2e/agent.ts` | @bug |
 | 2026-10-07 | 设计文档 v0.98（素材瓦片的底色跟项目色板）：`TC-CORE-035` 第 6 步预期改为「判出深色标志的瓦片底色等于项目 `background`」，脚本加对应断言；单测加 `web/assetTone`（`toneColor` 的取色与回落门槛）| @bug |
 | 2026-10-07 | 设计文档 v0.97（顶栏去掉屏数与缩放比例，设置移到工具栏最下方）：`TC-CORE-022` 加第 3 步（顶栏没有「N 屏 · N%」、工具栏最末是「设置」、按它打开设置弹层、关闭后焦点回到它）；`TC-CORE-040` 第 2 步、`TC-CORE-032` 第 1 步、`TC-PROTO-011` 的缩放改读世界层 `transform` 的 `scale`（此前读顶栏的百分比） | @bug |
 | 2026-10-06 | 设计文档 v0.96（检查器的类名一行一个、带说明与换档）：新增 `TC-EDIT-030`（一行一个且顺序不变、说明按本项目取值、‹ › 换档且到头不可点、颜色下拉换 token、删行 / 加行 / 失焦拆行、未收录与非 token 色有标注、打字时输入框不横跳、`⌘S` 按行序存回），在 `tests/e2e/edit.ts`；单测加 `web/twClass`（§3 清单与 §5 单测轮的纯函数清单同步） | @bug |
 | 2026-10-06 | 设计文档 v0.95（检查器的键盘操作与直改撤销）：新增 `TC-EDIT-029`（点了屏里的元素焦点挪到检查器、直接 `⌘S` 保存；焦点在文案框 / 检查器 / 屏里时 `⌘S` 都保存并拦掉浏览器保存；文案框里 `Backspace` 只删字；`Delete` 删元素；`⌘Z` 连撤删除与保存、之后被别的写入改过就不撤；组件里的直改提示撤销不了），在 `tests/e2e/edit.ts` | @bug |
-| 2026-10-06 | 设计文档 v0.94（退出交互态后不再等截图）：新增 `TC-CORE-085`（改完立即退出时 iframe 留到这一版的截图解码完、0 帧骨架、不重载、焦点移出；截图已就绪时不留；聚焦别屏时让位；留着时重新聚焦照常就绪），在 `tests/e2e/load.ts`；§3 执行脚本一条补上 | @bug |
 
 ## 2. 测试范围 / 不测什么
 
@@ -1880,6 +1880,23 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 后置：关假会话。
 
+#### `TC-AGENT-024` 改组件交给本机会话 — 对应 `REQ-EDIT-006`、`REQ-AGENT-003`（v0.99）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：同 `TC-AGENT-023` 的假会话环境（未满足时登记「跳过」）；`pnpm seed:project --name AgentComponent --device mobile --screens 1 --no-shot`；经 `POST /v1/projects/<id>/components` 建组件 `Footer`（`<footer class="p-4"><p>v1</p></footer>`），经 MCP `quilt.create_screen` 建一屏 `Uses`（`/uses`），屏里放 `<footer data-component="Footer"></footer>`；模型通道（`runner:{kind:"model",driver:"stub",model:"stub"}`）对 `Footer` 发一轮 `C1 加上版权年份`，等它结束。下文「以会话身份」= 脚本经 MCP 客户端调工具。脚本 `tests/e2e/agent.ts`（`ONLY=TC-AGENT-024`）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 只选 `Footer`、交给假会话发 `HANG C2 文字改成 v2`（`POST messages` 带 `targetComponentIds:[Footer]`、`runner:{kind:"agent", tool:"claude-code", sessionId}`） | `202`，作业 `kind=edit_component`、`runner=agent`；假会话收到的提示词写明 `componentId`、当前 `expectedVersion`、`placed on 1 screen: Uses (/uses)`、`quilt.update_component` 与本作业的 `jobId`，有 `EARLIER INSTRUCTIONS ALREADY APPLIED TO COMPONENT "Footer"` 一块（`1. C1 加上版权年份`），没有 `Target screens` |
+| 2 | 作业在跑时取项目详情 | `activeJobs` 里有它（画布据此把 `Footer` 当成「正在改」，挡住检查器直改与再发一轮） |
+| 3 | 以会话身份调 `quilt.update_component`：先带一个别的组件与本 `jobId`，再带 `Footer`、本 `jobId` 与过期的 `expectedVersion` | 前者 `400 /errors/validation`（`path: jobId`），后者 `409 /errors/version-conflict`；两次之后两个组件的 `version` 都没变 |
+| 4 | 以会话身份带 `Footer`、本 `jobId`、正确版本写 `<footer class="p-4"><p>v2</p></footer>` | 返回的 `applied` 含 `Uses`；`Uses` 最新修订 `sourceKind=component`、HTML 含 `v2` |
+| 5 | 以会话身份 `quilt.finish_job { jobId, summary: "文字改成 v2" }`；之后再带这个 `jobId` 调一次 `update_component` | 作业 `succeeded`，`output.screenIds = [Uses]`、`output.component = "Footer"`；助手消息「本机 agent 已更新组件「Footer」，同步 1 屏（Uses）：文字改成 v2」；作业结束后的那次调用 `409 /errors/job-finished` |
+| 6 | 再交给假会话发 `HANG C3 背景改成深色`，会话不写组件、直接 `finish_job`；接着交给假会话发 `HANG C4 字号加大`，读提示词后取消 | C3 的助手消息「本机 agent 已完成（没有改组件）」；C4 提示词的历史块依次是 `HANG C2 文字改成 v2`、`C1 加上版权年份`，没有 C3 |
+| 7 | 打开本机 agent 面板（`?panel=agent`） | C2 那条目标行写「改组件「Footer」」、完成行「改了组件，同步 1 屏」；C3 那条完成行「没有改组件」 |
+| 8 | 对 C2 那一轮发重试（`POST messages/<id>/retry`，带同一个本机会话） | `202`，新作业 `edit_component`、`runner=agent`；取消 |
+
+后置：关假会话，删项目。
+
 ## 5. 回归策略
 
 冒烟级 = `TC-CORE-003`、`TC-CORE-005`、`TC-CORE-010`、`TC-CORE-012`、`TC-CORE-018`、`TC-CORE-031`、`TC-PROTO-001`、`TC-AGENT-001`——建项目 → 生成 → 聚焦 → 对话改屏 → 恢复 → 一键安装冷启动，加播放与 MCP 各一条主链路。
@@ -2062,6 +2079,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | RUN-237 | 2026-10-06 | 未提交工作树（设计文档 v0.96，在 v0.95 之上） | AI(Claude Code) | 局部轮（检查器类名一行一个、说明与换档、颜色下拉；共享 `IconButton` 加 24px 的 `2xs` 档）：typecheck；单测轮（新增 `web/twClass` 8 条）；`edit.ts`、`components.ts`、`canvas.ts` 整套（含新增 `TC-EDIT-030`）；冒烟级 `TC-CORE-003` / `005` / `010` / `012` / `018` / `031`、`TC-PROTO-001`、`TC-AGENT-001`。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态（重打），`LIVE_LLM=0`、`GEMINI_API_KEY=`；install 停栈后用 `env -u npm_config_allow_scripts` 运行。另用无头 Edge 截了类名区，证据 `docs/test-runs/run-237-classlist.png` | typecheck 通过；单测 83/83；e2e 通过 30 · 失败 6：CORE 3/5、EDIT 19/23、COMPONENTS 1/1、CANVAS 4/4（25 步全过）、PROTO 1/1、AGENT 1/1、INSTALL 1/1（冷启动 4024 ms）；`core.ts` 固定输出的 `020` 待人工、`006` 跳过。失败归因：需真实模型 4（`TC-CORE-005` / `012`、`TC-EDIT-003` / `008`）、HEAD 同现 2（`TC-EDIT-002` / `006`），与 RUN-236 同一批。没有本次改动引入的失败 |
 | RUN-238 | 2026-10-07 | 未提交工作树（设计文档 v0.97，在 v0.96 之上） | AI(Claude Code) | 局部轮（顶栏去掉屏数与缩放比例、设置移到工具栏最下方）：typecheck；单测轮；改到的 `TC-CORE-022` / `032` / `040`、`TC-PROTO-011`（连同建它前置项目的 `TC-PROTO-007`）、`smoke.ts`；`canvas.ts`、`load.ts` 整套；冒烟级 `TC-CORE-003` / `005` / `010` / `012` / `018` / `031`、`TC-PROTO-001`、`TC-AGENT-001`。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态（重打），`LIVE_LLM=0`、`GEMINI_API_KEY=`；install 停栈后用 `env -u npm_config_allow_scripts` 运行 | typecheck 通过；单测 83/83；e2e 通过 27 · 失败 2：CORE 6/8（`005` / `012` 需真实模型，基线）、PROTO 3/3（`TC-PROTO-011` 首次与 001 一起单跑时缺前置项目失败，连同 `TC-PROTO-007` 重跑通过：100% → 200% → 50%）、CANVAS 4/4（25 步全过）、LOAD 12/12、AGENT 1/1、INSTALL 1/1（冷启动 3521 ms）；`smoke.ts` 只输出诊断，跑通；`core.ts` 固定输出的 `020` 待人工、`006` 跳过。没有本次改动引入的失败 |
 | RUN-239 | 2026-10-07 | 未提交工作树（设计文档 v0.98，在 v0.97 之上） | AI(Claude Code) | 局部轮（素材瓦片的底色跟项目色板，`REQ-CORE-019` → `TC-CORE-035`）：typecheck；单测轮（新增 `web/assetTone` 5 条）；`TC-CORE-035`；冒烟级 `TC-CORE-003` / `005` / `010` / `012` / `018` / `031`、`TC-PROTO-001`、`TC-AGENT-001`。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态（重打），`LIVE_LLM=0`、`GEMINI_API_KEY=`；install 停栈后用 `env -u npm_config_allow_scripts node --import tsx` 运行。另用无头 Edge 读开发实例上 Ofcourt 项目（只读）的瓦片计算底色 | typecheck 通过；单测 88/88；e2e 通过 7 · 失败 2：CORE `003` / `010` / `018` / `035` 通过、`005` / `012` 需真实模型（基线）；PROTO 1/1；AGENT 1/1；INSTALL 1/1（冷启动 4023 ms）。`TC-CORE-035` 先照常跑仍是基线的「fetch failed」，找到根因后在测试进程里把 `*.localhost` 指回 127.0.0.1 重跑，7 步全过（含新断言：深色素材瓦片底色 = 项目 `background`）。Ofcourt 实测：浅底版标志衬 `rgb(244, 242, 233)`（其 `background`）、反白版衬 `rgb(18, 60, 46)`（其 `primary`）。没有本次改动引入的失败 |
+| RUN-240 | 2026-10-07 | 未提交工作树（设计文档 v0.99，在 v0.98 之上） | AI(Claude Code) | 复现 + 局部轮（改组件交给本机会话，`REQ-EDIT-006` / `REQ-AGENT-003`）：typecheck；单测轮；新用例 `TC-AGENT-024` 先在改动前的服务端代码上跑一次（`git stash` 掉 `apps/api/src` 后重启被测 API）、再在改动后跑；AGENT、MCP、COMPONENTS 整套，`TC-EDIT-019` / `025`（组件作业与组件历史），`TC-CORE-062`（重试与组件契约）；冒烟级 `TC-CORE-003` / `005` / `010` / `012` / `018` / `031`、`TC-PROTO-001`。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态（`apps/web/dist` 重建），`LIVE_LLM=0`、`GEMINI_API_KEY=`；install 停栈后用 `env -u npm_config_allow_scripts` 运行 | typecheck 通过，单测 88/88。改动前 `TC-AGENT-024` 在第 1 步失败：`400 /errors/validation`「请求参数不合法」，`errors[0]` = `runner`「改组件请换一个模型通道，本机会话不接这类作业」，与用户截图同一个报错；改动后首跑通过。e2e：AGENT 7/7 · 待人工 1（`TC-AGENT-010`）、MCP 3/3（`TC-AGENT-011` 首跑撞限流，单跑通过，见明细）、COMPONENTS 1/1、EDIT 2/2、CORE 4/6（`005` / `012` 需真实模型，基线）、PROTO 1/1、INSTALL 1/1（冷启动 5042 ms）；`core.ts` 固定输出的 `020` 待人工、`006` 跳过 |
 | RUN-114 | 2026-09-23 | 未提交工作树（设计文档 v0.65：审查缺陷回写） | AI(Claude Code) | 单测轮 34/34；e2e 局部轮：`TC-AGENT-011`（含新增 7c / 8a）、`TC-AGENT-003` / `004`；`TC-PROTO-001` / `012`（含新增 5～6b）；`TC-CORE-007` / `010` / `011` / `018` / `023` / `034` / `036` / `040` / `041`（含新增断言）；`TC-EDIT-001` / `005` / `007` / `012`。隔离栈 3200 / 3201 + `quilt_test` + stub + 打包形态，逐套串行 | 通过 18/19 · 失败 1（`TC-CORE-023`，与 RUN-112 同一步、HEAD 同现，判环境） |
 | RUN-113 | 2026-09-23 | 未提交工作树（设计文档 v0.64：MCP 写屏改小步——`patch_screen` / `append_upload`、`get_screen` 只给 body） | AI(Claude Code) | 局部轮（`REQ-AGENT-002` → `TC-AGENT-011` 全部步骤含新增 7b；`get_screen` 口径变化波及的 `TC-AGENT-003` / `004`）。隔离环境 3200 / 3201 + `quilt_test` + stub，纯 MCP / API，未托管前端 | 通过 2/3 · 失败 1（`TC-AGENT-003`：MCP 部分——`get_screen` 只给 body、截图就绪——已过，随后打开浏览器页 `locator.waitFor` 超时：本栈没托管前端，判环境） |
 | RUN-112 | 2026-09-23 | 未提交工作树（设计文档 v0.60 工程底座 + v0.61 找屏与总览 + v0.62 状态变体 + v0.63 叠层屏） | AI(Claude Code) | 单测轮 `pnpm test` 31/31；e2e 局部轮（新增 `TC-CORE-040` / `041`、`TC-PROTO-012`；重构影响面：`TC-CORE-003` / `007` / `012` / `018` / `023` / `034` / `036`、`TC-EDIT-001` / `005`、`TC-AGENT-001` / `003` / `004` / `011`）。隔离环境：3200 / 3201 + `quilt_test` + stub 驱动 + 打包形态（`WEB_DIST` + `WEB_ORIGIN=3200`，§3），3100 / 5173 归另一会话 | 通过 15/17 · 失败 1（`TC-CORE-023`，HEAD 同现、判环境）· 未跑 1（`TC-EDIT-008` 需真实模型）· 跳过 / 待人工 2（`TC-AGENT-009` / `010`） |
@@ -2123,6 +2141,9 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 | 轮次 | 用例 | 结果 | 现象 / 证据 | 跟进 |
 | --- | --- | --- | --- | --- |
+| RUN-240 | TC-AGENT-011 | 失败 → 通过 | 整套连跑时 `quilt.edit_screens` 返回 `429 /errors/rate-limited`：每人每分钟 10 个作业的限流，`agent.ts` 末尾新加的 `TC-AGENT-024` 建了 5 个作业，`mcp.ts` 在同一分钟里开跑。等过一分钟单跑通过 | 环境（用例顺序与限流），不是产品回归；连跑 AGENT 与 MCP 两套之间隔一分钟 |
+| RUN-240 | TC-AGENT-024 | 失败（改动前）→ 通过 | 改动前的服务端拒绝「只选组件 + 本机会话」：第 1 步 `400`，`path: runner` | 产品改动（设计文档 v0.99）后通过 |
+| RUN-240 | TC-CORE-005 / 012 | 失败 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-239 | TC-CORE-035 | 失败 → 通过 | 照常跑仍是 RUN-181 起的「fetch failed」。根因是环境：本机代理的 fake-ip DNS 把 `preview.localhost` 解析成 `198.18.0.174`，Node 的 `fetch` 连不上预览域（浏览器自己把 `*.localhost` 当回环，所以画布不受影响）。测试进程加 `NODE_OPTIONS="--import <脚本>"` 把 `*.localhost` 的 `dns.lookup` 指回 127.0.0.1 后重跑通过 | 以往各轮的 `035`「fetch failed」应是同一原因；脚本没改，只在本轮进程里打补丁 |
 | RUN-239 | TC-CORE-031 | 失败 → 通过 | 用 `npx tsx e2e/install.ts` 跑时 `npm install` 打包件失败两次；npx 给子进程注入了一组 `npm_config_*`，同一个包手动安装成功。改用 `node --import tsx e2e/install.ts` 后通过 | 运行方式问题，不是产品问题 |
 | RUN-239 | TC-CORE-005 / 012 | 失败 | `LIVE_LLM=0`，需真实模型 | 基线 |

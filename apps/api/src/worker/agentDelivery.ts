@@ -6,6 +6,7 @@ import { findSession, injectMessage } from '../lib/claudeSessions.ts';
 import { findCodexThread, openCodexThread, queueCodexMessage } from '../lib/codexSessions.ts';
 import { registerAgentHooks } from '../services/jobs.ts';
 import { deriveLinks, priorInstructions } from '../services/screens.ts';
+import { componentInstructions } from '../services/components.ts';
 import type { JobRow } from '../services/projects.ts';
 import { priorInstructionsBlock, type AgentTool } from '@quilt/core';
 
@@ -25,6 +26,7 @@ const MCP_SETUP: Record<AgentTool, (url: string) => string> = {
 
 async function buildPrompt(job: JobRow): Promise<string> {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, job.projectId));
+  if (job.kind === 'edit_component') return componentPrompt(job, project);
   // generate / edit_screens 带 screenIds；regenerate_subtree 带单个 screenId + qid（只重写该子树）
   const input = job.input as { prompt: string; screenIds?: string[]; screenId?: string; qid?: string };
   const ids = input.screenIds?.length ? input.screenIds : input.screenId ? [input.screenId] : [];
@@ -49,6 +51,29 @@ async function buildPrompt(job: JobRow): Promise<string> {
     `Target screens:\n${targets}`,
     `Rules: pass jobId="${job.id}" on EVERY quilt.update_screen / quilt.create_screen call; for update_screen pass the expectedRevisionId listed above. If you get 409 revision-conflict, call quilt.get_screen and redo the change on the current version.`,
     'Steps: quilt.get_design_contract → read each target screen with quilt.get_screen (the body with data-qid) → make the change → write it back: quilt.patch_screen for a partial change (find/replace, only the changed text), quilt.update_screen for a rewrite, quilt.create_screen for a new screen. The contract\'s tokens and recipes are the shared vocabulary, not a gate: quilt.validate_screen reports deviations as advice — fix dangling routes and anything you did not intend, keep deliberate choices such as a chart library or a colour the tokens cannot express. Keep each call\'s HTML under ~8 KB: a larger screen goes through quilt.create_upload_url + quilt.append_upload chunks and uploadId. Do not modify any files on disk; all output goes through the MCP tools.',
+    `When you are done, call quilt.finish_job with jobId="${job.id}" and a one-line summary (status "failed" with the reason if you could not do it). Quilt keeps the job open until this call.`,
+  ].filter(Boolean).join('\n\n');
+}
+
+// 改组件（v0.99 REQ-EDIT-006）：目标是一个共享组件，不是屏。会话读契约里的组件、改完用带 jobId 的 update_component 写回，
+// Quilt 照模型通道那条路确定性回刷所有放着它的屏；组件写法与 componentSystemPrompt 的要求一致（单根、保留 data-slot、导航恰好一条 aria-current）
+async function componentPrompt(job: JobRow, project: typeof schema.projects.$inferSelect): Promise<string> {
+  const input = job.input as { prompt: string; componentId: string };
+  const [comp] = await db.select().from(schema.components).where(and(eq(schema.components.id, input.componentId), eq(schema.components.projectId, project.id)));
+  if (!comp) throw new Error('组件已被删除');
+  const uses = await db.select({ name: schema.screens.name, route: schema.screens.route }).from(schema.componentUses).innerJoin(schema.screens, eq(schema.screens.id, schema.componentUses.screenId))
+    .where(and(eq(schema.componentUses.projectId, project.id), eq(schema.componentUses.name, comp.name)));
+  const placed = uses.length ? `placed on ${uses.length} screen${uses.length > 1 ? 's' : ''}: ${uses.map((u) => `${u.name} (${u.route})`).join(', ')}` : 'not placed on any screen yet';
+  return [
+    `[Quilt] The Quilt canvas delivered a job to this session (job ${job.id}).`,
+    `You are working on the Quilt project "${project.name}" (projectId ${project.id}, ${project.deviceType}) through the Quilt MCP server "quilt" at ${mcpUrl()}. ${MCP_SETUP[toolOf(job)](mcpUrl())}`,
+    project.brief ? `App brief: ${project.brief}` : '',
+    `Instruction from the user:\n${input.prompt}`,
+    priorInstructionsBlock(`COMPONENT "${comp.name}"`, await componentInstructions(project.id, comp.id)).trim(),
+    `Target shared component: "${comp.name}" componentId=${comp.id} expectedVersion=${comp.version}, ${placed}.`,
+    `Rules: this job changes ONE shared component, not screens. Write it back with quilt.update_component { componentId, html, expectedVersion, jobId="${job.id}" }: Quilt re-bakes every screen that places it, so do not edit those screens' copies with quilt.update_screen / quilt.patch_screen (an edited copy is replaced by the component on the next write). On 409 version-conflict read it again and redo the change on the current version.`,
+    'Component HTML: exactly ONE root element (keep its tag unless the instruction requires otherwise); keep every data-slot="…" element; no <script>, no <style>, no data-component element inside. Links to other screens are <a href="/route"> with routes from the app map, and exactly one carries aria-current="page" with the active styling (Quilt decides per screen which one is active); switches within a screen (tabs, segmented controls) work CSS-only.',
+    'Steps: quilt.get_design_contract → take this component\'s current html and version from sharedComponents[] (tokens and recipes are the shared vocabulary) → make the change → quilt.update_component. Do not modify any files on disk; all output goes through the MCP tools.',
     `When you are done, call quilt.finish_job with jobId="${job.id}" and a one-line summary (status "failed" with the reason if you could not do it). Quilt keeps the job open until this call.`,
   ].filter(Boolean).join('\n\n');
 }
@@ -78,9 +103,11 @@ export async function finishAgentJob(job: JobRow, status: 'succeeded' | 'failed'
     if (!updated) return false;
     const names = screenIds.length ? (await tx.select({ name: schema.screens.name }).from(schema.screens).where(inArray(schema.screens.id, screenIds))).map((s) => s.name).join('、') : '';
     const summary = typeof extra.summary === 'string' && extra.summary ? `：${extra.summary}` : '';
-    const content = status === 'succeeded'
-      ? (screenIds.length ? `本机 agent 已完成：更新了 ${screenIds.length} 屏（${names}）${summary}` : `本机 agent 已完成（没有回写屏幕）${summary}`)
-      : `本机 agent 未完成（${String(extra.message ?? extra.errorClass ?? '')}）`;
+    // 改组件（v0.99）：组件名由带 jobId 的 update_component 记进 output；没记上就是会话没写组件
+    const component = job.kind === 'edit_component' ? (output as { component?: string }).component : undefined;
+    const content = status !== 'succeeded' ? `本机 agent 未完成（${String(extra.message ?? extra.errorClass ?? '')}）`
+      : job.kind === 'edit_component' ? (component ? `本机 agent 已更新组件「${component}」，同步 ${screenIds.length} 屏${names ? `（${names}）` : ''}${summary}` : `本机 agent 已完成（没有改组件）${summary}`)
+      : screenIds.length ? `本机 agent 已完成：更新了 ${screenIds.length} 屏（${names}）${summary}` : `本机 agent 已完成（没有回写屏幕）${summary}`;
     await tx.update(schema.messages).set({ content, affectedScreenIds: screenIds }).where(and(eq(schema.messages.jobId, job.id), eq(schema.messages.role, 'assistant')));
     if (screenIds.length) { await deriveLinks(tx, job.projectId); await tx.update(schema.projects).set({ updatedAt: new Date() }).where(eq(schema.projects.id, job.projectId)); }
     return true;
