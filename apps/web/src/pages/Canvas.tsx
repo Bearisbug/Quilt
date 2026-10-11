@@ -532,7 +532,7 @@ export function CanvasPage() {
   const cancelNewest = () => { const j = runningJobs[0]; if (j) void cancelJob(j.id); };
   // 画布撤销栈（⌘Z，undo.ts）：位置改动与检查器的直改共用。拖动落库、多选排列在 positions.ts 的 usePositionUndo，这里只接线
   const undoStack = useUndoStack(toast);
-  const { onMove, arrange } = usePositionUndo({ drafts, screensRef, components, setDetail, refresh, toast, pushStep: undoStack.push });
+  const { onMove, arrange } = usePositionUndo({ drafts, screensRef, components, setDetail, refresh, toast, pushStep: undoStack.push, undo: () => void undoStack.undo() });
   // 检查器直改的撤销（v0.95）：回溯到改前那一版，expectedRevisionId 是这次直改落下的修订——之后被别的写入改过就不撤，免得把后来的改动一起冲掉。
   // 回溯会新建一版（内容同改前那一版）：记下「改前那一版现在由哪一版接替」，连按 ⌘Z 时下一步按接替的那一版比，否则第二下必定判成冲突。
   // 组件里的直改撤不了（会同步到所有用它的屏），也压一步：撤到它时说明，不越过它去撤更早的一步
@@ -606,7 +606,7 @@ export function CanvasPage() {
     showComposer();
   };
   const exportPrototype = () => startJob({ kind: 'export_prototype', input: {} }, '导出失败');
-  // REQ-PROTO-002：连线开关（本机记忆）与「补链」修复轮（edit_screens 固定指令，按屏计费）
+  // REQ-PROTO-002：连线开关（本机记忆）与「接上跳转」修复轮（edit_screens 固定指令，按屏计费）
   const [showLinks, setShowLinks] = useState(() => { try { return localStorage.getItem('quilt:links') !== '0'; } catch { return true; } });
   const toggleLinks = () => setShowLinks((v) => { try { localStorage.setItem('quilt:links', v ? '0' : '1'); } catch { /* 无痕模式等写不了，退化为仅本次会话有效 */ } return !v; });
   // 选中了就只修选中的那几屏，没选中才作用于全部（契约上限 20 屏）
@@ -619,8 +619,8 @@ export function CanvasPage() {
       if (!(await startJob({ kind: 'edit_screens', input: { prompt: LINK_REPAIR_PROMPT, screenIds: batch.map((s) => s.id), versions: 1 } }, '接上跳转失败'))) break;
       sent += batch.length;
     }
-    if (sent === targets.length) toast(targets.length > MAX_TARGETS ? `正在为 ${sent} 屏补链（分 ${Math.ceil(sent / MAX_TARGETS)} 批）` : `正在为 ${sent} 屏补链`);
-    else if (sent) toast(`已为 ${sent} 屏发起补链，其余 ${targets.length - sent} 屏没发出去`, 'error');
+    if (sent === targets.length) toast(targets.length > MAX_TARGETS ? `正在为 ${sent} 屏接上跳转（分 ${Math.ceil(sent / MAX_TARGETS)} 批）` : `正在为 ${sent} 屏接上跳转`);
+    else if (sent) toast(`已为 ${sent} 屏发起接上跳转，其余 ${targets.length - sent} 屏没发出去`, 'error');
   };
   const applyDesignSystem = () => startJob({ kind: 'apply_design_system', input: { screenIds: 'all' } }, '回刷失败');
   // REQ-EDIT-002：通道由检查器自己选（记忆独立于输入框），本机 agent 时作业投递到会话、提示词限定只重写该子树。
@@ -764,8 +764,10 @@ export function CanvasPage() {
     KeyS: () => setPanel(panel === 'screens' ? null : 'screens'),
     KeyV: selected && !selected.variantOf && !focusedId ? () => { if (generating) toast(GENERATE_BUSY, 'error'); else setVariantFor(selected); } : undefined,
   };
-  // busy = 有任何作业在跑（设计系统面板的回刷、导出、接上跳转等仍按这个语义走）
+  // busy = 有任何作业在跑（导出、接上跳转等仍按这个语义走）
   const busy = activeJobs.length > 0;
+  // 回刷所有屏、按新约定重生成要改全部屏，与任何在跑作业都冲突：挡住时写出是哪个作业（PAGE-CANVAS「作业进行中时的面板」）
+  const busyReason = runningJobs.length ? `有作业进行中：${jobLabel(runningJobs[0], screens, components)}` : false;
   // 对话记录里「重试」要知道最后一轮还在不在跑：本页跟踪的作业 + 服务端列出的（含交给本机 agent 的）
   const runningJobIds = useMemo(() => new Set([...activeJobs, ...(detail?.activeJobs ?? [])].map((j) => j.id)), [activeJobs, detail?.activeJobs]);
   const keyState = {
@@ -882,11 +884,11 @@ export function CanvasPage() {
 
   const panelBody = !detail ? null
     : panel === 'revisions' && selected ? <RevisionPanel screen={selected} onClose={() => setPanel(null)} onRestored={refresh} />
-    : panel === 'design' ? <DesignPanel ds={detail.designSystem} project={detail.project} screens={screens} assets={detail.assets} busy={busy} onClose={() => setPanel(null)} onSaved={refresh} onApplyAll={applyDesignSystem} onPropose={(i) => propose(i)} />
+    : panel === 'design' ? <DesignPanel ds={detail.designSystem} project={detail.project} screens={screens} assets={detail.assets} busyReason={busyReason} onClose={() => setPanel(null)} onSaved={refresh} onApplyAll={applyDesignSystem} onPropose={(i) => propose(i)} />
     : panel === 'screens' ? <ScreensPanel screens={screens} links={detail.links} busy={busyScreens} onPick={(id) => reveal({ kind: 'screen', id })} onClose={() => setPanel(null)} />
     : panel === 'agent' ? <AgentJobsPanel projectId={projectId} screens={screens} components={components} runners={runners} onClose={() => setPanel(null)} onChanged={refresh} />
     : panel === 'inspect' && focusedComponent ? <InspectorPanel component={focusedComponent} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyComponents.has(focusedComponent.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} tokens={tokens} onPathPick={(qid) => canvasApi.current?.pick(qid)} onPathPeek={(qid) => canvasApi.current?.peek(qid)} onClose={() => setPanel(null)} onEdited={() => { setElementSel(null); refresh(); }} />
-    : panel === 'inspect' && shownScreen ? <InspectorPanel screen={shownScreen} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyScreens.has(shownScreen.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} tokens={tokens} onPathPick={(qid) => canvasApi.current?.pick(qid)} onPathPeek={(qid) => canvasApi.current?.peek(qid)} runners={runners} composerRunnerId={runnerId} sessionLists={lists} onSessionsOpen={(tool) => void loadSessionsFor(tool)} workingQids={workingSubtrees.filter((w) => w.screenId === shownScreen.id).map((w) => w.qid)} onClose={() => setPanel(null)} onEdited={(qid) => { canvasApi.current?.markDone([qid]); refresh(); }} onRegenerate={regenerateSubtree} onEditComponent={onEditComponent} />
+    : panel === 'inspect' && shownScreen ? <InspectorPanel screen={shownScreen} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyScreens.has(shownScreen.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} onUndo={() => void undoStack.undo()} tokens={tokens} onPathPick={(qid) => canvasApi.current?.pick(qid)} onPathPeek={(qid) => canvasApi.current?.peek(qid)} runners={runners} composerRunnerId={runnerId} sessionLists={lists} onSessionsOpen={(tool) => void loadSessionsFor(tool)} workingQids={workingSubtrees.filter((w) => w.screenId === shownScreen.id).map((w) => w.qid)} onClose={() => setPanel(null)} onEdited={(qid) => { canvasApi.current?.markDone([qid]); refresh(); }} onRegenerate={regenerateSubtree} onEditComponent={onEditComponent} />
     : panel === 'annotate' && shownScreen ? <AnnotationPanel screen={shownScreen} sel={elementSel} items={screenAnnotations} busy={busyScreens.has(shownScreen.id)} onClose={() => { setPanel(null); setFocusedId(null); }} onAdd={addAnnotation} onUpdate={updateAnnotation} onRemove={removeAnnotation} onSend={sendAnnotations} />
     : null;
 
@@ -956,7 +958,7 @@ export function CanvasPage() {
       {/* 多选排列条（REQ-CORE-018）：选中 ≥ 2 屏且没聚焦时出现在画布顶部中央；候选就地展开时让位。排版与键盘在 ArrangeBar，算位在 arrange.ts，落库在 positions.ts */}
       {selectedScreens.length >= 2 && !focusedId && !inspectArmed && !annotateArmed && !candidates && <ArrangeBar count={selectedScreens.length} yieldToPanel={!!panelBody} onArrange={(k) => void arrange(k, selectedScreens)} />}
       {settingsSection && <SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} returnTo={settingsTool} onCatalog={applyCatalog} />}
-      <ChatDock boxRef={dockRef} messages={messages} progress={progress} status={jobStatus} collapsed={chatCollapsed} onToggle={() => { if (chatCollapsed) setUnseenFailures(0); toggleChat(); }} onRemember={rememberConvention} busy={busy}
+      <ChatDock boxRef={dockRef} messages={messages} progress={progress} status={jobStatus} collapsed={chatCollapsed} onToggle={() => { if (chatCollapsed) setUnseenFailures(0); toggleChat(); }} onRemember={rememberConvention}
         onRetry={(u) => void retryRound(u)} onEdit={(u) => void editRound(u)} runningJobIds={runningJobIds} retrying={retrying} followSeq={followSeq} failed={unseenFailures}
         // 项目不存在时消息自然也取不到：那不是「没加载出来」，也不是还没聊过的空项目，画布区已经说明了
         loadState={gone ? 'missing' : msgState === 'ok' ? undefined : msgState} onReload={() => { setMsgState('loading'); void refreshMessages(); }} />
@@ -978,7 +980,7 @@ export function CanvasPage() {
       {/* 项目没到手时只留三个本机开关与设置可用，其余写明为什么用不了 */}
       <CanvasToolbar groups={ready ? tools : tools.map((g) => g.map((t) => (['composer', 'minimap', 'links', 'settings'].includes(t.id) ? t : { ...t, unavailable: pendingReason })))} />
       {panelBody && <div key={panel} ref={panelRef} className="chrome slide-in-right absolute bottom-4 right-[var(--rail-w)] top-16 z-20 flex w-[var(--panel-w)] flex-col overflow-hidden rounded-xl">{panelBody}</div>}
-      {proposal && detail && <ProposalDialog proposal={proposal} ds={detail.designSystem} busy={busy} screenCount={screens.length} batches={Math.ceil(screens.length / MAX_TARGETS)} onWrite={writeProposal} onFinish={finishProposal} onClose={() => setProposal(null)} />}
+      {proposal && detail && <ProposalDialog proposal={proposal} ds={detail.designSystem} busyReason={busyReason} screenCount={screens.length} batches={Math.ceil(screens.length / MAX_TARGETS)} onWrite={writeProposal} onFinish={finishProposal} onClose={() => setProposal(null)} />}
       {newComponentOpen && <NewComponentDialog onCreate={createComponent} onClose={() => setNewComponentOpen(false)} />}
       {finderOpen && detail && <ScreenFinder screens={screens} components={components} links={detail.links} busy={busyScreens} onPick={(pick) => { setFinderOpen(false); reveal(pick); }} onClose={() => setFinderOpen(false)} />}
       {variantFor && <VariantDialog base={variantFor} onCreate={createVariant} onClose={() => setVariantFor(null)} />}

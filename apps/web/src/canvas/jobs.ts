@@ -31,9 +31,13 @@ export function jobLabel(job: JobDto, screens: Pick<ScreenDto, 'id' | 'name'>[],
     case 'generate': return i.variantOf ? `出「${name(i.variantOf)}」的「${i.variantName}」变体${ver}` : `造${i.count === undefined || i.count === 'auto' ? '一组屏' : ` ${i.count} 屏`}${ver}`;
     case 'edit_screens': {
       const ids = coveredScreens(job, screens.map((s) => s.id));
+      // 系统代发的修复轮按它自己的名字说（PAGE-CANVAS「同一功能一个名字」）
+      const preset = roundPreset(job)?.preset.kind;
+      if (preset === 'link_repair') return `接上跳转 ${ids.length} 屏${ver}`;
+      if (preset === 'conventions') return `按新约定重生成 ${ids.length} 屏${ver}`;
       return `改${ids.length === 1 ? `「${name(ids[0])}」` : screens.length > 0 && ids.length >= screens.length ? `全部 ${ids.length} 屏` : ` ${ids.length} 屏`}${ver}`;
     }
-    case 'regenerate_subtree': return `重做「${name(i.screenId)}」的一块`;
+    case 'regenerate_subtree': return `重生成「${name(i.screenId)}」的一块`;
     case 'apply_design_system': return i.screenIds === 'all' ? '回刷所有屏' : `回刷 ${(i.screenIds ?? []).length} 屏`;
     case 'propose_design_system': return '提炼约定';
     case 'export_prototype': return '打包原型';
@@ -62,7 +66,7 @@ export function presetView(p: RoundPreset, screens: ScreenDto[], targets: number
   switch (p.kind) {
     case 'variant': return { label: `「${screens.find((s) => s.id === p.variantOf)?.name ?? '已删除的屏'}」的 ${p.variantName} 变体`, verb: `出变体 1 屏${ver}`, hint: `描述这个状态长什么样；留空就按状态名「${p.variantName}」出` };
     case 'missing': return { label: `缺失页 ${p.route}`, verb: `造 1 屏 · ${p.route}${ver}`, hint: NOTE_HINT };
-    case 'link_repair': return { label: '补链', verb: `补链 ${targets} 屏${ver}`, hint: NOTE_HINT };
+    case 'link_repair': return { label: '接上跳转', verb: `接上跳转 ${targets} 屏${ver}`, hint: NOTE_HINT };
     case 'conventions': return { label: '按新约定重生成', verb: `按新约定重生成 ${targets} 屏${ver}`, hint: NOTE_HINT };
   }
 }

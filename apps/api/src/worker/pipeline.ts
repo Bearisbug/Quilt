@@ -618,7 +618,7 @@ async function runClaimed(claimed: JobRow): Promise<void> {
       : job.kind === 'edit_component' ? `已更新组件「${extraOutput.component}」，同步 ${screens.length} 屏${names ? `：${names}` : ''}${(extraOutput.skipped as string[] | undefined)?.length ? `；${(extraOutput.skipped as string[]).join('、')} 正在改、落地后自动用新版` : ''}`
       : job.kind === 'apply_design_system' ? `设计系统已回刷 ${screens.length} 屏`
       : job.kind === 'propose_design_system' ? `设计系统提案已生成${proposal?.summary ? `：${proposal.summary}` : ''}，在设计系统面板预览后确认写入`
-      : job.kind === 'regenerate_subtree' ? `已重生成「${names}」中的选中区域`
+      : job.kind === 'regenerate_subtree' ? `已重生成「${names}」的一块`
       : job.kind === 'edit_screens' ? `已更新 ${screens.length} 屏：${names}${candidateNote}`
       : `已生成 ${fresh.length} 屏：${names}${candidateNote}${entryNote}`;
     await tx.update(schema.messages).set({ content, affectedScreenIds: screenIds }).where(and(eq(schema.messages.jobId, jobId), eq(schema.messages.role, 'assistant')));

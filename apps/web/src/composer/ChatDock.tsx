@@ -20,7 +20,6 @@ export type ChatDockProps = {
   onToggle: () => void;
   /** 「记为约定」（REQ-EDIT-003）：把这一轮改屏的指令提炼成设计系统约定，预览后写入 */
   onRemember?: (assistant: MessageDto) => void;
-  busy?: boolean;
   /** 最后一轮的重试 / 修改（REQ-CORE-026）：参数都是这一轮的用户消息 */
   onRetry?: (user: MessageDto) => void;
   onEdit?: (user: MessageDto) => void;
@@ -154,8 +153,8 @@ export function ChatDock(p: ChatDockProps) {
                     <span>影响 {m.affectedScreenIds.length} 屏</span>
                     {/* 只有改屏的回执才能记为约定：单屏指令也可能是全局偏好，让用户自己判断；提炼后有预览兜底 */}
                     {m.role === 'assistant' && m.jobKind === 'edit_screens' && m.content && p.onRemember && (
-                      <button type="button" data-testid="remember-convention" disabled={p.busy} onClick={() => p.onRemember!(m)} title="把这一轮的指令提炼成设计系统约定，预览后写入，之后每次生成都会遵守"
-                        className="rounded-md px-1.5 py-0.5 text-[11px] text-accent-strong transition-colors duration-[var(--duration-fast)] hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">记为约定</button>
+                      <button type="button" data-testid="remember-convention" onClick={() => p.onRemember!(m)} title="把这一轮的指令提炼成设计系统约定，预览后写入，之后每次生成都会遵守"
+                        className="rounded-md px-1.5 py-0.5 text-[11px] text-accent-strong transition-colors duration-[var(--duration-fast)] hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-accent">记为约定</button>
                     )}
                   </div>
                 )}
@@ -164,7 +163,7 @@ export function ChatDock(p: ChatDockProps) {
           </div>
           {/* 鼠标手势提示：48rem 以下与触屏上不显示（v0.78）——窄屏时对话记录叠在输入框上方、高度本就紧，这三行比消息区还高，而滚轮 / 空格拖拽 / Shift 点击在这两种场合用不上 */}
           <p className="shrink-0 border-t border-line p-3 text-[11px] leading-relaxed text-muted [@media(hover:none)]:hidden [@media(max-width:48rem)]:hidden">
-            滚轮/触控板平移 · Ctrl+滚轮或捏合缩放 · 空格+拖拽平移 · 空白处拖拽框选 · Shift/⌘ 点击加选 · 拖动卡片摆放 · 双击进入交互 · Esc 退出
+            滚轮/触控板平移 · Ctrl+滚轮或捏合缩放 · 空格+拖拽平移 · 空白处拖拽框选 · Shift/⌘ 点击加选 · 拖动卡片摆放 · ⌘Z 撤销 · 双击进入交互 · Esc 退出
           </p>
         </>
       )}

@@ -7,8 +7,8 @@ import { RADIUS } from './designOptions';
 // 设计系统提案预览（REQ-EDIT-003）：提炼出来的绝对规则逐条可取消、token 变更前后对比；「确认写入」即落库，
 // 写成之后才按提案的 regenerate 问要不要按新约定重生成所有屏（只改 token 就直接回刷）。
 // 第二步已经写入：Esc / 点遮罩 = 不重生成（照样收尾回刷 token），初始焦点落「不重生成」——另一个按钮按屏计费
-export function ProposalDialog({ proposal, ds, busy, screenCount, batches, onWrite, onFinish, onClose }: {
-  proposal: DesignProposalDto; ds: DesignSystemDto; busy: boolean;
+export function ProposalDialog({ proposal, ds, busyReason, screenCount, batches, onWrite, onFinish, onClose }: {
+  proposal: DesignProposalDto; ds: DesignSystemDto; busyReason: string | false;
   /** 重生成要发几屏、拆成几个作业（每个作业至多 20 屏） */
   screenCount: number; batches: number;
   /** 写入设计系统；返回是否写成，写不成弹层留着 */
@@ -96,18 +96,22 @@ export function ProposalDialog({ proposal, ds, busy, screenCount, batches, onWri
             )}
           </div>
         ) : (
-          <div className="p-4 text-xs leading-cn text-muted">约定已写入。现有 {screenCount} 屏还是老样子——重生成会对每一屏跑一次模型（按屏计费{batches > 1 ? `，分 ${batches} 个作业发出` : ''}），不重生成则只对以后新造的屏生效。</div>
+          <div className="p-4 text-xs leading-cn text-muted">
+            约定已写入。现有 {screenCount} 屏还是老样子——重生成会对每一屏跑一次模型（按屏计费{batches > 1 ? `，分 ${batches} 个作业发出` : ''}），不重生成则只对以后新造的屏生效。
+            {/* 重生成要改全部屏，与在跑作业冲突：就地写原因（PAGE-CANVAS「作业进行中时的面板」） */}
+            {busyReason && <p className="mt-2 text-warn" data-testid="ds-proposal-blocked">{busyReason}，等它结束再重生成</p>}
+          </div>
         )}
         <footer className="flex shrink-0 justify-end gap-2 border-t border-line px-4 py-3">
           {step === 'preview' ? (
             <>
               <Button key="cancel" size="sm" onClick={onClose}>取消</Button>
-              <Button key="confirm" ref={confirmRef} size="sm" variant="primary" data-testid="ds-proposal-confirm" pending={pending === 'write'} disabled={nothing || busy} onClick={() => void confirm()}>确认写入</Button>
+              <Button key="confirm" ref={confirmRef} size="sm" variant="primary" data-testid="ds-proposal-confirm" pending={pending === 'write'} disabled={nothing} onClick={() => void confirm()}>确认写入</Button>
             </>
           ) : (
             <>
               <Button key="skip" ref={skipRef} size="sm" data-testid="ds-proposal-write-only" pending={pending === 'skip'} disabled={!!pending} onClick={() => void finish(false)}>不重生成</Button>
-              <Button key="regenerate" size="sm" variant="primary" data-testid="ds-proposal-regenerate" pending={pending === 'regenerate'} disabled={busy || !!pending} onClick={() => void finish(true)}>重生成 {screenCount} 屏</Button>
+              <Button key="regenerate" size="sm" variant="primary" data-testid="ds-proposal-regenerate" pending={pending === 'regenerate'} disabled={!!busyReason || !!pending} onClick={() => void finish(true)}>重生成 {screenCount} 屏</Button>
             </>
           )}
         </footer>

@@ -238,8 +238,8 @@ await step('TC-PROTO-009', async () => {
   await page.locator('[data-testid="screen-card"] img').first().waitFor({ timeout: 15000 });
   const before = await apiJson<{ edges: { fromScreenId: string }[] }>(`/v1/projects/${r.projectId}/app-map`);
   await page.getByTestId('repair-links').click();
-  await page.getByText('正在为 2 屏补链').waitFor({ timeout: 5000 });
-  await page.getByText('补链：把 2 屏的按钮 / 表单连上路由').waitFor({ timeout: 5000 });
+  await page.getByText('正在为 2 屏接上跳转').waitFor({ timeout: 5000 });
+  await page.getByText('接上跳转：把 2 屏的按钮 / 表单连上路由').waitFor({ timeout: 5000 });
   await page.getByText('已更新 2 屏', { exact: false }).first().waitFor({ timeout: 240000 });
   const rev = (await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${r.projectId}`)).body.screens.find((s) => s.id === r.screens[0].id)!.currentRevisionId;
   const html = await apiJson<{ revision: { htmlUrl: string } }>(`/v1/screens/${r.screens[0].id}/revisions/${rev}`).then((x) => fetch(x.body.revision.htmlUrl).then((y) => y.text()));
@@ -421,7 +421,7 @@ await step('TC-PROTO-013', async () => {
   await page.goto(`${WEB}/p/${r.projectId}`);
   await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
   await page.getByTestId('repair-links').click();
-  await page.getByText('正在为 25 屏补链（分 2 批）').waitFor({ timeout: 10000 });
+  await page.getByText('正在为 25 屏接上跳转（分 2 批）').waitFor({ timeout: 10000 });
   const jobs = (await apiJson<{ items: { id: string; kind: string; input: { screenIds?: string[] } }[] }>(`/v1/projects/${r.projectId}/jobs`)).body.items.filter((j) => j.kind === 'edit_screens');
   const sizes = jobs.map((j) => j.input.screenIds?.length ?? 0).sort((a, b) => b - a);
   const covered = new Set(jobs.flatMap((j) => j.input.screenIds ?? []));

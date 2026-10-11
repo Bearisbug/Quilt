@@ -76,7 +76,7 @@ const withNote = (note: string | null, sep: string) => (note ? `${sep}${note}` :
 function describeJob(input: CreateJobInput): string | null {
   switch (input.kind) {
     case 'generate': return input.input.variantOf ? `出「${input.input.variantName}」状态变体：${input.input.prompt}` : input.input.route ? `生成缺失的页面 ${input.input.route}${withNote(presetNote(input.input.prompt, missingPagePrompt(input.input.route)), '：')}` : `新建${input.input.count === 'auto' ? '一组屏' : input.input.count > 1 ? ` ${input.input.count} 屏` : '一屏'}${input.input.versions > 1 ? `（${input.input.versions} 版候选）` : ''}：${input.input.prompt}`;
-    case 'regenerate_subtree': return `重生成选中区域：${input.input.prompt}`;
+    case 'regenerate_subtree': return `重生成一块：${input.input.prompt}`;
     case 'apply_design_system': return input.input.screenIds === 'all' ? '把最新设计系统回刷到所有屏' : `把最新设计系统回刷到 ${input.input.screenIds.length} 屏`;
     case 'propose_design_system': return `提炼设计系统约定：${input.input.instruction}`;
     case 'export_prototype': return '导出单文件原型';
@@ -84,7 +84,7 @@ function describeJob(input: CreateJobInput): string | null {
       const n = input.input.screenIds.length;
       const link = presetNote(input.input.prompt, LINK_REPAIR_PROMPT);
       const conv = presetNote(input.input.prompt, CONVENTIONS_REGENERATE_PROMPT);
-      return link !== null ? `补链：把 ${n} 屏的按钮 / 表单连上路由${withNote(link, '。附加要求：')}` : conv !== null ? `按新约定重生成 ${n} 屏${withNote(conv, '。附加要求：')}` : input.input.prompt;
+      return link !== null ? `接上跳转：把 ${n} 屏的按钮 / 表单连上路由${withNote(link, '。附加要求：')}` : conv !== null ? `按新约定重生成 ${n} 屏${withNote(conv, '。附加要求：')}` : input.input.prompt;
     }
     case 'chat': return input.input.prompt;
     case 'edit_component': return `改组件：${input.input.prompt}`;
@@ -122,7 +122,7 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
   const preset = chat ? undefined : body.preset;
   if (pinned && targets) throw problems.validation([{ path: 'targetScreenIds', message: '出变体 / 补缺失页是造屏，不能同时带目标屏' }]);
   if (!chat && body.variantOf && body.route) throw problems.validation([{ path: 'route', message: '出变体与补缺失页不能同时给' }]);
-  if (preset && (!targets || pinned)) throw problems.validation([{ path: 'targetScreenIds', message: '补链 / 按新约定重生成要带目标屏' }]);
+  if (preset && (!targets || pinned)) throw problems.validation([{ path: 'targetScreenIds', message: '接上跳转 / 按新约定重生成要带目标屏' }]);
   const editComponent = !!compTargets && !targets && !body.anchor && !pinned;
   if (editComponent && compTargets!.length !== 1) throw problems.validation([{ path: 'targetComponentIds', message: '一次只能改一个组件' }]);
   // 参考图（REQ-CORE-012）：先把 id 解析成真实存在的对象，取不到就判非法——

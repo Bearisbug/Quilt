@@ -32,9 +32,9 @@ export type PositionDrafts = ReturnType<typeof usePositionDrafts>;
 export function usePositionUndo(args: {
   drafts: PositionDrafts; screensRef: { current: ScreenDto[] }; components: ComponentDto[];
   setDetail: Dispatch<SetStateAction<ProjectDetailDto | null>>; refresh: () => unknown; toast: ReturnType<typeof useToast>;
-  pushStep: (step: UndoStep) => void;
+  pushStep: (step: UndoStep) => void; undo: () => void;
 }) {
-  const { drafts: { dirtyPos, dirtyCompPos }, screensRef, components, setDetail, refresh, toast, pushStep } = args;
+  const { drafts: { dirtyPos, dirtyCompPos }, screensRef, components, setDetail, refresh, toast, pushStep, undo } = args;
   // 位置撤销（v0.41）：拖动与对齐都是一步把屏挪走的动作，错了没有退路——每次动之前把「这几张原来在哪」压进画布撤销栈（undo.ts），⌘Z 逐步还原。
   // 删屏有确认框，不进栈。一步同时记屏与组件（v0.47 整组一起拖、整组一起还原）
   const pushUndo = (label: string, screenIds: string[], componentIds: string[] = []) => {
@@ -83,7 +83,7 @@ export function usePositionUndo(args: {
     // 失败的屏把坐标交还服务端（口径是重取、不回滚已落库的那几屏），成功的仍归本地直到刷新里对上
     const done = await Promise.allSettled(moved.map((s) => api.screens.patch(s.id, next.get(s.id)!)));
     const failed = moved.filter((_, i) => done[i].status === 'rejected');
-    if (!failed.length) return;
+    if (!failed.length) { toast(`已${label} ${sel.length} 屏`, 'info', { action: { label: '撤销（⌘Z）', run: undo } }); return; }
     for (const s of failed) dirtyPos.current.delete(s.id);
     toast(`位置保存失败：${failed.map((s) => s.name).join('、')} 没排上，再点一次对齐`, 'error');
     refresh();

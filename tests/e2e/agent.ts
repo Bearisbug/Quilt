@@ -499,8 +499,8 @@ await step('TC-AGENT-023', async () => {
     await page.goto(`${WEB}/p/${r.projectId}?panel=agent`);
     await page.locator('[data-testid="agent-jobs"]').waitFor({ timeout: 10000 });
     const cardText = await page.locator('[data-testid="agent-job"]').first().innerText();
-    expect(cardText.includes('重做「Screen 1」的一块') && !cardText.includes('造新屏'), `④ 重做一块的目标行不对：${cardText}`);
-    return '改屏与局部重生成的投递提示词都带目标屏的历史，从新到旧；取消掉的那轮不在；面板把重做一块写成「重做「屏名」的一块」';
+    expect(cardText.includes('重生成「Screen 1」的一块') && !cardText.includes('造新屏'), `④ 重生成一块的目标行不对：${cardText}`);
+    return '改屏与局部重生成的投递提示词都带目标屏的历史，从新到旧；取消掉的那轮不在；面板把重生成一块写成「重生成「屏名」的一块」';
   } finally { await fake.close().catch(() => {}); }
 });
 

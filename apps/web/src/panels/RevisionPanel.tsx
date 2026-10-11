@@ -4,7 +4,7 @@ import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button, EmptyState, Panel, Spinner } from '@/ui/ui';
 
-const SOURCE_LABEL: Record<string, string> = { generate: '生成', edit: '对话修改', subtree: '局部重生成', manual: '直改', restore: '回溯', apply_ds: '设计系统回刷', agent_ingest: 'agent 推入', component: '共享组件同步' };
+const SOURCE_LABEL: Record<string, string> = { generate: '生成', edit: '对话修改', subtree: '重生成一块', manual: '直改', restore: '回溯', apply_ds: '设计系统回刷', agent_ingest: 'agent 推入', component: '共享组件同步' };
 
 // 修订面板（REQ-CORE-007 v0.31）：修订树——同批候选折成一组（未选用的可随时采用），其余按 seq 倒序并标出派生自哪一版。回溯仍是建新修订。
 export function RevisionPanel({ screen, onClose, onRestored }: { screen: ScreenDto; onClose: () => void; onRestored: () => void }) {
@@ -29,7 +29,7 @@ export function RevisionPanel({ screen, onClose, onRestored }: { screen: ScreenD
   };
   const adopt = async (rev: RevisionDto) => {
     setBusy(rev.id);
-    try { await api.screens.adopt(screen.id, rev.id); toast(`已采用候选第 ${(rev.candidateIndex ?? 0) + 1} 版`); onRestored(); }
+    try { await api.screens.adopt(screen.id, rev.id); toast(`已采用候选 ${(rev.candidateIndex ?? 0) + 1}`); onRestored(); }
     catch (e) { fail(e, '采用失败'); } finally { setBusy(null); }
   };
 
@@ -48,7 +48,8 @@ export function RevisionPanel({ screen, onClose, onRestored }: { screen: ScreenD
   const row = (r: RevisionDto, inGroup: boolean) => {
     const current = r.id === screen.currentRevisionId;
     const settled = !!r.candidateSettledAt;
-    const label = inGroup ? `第 ${(r.candidateIndex ?? 0) + 1} 版（seq ${r.seq}）` : `第 ${r.seq} 版`;
+    // 「第 n 版」只指修订序号；同批候选叫「候选 n」（PAGE-CANVAS「同一功能一个名字」）
+    const label = inGroup ? `候选 ${(r.candidateIndex ?? 0) + 1}` : `第 ${r.seq} 版`;
     const status = current ? (inGroup && settled ? '已采用' : '当前') : inGroup && !settled ? '未选用' : '';
     return (
       <li key={r.id} className={`flex gap-2 rounded-md border p-2 ${current ? 'border-accent bg-accent/10' : 'border-line'}`} data-testid="revision" data-seq={r.seq} data-candidate={inGroup ? r.candidateIndex ?? undefined : undefined}>
@@ -73,7 +74,7 @@ export function RevisionPanel({ screen, onClose, onRestored }: { screen: ScreenD
         <ul className="scroll flex flex-1 flex-col gap-2 p-2">
           {groups.map((g) => g.jobId ? (
             <li key={g.key} className="rounded-lg border border-dashed border-line p-1.5" data-testid="candidate-group" data-job={g.jobId}>
-              <div className="px-1 pb-1.5 text-[11px] text-muted">候选 · 作业 {g.jobId.slice(0, 8)} · {g.revs.length} 版{g.revs.every((r) => r.candidateSettledAt) ? ' · 已采用' : ' · 待采用'}</div>
+              <div className="px-1 pb-1.5 text-[11px] text-muted">候选 · {g.revs.length} 版{g.revs.every((r) => r.candidateSettledAt) ? ' · 已采用' : ' · 待采用'}</div>
               <ul className="flex flex-col gap-1.5">{[...g.revs].sort((a, b) => (a.candidateIndex ?? 0) - (b.candidateIndex ?? 0)).map((r) => row(r, true))}</ul>
             </li>
           ) : row(g.revs[0], false))}

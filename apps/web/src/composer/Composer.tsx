@@ -179,7 +179,16 @@ export function Composer(p: ComposerProps) {
       : { need: Math.ceil(need + chrome), runnerMax: null, wrap: left + chrome > avail + 1 ? 'all' as const : 'bar' as const };
     setBar((v) => (Math.abs(v.need - next.need) < 1 && v.runnerMax === next.runnerMax && v.wrap === next.wrap ? v : next));
   }, [p.hidden, lane]);
-  useLayoutEffect(measureBar);
+  // 量一次要强制布局两回，每次渲染都量会拖慢打字：只在工具条内容变了（文字、控件增减、显隐）时量。
+  // 读 textContent 与元素个数不触发布局；宽度变化另有下面的 ResizeObserver 与字体加载两条路
+  const barSig = useRef('');
+  useLayoutEffect(() => {
+    const el = barRef.current;
+    const sig = el ? `${p.hidden}|${el.getElementsByTagName('*').length}|${el.textContent}` : '';
+    if (sig === barSig.current) return;
+    barSig.current = sig;
+    measureBar();
+  });
   // 宽度过渡在首次量完的下一帧才启用（v0.78）：与第一次写入宽度落在同一帧的话，浏览器按量宽时算过的 30rem 起跑过渡，
   // 每次加载都先长一下。通道清单还没到时不启用——触发器随后才出现，那一下变宽不该滑
   const [measured, setMeasured] = useState(false);

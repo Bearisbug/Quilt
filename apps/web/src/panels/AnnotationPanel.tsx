@@ -60,6 +60,7 @@ export function AnnotationPanel({ screen, sel, items, busy, onClose, onAdd, onUp
             <Button size="sm" variant="primary" disabled={open.length === 0 || pending || busy} data-testid="send-annotations"
               onClick={() => run(() => onSend(open.map((a) => a.id)))}>一起发送</Button>
           </div>
+          {busy && <p className="mb-2 text-[11px] text-warn" data-testid="anno-busy">这一屏正在改，等这一轮完事再发</p>}
           {items.length === 0 ? <EmptyState title="还没有批注" hint="点选元素后写下改动说明，可以攒够一起发。" /> : (
             <ul className="space-y-2">
               {items.map((a, i) => (

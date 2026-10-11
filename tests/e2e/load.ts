@@ -757,7 +757,8 @@ await step('TC-CORE-076', async () => {
     const [tb, db, cb] = [await t1.boundingBox(), await box(page, '[data-testid="chat-dock"]'), await box(page, 'form.composer')];
     await S.check(() => expect(tb && tb.y + tb.height <= db.y + 1, `① 390 宽下失败 toast 压住了折叠横条：toast 底 ${tb && Math.round(tb.y + tb.height)}，横条顶 ${Math.round(db.y)}`));
     await S.check(() => expect(tb && tb.y + tb.height <= cb.y + 1, `① toast 压住了输入框：toast 底 ${tb && Math.round(tb.y + tb.height)}，输入框顶 ${Math.round(cb.y)}`));
-    await eventually(async () => expect((await page.getByText(/^造屏失败/).count()) === 0, 'toast 没自行消失'), 6000);
+    // 错误提示 8 s 后消失（PAGE-CANVAS「提示条」）
+    await eventually(async () => expect((await page.getByText(/^造屏失败/).count()) === 0, 'toast 没自行消失'), 10000);
     // 1b 收起输入框（⌘/）：横条落到底部，toast 仍在它上方
     await page.keyboard.press('ControlOrMeta+Slash');
     await page.locator('form.composer').waitFor({ state: 'hidden', timeout: 3000 });

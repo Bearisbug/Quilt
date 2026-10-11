@@ -1131,7 +1131,7 @@ await step('TC-EDIT-026', async () => {
     const b5 = r5.hit ? historyIn(r5.hit.user, 'SCREEN') : null;
     const want5 = ['S3 底部加一行版权说明', '批注：「Primary action」→ S2 按钮圆角改小', 'S1 标题改成「我的订单」'];
     await S.check(() => expect(JSON.stringify(b5) === JSON.stringify(want5), `⑤ 历史块应为 ${JSON.stringify(want5)}：${JSON.stringify(b5)}`));
-    await S.check(() => expect(b5 && !/data-qid|回刷|补链|Apply the following/.test(b5.join('\n')), `⑤ 历史块里混进了 qid / 系统描述：${JSON.stringify(b5)}`));
+    await S.check(() => expect(b5 && !/data-qid|回刷|接上跳转|Apply the following/.test(b5.join('\n')), `⑤ 历史块里混进了 qid / 系统描述：${JSON.stringify(b5)}`));
     const rev4 = await currentOf();
     // 6 改一轮再回溯：回溯修订的父修订是被回溯到的那一版
     const r6 = await histRound(h, { ...scr, content: 'S5 顶部加一条促销横幅' }, 'S5 顶部');
@@ -1658,6 +1658,152 @@ await step('TC-EDIT-033', async () => {
     hold.closeAllConnections(); hold.close();
     await restart({});
   }
+});
+
+// TC-EDIT-034 提示条（PAGE-CANVAS「提示条」v1.04 UX-5）：直改成功的提示带「撤销（⌘Z）」，点了等于 ⌘Z；删元素写「已删除元素」；
+// 带动作的提示条悬停不计时、移开后照常消失；错误提示 5 s 时还在、可手动关；多选对齐的提示同样带撤销
+await step('TC-EDIT-034', async () => {
+  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Toasts', '--device', 'mobile', '--screens', '2', '--no-shot');
+  const pid = r.projectId; const [s1, s2] = r.screens.map((s) => s.id);
+  const S = softly();
+  const toast = (text: string) => page.getByTestId('toast').filter({ hasText: text });
+  const currentHtml = async () => (await revisionHtml(s1, (await detail(pid)).screens.find((s) => s.id === s1)!.currentRevisionId)).html;
+  const pickIn = async (selector: string) => {
+    await page.goto(`${WEB}/p/${pid}`);
+    await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+    await page.keyboard.press('ControlOrMeta+e');
+    await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
+    await page.locator('.card.focused .badge', { hasText: '选择元素中' }).waitFor({ timeout: 20000 });
+    const fl = page.frameLocator('.card.focused iframe');
+    await fl.locator(selector).waitFor({ timeout: 15000 });
+    await page.waitForTimeout(300);
+    await fl.locator(selector).click();
+    await page.locator('#el-text').waitFor({ timeout: 5000 });
+  };
+  try {
+    // 1 改文案保存：提示带「撤销（⌘Z）」，点了 current 回到改之前的内容
+    await pickIn('#toggle');
+    await page.locator('#el-text').fill('立即登录');
+    await page.getByRole('button', { name: '保存（零 token）' }).click();
+    const saved = toast('已更新，截图稍后刷新');
+    await saved.waitFor({ timeout: 15000 });
+    await S.check(async () => expect((await currentHtml()).includes('立即登录'), '① 保存没落库'));
+    await S.check(async () => expect((await saved.getByTestId('toast-action').innerText()) === '撤销（⌘Z）', '① 直改成功的提示没带「撤销（⌘Z）」'));
+    await saved.getByTestId('toast-action').click();
+    await S.check(() => toast('已撤销修改元素').waitFor({ timeout: 10000 }).catch(() => { throw new Error('① 点撤销后没出「已撤销修改元素」'); }));
+    await S.check(() => eventually(async () => expect(!(await currentHtml()).includes('立即登录'), 'undo'), 10000).catch(() => { throw new Error('① 点撤销后 current 仍是改过的内容'); }));
+    // 2 删元素：提示写「已删除元素」并带撤销；悬停 5 s 不消失，移开后 3.2 s 内（留余量 4.5 s）消失
+    await pickIn('h1');
+    await page.getByRole('button', { name: '删除元素' }).click();
+    const removed = toast('已删除元素');
+    await removed.waitFor({ timeout: 15000 });
+    await S.check(async () => expect((await removed.getByTestId('toast-action').count()) === 1, '② 删元素的提示没带撤销'));
+    // 悬停 5 s：提示条会随输入框高度变化挪位置，挪出指针下方时重新悬停（移开即重新计时，所以持续悬停期间它不该消失）
+    await removed.hover();
+    let at = await removed.boundingBox();
+    let pointer = at && { x: at.x + at.width / 2, y: at.y + at.height / 2 };
+    for (const t0 = Date.now(); Date.now() - t0 < 5000;) {
+      await page.waitForTimeout(250);
+      at = await removed.boundingBox();
+      if (!at || !pointer) break;
+      if (pointer.x < at.x || pointer.x > at.x + at.width || pointer.y < at.y || pointer.y > at.y + at.height) { await removed.hover(); pointer = { x: at.x + at.width / 2, y: at.y + at.height / 2 }; }
+    }
+    await S.check(async () => expect((await removed.count()) === 1, '② 悬停 5 s 后提示条不该消失'));
+    await page.mouse.move(10, 10);
+    await S.check(() => eventually(async () => expect((await removed.count()) === 0, 'gone'), 4500).catch(() => { throw new Error('② 移开后提示条 4.5 s 内没消失'); }));
+    // 3 错误提示：5 s 时还在、带关闭键，点了就收
+    await page.route('**/v1/screens/*/elements/*', (rt) => rt.abort());
+    await pickIn('#toggle');
+    await page.locator('#el-text').fill('失败一次');
+    await page.getByRole('button', { name: '保存（零 token）' }).click();
+    const failed = toast('保存失败');
+    await failed.waitFor({ timeout: 10000 });
+    await page.waitForTimeout(5000);
+    await S.check(async () => expect((await failed.count()) === 1 && (await failed.getAttribute('data-kind')) === 'error', '③ 错误提示 5 s 时不该消失'));
+    await failed.getByRole('button', { name: '关闭提示' }).click();
+    await S.check(async () => expect((await failed.count()) === 0, '③ 点关闭后错误提示应收起'));
+    await page.unroute('**/v1/screens/*/elements/*');
+    // 4 多选上对齐：提示「已对齐 2 屏」带撤销，点了两屏回到原位
+    for (const [id, x, y] of [[s1, 0, 0], [s2, 700, 150]] as const) await apiJson(`/v1/screens/${id}`, { method: 'PATCH', body: JSON.stringify({ x, y }) });
+    const pos = async () => Object.fromEntries((await apiJson<{ screens: { id: string; x: number; y: number }[] }>(`/v1/projects/${pid}`)).body.screens.map((s) => [s.id, s]));
+    await page.goto(`${WEB}/p/${pid}`);
+    await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+    await page.locator('[data-testid="screen-card"]').first().locator('.gesture').click();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.getByTestId('arrange-bar').getByTestId('arrange-top').click();
+    const aligned = toast('已对齐 2 屏');
+    await aligned.waitFor({ timeout: 8000 });
+    await S.check(() => eventually(async () => expect((await pos())[s2].y === 0, 'aligned'), 8000).catch(() => { throw new Error('④ 上对齐没落库'); }));
+    await aligned.getByTestId('toast-action').click();
+    await S.check(() => eventually(async () => { const p = await pos(); expect(p[s2].y === 150 && p[s1].y === 0, 'undo'); }, 8000).catch(() => { throw new Error('④ 点撤销后两屏没回到原位'); }));
+  } catch (e) { S.fail(e); }
+  finally { await page.unroute('**/v1/screens/*/elements/*').catch(() => {}); await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
+  S.done();
+  return '直改、删元素、对齐的提示带「撤销（⌘Z）」且点了即撤销；删元素写「已删除元素」；悬停不计时；错误提示 5 s 时仍在、可手动关';
+});
+
+// TC-EDIT-035 作业进行中时的面板（PAGE-CANVAS「作业进行中时的面板」v1.04 UX-3）：别的屏有作业在跑时，删约定、一句话改设计系统、记为约定照常可点；
+// 回刷所有屏不可点、就地写是哪个作业；检查器所在的屏正在改时写明原因，按 ⌘S 弹同样的提示；批注面板同样写明原因
+await step('TC-EDIT-035', async () => {
+  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'BusyPanels', '--device', 'mobile', '--screens', '2', '--no-shot');
+  const pid = r.projectId; const [s1, s2] = r.screens.map((s) => s.id);
+  const S = softly();
+  const idem = () => ({ 'Idempotency-Key': crypto.randomUUID() });
+  let held = '';
+  try {
+    // 前置：s2 先改一轮（对话里有可「记为约定」的回执）、写一条约定；再对 s1 起一个停 60 s 的改屏
+    const m = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/messages`, { method: 'POST', headers: idem(), body: JSON.stringify({ content: '标题加粗', targetScreenIds: [s2], runner: STUB_RUNNER }) });
+    expect(m.status === 202, `改 s2 ${m.status}`);
+    expect((await waitJob(m.body.job.id, 90)).status === 'succeeded', '前置改屏没成功');
+    const ds = (await detail(pid)).designSystem;
+    expect((await apiJson(`/v1/projects/${pid}/design-system`, { method: 'PUT', body: JSON.stringify({ conventions: ['按钮一律用主色'], expectedVersion: ds.version }) })).status === 200, '写约定失败');
+    const h = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: idem(), body: JSON.stringify({ kind: 'edit_screens', input: { prompt: '[stub-hold:60000] 改标题', screenIds: [s1], versions: 1, runner: STUB_RUNNER } }) });
+    expect(h.status === 202, `起停顿作业 ${h.status}`);
+    held = h.body.job.id;
+    await page.goto(`${WEB}/p/${pid}`);
+    await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+    // 1 设计系统面板：回刷不可点并写明原因；删约定、一句话改设计系统照常可用
+    await page.keyboard.press('Alt+d');
+    const blocked = page.getByTestId('ds-apply-blocked');
+    await blocked.waitFor({ timeout: 10000 });
+    const why = await blocked.innerText();
+    await S.check(() => expect(why === '有作业进行中：改「Screen 1」，等它结束再回刷', `① 回刷的原因不对：${why}`));
+    await S.check(async () => expect(await page.getByRole('button', { name: '回刷所有屏' }).isDisabled(), '① 有作业在跑时回刷所有屏应不可点'));
+    await S.check(async () => expect(!(await page.getByRole('button', { name: '删除约定：按钮一律用主色' }).isDisabled()), '① 删约定不该被作业挡住'));
+    await page.getByTestId('ds-instruction').fill('正文大一号');
+    await S.check(async () => expect(!(await page.getByTestId('ds-propose').isDisabled()), '① 提炼并预览不该被作业挡住'));
+    // 2 对话记录的「记为约定」照常可点（先让说明框失焦，快捷键在输入框里不生效）
+    await blurActive();
+    await page.keyboard.press('Alt+d');
+    await S.check(async () => { const b = page.getByTestId('remember-convention').last(); await b.waitFor({ timeout: 5000 }); expect(!(await b.isDisabled()), '② 记为约定不该被作业挡住'); });
+    // 3 检查器在正改的 s1 上：写明原因，按 ⌘S 弹同样的提示
+    await page.keyboard.press('ControlOrMeta+e');
+    await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
+    await page.locator('.card.focused .badge', { hasText: '选择元素中' }).waitFor({ timeout: 20000 });
+    const fl = page.frameLocator('.card.focused iframe');
+    await fl.locator('h1').waitFor({ timeout: 15000 });
+    await page.waitForTimeout(300);
+    await fl.locator('h1').click();
+    const note = page.getByTestId('el-busy');
+    await note.waitFor({ timeout: 5000 });
+    await S.check(async () => expect((await note.innerText()) === '这一屏正在改，等这一轮完事', `③ 检查器的原因不对：${await note.innerText()}`));
+    await page.keyboard.press('ControlOrMeta+s');
+    await S.check(() => page.getByTestId('toast').filter({ hasText: '这一屏正在改，等这一轮完事' }).waitFor({ timeout: 3000 }).catch(() => { throw new Error('③ 屏忙时按 ⌘S 没有提示'); }));
+    // 4 批注面板在正改的 s1 上：发送类按钮不可点并写明原因，「记下（不发送）」照常
+    await page.goto(`${WEB}/p/${pid}`);
+    await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+    await page.keyboard.press('Alt+n');
+    await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
+    await page.locator('.card.focused .badge', { hasText: '批注中' }).waitFor({ timeout: 20000 });
+    const anno = page.getByTestId('anno-busy');
+    await S.check(() => anno.waitFor({ timeout: 5000 }).then(async () => expect((await anno.innerText()) === '这一屏正在改，等这一轮完事再发', `④ 批注面板的原因不对：${await anno.innerText()}`)).catch((e) => { throw new Error(`④ 批注面板没写原因：${(e as Error).message.slice(0, 80)}`); }));
+  } catch (e) { S.fail(e); }
+  finally {
+    if (held) await apiJson(`/v1/jobs/${held}/cancel`, { method: 'POST' }).catch(() => {});
+    await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});
+  }
+  S.done();
+  return '别的屏有作业在跑时删约定、一句话改设计系统、记为约定照常可点；回刷所有屏不可点并写明是哪个作业；检查器写明这一屏正在改，⌘S 弹同样的提示；批注面板写明原因';
 });
 
 await browser.close();

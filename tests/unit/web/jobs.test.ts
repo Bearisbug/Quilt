@@ -24,7 +24,10 @@ test('jobLabel：在跑作业行的文案', () => {
   assert.equal(jobLabel(job('generate', { count: 2, versions: 3 }), screens, []), '造 2 屏 × 3 版');
   assert.equal(jobLabel(job('edit_screens', { screenIds: ['s1'] }), screens, []), '改「首页」');
   assert.equal(jobLabel(job('edit_screens', { screenIds: 'all', versions: 2 }), screens, []), '改全部 2 屏 × 2 版');
-  assert.equal(jobLabel(job('regenerate_subtree', { screenId: 'zz' }), screens, []), '重做「已删除的屏」的一块');
+  assert.equal(jobLabel(job('regenerate_subtree', { screenId: 'zz' }), screens, []), '重生成「已删除的屏」的一块');
+  // 系统代发的修复轮按自己的名字说（PAGE-CANVAS「同一功能一个名字」）
+  assert.equal(jobLabel(job('edit_screens', { prompt: LINK_REPAIR_PROMPT, screenIds: ['s1', 's2'] }), screens, []), '接上跳转 2 屏');
+  assert.equal(jobLabel(job('edit_screens', { prompt: presetPrompt(CONVENTIONS_REGENERATE_PROMPT, '衬线'), screenIds: ['s1'], versions: 2 }), screens, []), '按新约定重生成 1 屏 × 2 版');
   assert.equal(jobLabel(job('chat', { prompt: 'x'.repeat(30) }), screens, []), `聊「${'x'.repeat(20)}…」`);
   assert.equal(jobLabel(job('edit_component', { componentId: 'c9' }), screens, components), '改组件「已删除的组件」');
 });
@@ -45,6 +48,7 @@ test('presetView：胶囊文字、动词行', () => {
   assert.equal(v.verb, '出变体 1 屏 × 2 版');
   assert.equal(presetView({ kind: 'missing', route: '/help' }, screens, 0, 1).label, '缺失页 /help');
   assert.equal(presetView({ kind: 'missing', route: '/help' }, screens, 0, 1).verb, '造 1 屏 · /help');
-  assert.equal(presetView({ kind: 'link_repair' }, screens, 3, 1).verb, '补链 3 屏');
+  assert.equal(presetView({ kind: 'link_repair' }, screens, 3, 1).verb, '接上跳转 3 屏');
+  assert.equal(presetView({ kind: 'link_repair' }, screens, 3, 1).label, '接上跳转');
   assert.equal(presetView({ kind: 'conventions' }, screens, 1, 2).verb, '按新约定重生成 1 屏 × 2 版');
 });

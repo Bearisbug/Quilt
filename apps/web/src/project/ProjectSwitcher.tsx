@@ -74,18 +74,21 @@ export function ProjectSwitcher({ current, placeholder = '选择项目', onRenam
         </Select.Trigger>
         <Select.Portal>
           <Select.Content position="popper" side="bottom" align="start" sideOffset={6} collisionPadding={12} data-testid="project-switcher-list"
-            // Esc / 方向键 / 字母检索归下拉自己，不冒泡给画布快捷键；Delete / Backspace 删高亮行（垃圾桶的键盘等价物）
+            // Esc / 方向键 / 字母检索归下拉自己，不冒泡给画布快捷键；高亮行上 F2 改名、Delete / Backspace 删（两个行内按钮的键盘等价物）
             onKeyDown={(e) => {
               e.stopPropagation();
-              if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+              const rename = e.key === 'F2';
+              if (!rename && e.key !== 'Delete' && e.key !== 'Backspace') return;
               const id = (e.currentTarget as HTMLElement).querySelector('[data-highlighted][data-project-id]')?.getAttribute('data-project-id');
               const p = id ? list.find((x) => x.id === id) : undefined;
-              if (p) { e.preventDefault(); askDelete(p); }
+              if (!p) return;
+              e.preventDefault();
+              if (rename) { setDraft(p.name); setRenaming(p.id); } else askDelete(p);
             }}
             className="menu z-50 max-h-[min(24rem,70vh)] w-[min(20rem,calc(100vw-1.5rem))] overflow-y-auto p-1.5">
             <Select.Viewport>
               <Select.Group>
-                <Select.Label className="px-2.5 pb-1 pt-1.5 text-[11px] text-muted">项目 · 按更新时间</Select.Label>
+                <Select.Label className="flex justify-between gap-2 px-2.5 pb-1 pt-1.5 text-[11px] text-muted"><span>项目 · 按更新时间</span><span data-testid="project-keys-hint">F2 改名 · Delete 删除</span></Select.Label>
                 {list.map((p) => (
                   <Select.Item key={p.id} value={p.id} textValue={p.name} data-testid="project-option" data-project-id={p.id} className={ITEM_CLS}
                     // 改名期间指针移过哪一行都不抢焦点：Radix 在 pointermove 时把焦点交给指针下的那一行，改名框随之失焦，

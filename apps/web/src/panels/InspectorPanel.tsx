@@ -60,7 +60,7 @@ function ElementPath({ sel, onPick, onPeek }: { sel: ElementSel; onPick?: (qid: 
 // 目标是一张屏，或一个共享组件（v0.57 `REQ-EDIT-006`）——组件也能选元素直改，op 与屏同一套，
 // 只是落在组件自己的 HTML 上、乐观并发用版本号，改完由服务端回刷所有用它的屏。
 // 组件没有 AI 子树重生成（整块重写走输入框的「改组件」）、没有批注、也不能再「记为共享组件」。
-export function InspectorPanel({ screen, component, sel, routes = [], busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent, keysRef, onDirectEdit, tokens, onPathPick, onPathPeek }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes?: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void; keysRef?: { current: InspectorKeys | null }; onDirectEdit?: (e: DirectEdit) => void; tokens?: Tokens; onPathPick?: (qid: string) => void; onPathPeek?: (qid: string | null) => void }) {
+export function InspectorPanel({ screen, component, sel, routes = [], busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent, keysRef, onDirectEdit, onUndo, tokens, onPathPick, onPathPeek }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes?: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void; keysRef?: { current: InspectorKeys | null }; onDirectEdit?: (e: DirectEdit) => void; onUndo?: () => void; tokens?: Tokens; onPathPick?: (qid: string) => void; onPathPeek?: (qid: string | null) => void }) {
   const toast = useToast();
   // 改了没存的文案 / 类名 / 跳转与重生成说明按元素暂存（v0.78）：点别的元素再点回来还在。
   // 直改三格记着起草时元素的原值：元素本身变了（保存后热更新重选、别处改了它）就作废、回到新值；说明不随元素内容作废
@@ -107,7 +107,13 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
   // 这块已有作业在改（本机会话投递的作业不占 busy，靠这个挡重复发起；屏锁在服务端还有一道 409）
   const working = !!sel && workingQids.includes(sel.qid);
   const canRegenerate = !!sel && !!onRegenerate && !!prompt.trim() && !busy && sessionOk && !working;
-  const regenerate = async () => { if (sel && canRegenerate && onRegenerate && (await onRegenerate(sel.qid, prompt.trim(), runner))) edit({ prompt: '' }); };
+  // 转圈只给这一下自己发出的请求；屏被别的作业占着时靠面板里那行原因说明
+  const [regenerating, setRegenerating] = useState(false);
+  const regenerate = async () => {
+    if (!sel || !canRegenerate || !onRegenerate || regenerating) return;
+    setRegenerating(true);
+    try { if (await onRegenerate(sel.qid, prompt.trim(), runner)) edit({ prompt: '' }); } finally { setRegenerating(false); }
+  };
   useEffect(() => { setMaking(false); setCompError(null); }, [sel?.qid, sel?.text, sel?.classes, sel?.href]);
   // 当前指向的路由若不在项目里（断链）也要能显示出来
   const linkOptions = link && !routes.includes(link) ? [link, ...routes] : routes;
@@ -134,7 +140,8 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
     setSaving(true);
     try {
       const { revision } = await api.screens.editElement(screen.id, sel.qid, ops, screen.currentRevisionId);
-      toast(okText);
+      // 屏上的直改进了画布撤销栈：提示条带「撤销」，点了等于按 ⌘Z（PAGE-CANVAS「提示条」）
+      toast(okText, 'info', onUndo && { action: { label: '撤销（⌘Z）', run: onUndo } });
       onDirectEdit?.({ screenId: screen.id, before: screen.currentRevisionId, after: revision.id, label: ops.some((o) => o.type === 'remove') ? '删除元素' : ops.some((o) => o.type === 'detach') ? '脱离共享' : '修改元素' });
       onEdited(sel.qid);
     }
@@ -157,17 +164,19 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
   };
   // 组件里的元素删了会同步到所有用它的屏、撤销不了（v1.03）：先确认；屏上的元素照旧直接删、可 ⌘Z
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const remove = () => { if (component) setConfirmRemove(true); else void apply([{ type: 'remove' }]); };
+  const remove = () => { if (component) setConfirmRemove(true); else void apply([{ type: 'remove' }], '已删除元素'); };
   // 点屏里的元素之后焦点停在 iframe 里（v0.95）：父页收不到 ⌘S / Delete，Tab 也进不了检查器，得先点一下面板。挪到检查器的内容区——
   // 只在焦点确实在画布的 iframe 上（刚点过元素）时挪；保存后的重选、别处回写这类被动更新发生时焦点在别处，不抢（INT-008）。
   // 不直接落进「文案」框：那样 Delete 就成了删字
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (sel && document.activeElement instanceof HTMLIFrameElement) bodyRef.current?.focus({ preventScroll: true }); }, [sel]);
-  // 键盘等价物（v0.95）：与按钮同样的可用条件——共享组件实例里的元素没有这两个操作，保存中或屏忙时不响应
+  // 键盘等价物（v0.95）：与按钮同样的可用条件——共享组件实例里的元素没有这两个操作，保存中不响应；屏忙时提示原因（v1.04）
   const keyable = !!sel && !(sel.component && !component);
+  const busyText = component ? '这个组件正在改，等这一轮完事' : '这一屏正在改，等这一轮完事';
   useEffect(() => {
     if (!keysRef) return;
-    keysRef.current = keyable ? { save: () => { if (!busy && !saving) save(); }, remove: () => { if (!busy && !saving) remove(); } } : null;
+    const guard = (run: () => void) => () => { if (busy) toast(busyText); else if (!saving) run(); };
+    keysRef.current = keyable ? { save: guard(save), remove: guard(remove) } : null;
     return () => { keysRef.current = null; };
   });
   const makeComponent = async () => {
@@ -195,6 +204,7 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
         <div ref={bodyRef} tabIndex={-1} className="scroll flex-1 space-y-4 p-3 focus:outline-none">
           <ElementPath sel={sel} onPick={onPathPick} onPeek={onPathPeek} />
           <div className="text-xs text-muted">&lt;{sel.tag}&gt; · {sel.qid}</div>
+          {busy && <p className="text-[11px] text-warn" data-testid="el-busy">{busyText}</p>}
           <div className="space-y-2 rounded-md border border-line bg-panel-2 p-3 text-xs" data-testid="el-component-lock" data-component={sel.component}>
             <p className="leading-cn">这是共享组件「<b className="text-fg">{sel.component}</b>」的一部分——改它会同步到所有用它的屏。</p>
             <div className="flex flex-wrap gap-2">
@@ -208,6 +218,7 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
         <div ref={bodyRef} tabIndex={-1} className="scroll flex-1 space-y-4 p-3 focus:outline-none" data-testid="inspector-body">
           <ElementPath sel={sel} onPick={onPathPick} onPeek={onPathPeek} />
           <div className="text-xs text-muted">&lt;{sel.tag}&gt; · {sel.qid}</div>
+          {busy && <p className="text-[11px] text-warn" data-testid="el-busy">{busyText}</p>}
           <div className="space-y-1.5">
             <label htmlFor="el-text" className="block text-xs font-medium text-muted">文案</label>
             <input id="el-text" value={text} onChange={(e) => edit({ text: e.target.value })} className="h-9 w-full rounded-md border border-line bg-canvas px-2 text-sm" placeholder="（无直接文本）" />
@@ -268,7 +279,7 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
               {tool && <SessionSelect tool={tool} sessions={sessions} reason={list?.reason} value={sessionId} onChange={pickSession} onOpen={() => onSessionsOpen?.(tool)} disabled={busy} testId="el-session-select" />}
             </div>
             <div className="flex items-center gap-2">
-              <Button size="sm" disabled={!canRegenerate} pending={busy} onClick={() => void regenerate()}>重生成选中区域</Button>
+              <Button size="sm" disabled={!canRegenerate} pending={regenerating} onClick={() => void regenerate()}>重生成这块</Button>
               <kbd className="rounded border border-line bg-panel-2 px-1 py-px font-sans text-[10px] text-muted">Shift+Enter</kbd>
             </div>
             {working && <p className="text-[11px] text-accent-strong" data-testid="el-working">这块正在修改中，回写后会标「已更新」</p>}
