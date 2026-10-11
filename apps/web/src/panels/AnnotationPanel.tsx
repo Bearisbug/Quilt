@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ScreenDto, AnnotationDto } from '@quilt/core';
 import { Button, EmptyState, Panel } from '@/ui/ui';
+import { ConfirmDialog } from '@/ui/modal';
 import type { ElementSel } from './InspectorPanel';
 
 // 批注面板（REQ-EDIT-004）：选中元素后写一条改动说明，可单独发也可一起发。
@@ -18,6 +19,8 @@ export function AnnotationPanel({ screen, sel, items, busy, onClose, onAdd, onUp
   const setDraft = (v: string) => setDrafts((m) => ({ ...m, [draftKey]: v }));
   const [editing, setEditing] = useState<{ id: string; note: string } | null>(null);
   const [pending, setPending] = useState(false);
+  // 删批注撤销不了（v1.03）：先确认
+  const [pendingRemove, setPendingRemove] = useState<AnnotationDto | null>(null);
   const open = items.filter((a) => a.status === 'open');
   // 共享组件里的元素不批注（REQ-EDIT-006）：批注发出去是改屏，改屏动不了组件展开的那一块
   const locked = sel?.component ?? null;
@@ -84,7 +87,7 @@ export function AnnotationPanel({ screen, sel, items, busy, onClose, onAdd, onUp
                         <div className="mt-1.5 flex flex-wrap gap-1.5">
                           <Button size="sm" onClick={() => setEditing({ id: a.id, note: a.note })}>改写</Button>
                           <Button size="sm" disabled={pending || busy} onClick={() => run(() => onSend([a.id]))}>只发这条</Button>
-                          <Button size="sm" variant="danger" disabled={pending} onClick={() => run(() => onRemove(a.id))}>删除</Button>
+                          <Button size="sm" variant="danger" disabled={pending} onClick={() => setPendingRemove(a)}>删除</Button>
                         </div>
                       )}
                     </>
@@ -95,6 +98,10 @@ export function AnnotationPanel({ screen, sel, items, busy, onClose, onAdd, onUp
           )}
         </div>
       </div>
+      {pendingRemove && (
+        <ConfirmDialog title="删除这条批注？" body={`「${pendingRemove.note.length > 40 ? `${pendingRemove.note.slice(0, 40)}…` : pendingRemove.note}」删了撤销不了。`} confirmLabel="删除"
+          onCancel={() => setPendingRemove(null)} onConfirm={async () => { const a = pendingRemove; setPendingRemove(null); await run(() => onRemove(a.id)); }} />
+      )}
     </Panel>
   );
 }

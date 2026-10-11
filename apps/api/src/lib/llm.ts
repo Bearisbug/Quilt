@@ -16,7 +16,9 @@ const cutOff = (driver: string, reason: string) => new ProviderError(`${driver} 
 // 参考图（REQ-CORE-012）：正文以 base64 随请求走，不给模型发 URL——签名 URL 会过期，
 // 而且让供应商回源取图等于把可用性押在我们的对象存储上。
 export type LlmImage = { mediaType: string; dataBase64: string };
-export type LlmArgs = { system: string; prompt: string; images?: LlmImage[]; model?: string; maxTokens?: number; signal?: AbortSignal };
+export type LlmArgs = { system: string; prompt: string; images?: LlmImage[]; model?: string; maxTokens?: number; signal?: AbortSignal; idleMs?: number };
+// 流式调用的空闲超时（§17 v1.03）：两次流事件之间超过它就判失败；整屏重写的桌面屏要写几分钟，不能用总超时
+const STREAM_IDLE_MS = 120_000;
 
 export interface Llm {
   /** 该驱动能否接受参考图；不能的驱动在建作业时就被挡掉，不会走到这里（REQ-CORE-012） */
@@ -29,14 +31,19 @@ class AnthropicLlm implements Llm {
   private client: import('@anthropic-ai/sdk').default | null = null;
   // 凭据与端点可由账号自建通道给出（REQ-CORE-013）；缺省回落到 .env
   constructor(private apiKey?: string, private baseUrl?: string) {}
-  async complete({ system, prompt, images, model = config.model, maxTokens = 12000, signal }: LlmArgs) {
+  // 流式（§17 v1.03）：输出上限 64000，整屏重写的桌面屏要写几分钟——非流式 120 s 总超时写不完；空闲超时不重试，同样的请求大概率再卡一次
+  async complete({ system, prompt, images, model = config.model, maxTokens = 64000, signal, idleMs = STREAM_IDLE_MS }: LlmArgs) {
     if (!this.client) {
       const { default: Anthropic } = await import('@anthropic-ai/sdk');
       this.client = new Anthropic({ apiKey: this.apiKey ?? config.anthropicApiKey, baseURL: this.baseUrl, maxRetries: 0 });
     }
     const t0 = Date.now();
+    const idle = new AbortController();
+    let timer: NodeJS.Timeout | undefined;
+    const kick = () => { clearTimeout(timer); timer = setTimeout(() => idle.abort(), idleMs); };
     try {
-      const msg = await this.client.messages.create(
+      kick();
+      const stream = this.client.messages.stream(
         {
           model, max_tokens: maxTokens,
           system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
@@ -46,16 +53,19 @@ class AnthropicLlm implements Llm {
             { type: 'text' as const, text: prompt },
           ] }],
         },
-        { signal, timeout: 120_000 },
+        { signal: signal ? AbortSignal.any([signal, idle.signal]) : idle.signal, timeout: 30 * 60_000 },
       );
+      stream.on('streamEvent', kick);
+      const msg = await stream.finalMessage();
       if (msg.stop_reason === 'max_tokens') throw cutOff('anthropic', 'stop_reason=max_tokens');
       const text = msg.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('');
       return { text, tokensIn: msg.usage.input_tokens + (msg.usage.cache_read_input_tokens ?? 0) + (msg.usage.cache_creation_input_tokens ?? 0), tokensOut: msg.usage.output_tokens, model, ms: Date.now() - t0 };
     } catch (e) {
       if (e instanceof ProviderError) throw e;
+      if (idle.signal.aborted && !signal?.aborted) throw new ProviderError(`anthropic stream idle for ${idleMs / 1000}s`, false);
       const status = (e as { status?: number }).status;
       throw new ProviderError(`anthropic ${status ?? ''} ${(e as Error).message}`, status === 429 || (status ?? 500) >= 500);
-    }
+    } finally { clearTimeout(timer); }
   }
 }
 
@@ -186,7 +196,7 @@ class GeminiLlm implements Llm {
   readonly vision = true;
   private client: import('@google/genai').GoogleGenAI | null = null;
   constructor(private apiKey?: string, private baseUrl?: string) {}
-  async complete({ system, prompt, images, model = config.model, maxTokens = 12000, signal }: LlmArgs) {
+  async complete({ system, prompt, images, model = config.model, maxTokens, signal }: LlmArgs) {
     if (!this.client) {
       const { GoogleGenAI } = await import('@google/genai');
       // 用户自填了 Key 就走 AI Studio 路径；只有 .env 预置且开了 GEMINI_VERTEX 才走 Vertex
@@ -199,7 +209,8 @@ class GeminiLlm implements Llm {
       const parts = [...(images ?? []).map((i) => ({ inlineData: { mimeType: i.mediaType, data: i.dataBase64 } })), { text: prompt }];
       const r = await this.client.models.generateContent({
         model, contents: [{ role: 'user', parts }],
-        config: { systemInstruction: system, maxOutputTokens: maxTokens + 8000, abortSignal: signal, httpOptions: { timeout: 120_000 } },
+        // 缺省给到模型上限 65536（含思考，§17 v1.03）；显式给的上限再留 8000 给思考。总超时放宽到 10 分钟，作业时限管总长
+        config: { systemInstruction: system, maxOutputTokens: maxTokens === undefined ? 65536 : maxTokens + 8000, abortSignal: signal, httpOptions: { timeout: 10 * 60_000 } },
       });
       if (r.candidates?.[0]?.finishReason === 'MAX_TOKENS') throw cutOff('gemini', 'finishReason=MAX_TOKENS');
       const text = r.text ?? '';
@@ -219,22 +230,30 @@ class GeminiLlm implements Llm {
 class OpenAiCompatLlm implements Llm {
   readonly vision = true;
   constructor(private apiKey: string, private baseUrl: string) {}
-  async complete({ system, prompt, images, model = config.model, maxTokens = 12000, signal }: LlmArgs) {
+  // 输出上限缺省 32768（§17 v1.03）：DeepSeek 一类端点不接受这么大的上限、回 400 点名 max_tokens——那就去掉上限按服务端缺省重发一次
+  async complete({ system, prompt, images, model = config.model, maxTokens = 32768, signal }: LlmArgs) {
     const t0 = Date.now();
     const content = images?.length
       ? [...images.map((i) => ({ type: 'image_url', image_url: { url: `data:${i.mediaType};base64,${i.dataBase64}` } })), { type: 'text', text: prompt }]
       : prompt;
-    const timeout = AbortSignal.timeout(120_000);
-    let res: Response;
-    try {
-      res = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
-        body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: 'system', content: system }, { role: 'user', content }] }),
-        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-      });
-    } catch (e) {
-      throw new ProviderError(`openai-compatible fetch failed: ${(e as Error).message}`, true);
+    const post = async (limit: number | null) => {
+      const timeout = AbortSignal.timeout(10 * 60_000);
+      try {
+        return await fetch(`${this.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
+          body: JSON.stringify({ model, ...(limit === null ? {} : { max_tokens: limit }), messages: [{ role: 'system', content: system }, { role: 'user', content }] }),
+          signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        });
+      } catch (e) {
+        throw new ProviderError(`openai-compatible fetch failed: ${(e as Error).message}`, true);
+      }
+    };
+    let res = await post(maxTokens);
+    if (res.status === 400) {
+      const body = await res.text().catch(() => '');
+      if (!/max_(completion_)?tokens/i.test(body)) throw new ProviderError(`openai-compatible 400 ${body.slice(0, 300)}`, false);
+      res = await post(null);
     }
     if (!res.ok) {
       const body = (await res.text().catch(() => '')).slice(0, 300);

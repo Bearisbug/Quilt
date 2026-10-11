@@ -610,10 +610,17 @@ export function CanvasPage() {
   const [showLinks, setShowLinks] = useState(() => { try { return localStorage.getItem('quilt:links') !== '0'; } catch { return true; } });
   const toggleLinks = () => setShowLinks((v) => { try { localStorage.setItem('quilt:links', v ? '0' : '1'); } catch { /* 无痕模式等写不了，退化为仅本次会话有效 */ } return !v; });
   // 选中了就只修选中的那几屏，没选中才作用于全部（契约上限 20 屏）
+  // 超过 20 屏（API-CORE-010 的上限）每 20 屏一个作业，全部发出（REQ-PROTO-002 v1.03）；有批次没发出去时说清还剩几屏
   const repairLinks = async () => {
-    const targets = (selectedIds.length ? selectedScreens : screens).slice(0, MAX_TARGETS);
-    const job = await startJob({ kind: 'edit_screens', input: { prompt: LINK_REPAIR_PROMPT, screenIds: targets.map((s) => s.id), versions: 1 } }, '接上跳转失败');
-    if (job) toast(`正在为 ${targets.length} 屏补链`);
+    const targets = selectedIds.length ? selectedScreens : screens;
+    let sent = 0;
+    for (let i = 0; i < targets.length; i += MAX_TARGETS) {
+      const batch = targets.slice(i, i + MAX_TARGETS);
+      if (!(await startJob({ kind: 'edit_screens', input: { prompt: LINK_REPAIR_PROMPT, screenIds: batch.map((s) => s.id), versions: 1 } }, '接上跳转失败'))) break;
+      sent += batch.length;
+    }
+    if (sent === targets.length) toast(targets.length > MAX_TARGETS ? `正在为 ${sent} 屏补链（分 ${Math.ceil(sent / MAX_TARGETS)} 批）` : `正在为 ${sent} 屏补链`);
+    else if (sent) toast(`已为 ${sent} 屏发起补链，其余 ${targets.length - sent} 屏没发出去`, 'error');
   };
   const applyDesignSystem = () => startJob({ kind: 'apply_design_system', input: { screenIds: 'all' } }, '回刷失败');
   // REQ-EDIT-002：通道由检查器自己选（记忆独立于输入框），本机 agent 时作业投递到会话、提示词限定只重写该子树。

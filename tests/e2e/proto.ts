@@ -415,6 +415,21 @@ await step('TC-PROTO-012', async () => {
   return '设为叠层落库 + 预览注入透明底；播放压层、后退只关层、从层跳 push 屏清层、后退回叠层按栈重摆、关闭链接关层、热更新后脚本执行且重跑不报已声明；叠层下底屏更新关层即见、标记落在叠层；导出模板带 presentation、导出叠层栈 0/1/0/1/0、直开叠层 hash 垫起始屏、叠层上切变体只换那一层';
 });
 
+// TC-PROTO-013 「接上跳转」超过 20 屏分批全发（REQ-PROTO-002 v1.03 UX-2）：25 屏、什么都没选时发两个作业（20 + 5 屏），toast 写明分批
+await step('TC-PROTO-013', async () => {
+  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'RepairMany', '--device', 'mobile', '--screens', '25', '--no-shot');
+  await page.goto(`${WEB}/p/${r.projectId}`);
+  await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+  await page.getByTestId('repair-links').click();
+  await page.getByText('正在为 25 屏补链（分 2 批）').waitFor({ timeout: 10000 });
+  const jobs = (await apiJson<{ items: { id: string; kind: string; input: { screenIds?: string[] } }[] }>(`/v1/projects/${r.projectId}/jobs`)).body.items.filter((j) => j.kind === 'edit_screens');
+  const sizes = jobs.map((j) => j.input.screenIds?.length ?? 0).sort((a, b) => b - a);
+  const covered = new Set(jobs.flatMap((j) => j.input.screenIds ?? []));
+  expect(sizes.join('+') === '20+5' && covered.size === 25, `应发两个作业（20 + 5 屏）覆盖全部 25 屏：${sizes.join('+')}，覆盖 ${covered.size}`);
+  for (const j of jobs) await waitJob(j.id, 240);
+  return `两个作业 ${sizes.join(' + ')} 屏，覆盖全部 25 屏`;
+});
+
 await browser.close();
 console.log(`\n=== RUN-${RUN} PROTO ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));
 console.log(results.map((r) => `${r.tc} ${r.result} ${r.note}`).join('\n'));

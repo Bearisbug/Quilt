@@ -84,7 +84,7 @@ export async function listCandidates(project: ProjectRow, jobId: string): Promis
   for (const { r, s } of rows) {
     if (!byScreen.has(s.id)) byScreen.set(s.id, { screenId: s.id, name: s.name, route: s.route, width: size.w, height: size.h, currentRevisionId: s.currentRevisionId, settled: false, revisions: [] });
     const e = byScreen.get(s.id)!;
-    e.revisions.push({ id: r.id, index: r.candidateIndex!, seq: r.seq, screenshotUrl: r.screenshotKey ? await storage.signedUrl(r.screenshotKey) : null, htmlUrl: await storage.signedUrl(r.htmlKey), previewUrl: `${config.previewOrigin}/p/${project.id}/${s.id}?rev=${r.id}&t=${previewToken}` });
+    e.revisions.push({ id: r.id, index: r.candidateIndex!, seq: r.seq, screenshotUrl: r.screenshotKey ? await storage.signedUrl(r.screenshotKey) : null, thumbUrl: r.thumbKey ? await storage.signedUrl(r.thumbKey) : null, htmlUrl: await storage.signedUrl(r.htmlKey), previewUrl: `${config.previewOrigin}/p/${project.id}/${s.id}?rev=${r.id}&t=${previewToken}` });
     if (r.candidateSettledAt) e.settled = true;
     versions = Math.max(versions, r.candidateIndex! + 1);
   }
@@ -121,7 +121,7 @@ export async function revisionDto(r: RevisionRow): Promise<RevisionDto> {
   return {
     id: r.id, screenId: r.screenId, seq: r.seq, sourceKind: r.sourceKind as SourceKind, jobId: r.jobId,
     parentRevisionId: r.parentRevisionId, candidateIndex: r.candidateIndex, candidateSettledAt: r.candidateSettledAt?.toISOString() ?? null,
-    htmlUrl: await storage.signedUrl(r.htmlKey), screenshotUrl: r.screenshotKey ? await storage.signedUrl(r.screenshotKey) : null, lintReport: r.lintReport, createdAt: r.createdAt.toISOString(),
+    htmlUrl: await storage.signedUrl(r.htmlKey), screenshotUrl: r.screenshotKey ? await storage.signedUrl(r.screenshotKey) : null, thumbUrl: r.thumbKey ? await storage.signedUrl(r.thumbKey) : null, lintReport: r.lintReport, createdAt: r.createdAt.toISOString(),
   };
 }
 
@@ -198,20 +198,32 @@ export async function deleteScreen(projectId: string, screenId: string): Promise
 
 // 截图写回（§16 v0.77）：渲染要几秒，期间屏或整个项目可能已被删、对象前缀已清过。先写对象再按修订行条件回填，
 // 行已不在就清掉这一屏（项目也不在了就清整个项目）的前缀——否则刚写的 PNG 没有任何行指向它，再也没人清。返回 null = 屏已删。
-// 缩略图（v1.02 ADR-029）随截图一起写、同一条 UPDATE 回填；做不出来只回填截图，留给 screenshot.retry 补
-export async function storeRevisionShot(projectId: string, screenId: string, revisionId: string, png: Buffer): Promise<string | null> {
-  const key = objectKeys.revisionShot(projectId, screenId, revisionId);
+// 缩略图（v1.02 ADR-029）随截图一起写、同一条 UPDATE 回填；做不出来只回填截图，留给 screenshot.retry 补。
+// 回填是条件更新（§16 v1.03）：截图还空着、且屏的呈现方式仍是拍摄时那一个；拍的途中切了呈现方式，这两张图就作废
+export async function storeRevisionShot(projectId: string, screenId: string, revisionId: string, png: Buffer, presentation: Presentation = 'push'): Promise<string | null> {
+  const key = objectKeys.revisionShot(projectId, screenId, revisionId, presentation);
   await storage.put(key, png, 'image/png');
-  const thumbKey = await storeThumb(projectId, screenId, revisionId, png).catch((e: Error) => { console.warn(`[thumbnail] ${revisionId}: ${e.message}`); return null; });
-  const rows = await db.update(schema.screenRevisions).set({ screenshotKey: key, thumbKey }).where(eq(schema.screenRevisions.id, revisionId)).returning({ id: schema.screenRevisions.id });
+  const thumbKey = await storeThumb(projectId, screenId, revisionId, png, presentation).catch((e: Error) => { console.warn(`[thumbnail] ${revisionId}: ${e.message}`); return null; });
+  const rows = await db.update(schema.screenRevisions).set({ screenshotKey: key, thumbKey })
+    .where(and(eq(schema.screenRevisions.id, revisionId), isNull(schema.screenRevisions.screenshotKey),
+      sql`exists (select 1 from ${schema.screens} where ${schema.screens.id} = ${schema.screenRevisions.screenId} and ${schema.screens.presentation} = ${presentation})`))
+    .returning({ id: schema.screenRevisions.id });
   if (rows.length) return key;
+  const [rev] = await db.select({ screenshotKey: schema.screenRevisions.screenshotKey }).from(schema.screenRevisions).where(eq(schema.screenRevisions.id, revisionId));
+  if (rev) {
+    // 行还在：别处已按同一呈现方式写过同一个键就算成了；否则刚写的是按过期的呈现方式拍的，没有任何行指向它
+    if (rev.screenshotKey === key) return key;
+    await storage.delete(key).catch(() => {});
+    if (thumbKey) await storage.delete(thumbKey).catch(() => {});
+    return null;
+  }
   const [project] = await db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.id, projectId));
   await storage.deletePrefix(project ? `projects/${projectId}/screens/${screenId}/` : `projects/${projectId}/`).catch(() => {});
   return null;
 }
 
-export async function storeThumb(projectId: string, screenId: string, revisionId: string, png: Buffer): Promise<string> {
-  const key = objectKeys.revisionThumb(projectId, screenId, revisionId);
+export async function storeThumb(projectId: string, screenId: string, revisionId: string, png: Buffer, presentation: Presentation = 'push'): Promise<string> {
+  const key = objectKeys.revisionThumb(projectId, screenId, revisionId, presentation);
   await storage.put(key, await thumbnailOf(png), 'image/webp');
   return key;
 }

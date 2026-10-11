@@ -54,10 +54,13 @@ export function targetScreenOf(input: CreateJobInput): string | null {
   }
 }
 
-// 作业超时随预估调用数伸缩（REQ-CORE-008）：基数 + 每次调用一分钟 + 每屏确定性回刷 5 s（回刷 / 改组件逐屏落修订并截图），封顶
-export function timeoutFor(input: CreateJobInput, repaintScreens = 0): number {
+// 作业超时随预估调用数伸缩（REQ-CORE-008）：基数 + 每次调用一分钟 + 每屏确定性回刷 5 s（回刷 / 改组件逐屏落修订并截图）
+// + 改屏整屏重写的输出时间（outputChars = 目标屏正文长度 × 版数，§11 v1.03），封顶
+export function timeoutFor(input: CreateJobInput, repaintScreens = 0, outputChars = 0): number {
   const { calls } = estimateJob(input, 0);
-  return Math.min(config.jobTimeoutMs.max, config.jobTimeoutMs.base + calls * config.jobTimeoutMs.perCall + repaintScreens * config.jobTimeoutMs.perScreen);
+  const t = config.jobTimeoutMs;
+  if (t.total) return t.total;
+  return Math.min(t.max, t.base + calls * t.perCall + repaintScreens * t.perScreen + Math.ceil(outputChars / t.outputCharsPerSec) * 1000);
 }
 
 // regenerate_subtree 创建前校验：qid 必须在当前修订里（TC-EDIT-004 → 404），expectedRevisionId 必须是当前版
@@ -157,8 +160,9 @@ export async function createJob(args: { user: UserRow; projectId: string; input:
     }
     throw e;
   }
-  await emitJobEvent(result.job.id, 'progress', { stage: 'queued' });
-  if (runner === 'model') jobQueue.push({ jobId: result.job.id });
+  // 事件发不出去（库抖了一下）只记日志：作业已落库，入队这一步不能被它挡掉，否则只有重启才会再领（§16 v1.03）
+  await emitJobEvent(result.job.id, 'progress', { stage: 'queued' }).catch((e) => console.warn(`[job ${result.job.id}] queued event: ${(e as Error).message}`));
+  if (runner === 'model') jobQueue.push({ jobId: result.job.id }, { key: result.job.id });
   else agentHooks?.run(result.job.id);
   return result;
 }

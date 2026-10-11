@@ -62,9 +62,15 @@ export const config = {
   // §15 容量与限流
   workerConcurrency: Number(env('WORKER_CONCURRENCY', '20')),
   screenConcurrency: Number(env('SCREEN_CONCURRENCY', '4')),
-  // 作业超时随预估调用数伸缩（REQ-CORE-008）：基数 + 每次调用 1 分钟 + 每屏确定性回刷 5 秒，封顶 30 分钟。
-  // QUILT_JOB_TIMEOUT_BASE_MS 只给测试用（超时路径的自动化用例，§11）：只在 LLM_DRIVER=stub 时认，真实安装里设了也不生效
-  jobTimeoutMs: { base: llmDriver === 'stub' && process.env.QUILT_JOB_TIMEOUT_BASE_MS ? Number(process.env.QUILT_JOB_TIMEOUT_BASE_MS) : 3 * 60_000, perCall: 60_000, perScreen: 5_000, max: 30 * 60_000 },
+  // 作业超时随预估调用数伸缩（REQ-CORE-008）：基数 + 每次调用 1 分钟 + 每屏确定性回刷 5 秒 + 改屏整屏重写的输出时间
+  // （每 240 字符 1 秒：约 2.4 字符 / token × 100 token / s 的保守值，§11 v1.03），封顶 30 分钟。
+  // QUILT_JOB_TIMEOUT_BASE_MS / QUILT_JOB_TIMEOUT_TOTAL_MS 只给测试用（超时路径的自动化用例，§11）：只在 LLM_DRIVER=stub 时认，真实安装里设了也不生效。
+  // TOTAL 直接定死整个时限（例如让时限落在修订已落库、截图还没拍完的那一段）
+  jobTimeoutMs: {
+    base: llmDriver === 'stub' && process.env.QUILT_JOB_TIMEOUT_BASE_MS ? Number(process.env.QUILT_JOB_TIMEOUT_BASE_MS) : 3 * 60_000,
+    total: llmDriver === 'stub' && process.env.QUILT_JOB_TIMEOUT_TOTAL_MS ? Number(process.env.QUILT_JOB_TIMEOUT_TOTAL_MS) : 0,
+    perCall: 60_000, perScreen: 5_000, outputCharsPerSec: 240, max: 30 * 60_000,
+  },
   rateLimitJobsPerMinute: 10,
   maxScreensPerProject: 200,
   maxScreenHtmlBytes: 256 * 1024,

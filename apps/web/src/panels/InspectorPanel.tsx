@@ -4,6 +4,7 @@ import type { SessionList } from '@/composer/useRunnerPrefs';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button, EmptyState, Input, Panel } from '@/ui/ui';
+import { ConfirmDialog } from '@/ui/modal';
 import { Select } from '@/ui/Select';
 import { RunnerSelect, SessionSelect } from '@/composer/Composer';
 import { ClassList } from './ClassList';
@@ -115,7 +116,12 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
     if (!sel) return;
     if (component) {
       setSaving(true);
-      try { const r = await api.components.editElement(component.id, sel.qid, ops, component.version); toast(`已更新组件「${component.name}」${r.applied.length ? `，同步 ${r.applied.length} 屏` : ''}`); onDirectEdit?.({ componentName: component.name }); onEdited(sel.qid); }
+      try {
+        const r = await api.components.editElement(component.id, sel.qid, ops, component.version);
+        const synced = r.applied.length ? `，同步 ${r.applied.length} 屏` : '';
+        toast(ops.some((o) => o.type === 'remove') ? `已删除组件「${component.name}」里的元素${synced}` : `已更新组件「${component.name}」${synced}`);
+        onDirectEdit?.({ componentName: component.name }); onEdited(sel.qid);
+      }
       catch (e) {
         if (e instanceof ApiError && e.type === '/errors/component-busy') toast(`组件「${component.name}」正在改，等这一轮完事`, 'error');
         else if (e instanceof ApiError && e.type === '/errors/version-conflict') toast('组件已被更新，重新选一次元素', 'error');
@@ -149,7 +155,9 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
     if (link !== (sel.href ?? '')) ops.push({ type: 'link', value: link || null });
     if (ops.length) void apply(ops); else toast('没有改动');
   };
-  const remove = () => void apply([{ type: 'remove' }]);
+  // 组件里的元素删了会同步到所有用它的屏、撤销不了（v1.03）：先确认；屏上的元素照旧直接删、可 ⌘Z
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const remove = () => { if (component) setConfirmRemove(true); else void apply([{ type: 'remove' }]); };
   // 点屏里的元素之后焦点停在 iframe 里（v0.95）：父页收不到 ⌘S / Delete，Tab 也进不了检查器，得先点一下面板。挪到检查器的内容区——
   // 只在焦点确实在画布的 iframe 上（刚点过元素）时挪；保存后的重选、别处回写这类被动更新发生时焦点在别处，不抢（INT-008）。
   // 不直接落进「文案」框：那样 Delete 就成了删字
@@ -268,6 +276,12 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
           </div>
           )}
         </div>
+      )}
+      {confirmRemove && component && (
+        <ConfirmDialog title={`删除组件「${component.name}」里的这个元素？`}
+          body={component.usedBy.length ? `会同步到用它的 ${component.usedBy.length} 屏，撤销不了。` : '组件改了撤销不了。'}
+          confirmLabel="删除" onCancel={() => setConfirmRemove(false)}
+          onConfirm={async () => { setConfirmRemove(false); await apply([{ type: 'remove' }]); }} />
       )}
     </Panel>
   );

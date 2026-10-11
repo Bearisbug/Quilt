@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // `npx quilt-canvas`（REQ-CORE-017）：准备 $QUILT_HOME（默认 ~/.quilt）→ 首次生成 config.env 密钥 → 起服务并打开浏览器。
 // 用法：quilt [--home <dir>] [--port <n>] [--preview-port <n>] [--no-open]
-import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync, readFileSync, chmodSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
@@ -17,7 +17,10 @@ if (major < 22) { console.error(`Quilt 需要 Node.js 22 或更新（当前 ${pr
 
 const dist = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../dist');
 const home = path.resolve(opt('home', process.env.QUILT_HOME || path.join(os.homedir(), '.quilt')));
-for (const d of ['', 'db', 'objects', 'agent']) mkdirSync(path.join(home, d), { recursive: true });
+// 目录 0700、config.env 0600（§15 本机密钥文件，v1.03）：里面有主密钥与 API Key，按默认 umask 落成 0755 / 0644 时
+// 同机其他账号读得到。新建时按这个权限建，已有的（老版本建的）每次启动补一次 chmod
+for (const d of ['', 'db', 'objects', 'agent']) mkdirSync(path.join(home, d), { recursive: true, mode: 0o700 });
+try { chmodSync(home, 0o700); } catch { /* 目录不属于当前用户时改不了，照常启动 */ }
 
 // 首次运行：生成两把随机密钥写进 config.env（用户以后可在这里改 LLM_DRIVER / API Key 等）
 const cfgPath = path.join(home, 'config.env');
@@ -31,9 +34,10 @@ if (!existsSync(cfgPath)) {
     'ANTHROPIC_API_KEY=',
     'GEMINI_API_KEY=',
     '',
-  ].join('\n'));
+  ].join('\n'), { mode: 0o600 });
   console.log(`[quilt] 首次运行：已初始化 ${home}`);
 }
+try { chmodSync(cfgPath, 0o600); } catch { /* 同上 */ }
 
 const port = opt('port', process.env.API_PORT || '3100');
 const previewPort = opt('preview-port', process.env.PREVIEW_PORT || '3101');

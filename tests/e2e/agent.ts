@@ -495,7 +495,12 @@ await step('TC-AGENT-023', async () => {
     const qid = /<h1[^>]*data-qid="(q\d+)"/.exec(await (await fetch(rev.htmlUrl)).text())?.[1];
     const p3 = await deliver(`/v1/projects/${r.projectId}/jobs`, { kind: 'regenerate_subtree', input: { screenId: s1, qid, prompt: 'HANG A4 标题加粗', expectedRevisionId: cur, runner: agent } });
     expect(JSON.stringify(block(p3)) === JSON.stringify(want) && !p3.includes('A3'), `③ 局部重生成投递的历史块应为 ${JSON.stringify(want)} 且不含 A3：${JSON.stringify(block(p3))}`);
-    return '改屏与局部重生成的投递提示词都带目标屏的历史，从新到旧；取消掉的那轮不在';
+    // 4 本机 agent 面板：重做一块的作业目标行与在跑作业行同一个叫法，不写成「造新屏」（v1.03）
+    await page.goto(`${WEB}/p/${r.projectId}?panel=agent`);
+    await page.locator('[data-testid="agent-jobs"]').waitFor({ timeout: 10000 });
+    const cardText = await page.locator('[data-testid="agent-job"]').first().innerText();
+    expect(cardText.includes('重做「Screen 1」的一块') && !cardText.includes('造新屏'), `④ 重做一块的目标行不对：${cardText}`);
+    return '改屏与局部重生成的投递提示词都带目标屏的历史，从新到旧；取消掉的那轮不在；面板把重做一块写成「重做「屏名」的一块」';
   } finally { await fake.close().catch(() => {}); }
 });
 

@@ -25,6 +25,9 @@ async function pgDriver(url: string): Promise<Driver> {
   const { default: pg } = await import('pg');
   const { drizzle } = await import('drizzle-orm/node-postgres');
   const pool = new pg.Pool({ connectionString: url, max: 20, statement_timeout: 5000 });
+  // 空闲连接被对端断开（Postgres / docker 重启、休眠断网）时 pg-pool 发 error：没有监听就是未捕获异常、整个进程退出。
+  // 坏连接 pg-pool 自己已移出池，这里只记一行（§16 v1.03）
+  pool.on('error', (e) => console.warn(`[db] idle client error: ${e.message}`));
   const handlers = new Map<string, Set<(p: string) => void>>();
   const reconnectHooks: (() => void)[] = [];
   // LISTEN 用一条专用连接。它会断（Postgres / docker 重启、休眠断网）：断了就按 1 s 起、翻倍、封顶 30 s 退避重连，

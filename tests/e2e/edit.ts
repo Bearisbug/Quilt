@@ -440,6 +440,8 @@ await step('TC-EDIT-009', async () => {
     expect((await page.getByTestId('ds-conventions').locator('li').count()) === 2, '设计系统面板未列出 2 条约定');
     // 4 面板删除一条 → 剩 1 条、version 再 +1
     await page.getByTestId('ds-conventions').locator('li').first().getByRole('button').click();
+    // 删约定撤销不了，先确认（v1.03）
+    await page.getByRole('alertdialog').getByRole('button', { name: '删除' }).click();
     await page.waitForFunction(() => document.querySelectorAll('[data-testid="ds-conventions"] li').length === 1, null, { timeout: 10000 });
     expect((await detail(r.projectId)).designSystem.version === version0 + 2, '删除约定后 version 未 +1');
     return '⌘A 不改设计系统；记为约定 → 提炼作业 → 预览 2 条绝对规则 → 确认写入、不重生成 → 约定节 + version+1；面板可删';
@@ -673,6 +675,8 @@ await step('TC-EDIT-013', async () => {
     // 5 面板开着时删一条约定：改过的种子色与 DESIGN.md 草稿留着，草稿里的约定节换成删后的
     await eventually(async () => expect((await detail(r.projectId) as unknown as { activeJobs: unknown[] }).activeJobs.length === 0, '重生成作业应跑完'), 120000);
     await page.getByTestId('ds-conventions').locator('li').first().getByRole('button').click();
+    // 删约定撤销不了，先确认（v1.03）
+    await page.getByRole('alertdialog').getByRole('button', { name: '删除' }).click();
     await page.waitForFunction(() => document.querySelectorAll('[data-testid="ds-conventions"] li').length === 1, null, { timeout: 10000 });
     await page.waitForTimeout(400);
     await S.check(async () => { const m = await md.inputValue(); const h = await hex.inputValue(); expect(h === '#123456' && m.includes('草稿里加的一行') && !m.includes('按钮一律圆角胶囊') && m.includes('页面标题一律 text-xl'), `⑤ 删约定后：种子 ${h}，草稿末行「${m.trim().split('\n').at(-1)}」，还含删掉的约定 ${m.includes('按钮一律圆角胶囊')}`); });
@@ -696,6 +700,7 @@ await step('TC-EDIT-013', async () => {
     });
     await hex.fill('#654321');
     await page.getByTestId('ds-conventions').locator('li').first().getByRole('button').click();
+    await page.getByRole('alertdialog').getByRole('button', { name: '删除' }).click();
     await page.getByTestId('ds-conventions').waitFor({ state: 'detached', timeout: 10000 });
     await page.waitForTimeout(400);
     await S.check(async () => { const h = await hex.inputValue(); expect(h === '#654321', `⑦ 保存之后再删约定，改过的种子色应留着：${h}`); });
@@ -1532,6 +1537,127 @@ await step('TC-EDIT-031', async () => {
   finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
   S.done();
   return '悬停 Shift+Enter 扩到 a、li，点中 li；选中后 Shift+Enter / Enter 上下走、到锚点为止；路径点选不改路径、悬停预览；文案框里不触发；iframe 里就地处理；组件卡同样可用';
+});
+
+// TC-EDIT-032 撤销不了的删除先确认（v1.03 UX-1）：组件里的元素（Delete 键与「删除元素」按钮都先弹确认，写明同步屏数；取消不删、确认才删）；
+// 设计系统面板删约定；批注面板删批注
+await step('TC-EDIT-032', async () => {
+  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Confirm', '--device', 'mobile', '--screens', '2', '--no-shot');
+  const pid = r.projectId; const s1 = r.screens[0].id;
+  const S = softly();
+  const dialog = page.getByRole('alertdialog');
+  type CompRow = { id: string; html: string; usedBy: string[] };
+  try {
+    const html1 = (await revisionHtml(s1, (await detail(pid)).screens.find((s) => s.id === s1)!.currentRevisionId)).html;
+    const c = await apiJson<{ component: { id: string } }>(`/v1/projects/${pid}/components`, { method: 'POST', body: JSON.stringify({ name: 'AppBar', fromScreenId: s1, qid: qidOf(html1, 'class="h-14 flex')!, applyToScreens: true }) });
+    expect(c.status === 201, `建组件 ${c.status}`);
+    const compId = c.body.component.id;
+    const comp = async () => ((await detail(pid)) as unknown as { components: CompRow[] }).components.find((x) => x.id === compId)!;
+    const used = (await comp()).usedBy.length;
+    expect(used >= 1, '前置不成立：组件没用在任何屏上');
+    // 组件卡挪到屏的右侧，别压在对话记录与检查器底下
+    await apiJson(`/v1/components/${compId}`, { method: 'PATCH', body: JSON.stringify({ x: 900, y: 0 }) });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(`${WEB}/p/${pid}`);
+    await page.locator('[data-testid="component-card"][data-name="AppBar"][data-ready]').waitFor({ timeout: 20000 });
+    await page.locator('[data-testid="component-card"][data-name="AppBar"] .gesture').dblclick();
+    await eventually(async () => expect((await page.locator('.comp.focused').count()) === 1, '双击组件卡没进交互态'));
+    await page.keyboard.press('ControlOrMeta+e');
+    await page.waitForTimeout(500);
+    await page.frameLocator('.comp.focused iframe').locator('h1').dispatchEvent('click');
+    await page.locator('#el-text').waitFor({ timeout: 8000 });
+    // 1 焦点在检查器上按 Delete：弹确认、写明同步屏数；取消不删
+    await page.locator('[data-testid="inspector-body"]').focus();
+    await page.keyboard.press('Delete');
+    await dialog.waitFor({ timeout: 5000 });
+    const t1 = await dialog.innerText();
+    await S.check(() => expect(t1.includes('删除组件「AppBar」里的这个元素？') && t1.includes(`会同步到用它的 ${used} 屏，撤销不了`), `① 确认框文案不对：${t1}`));
+    await dialog.getByRole('button', { name: '取消' }).click();
+    await page.waitForTimeout(800);
+    await S.check(async () => expect((await comp()).html.includes('<h1'), '① 取消后组件里的 h1 不该被删'));
+    // 2 「删除元素」按钮同样先确认；确认后删，提示写同步屏数
+    await page.getByRole('button', { name: '删除元素' }).click();
+    await dialog.waitFor({ timeout: 5000 });
+    await dialog.getByRole('button', { name: '删除' }).click();
+    await page.getByText(`已删除组件「AppBar」里的元素，同步 ${used} 屏`).last().waitFor({ timeout: 15000 });
+    await S.check(async () => expect(!(await comp()).html.includes('<h1'), '② 确认后组件里的 h1 应被删'));
+    // 3 删约定：先确认，取消不删、确认才删
+    const ds = (await detail(pid)).designSystem as unknown as { version: number };
+    const put = await apiJson(`/v1/projects/${pid}/design-system`, { method: 'PUT', body: JSON.stringify({ conventions: ['按钮一律用主色'], expectedVersion: ds.version }) });
+    expect(put.status === 200, `写约定 ${put.status}`);
+    // 约定存在 DESIGN.md 的「## 约定」一节里，项目详情不单列
+    const conventions = async () => ((await detail(pid)).designSystem as unknown as { designMd: string }).designMd.includes('按钮一律用主色') ? ['按钮一律用主色'] : [];
+    await page.goto(`${WEB}/p/${pid}`);
+    await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+    await page.keyboard.press('Alt+d');
+    const delConv = page.getByRole('button', { name: '删除约定：按钮一律用主色' });
+    await delConv.click();
+    await dialog.waitFor({ timeout: 5000 });
+    await S.check(async () => expect((await dialog.innerText()).includes('删除这条约定？'), `③ 删约定没先确认：${await dialog.innerText()}`));
+    await dialog.getByRole('button', { name: '取消' }).click();
+    await page.waitForTimeout(500);
+    await S.check(async () => expect((await conventions()).length === 1, '③ 取消后约定不该被删'));
+    await delConv.click();
+    await dialog.getByRole('button', { name: '删除' }).click();
+    await page.getByText('已删除这条约定').last().waitFor({ timeout: 10000 });
+    await S.check(async () => expect((await conventions()).length === 0, '③ 确认后约定应被删'));
+    // 4 删批注：先确认，确认才删
+    const toggleQid = qidOf(html1, 'id="toggle"')!;
+    const a = await apiJson<{ annotation: { id: string } }>(`/v1/screens/${s1}/annotations`, { method: 'POST', body: JSON.stringify({ qid: toggleQid, note: '这里改成两列', rect: { x: 0, y: 0, w: 10, h: 10 } }) });
+    expect(a.status === 201, `建批注 ${a.status}`);
+    await page.goto(`${WEB}/p/${pid}`);
+    await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+    await page.keyboard.press('Alt+n');
+    await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
+    await page.locator('.card.focused .badge', { hasText: '批注中' }).waitFor({ timeout: 20000 });
+    const row = page.locator('li', { hasText: '这里改成两列' });
+    await row.getByRole('button', { name: '删除' }).click();
+    await dialog.waitFor({ timeout: 5000 });
+    await S.check(async () => expect((await dialog.innerText()).includes('删除这条批注？'), `④ 删批注没先确认：${await dialog.innerText()}`));
+    await dialog.getByRole('button', { name: '删除' }).click();
+    await eventually(async () => expect(((await detail(pid)) as unknown as { annotations: { id: string }[] }).annotations.every((x) => x.id !== a.body.annotation.id), '④ 确认后批注应被删'), 10000);
+  } catch (e) { S.fail(e); }
+  finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
+  S.done();
+  return '组件里删元素（Delete 与按钮）先确认、写明同步屏数，取消不删、确认才删；删约定、删批注同样先确认';
+});
+
+// TC-EDIT-033 计划的修订全部落库后被时限中止，按成功收尾（§11 v1.03 GEN-3）：用 QUILT_JOB_TIMEOUT_TOTAL_MS 把时限定死在 5 s 重启 API，
+// 对一张截图要 ~20 s 的慢屏重生成一块（桩模型立刻回）：修订 1 s 内落库、5 s 时截图还没拍完。作业应 succeeded、current 已前移。要 QUILT_E2E_RESTART
+await step('TC-EDIT-033', async () => {
+  const RESTART = process.env.QUILT_E2E_RESTART;
+  expect(RESTART, '环境：未设 QUILT_E2E_RESTART（重启被测 API 的命令，§3）');
+  const http = await import('node:http');
+  const { spawn } = await import('node:child_process');
+  const restart = (extra: Record<string, string>) => new Promise<void>((resolve, reject) => {
+    const env: Record<string, string | undefined> = { ...process.env, ...extra };
+    for (const k of ['QUILT_JOB_TIMEOUT_BASE_MS', 'QUILT_JOB_TIMEOUT_TOTAL_MS', 'SCREEN_CONCURRENCY']) if (!(k in extra)) delete env[k];
+    const p = spawn('sh', ['-c', RESTART!], { stdio: 'ignore', env });
+    p.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`重启命令退出码 ${code}`))));
+  });
+  const hold = http.createServer(() => { /* 不回 */ });
+  await new Promise<void>((r) => hold.listen(3987, '127.0.0.1', () => r()));
+  let pid = '';
+  try {
+    await restart({ QUILT_JOB_TIMEOUT_TOTAL_MS: '5000' });
+    pid = seedJson<{ projectId: string }>('seed:project', '--name', 'Landed', '--device', 'mobile', '--screens', '1', '--no-shot').projectId;
+    const [sid] = await mcpScreens(pid, [{ name: 'Slow', route: '/slow', html: '<div class="min-h-dvh bg-background p-6"><h1 class="text-xl">Slow</h1><img src="http://127.0.0.1:3987/hang.png" width="8" height="8" alt=""></div>' }]);
+    const rev0 = (await revs082(sid))[0]!.id;
+    const qid = qidOf((await revisionHtml(sid, rev0)).html, 'class="text-xl"')!;
+    const t0 = Date.now();
+    const r = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ kind: 'regenerate_subtree', input: { screenId: sid, qid, prompt: '换成一句标语', expectedRevisionId: rev0, runner: { kind: 'model', driver: 'stub', model: 'stub' } } }) });
+    expect(r.status === 202, `重生成一块 ${r.status}`);
+    const job = await waitJob(r.body.job.id, 120);
+    const took = Math.round((Date.now() - t0) / 1000);
+    expect(job.status === 'succeeded', `修订已落库后被时限中止应按成功收尾：${job.status} ${JSON.stringify(job.output)}（${took} s）`);
+    expect((await revs082(sid))[0]!.id !== rev0, 'current 应前移到新修订');
+    expect(took > 5, `作业 ${took} s 就收口，时限没在截图途中触发，前置不成立`);
+    return `时限 5 s、截图拍了约 ${took} s：succeeded，修订已生效`;
+  } finally {
+    if (pid) await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});
+    hold.closeAllConnections(); hold.close();
+    await restart({});
+  }
 });
 
 await browser.close();

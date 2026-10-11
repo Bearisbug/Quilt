@@ -2,14 +2,14 @@ import { and, eq, lt, isNull, isNotNull, sql, inArray, notInArray, desc } from '
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
 import { jobQueue, shotQueue } from '../services/jobs.ts';
-import { emitJobEvent, emitProjectEvent, notifyCanvas } from '../lib/events.ts';
+import { emitProjectEvent, notifyCanvas } from '../lib/events.ts';
 import { storage } from '../lib/storage.ts';
-import { storeRevisionShot, storeThumb, pointCurrentToFirstCandidate, deriveLinks } from '../services/screens.ts';
+import { storeRevisionShot, storeThumb } from '../services/screens.ts';
 import { screenshotHtml } from '../lib/screenshot.ts';
-import { DEVICE_SIZE, failureText, type DeviceType, type JobKind } from '@quilt/core';
+import { DEVICE_SIZE, type DeviceType, type Presentation } from '@quilt/core';
 import { runJob } from './pipeline.ts';
 import { startAgentDelivery, deliverAgentJob } from './agentDelivery.ts';
-import { settleByJob } from '../services/annotations.ts';
+import { finishFailed } from './failJob.ts';
 
 export async function renderRevisionScreenshot(revisionId: string): Promise<boolean> {
   const [r] = await db.select({ id: schema.screenRevisions.id, htmlKey: schema.screenRevisions.htmlKey, screenshotKey: schema.screenRevisions.screenshotKey, screenId: schema.screens.id, presentation: schema.screens.presentation, projectId: schema.projects.id, deviceType: schema.projects.deviceType })
@@ -20,7 +20,7 @@ export async function renderRevisionScreenshot(revisionId: string): Promise<bool
   if (!r || r.screenshotKey) return false;
   const html = (await storage.get(r.htmlKey)).toString('utf8');
   const png = await screenshotHtml(html, DEVICE_SIZE[r.deviceType as DeviceType], { overlay: r.presentation === 'overlay' });
-  if (!(await storeRevisionShot(r.projectId, r.screenId, r.id, png))) return false;
+  if (!(await storeRevisionShot(r.projectId, r.screenId, r.id, png, r.presentation as Presentation))) return false;
   // 截图就绪：非作业路径（MCP 回写、直改）没有 screen_screenshot_ready 事件，项目频道补一条让卡片换图
   await emitProjectEvent(r.projectId, 'screen_changed', { screenId: r.screenId, revisionId: r.id, screenshot: true }).catch(() => {});
   return true;
@@ -59,21 +59,23 @@ export async function retryScreenshots(): Promise<number> {
   } finally { retrying = false; }
 }
 
-// 缩略图补扫（v1.02 ADR-029 §25）：只补各屏当前修订——画布卡片只用它们的缩略图。每轮最多 200 条；
+// 缩略图补扫（ADR-029 §25）：各屏当前修订先补（画布卡片用），再按新到旧补历史修订（v1.03 起修订面板与候选展开也用）。每轮最多 200 条；
 // 回填带上截图键做条件，补的途中截图被作废（换呈现方式）就不写。做不出来的修订本进程内不再试（坏图不会自己变好），
 // 补完一个项目推一条 screen_changed，开着的画布重取详情换上缩略图
 const thumbFailed = new Set<string>();
 async function backfillThumbs() {
   const rows = await db.select({ id: schema.screenRevisions.id, screenshotKey: schema.screenRevisions.screenshotKey, screenId: schema.screens.id, projectId: schema.screens.projectId })
     .from(schema.screenRevisions)
-    .innerJoin(schema.screens, eq(schema.screens.currentRevisionId, schema.screenRevisions.id))
+    .innerJoin(schema.screens, eq(schema.screens.id, schema.screenRevisions.screenId))
     .where(and(isNotNull(schema.screenRevisions.screenshotKey), isNull(schema.screenRevisions.thumbKey), thumbFailed.size ? notInArray(schema.screenRevisions.id, [...thumbFailed]) : undefined))
+    .orderBy(sql`(${schema.screens.currentRevisionId} = ${schema.screenRevisions.id}) is true desc`, desc(schema.screenRevisions.createdAt))
     .limit(200);
   const touched = new Set<string>();
   let n = 0;
   for (const r of rows) {
     try {
-      const thumbKey = await storeThumb(r.projectId, r.screenId, r.id, await storage.get(r.screenshotKey!));
+      // 呈现方式按截图键认：键里带 .overlay 的就是按叠层拍的（§16 v1.03；之前的叠层截图键不带，按整屏命名缩略图）
+      const thumbKey = await storeThumb(r.projectId, r.screenId, r.id, await storage.get(r.screenshotKey!), r.screenshotKey!.endsWith('.overlay.png') ? 'overlay' : 'push');
       const done = await db.update(schema.screenRevisions).set({ thumbKey })
         .where(and(eq(schema.screenRevisions.id, r.id), eq(schema.screenRevisions.screenshotKey, r.screenshotKey!))).returning({ id: schema.screenRevisions.id });
       if (done.length) { touched.add(r.projectId); n++; }
@@ -86,38 +88,16 @@ async function backfillThumbs() {
   if (rows.length) console.log(`[thumbnail.retry] backfilled ${n}/${rows.length}`);
 }
 
-// 进程在造屏 / 改屏中途退出时，runGenerate / runEditScreens 在 finally 里的收尾没跑（进程被杀时 finally 不执行）：按作业自己的
-// screen_planned 事件与修订补做——候选批让 current 指向第 1 版（改屏候选只在 current 仍是它的基线时），一版都没落的新屏删掉
-// （空屏占着路由，指向它的链接也不再显示为断链），再重派生应用地图
-async function settleInterrupted(job: { id: string; projectId: string }) {
-  const planned = (await db.select({ data: schema.jobEvents.data }).from(schema.jobEvents).where(and(eq(schema.jobEvents.jobId, job.id), eq(schema.jobEvents.type, 'screen_planned'))))
-    .map((e) => (e.data as { screenId?: string }).screenId).filter((id): id is string => !!id);
-  const batches = await db.selectDistinct({ screenId: schema.screenRevisions.screenId, base: schema.screenRevisions.parentRevisionId }).from(schema.screenRevisions)
-    .where(and(eq(schema.screenRevisions.jobId, job.id), isNotNull(schema.screenRevisions.candidateIndex)));
-  const produced = await db.select({ id: schema.screenRevisions.id }).from(schema.screenRevisions).where(eq(schema.screenRevisions.jobId, job.id)).limit(1);
-  if (!planned.length && !produced.length) return;
-  await db.transaction(async (tx) => {
-    for (const b of batches) await pointCurrentToFirstCandidate(tx, b.screenId, job.id, b.base ?? undefined);
-    if (planned.length) await tx.delete(schema.screens).where(and(inArray(schema.screens.id, planned), isNull(schema.screens.currentRevisionId)));
-    await deriveLinks(tx, job.projectId);
-  });
-}
-
 // 进程重启的收口（ADR-010 v0.32）：queued 的作业补上——model 的入队、agent 的投递（deliverAgentJob 自己校验会话，不在就收成 failed）；
 // running 的 model 作业标失败——上次进程没跑完，并补做它的收尾。running 的 agent 作业不动：活在外面的会话手里，agentDelivery 启动时按 startedAt 重新计时
 async function recoverJobs() {
   const stale = await db.update(schema.generationJobs)
     .set({ status: 'failed', finishedAt: new Date(), output: sql`coalesce(${schema.generationJobs.output}, '{}'::jsonb) || '{"errorClass":"system","message":"Quilt 重启时作业未完成"}'::jsonb` })
     .where(and(eq(schema.generationJobs.status, 'running'), eq(schema.generationJobs.runner, 'model'))).returning({ id: schema.generationJobs.id, kind: schema.generationJobs.kind, projectId: schema.generationJobs.projectId });
-  for (const r of stale) {
-    await db.update(schema.messages).set({ content: failureText(r.kind as JobKind, 'system', 'Quilt 重启时作业未完成') }).where(and(eq(schema.messages.jobId, r.id), eq(schema.messages.role, 'assistant'), eq(schema.messages.content, '')));
-    await settleInterrupted(r).catch((e) => console.error(`[worker] settle ${r.id}`, e));
-    await emitJobEvent(r.id, 'failed', { errorClass: 'system', message: 'Quilt 重启时作业未完成' }).catch(() => {});
-    await settleByJob(r.id, false);
-  }
+  for (const r of stale) await finishFailed(r, 'system', 'Quilt 重启时作业未完成');
   const queued = await db.select({ id: schema.generationJobs.id, runner: schema.generationJobs.runner }).from(schema.generationJobs).where(inArray(schema.generationJobs.status, ['queued']));
   for (const j of queued) {
-    if (j.runner === 'model') jobQueue.push({ jobId: j.id });
+    if (j.runner === 'model') jobQueue.push({ jobId: j.id }, { key: j.id });
     else await deliverAgentJob(j.id).catch((e) => console.error(`[agent ${j.id}]`, e));
   }
   if (stale.length || queued.length) console.log(`[worker] recovered: ${queued.length} re-queued, ${stale.length} marked failed`);
@@ -128,6 +108,25 @@ async function recoverJobs() {
 async function sweepUploads() {
   const before = Date.now() - config.uploadUrlMinutes * 60_000;
   for (const o of await storage.list('uploads/')) if (o.modifiedAt.getTime() < before) await storage.delete(o.key);
+}
+
+// storage.gc（§17 v1.03）：删超过 24 小时的导出产物（画布导出成功即下载，get_export 的地址 5 分钟过期）；
+// 删上传超过 24 小时、没被任何消息或作业输入引用的参考图附件。删失败的下一轮再扫
+const DAY = 24 * 3600_000;
+export async function sweepStorage(now = Date.now()) {
+  const projects = await db.select({ id: schema.projects.id }).from(schema.projects);
+  let removed = 0;
+  for (const p of projects) {
+    for (const o of await storage.list(`projects/${p.id}/exports/`)) if (o.modifiedAt.getTime() < now - DAY) { await storage.delete(o.key); removed++; }
+    const stale = (await storage.list(`projects/${p.id}/attachments/`)).filter((o) => o.modifiedAt.getTime() < now - DAY);
+    if (!stale.length) continue;
+    const msgs = await db.select({ a: schema.messages.attachments }).from(schema.messages).where(eq(schema.messages.projectId, p.id));
+    const jobs = await db.select({ input: schema.generationJobs.input }).from(schema.generationJobs).where(eq(schema.generationJobs.projectId, p.id));
+    const used = new Set([...msgs.flatMap((m) => ((m.a ?? []) as { key: string }[]).map((x) => x.key)), ...jobs.flatMap((j) => ((j.input as { imageKeys?: string[] }).imageKeys ?? []))]);
+    for (const o of stale) if (!used.has(o.key)) { await storage.delete(o.key); removed++; }
+  }
+  if (removed) console.log(`[storage.gc] removed ${removed} object(s)`);
+  return removed;
 }
 
 // 作业 Worker（§17 内部任务 job.claim / job.timeout / screenshot.render / screenshot.retry）
@@ -142,8 +141,12 @@ export async function startWorker() {
       const limit = new Date(Date.now() - config.jobTimeoutMs.max - 60_000);
       const rows = await db.update(schema.generationJobs)
         .set({ status: 'failed', finishedAt: new Date(), output: sql`coalesce(${schema.generationJobs.output}, '{}'::jsonb) || '{"errorClass":"timeout","message":"swept by job.timeout"}'::jsonb` })
-        .where(and(eq(schema.generationJobs.status, 'running'), eq(schema.generationJobs.runner, 'model'), lt(schema.generationJobs.startedAt, limit))).returning({ id: schema.generationJobs.id });
-      for (const r of rows) { await emitJobEvent(r.id, 'failed', { errorClass: 'timeout', message: 'swept by job.timeout' }); await settleByJob(r.id, false); }
+        .where(and(eq(schema.generationJobs.status, 'running'), eq(schema.generationJobs.runner, 'model'), lt(schema.generationJobs.startedAt, limit))).returning({ id: schema.generationJobs.id, kind: schema.generationJobs.kind, projectId: schema.generationJobs.projectId });
+      for (const r of rows) await finishFailed(r, 'timeout', 'swept by job.timeout');
+      // 排队超过 1 分钟的 model 作业重新入队（v1.03）：建作业时入队那一步之前出过错就不会自己再来；领取是条件更新，重复入队无害
+      const waiting = await db.select({ id: schema.generationJobs.id }).from(schema.generationJobs)
+        .where(and(eq(schema.generationJobs.status, 'queued'), eq(schema.generationJobs.runner, 'model'), lt(schema.generationJobs.createdAt, new Date(Date.now() - 60_000))));
+      for (const r of waiting) jobQueue.push({ jobId: r.id }, { key: r.id });
       // 投递是建作业后立即做的：agent 作业排队超过 1 分钟，就是投递在抢占之前出了错（它不会自己重来），再投一次
       const stuck = await db.select({ id: schema.generationJobs.id }).from(schema.generationJobs)
         .where(and(eq(schema.generationJobs.status, 'queued'), eq(schema.generationJobs.runner, 'agent'), lt(schema.generationJobs.createdAt, new Date(Date.now() - 60_000))));
@@ -153,5 +156,7 @@ export async function startWorker() {
   setTimeout(() => retryScreenshots().catch(() => {}), 3_000);
   setInterval(() => retryScreenshots().catch(() => {}), 5 * 60_000).unref();
   setInterval(() => sweepUploads().catch((e) => console.error('[upload.gc]', e)), 60_000).unref();
+  setTimeout(() => sweepStorage().catch((e) => console.error('[storage.gc]', e)), 60_000).unref();
+  setInterval(() => sweepStorage().catch((e) => console.error('[storage.gc]', e)), 3600_000).unref();
   console.log(`[worker] in-process queues ready (concurrency ${config.workerConcurrency}, llm=${config.llmDriver}, screenshot=${config.screenshotChannel || 'auto'})`);
 }

@@ -97,7 +97,8 @@ export const storage: Storage = config.storageDriver === 's3' ? new S3Storage() 
 
 export const objectKeys = {
   revisionHtml: (projectId: string, screenId: string, revisionId: string) => `projects/${projectId}/screens/${screenId}/${revisionId}.html`,
-  revisionShot: (projectId: string, screenId: string, revisionId: string) => `projects/${projectId}/screens/${screenId}/${revisionId}.png`,
-  revisionThumb: (projectId: string, screenId: string, revisionId: string) => `projects/${projectId}/screens/${screenId}/${revisionId}.thumb.webp`,
+  // 叠层与整屏拍出来的图不同，键带上呈现方式（§16 v1.03）：切换后重拍的图换了地址，浏览器不会拿内存里的旧图顶替
+  revisionShot: (projectId: string, screenId: string, revisionId: string, presentation: 'push' | 'overlay' = 'push') => `projects/${projectId}/screens/${screenId}/${revisionId}${presentation === 'overlay' ? '.overlay' : ''}.png`,
+  revisionThumb: (projectId: string, screenId: string, revisionId: string, presentation: 'push' | 'overlay' = 'push') => `projects/${projectId}/screens/${screenId}/${revisionId}${presentation === 'overlay' ? '.overlay' : ''}.thumb.webp`,
   exportHtml: (projectId: string, jobId: string) => `projects/${projectId}/exports/${jobId}.html`,
 };

@@ -3,7 +3,7 @@ import { fontFamilySchema, fontUrlSchema, parseConventions, type FontSource, typ
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button, Input, Panel, Textarea } from '@/ui/ui';
-import { Overlay, useModal } from '@/ui/modal';
+import { ConfirmDialog, Overlay, useModal } from '@/ui/modal';
 import { AssetsSection, PaletteSection } from '@/panels/BrandSections';
 import { PresetsSection } from '@/panels/PresetsSection';
 import { FONTS, SYSTEM_FONTS, FONT_SOURCE_OPTIONS, RADIUS } from './designOptions';
@@ -96,6 +96,8 @@ export function DesignPanel({ ds, project, screens, assets, busy, onClose, onSav
     try { await api.projects.patch(project.id, { brief: brief.trim() }); forceRef.current = [...forceRef.current, 'brief']; toast('应用简介已保存'); onSaved(); }
     catch { toast('保存失败', 'error'); } finally { setSavingBrief(false); }
   };
+  // 删约定直接写库、撤销不了（v1.03）：先确认
+  const [pendingConvention, setPendingConvention] = useState<number | null>(null);
   const removeConvention = async (i: number) => {
     try { await api.designSystem.update(ds.projectId, { conventions: conventions.filter((_, k) => k !== i), expectedVersion: ds.version }); toast('已删除这条约定'); onSaved(); }
     catch (e) { toast(e instanceof ApiError && e.type === '/errors/version-conflict' ? '设计系统已被更新，请刷新后重试' : '删除失败', 'error'); }
@@ -173,7 +175,7 @@ export function DesignPanel({ ds, project, screens, assets, busy, onClose, onSav
               {conventions.map((c, i) => (
                 <li key={i} className="flex items-start justify-between gap-2 rounded-md border border-line px-2 py-1.5 text-xs">
                   <span className="min-w-0 flex-1 leading-cn [overflow-wrap:anywhere]">{c}</span>
-                  <button type="button" aria-label={`删除约定：${c}`} disabled={busy} onClick={() => removeConvention(i)} className="shrink-0 rounded-md px-1 text-muted hover:text-danger focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">删除</button>
+                  <button type="button" aria-label={`删除约定：${c}`} disabled={busy} onClick={() => setPendingConvention(i)} className="shrink-0 rounded-md px-1 text-muted hover:text-danger focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">删除</button>
                 </li>
               ))}
             </ul>
@@ -208,6 +210,10 @@ export function DesignPanel({ ds, project, screens, assets, busy, onClose, onSav
         </div>
       </div>
       {askApply && <ApplyAllDialog count={screens.length} returnTo={saveRef} fallback={applyRef} onConfirm={onApplyAll} onClose={() => setAskApply(false)} />}
+      {pendingConvention !== null && conventions[pendingConvention] !== undefined && (
+        <ConfirmDialog title="删除这条约定？" body={`「${conventions[pendingConvention]}」之后生成与改屏都不再带它，撤销不了。`} confirmLabel="删除"
+          onCancel={() => setPendingConvention(null)} onConfirm={async () => { const i = pendingConvention; setPendingConvention(null); await removeConvention(i); }} />
+      )}
     </Panel>
   );
 }

@@ -10,8 +10,10 @@ const SOURCE_LABEL: Record<string, string> = { generate: '生成', edit: '对话
 export function RevisionPanel({ screen, onClose, onRestored }: { screen: ScreenDto; onClose: () => void; onRestored: () => void }) {
   const toast = useToast();
   const [items, setItems] = useState<RevisionDto[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const load = () => api.screens.revisions(screen.id).then((r) => setItems(r.items)).catch(() => toast('修订列表加载失败', 'error'));
+  // 取数失败就地给重试（v1.03）；重取失败时已列出的修订留在原地
+  const load = () => { setLoadError(false); api.screens.revisions(screen.id).then((r) => setItems(r.items)).catch(() => setLoadError(true)); };
   useEffect(() => { setItems(null); load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [screen.id, screen.currentRevisionId]);
 
   const fail = (e: unknown, fallback: string) => {
@@ -50,7 +52,7 @@ export function RevisionPanel({ screen, onClose, onRestored }: { screen: ScreenD
     const status = current ? (inGroup && settled ? '已采用' : '当前') : inGroup && !settled ? '未选用' : '';
     return (
       <li key={r.id} className={`flex gap-2 rounded-md border p-2 ${current ? 'border-accent bg-accent/10' : 'border-line'}`} data-testid="revision" data-seq={r.seq} data-candidate={inGroup ? r.candidateIndex ?? undefined : undefined}>
-        {r.screenshotUrl ? <img src={r.screenshotUrl} alt={label} width={44} height={Math.round((44 * screen.height) / screen.width)} loading="lazy" className="w-11 shrink-0 rounded-sm bg-white object-cover object-top" /> : <div className="w-11 shrink-0 rounded-sm bg-panel-2" aria-hidden />}
+        {r.thumbUrl ?? r.screenshotUrl ? <img src={(r.thumbUrl ?? r.screenshotUrl)!} alt={label} width={44} height={Math.round((44 * screen.height) / screen.width)} loading="lazy" className="w-11 shrink-0 rounded-sm bg-white object-cover object-top" /> : <div className="w-11 shrink-0 rounded-sm bg-panel-2" aria-hidden />}
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2 text-xs">
             <span className="font-medium">{label}{status ? `（${status}）` : ''}</span>
@@ -66,7 +68,8 @@ export function RevisionPanel({ screen, onClose, onRestored }: { screen: ScreenD
 
   return (
     <Panel title={`修订 · ${screen.name}`} className="h-full" actions={<Button size="sm" onClick={onClose}>关闭</Button>}>
-      {items === null ? <Spinner /> : items.length === 0 ? <EmptyState title="还没有修订" hint="生成完成后会出现在这里" /> : (
+      {loadError && <p role="alert" className="m-2 flex items-center justify-between gap-2 rounded-md border border-danger/60 bg-danger/10 px-3 py-2 text-xs text-danger"><span>修订列表没取到</span><Button size="sm" onClick={load}>重试</Button></p>}
+      {items === null ? (!loadError && <Spinner />) : items.length === 0 ? <EmptyState title="还没有修订" hint="生成完成后会出现在这里" /> : (
         <ul className="scroll flex flex-1 flex-col gap-2 p-2">
           {groups.map((g) => g.jobId ? (
             <li key={g.key} className="rounded-lg border border-dashed border-line p-1.5" data-testid="candidate-group" data-job={g.jobId}>

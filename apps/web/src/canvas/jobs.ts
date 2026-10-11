@@ -22,7 +22,7 @@ export function coveredScreens(job: JobDto, allIds: string[], components: Compon
   }
 }
 // 在跑作业行的文案（REQ-CORE-020）：沿用输入框动词行的口径说「这个作业在做什么」
-export function jobLabel(job: JobDto, screens: ScreenDto[], components: ComponentDto[]): string {
+export function jobLabel(job: JobDto, screens: Pick<ScreenDto, 'id' | 'name'>[], components: Pick<ComponentDto, 'id' | 'name'>[]): string {
   const i = job.input as JobInput;
   const name = (id: string | undefined) => screens.find((s) => s.id === id)?.name ?? '已删除的屏';
   const ver = (i.versions ?? 1) > 1 ? ` × ${i.versions} 版` : '';

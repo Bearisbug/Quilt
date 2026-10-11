@@ -114,17 +114,18 @@ export const createJobSchema = z.discriminatedUnion('kind', [
 export type CreateJobInput = z.infer<typeof createJobSchema>;
 
 // 用量预估（REQ-CORE-008）：发送前、建作业、「按新约定重生成」确认三处共用这一个函数。
-// 修复轮按每屏最多 1 次算；apply_design_system / export 是确定性的，不占调用。
+// 每屏每版一次模型调用（v0.43 起没有修复轮）；造屏另有规划 1 次、入口屏补链至多 1 次——钉死路由的懒生成不规划、
+// 有来源屏时仍补链，造变体两样都没有。apply_design_system / export 是确定性的，不占调用。
 export function estimateJob(input: CreateJobInput, allScreens: number): { calls: number; screens: number } {
   switch (input.kind) {
     case 'generate': {
       const pinned = !!input.input.route || !!input.input.variantOf;
       const n = pinned ? 1 : input.input.count === 'auto' ? 5 : input.input.count;
       const screens = n * input.input.versions;
-      return { calls: screens * 2 + (pinned ? 0 : 1), screens };
+      return { calls: screens + (input.input.variantOf ? 0 : input.input.route ? 1 : 2), screens };
     }
-    case 'edit_screens': { const screens = input.input.screenIds.length * input.input.versions; return { calls: screens * 2, screens }; }
-    case 'regenerate_subtree': return { calls: 2, screens: 1 };
+    case 'edit_screens': { const screens = input.input.screenIds.length * input.input.versions; return { calls: screens, screens }; }
+    case 'regenerate_subtree': return { calls: 1, screens: 1 };
     case 'propose_design_system': return { calls: 1, screens: 0 };
     // 聊天一轮是 3–8 次工具调用外加模型往返，按上限估：超时 3 + 8 分钟
     case 'chat': return { calls: 8, screens: 0 };
@@ -413,9 +414,9 @@ export type JobEventDto = { seq: number; type: JobEventType; data: unknown; at: 
 export type MessageDto = { id: string; projectId: string; role: 'user' | 'assistant'; content: string; attachments: AttachmentDto[]; jobId: string | null; jobKind: JobKind | null; affectedScreenIds: string[]; createdAt: string };
 export type ProjectDto = { id: string; name: string; deviceType: (typeof DEVICE_TYPES)[number]; status: 'active' | 'archived'; brief: string; exemplarScreenId: string | null; createdAt: string; updatedAt: string };
 export type ProjectDetailDto = { project: ProjectDto; designSystem: DesignSystemDto; screens: ScreenDto[]; links: LinkDto[]; activeJobs: JobDto[]; annotations: AnnotationDto[]; assets: AssetDto[]; components: ComponentDto[] };
-export type RevisionDto = { id: string; screenId: string; seq: number; sourceKind: SourceKind; jobId: string | null; parentRevisionId: string | null; candidateIndex: number | null; candidateSettledAt: string | null; htmlUrl: string; screenshotUrl: string | null; lintReport: unknown; createdAt: string };
+export type RevisionDto = { id: string; screenId: string; seq: number; sourceKind: SourceKind; jobId: string | null; parentRevisionId: string | null; candidateIndex: number | null; candidateSettledAt: string | null; htmlUrl: string; screenshotUrl: string | null; thumbUrl: string | null; lintReport: unknown; createdAt: string };
 /** 候选覆盖层的数据（API-CORE-026）：列 = 版本、行 = 屏 */
-export type CandidatesDto = { jobId: string; versions: number; screens: { screenId: string; name: string; route: string; width: number; height: number; currentRevisionId: string | null; settled: boolean; revisions: { id: string; index: number; seq: number; screenshotUrl: string | null; htmlUrl: string; previewUrl: string }[] }[] };
+export type CandidatesDto = { jobId: string; versions: number; screens: { screenId: string; name: string; route: string; width: number; height: number; currentRevisionId: string | null; settled: boolean; revisions: { id: string; index: number; seq: number; screenshotUrl: string | null; thumbUrl: string | null; htmlUrl: string; previewUrl: string }[] }[] };
 /** 用量台账（REQ-CORE-008，v0.32 无上限只作展示） */
 export type UsageDto = { month: string; screens: number; tokensIn: number; tokensOut: number; byDriver: { driver: string; model: string; screens: number; tokensIn: number; tokensOut: number }[]; inflight: { calls: number; screens: number } };
 export type ProblemDto = { type: string; title: string; status: number; detail?: string; requestId: string; [k: string]: unknown };

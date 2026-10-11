@@ -122,6 +122,8 @@ export async function deliverAgentJob(jobId: string): Promise<void> {
   const [claimed] = await db.update(schema.generationJobs).set({ status: 'running', startedAt: new Date() })
     .where(and(eq(schema.generationJobs.id, jobId), eq(schema.generationJobs.status, 'queued'))).returning();
   if (!claimed) return;
+  // 领取即开始计时（§16 v1.03）：投递途中写库或发事件出错时也有人收口，不停在 running
+  arm(claimed);
   const sessionId = (claimed.input as { runner?: { sessionId?: string } }).runner?.sessionId ?? '';
   const tool = toolOf(claimed);
   const claude = tool === 'claude-code' ? await findSession(sessionId) : null;

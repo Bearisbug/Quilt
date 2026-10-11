@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm, readdir, readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync, chmodSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -50,6 +50,9 @@ try {
   expect(existsSync(path.join(home, 'config.env')) && existsSync(path.join(home, 'db')), 'QUILT_HOME 未初始化');
   const cfgText = await readFile(path.join(home, 'config.env'), 'utf8');
   expect(/QUILT_SECRETS_KEY=\S{20,}/.test(cfgText) && /PREVIEW_SIGNING_SECRET=\S{20,}/.test(cfgText), 'config.env 缺随机密钥');
+  // 主密钥只给本人读（§15 本机密钥文件，v1.03）
+  const modeOf = (f: string) => (statSync(f).mode & 0o777).toString(8);
+  expect(modeOf(home) === '700' && modeOf(path.join(home, 'config.env')) === '600', `目录 / config.env 权限应为 700 / 600：${modeOf(home)} / ${modeOf(path.join(home, 'config.env'))}`);
   const index = await fetch(`${API}/`).then((r) => r.text());
   expect(index.includes('<div id="root">') && /\/assets\/.*\.js/.test(index), '主页不是打包的前端');
   const asset = index.match(/src="(\/assets\/[^"]+\.js)"/)?.[1];
@@ -71,9 +74,11 @@ try {
   expect(rebound === 403, `伪造 Host 读项目应 403：${rebound}`);
   const pid = ((await created.json()) as { project: { id: string } }).project.id;
   expect((await readdir(path.join(home, 'db'))).length > 0, 'PGlite 目录为空');
-  // 3 停掉再起：秒开、数据还在
+  // 3 停掉再起：秒开、数据还在；老版本建的宽松权限在启动时补成 700 / 600
   await stop();
+  chmodSync(home, 0o755); chmodSync(path.join(home, 'config.env'), 0o644);
   const warm = await start('二次启动');
+  expect(modeOf(home) === '700' && modeOf(path.join(home, 'config.env')) === '600', `二次启动后权限没补回 700 / 600：${modeOf(home)} / ${modeOf(path.join(home, 'config.env'))}`);
   const list = await fetch(`${API}/v1/projects`).then((r) => r.json()) as { items: { id: string }[] };
   expect(list.items.some((p) => p.id === pid), '二次启动后项目丢了');
   expect(!/首次运行/.test(out), '二次启动仍走了首次初始化');

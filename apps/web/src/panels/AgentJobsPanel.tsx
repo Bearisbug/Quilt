@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button, EmptyState, IconButton, Panel, Spinner } from '@/ui/ui';
 import { VendorIcon } from '@/ui/VendorIcon';
+import { jobLabel } from '@/canvas/jobs';
 
 // 本机 agent 面板（§13 v0.34 / REQ-AGENT-003）：runner=agent 的作业列表——投递到哪个会话、指令、目标屏、状态、
 // 会话收口时的摘要或失败原因；运行中的可取消（只标作业，会话那边的活由用户自己在终端叫停）。派活入口只有输入框的通道下拉与会话下拉。
@@ -50,9 +51,6 @@ export function AgentJobsPanel({ projectId, screens, components, runners, onClos
   }, [activeKey, onChanged]);
 
   const cancel = async (id: string) => { try { await api.jobs.cancel(id); toast('已取消；会话那边如果还在做，去终端里叫停它'); } catch { toast('取消失败', 'error'); } };
-  const nameOf = (id: string) => screens.find((s) => s.id === id)?.name ?? '（已删除的屏）';
-  // 改组件的作业（v0.99）：目标是组件，不是屏
-  const componentOf = (id: string) => components.find((c) => c.id === id)?.name ?? '（已删除的组件）';
   const agents = runners.filter((r) => r.runner.kind === 'agent');
 
   return (
@@ -79,7 +77,6 @@ export function AgentJobsPanel({ projectId, screens, components, runners, onClos
             {items.map((j) => {
               const input = j.input as Input; const output = j.output as Output;
               const st = STATUS[j.status];
-              const targets = input.screenIds ?? [];
               const session = output?.delivery?.name ?? input.runner?.sessionId ?? '—';
               const codex = input.runner?.tool === 'codex';
               return (
@@ -89,11 +86,11 @@ export function AgentJobsPanel({ projectId, screens, components, runners, onClos
                     <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[11px] ${st.cls}`}>{st.label}</span>
                   </div>
                   <p className="mt-1.5 line-clamp-3 text-xs">{input.prompt}</p>
-                  <p className="mt-1 text-[11px] text-muted">{input.componentId ? `改组件「${componentOf(input.componentId)}」` : targets.length ? `改 ${targets.map(nameOf).join('、')}` : '造新屏'} · 投递到「<span className={`break-all ${output?.delivery?.name && output.delivery.name !== output.delivery.sessionId ? '' : 'font-mono'}`} data-testid="agent-session">{session}</span>」</p>
+                  <p className="mt-1 text-[11px] text-muted">{jobLabel(j, screens, components)} · 投递到「<span className={`break-all ${output?.delivery?.name && output.delivery.name !== output.delivery.sessionId ? '' : 'font-mono'}`} data-testid="agent-session">{session}</span>」</p>
                   {/* 排进了队列但没能让桌面版打开线程（REQ-AGENT-003 v0.79）：消息不会自己执行，要用户去 Codex 里打开它 */}
                   {j.status === 'running' && (output?.delivery?.openError
                     ? <p className="mt-1.5 text-[11px] text-warn" data-testid="agent-line" title={output.delivery.openError}>已排进线程的队列，但没能让 Codex 桌面版打开它：在 Codex 里打开这个线程后它就会执行，做完收口</p>
-                    : <p className="mt-1.5 text-[11px] text-muted" data-testid="agent-line">{output?.delivery ? (output.delivery.opened ? '已投递，已让 Codex 桌面版打开这个线程，等它收口（quilt.finish_job）' : '已投递，等会话收口（quilt.finish_job）') : '正在投递…'}</p>)}
+                    : <p className="mt-1.5 text-[11px] text-muted" data-testid="agent-line" title={output?.delivery ? '会话做完后经 quilt.finish_job 收口' : undefined}>{output?.delivery ? (output.delivery.opened ? '已投递，已让 Codex 桌面版打开这个线程，等它做完回写' : '已投递，等会话做完回写') : '正在投递…'}</p>)}
                   {j.status === 'failed' && output?.message && <p className="mt-1.5 break-words text-[11px] text-danger">{output.message}</p>}
                   {j.status === 'succeeded' && <p className="mt-1.5 break-words text-[11px] text-muted">{input.componentId ? (output?.component ? `改了组件，同步 ${output.screenIds?.length ?? 0} 屏` : '没有改组件') : output?.screenIds?.length ? `回写了 ${output.screenIds.length} 屏` : '没有回写屏幕'}{output?.summary ? ` · ${output.summary}` : ''}</p>}
                   {(j.status === 'queued' || j.status === 'running') && (

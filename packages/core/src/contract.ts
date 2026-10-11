@@ -329,11 +329,6 @@ export function subtreeUserPrompt(screenName: string, route: string, fragment: s
   return `Within the screen "${screenName}" at route ${route}, regenerate ONLY the following element according to this instruction:\n${instruction}\n${prior}\nReturn the complete replacement HTML for this single element (one root element, same role in the layout), nothing else. Keep the design system, recipes and any links intact unless the instruction says otherwise.\n\nCURRENT ELEMENT:\n${fragment}`;
 }
 
-export function repairUserPrompt(original: string, violations: { rule: string; message: string; sample?: string }[]): string {
-  const list = violations.map((v) => `- [${v.rule}] ${v.message}${v.sample ? ` — e.g. ${v.sample}` : ''}`).join('\n');
-  return `Your previous HTML violated the output rules:\n${list}\n\nFix every violation and return the corrected root element HTML only. Keep everything else identical.\n\nPREVIOUS HTML:\n${original}`;
-}
-
 // ---- 约定节（REQ-EDIT-003 / REQ-CORE-016）：DESIGN.md 里唯一由系统维护的一节 ----
 export const CONVENTIONS_HEADING = '## 约定';
 /** 从 DESIGN.md 取出约定条目（每条一行、`- ` 开头） */

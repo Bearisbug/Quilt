@@ -1,4 +1,4 @@
-import { mkdir, writeFile, stat } from 'node:fs/promises';
+import { mkdir, writeFile, stat, readdir, utimes } from 'node:fs/promises';
 import http from 'node:http';
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -1308,7 +1308,7 @@ await step('TC-CORE-029', async () => {
     await pickOption(page, '[data-testid="runner-select"]', 'Stub 新屏');
     await page.getByTestId('versions-3').click();
     expect((await page.getByTestId('versions-3').getAttribute('aria-checked')) === 'true', '版数 3 未选中');
-    expect((await verbLine(page)).includes('造 1 屏 × 3 版 · 此处 = 7 次调用'), `动词行应写全屏数 × 版数与调用数：${await verbLine(page)}`);
+    expect((await verbLine(page)).includes('造 1 屏 × 3 版 · 此处 = 5 次调用'), `动词行应写全屏数 × 版数与调用数：${await verbLine(page)}`);
     await page.fill('#chat-input', '订单详情页：状态时间线、商品清单、费用明细');
     const hits0 = stub.hits.length;
     const req = page.waitForRequest((r) => r.url().includes('/messages') && r.method() === 'POST');
@@ -1434,12 +1434,12 @@ await step('TC-CORE-030', async () => {
     await page.locator('[data-testid="screen-card"]').first().waitFor();
     await page.getByTestId('runner-select').waitFor({ timeout: 10000 });
     await pickOption(page, '[data-testid="runner-select"]', 'Stub 版数');
-    // 1 ⌘A + 版数 2：动词行「改全部 3 屏 × 2 版 = 12 次调用」；屏数控件在改时不出现
+    // 1 ⌘A + 版数 2：动词行「改全部 3 屏 × 2 版 = 6 次调用」；屏数控件在改时不出现
     await page.locator('[data-testid="screen-card"]').first().locator('.gesture').click();
     await page.keyboard.press('ControlOrMeta+a');
     await page.waitForTimeout(200);
     await page.getByTestId('versions-2').click();
-    expect((await verbLine(page)).includes('改全部 3 屏 × 2 版 = 12 次调用'), `动词行：${await verbLine(page)}`);
+    expect((await verbLine(page)).includes('改全部 3 屏 × 2 版 = 6 次调用'), `动词行：${await verbLine(page)}`);
     expect((await page.getByTestId('count-group').count()) === 0, '改的时候不该出现屏数控件');
     const req = page.waitForRequest((r) => r.url().includes('/messages') && r.method() === 'POST');
     await page.fill('#chat-input', '顶部导航改成标签栏');
@@ -1493,7 +1493,7 @@ await step('TC-CORE-030', async () => {
     await stub.close();
     if (cid) await apiJson(`/v1/channels/${cid}`, { method: 'DELETE' }).catch(() => {});
   }
-  return '⌘A × 2 版动词行写全 12 次调用；每屏 2 条候选同一作业；就地展开 2 格且排列条让位；全部被跳过时说明跳过、不收起；整组采用第 2 版并结清';
+  return '⌘A × 2 版动词行写全 6 次调用；每屏 2 条候选同一作业；就地展开 2 格且排列条让位；全部被跳过时说明跳过、不收起；整组采用第 2 版并结清';
 });
 
 await step('TC-CORE-009', async () => {
@@ -2458,19 +2458,18 @@ await step('TC-CORE-041', async () => {
   type Shot = { id: string; presentation: string; screenshotUrl: string | null };
   const shots = async () => (await apiJson<{ screens: Shot[] }>(`/v1/projects/${projectId}`)).body.screens;
   expect((await apiJson(`/v1/screens/${v!.id}`, { method: 'PATCH', body: JSON.stringify({ presentation: 'overlay' }) })).status === 422, '变体改呈现方式应 422');
-  // 截图重拍看对象存储里当前修订那张 PNG 的写入时间（仓库内开发用 fs 存储）；按内容比较不行——根元素自带底色的屏按透明底拍出来像素一样
-  const shotAt = async (id: string) => {
-    const s = (await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${projectId}`)).body.screens.find((x) => x.id === id)!;
-    return stat(path.join(ROOT, '.data/objects/projects', projectId, 'screens', id, `${s.currentRevisionId}.png`)).then((f) => f.mtimeMs, () => 0);
-  };
-  const t0 = Date.now();
+  // 截图重拍看卡片拿到的截图地址（v1.03）：对象键带呈现方式，按叠层拍的是 <修订>.overlay.png——地址变了，浏览器才不会拿内存里的旧图顶替
+  const shotKeyOf = async (id: string) => decodeURIComponent((await shots()).find((x) => x.id === id)?.screenshotUrl ?? '');
   expect((await apiJson(`/v1/screens/${s1.id}`, { method: 'PATCH', body: JSON.stringify({ presentation: 'overlay' }) })).status === 200, '默认屏改呈现方式应 200');
   const fam = (await shots()).filter((s) => s.id === s1.id || s.id === v!.id);
   expect(fam.every((s) => s.presentation === 'overlay'), `默认屏改呈现方式后变体应跟着改：${fam.map((s) => s.presentation).join('/')}`);
   await eventually(async () => {
-    for (const id of [s1.id, v!.id]) expect((await shotAt(id)) > t0, '家族两屏当前修订的截图都应重拍');
-  }, 20000, 1000);
+    for (const id of [s1.id, v!.id]) expect((await shotKeyOf(id)).includes('.overlay.png'), `家族两屏都应按叠层重拍、截图地址换成 .overlay.png：${await shotKeyOf(id)}`);
+  }, 30000, 1000);
   await apiJson(`/v1/screens/${s1.id}`, { method: 'PATCH', body: JSON.stringify({ presentation: 'push' }) });
+  await eventually(async () => {
+    for (const id of [s1.id, v!.id]) { const k = await shotKeyOf(id); expect(/[0-9a-f-]{36}\.png/.test(k) && !k.includes('.overlay'), `切回整屏后截图地址应换回 <修订>.png：${k}`); }
+  }, 30000, 1000);
   // 6 导出只带默认屏
   const { body: job } = await apiJson<{ job: { id: string } }>(`/v1/projects/${projectId}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': `e2e-var-${Date.now()}` }, body: JSON.stringify({ kind: 'export_prototype', input: {} }) });
   await waitJob(job.job.id, 90);
@@ -3876,8 +3875,14 @@ await step('TC-CORE-065', async () => {
   const htmlAt = Math.round((Date.now() - t0) / 100) / 10;
   proj.close(); js.close(); warmStream.close();
   await waitJob(held, 60);
+  // 4 掐掉被测库的全部连接（连接池里的空闲连接也在内，§16 v1.03）：API 进程不退，10 s 内 health 照常、能写库
+  const all = Number(psql(`select count(*) from (select pg_terminate_backend(pid) from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid()) t`));
+  await eventually(async () => expect((await fetch(`${API}/v1/health`).then((r) => r.status, () => 0)) === 200, 'health'), 10_000)
+    .catch(() => check(false, `掐掉全部 ${all} 条连接后 10 s 内 health 不通（进程多半退了）`));
+  const renamed = await apiJson(`/v1/projects/${pid}`, { method: 'PATCH', body: JSON.stringify({ name: 'Listen 2' }) }).then((r) => r.status, () => 0);
+  check(renamed === 200, `掐掉全部连接后写库失败：${renamed}`);
   if (bad.length) { console.log(`   TC-CORE-065 全部失败项：\n   - ${bad.join('\n   - ')}`); throw new Error(bad.join('；')); }
-  return `掐掉 ${killed} 条 LISTEN 连接后项目流收到 reconnected、连接重建；MCP 建屏 5 s 内推到；开作业流后 ${htmlAt} s 收到 screen_html_ready（桩拖 3 s）`;
+  return `掐掉 ${killed} 条 LISTEN 连接后项目流收到 reconnected、连接重建；MCP 建屏 5 s 内推到；开作业流后 ${htmlAt} s 收到 screen_html_ready（桩拖 3 s）；掐掉全部 ${all} 条连接后进程照常`;
 });
 
 // v0.79 截图：lucide 不认识的图标名不挡截图；作业里行内拍失败的截图入队重试、数秒内补上并推 screen_changed{screenshot:true}
@@ -4198,6 +4203,129 @@ await step('TC-CORE-074', async () => {
   expect(msg?.content.startsWith('改屏失败：目标屏还没有生成出内容'), `回执应写「改屏失败：目标屏还没有生成出内容」：${msg?.content}`);
   await waitJob(g.body.job.id, 60);
   return `作业 failed(validation)「${j.output.message}」；回执「${msg!.content}」`;
+});
+
+// TC-CORE-087 修订面板与候选展开用缩略图；修订面板、预设列表、候选展开取数失败就地重试（v1.03 PERF-1 / UX-4）
+await step('TC-CORE-087', async () => {
+  const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'PanelThumbs', '--device', 'mobile', '--screens', '1');
+  const sid = screens[0].id;
+  const bad: string[] = [];
+  const check = (cond: unknown, msg: string) => { if (!cond) bad.push(msg); };
+  const banner = (text: string) => page.getByRole('alert').filter({ hasText: text });
+  try {
+    // 1 修订 API 带 thumbUrl
+    const items = (await apiJson<{ items: { thumbUrl: string | null }[] }>(`/v1/screens/${sid}/revisions`)).body.items;
+    check(items[0]?.thumbUrl?.includes('.thumb.webp'), `修订缺 thumbUrl：${JSON.stringify(items[0])}`);
+    // 2 修订列表取失败：就地「没取到 · 重试」；重试后列出，缩略图取 .thumb.webp
+    let fail = true;
+    await page.route(`**/v1/screens/${sid}/revisions`, (r) => (fail && r.request().method() === 'GET' ? r.abort() : r.fallback()));
+    await page.goto(`${WEB}/p/${pid}`);
+    await page.locator('[data-testid="screen-card"] .gesture').first().click();
+    await page.keyboard.press('Alt+r');
+    await banner('修订列表没取到').waitFor({ timeout: 8000 }).catch(() => check(false, '修订列表取失败时没有就地提示'));
+    fail = false;
+    await banner('修订列表没取到').getByRole('button', { name: '重试' }).click().catch(() => {});
+    await page.locator('[data-testid="revision"]').first().waitFor({ timeout: 8000 }).catch(() => check(false, '重试后修订列表没出来'));
+    const src = await page.locator('[data-testid="revision"] img').first().getAttribute('src').catch(() => null);
+    check(src && decodeURIComponent(src).includes('.thumb.webp'), `修订面板缩略图应取 .thumb.webp：${src}`);
+    await page.unroute(`**/v1/screens/${sid}/revisions`);
+    // 3 预设列表取失败：不说成「还没有预设」，就地重试
+    fail = true;
+    await page.route('**/v1/design-presets', (r) => (fail && r.request().method() === 'GET' ? r.abort() : r.fallback()));
+    await page.goto(`${WEB}/p/${pid}?panel=design`);
+    await banner('预设列表没取到').waitFor({ timeout: 8000 }).catch(() => check(false, '预设列表取失败时没有就地提示'));
+    check(!(await page.getByText('还没有预设').count()), '预设列表取失败时说成了「还没有预设」');
+    fail = false;
+    await banner('预设列表没取到').getByRole('button', { name: '重试' }).click().catch(() => {});
+    await eventually(async () => expect((await page.getByTestId('preset-list').count()) + (await page.getByText('还没有预设').count()) > 0, 'presets'), 8000).catch(() => check(false, '重试后预设列表没出来'));
+    await page.unroute('**/v1/design-presets');
+    // 4 候选：钉死路由造 1 屏 × 2 版（不走规划，内置桩只会出多屏规划）；候选取失败时格子上写「候选没取到」并给重试；重试后两格，垫底图是缩略图
+    const g = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ kind: 'generate', input: { prompt: '一个设置页', route: '/settings', name: 'Settings', count: 1, versions: 2, runner: { kind: 'model', driver: 'stub', model: 'stub' } } }) });
+    expect(g.status === 202, `造候选 ${g.status}`);
+    await waitJob(g.body.job.id, 90);
+    fail = true;
+    await page.route('**/v1/jobs/*/candidates', (r) => (fail ? r.abort() : r.fallback()));
+    await page.goto(`${WEB}/p/${pid}`);
+    await page.locator('[data-testid="candidate-badge"]').first().click();
+    await page.getByText('候选没取到').waitFor({ timeout: 8000 }).catch(() => check(false, '候选取失败时没有就地提示'));
+    fail = false;
+    await page.getByTestId('candidate-retry').click().catch(() => {});
+    await eventually(async () => expect((await page.locator('[data-testid="candidate-cell"]').count()) === 2, 'cells'), 10000).catch(() => check(false, '重试后候选格没出来'));
+    const under = await page.locator('[data-testid="candidate-cell"] img').first().getAttribute('src').catch(() => null);
+    check(under && decodeURIComponent(under).includes('.thumb.webp'), `候选格垫底图应取缩略图：${under}`);
+    await page.unroute('**/v1/jobs/*/candidates');
+  } finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
+  if (bad.length) throw new Error(bad.join('；'));
+  return '修订带 thumbUrl、面板与候选格用缩略图；修订面板、预设列表、候选展开取失败就地「没取到 · 重试」，重试后照常';
+});
+
+// TC-CORE-088 取消与落库同时到达，事件流只有一个终态（§16 v1.03 REL-4）：桩的 [stub-finalize-hold] 让 worker 复核取消之后、落库之前停 30 s，取消落在这段里。
+// 停顿从截图拍完（或拍失败）之后开始：截图走外网 CDN，拍成要几秒、拍失败要二十来秒——等到 screen_screenshot_ready 或修订落库后 25 s，再取消
+await step('TC-CORE-088', async () => {
+  const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'CancelRace', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const mcp = await connectMcp();
+  const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+  try {
+    const events = async (jobId: string) => ((await callTool(mcp, 'quilt.get_job_events', { jobId })).json as { items: { type: string }[] }).items.map((e) => e.type);
+    const r = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ kind: 'edit_screens', input: { prompt: '[stub-finalize-hold:30000] 改标题', screenIds: [screens[0].id], versions: 1, runner: { kind: 'model', driver: 'stub', model: 'stub' } } }) });
+    expect(r.status === 202, `改屏 ${r.status}`);
+    const jobId = r.body.job.id;
+    await eventually(async () => expect((await events(jobId)).includes('screen_html_ready'), 'html'), 30_000, 200);
+    await eventually(async () => expect((await events(jobId)).includes('screen_screenshot_ready'), 'shot'), 25_000, 500).catch(() => {});
+    await sleep(1000);
+    const c = await apiJson(`/v1/jobs/${jobId}/cancel`, { method: 'POST' });
+    expect(c.status === 200, `取消 ${c.status}（落在停顿之外，前置不成立）`);
+    // 等停顿结束、worker 走完落库那一步
+    await sleep(32_000);
+    const terminal = (await events(jobId)).filter((t) => ['succeeded', 'failed', 'cancelled'].includes(t));
+    expect(terminal.length === 1 && terminal[0] === 'cancelled', `事件流应只有一个终态 cancelled：${terminal.join(', ')}`);
+    const job = (await apiJson<{ job: { status: string } }>(`/v1/jobs/${jobId}`)).body.job;
+    const msg = (await apiJson<{ items: { role: string; jobId: string | null; content: string }[] }>(`/v1/projects/${pid}/messages`)).body.items.find((m) => m.role === 'assistant' && m.jobId === jobId);
+    expect(job.status === 'cancelled' && msg?.content === '已取消', `作业应 cancelled、回执「已取消」：${job.status} ${msg?.content}`);
+    return `终态只有 cancelled；回执「${msg!.content}」`;
+  } finally { await mcp.close(); await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
+});
+
+// TC-CORE-089 排队卡住的 model 作业被 job.timeout 重新入队（§17 v1.03 REL-3）：seed:job 建一个只落库、没进进程内队列的 queued 作业，
+// job.timeout 每分钟扫、排队超过 60 s 的才补——最长约 2 分钟后它被领取跑完
+await step('TC-CORE-089', async () => {
+  const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Requeue', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const { jobId } = seedJson<{ jobId: string }>('seed:job', '--project', pid, '--screen', screens[0].id, '--status', 'queued', '--kind', 'edit_screens');
+  const t0 = Date.now();
+  const j = await waitJob(jobId, 180) as { status: string };
+  const took = Math.round((Date.now() - t0) / 1000);
+  await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});
+  expect(j.status === 'succeeded', `卡在 queued 的作业应被重新入队并跑完：${j.status}（${took} s）`);
+  return `${took} s 后被重新入队、succeeded`;
+});
+
+// TC-CORE-090 storage.gc 清超过 24 小时的导出与没被引用的参考图附件（§17 v1.03 REL-6）：把文件修改时间拨回 25 小时前，
+// 重启 API（启动 1 分钟后先扫一轮）。要 QUILT_E2E_RESTART
+await step('TC-CORE-090', async () => {
+  const RESTART = process.env.QUILT_E2E_RESTART;
+  expect(RESTART, '环境：未设 QUILT_E2E_RESTART（重启被测 API 的命令，§3）');
+  const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'StorageGc', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const objects = path.join(ROOT, '.data/objects/projects', pid);
+  try {
+    const ex = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ kind: 'export_prototype', input: {} }) });
+    expect((await waitJob(ex.body.job.id, 90) as { status: string }).status === 'succeeded', '导出没成功');
+    const used = await uploadPng(pid); const orphan = await uploadPng(pid);
+    const m = await apiJson(`/v1/projects/${pid}/messages`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ content: '参考这张', targetScreenIds: [screens[0].id], attachmentIds: [used], runner: { kind: 'model', driver: 'stub', model: 'stub' } }) });
+    expect(m.status === 202, `带参考图发消息 ${m.status}`);
+    const exportFile = path.join(objects, 'exports', `${ex.body.job.id}.html`);
+    const att = async (id: string) => (await readdir(path.join(objects, 'attachments'))).find((f) => f.startsWith(id));
+    const old = new Date(Date.now() - 25 * 3600_000);
+    for (const f of [exportFile, path.join(objects, 'attachments', (await att(used))!), path.join(objects, 'attachments', (await att(orphan))!)]) await utimes(f, old, old);
+    execFileSync('sh', ['-c', RESTART!], { stdio: 'ignore' });
+    await eventually(async () => expect(!(await stat(exportFile).then(() => true, () => false)), 'export'), 120_000, 2000)
+      .catch(() => { throw new Error('重启 2 分钟内 storage.gc 没清掉超过 24 小时的导出'); });
+    const dl = await fetch(`${API}/v1/jobs/${ex.body.job.id}/export`);
+    const body = await dl.json().catch(() => ({})) as { detail?: string };
+    expect(dl.status === 404 && body.detail?.includes('导出文件已清理'), `清掉的导出应 404 并写明原因：${dl.status} ${JSON.stringify(body)}`);
+    expect(!(await att(orphan)), '没被引用的旧附件应被清掉');
+    expect(!!(await att(used)), '被消息引用的附件不该被清掉');
+    return '重启后一轮扫掉过期导出（下载 404 写明原因）与孤儿附件，被引用的附件留着';
+  } finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
 });
 
 await browser.close();

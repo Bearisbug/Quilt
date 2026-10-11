@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, Layers, X } from 'lucide-react';
+import { Check, Layers, RotateCw, X } from 'lucide-react';
 import type { CandidatesDto, ScreenDto } from '@quilt/core';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
@@ -15,8 +15,11 @@ const GAP = 24;
 export function CandidateStack({ jobId, screen, onClose, onAdopted }: { jobId: string; screen: ScreenDto; onClose: () => void; onAdopted: () => Promise<void> | void }) {
   const toast = useToast();
   const [data, setData] = useState<CandidatesDto | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  useEffect(() => { api.jobs.candidates(jobId).then(setData).catch(() => toast('候选加载失败', 'error')); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [jobId]);
+  // 取数失败就地给重试（v1.03），不停在「加载候选…」
+  const load = () => { setLoadError(false); api.jobs.candidates(jobId).then(setData).catch(() => setLoadError(true)); };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [jobId]);
 
   const run = async (key: string, fn: () => Promise<unknown>, ok: string) => {
     setBusy(key);
@@ -53,7 +56,7 @@ export function CandidateStack({ jobId, screen, onClose, onAdopted }: { jobId: s
     <div data-testid="candidate-stack" data-screen={screen.id} role="group" aria-label={`「${screen.name}」的候选`} style={{ position: 'absolute', left: 0, top: 0, width: versions * w + (versions - 1) * GAP, height: h }}>
       {!data || !row ? (
         <div className="cand-cell" style={cellStyle(0)}>
-          <div className="cand-actions"><span className="cand-tag">{data ? '这个作业没有这一屏的候选' : '加载候选…'}</span><span className="cand-btns">{collapse}</span></div>
+          <div className="cand-actions"><span className="cand-tag" role={loadError ? 'alert' : undefined}>{data ? '这个作业没有这一屏的候选' : loadError ? '候选没取到' : '加载候选…'}</span><span className="cand-btns">{loadError && <IconButton size="xs" label="重试" data-testid="candidate-retry" onClick={load}><RotateCw size={16} aria-hidden="true" /></IconButton>}{collapse}</span></div>
         </div>
       ) : Array.from({ length: versions }, (_, i) => {
         const r = row.revisions.find((x) => x.index === i);
@@ -61,7 +64,8 @@ export function CandidateStack({ jobId, screen, onClose, onAdopted }: { jobId: s
         return (
           <div key={i} className="cand-cell" data-testid="candidate-cell" data-current={isCurrent ? '' : undefined} style={cellStyle(i)}>
             {/* 截图垫底、活 iframe 盖上（与卡片同尺寸）；没产出时占位不跳版（VIS-006 / PERF-003） */}
-            {r?.screenshotUrl && <img src={r.screenshotUrl} alt="" width={w} height={h} decoding="async" draggable={false} />}
+            {/* 垫底图只在 iframe 就绪前露出，用缩略图就够（v1.03） */}
+            {(r?.thumbUrl ?? r?.screenshotUrl) && <img src={(r!.thumbUrl ?? r!.screenshotUrl)!} alt="" width={w} height={h} decoding="async" draggable={false} />}
             {r ? <iframe className="nowheel nopan" src={r.previewUrl} title={`${screen.name} 第 ${i + 1} 版`} sandbox="allow-scripts allow-same-origin allow-forms" /> : <div className="grid size-full place-items-center text-sm text-ink/60">这一版没有产出</div>}
             <div className="cand-actions">
               <span className="cand-tag">第 {i + 1} 版{isCurrent && <> · {row.settled ? '已采用' : '当前'}</>}</span>

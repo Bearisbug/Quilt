@@ -18,7 +18,9 @@ export function PresetsSection({ projectId, version, busy, onApplied }: {
   const [pendingDelete, setPendingDelete] = useState<DesignPresetDto | null>(null);
   const saveRef = useRef<HTMLButtonElement>(null);
 
-  const load = () => { api.presets.list().then((r) => setItems(r.items)).catch(() => { setItems([]); toast('预设列表加载失败', 'error'); }); };
+  // 取数失败不能说成「还没有预设」（v1.03）：就地给重试，已列出的留在原地
+  const [loadError, setLoadError] = useState(false);
+  const load = () => { setLoadError(false); api.presets.list().then((r) => setItems(r.items)).catch(() => setLoadError(true)); };
   useEffect(load, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const apply = async (p: DesignPresetDto) => {
@@ -40,7 +42,8 @@ export function PresetsSection({ projectId, version, busy, onApplied }: {
           <BookmarkPlus size={14} aria-hidden="true" />存为预设
         </Button>
       </div>
-      {items === null ? (
+      {loadError && <p role="alert" className="flex items-center justify-between gap-2 rounded-md border border-danger/60 bg-danger/10 px-3 py-2 text-xs text-danger"><span>预设列表没取到</span><Button size="sm" onClick={load}>重试</Button></p>}
+      {items === null ? (loadError ? null :
         <ul className="flex flex-col gap-1" aria-busy="true">
           {[0, 1].map((i) => <li key={i} className="h-9 animate-pulse rounded-md bg-panel-2" />)}
         </ul>
