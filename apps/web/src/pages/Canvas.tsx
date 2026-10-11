@@ -45,6 +45,8 @@ type Panel = 'revisions' | 'design' | 'inspect' | 'annotate' | 'agent' | 'screen
 const MINIMAP_KEY = 'quilt:minimap';
 const ICON = 18;
 const MAX_TARGETS = 20; // API-CORE-010 契约上限
+// 详情还没到时的屏、组件、批注：同一个空数组，依赖它们的 memo 不必每次渲染都重算
+const NONE: never[] = [];
 // 造屏名额是项目级的（REQ-CORE-020）：锚点造屏、工具栏「新建屏幕」、断链补屏建的都是 generate，互相排队但不挡改屏
 const GENERATE_BUSY = '上一批屏还在造，等它落地再造下一批';
 // 聊天回合逐个串行（REQ-CORE-023）：一个项目一条会话
@@ -227,7 +229,7 @@ export function CanvasPage() {
       else if (!quiet) toast(e instanceof ApiError ? e.problem.title : '项目加载失败', 'error');
       return null;
     }
-  }, [projectId, toast, refreshMessages]);
+  }, [projectId, toast, refreshMessages, drafts]);
 
   useEffect(() => { refresh(); refreshMessages(); }, [refresh, refreshMessages]);
   const retryLoad = () => { setLoadFailure(null); setConfigFailed(false); void loadPreviewOrigin(); void refresh(); if (msgState !== 'ok') { setMsgState('loading'); void refreshMessages(); } };
@@ -245,7 +247,7 @@ export function CanvasPage() {
   const projectName = detail?.project.name;
   useEffect(() => { document.title = projectName ? `${projectName} · Quilt` : 'Quilt'; return () => { document.title = 'Quilt'; }; }, [projectName]);
 
-  const screens = detail?.screens ?? [];
+  const screens = detail?.screens ?? NONE;
   const screensRef = useRef(screens);
   screensRef.current = screens;
 
@@ -339,7 +341,7 @@ export function CanvasPage() {
   // 留着的话面板不显示，下次单选某屏时它自己弹出来
   useEffect(() => { if (panel === 'revisions' && detail && !selected) setPanel(null); }, [panel, detail, selected, setPanel]);
   const targetScreens = useMemo(() => screens.filter((s) => targetIds.includes(s.id)), [screens, targetIds]);
-  const components = detail?.components ?? [];
+  const components = detail?.components ?? NONE;
   const selectedComponents = useMemo(() => components.filter((c) => selectedComponentIds.includes(c.id)), [components, selectedComponentIds]);
   const targetComponents = useMemo(() => components.filter((c) => targetComponentIds.includes(c.id)), [components, targetComponentIds]);
   // 屏与组件是同一个选区（INT-015 单一状态源）：非加选地点哪一种，另一种就清空；点空白两种都清
@@ -703,7 +705,7 @@ export function CanvasPage() {
     if (selected) { canvasApi.current?.focus(selected.id); setPanel('annotate'); return; }
     setPanel('annotate');
   };
-  const annotations = detail?.annotations ?? [];
+  const annotations = detail?.annotations ?? NONE;
   const screenAnnotations = useMemo(() => annotations.filter((a) => a.screenId === shownScreen?.id), [annotations, shownScreen?.id]);
   // 存不上时 toast 原因并回 null / false（v0.78）：面板据此留着草稿与改写框，「记下并立刻发送」存不上就不发
   const addAnnotation = async (note: string): Promise<string | null> => {

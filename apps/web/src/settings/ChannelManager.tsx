@@ -56,7 +56,8 @@ export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOption
       onCatalog?.(r.items, r.default);
     } catch (e) { setLoadError(problemText(e, '通道清单加载失败')); setRunners([]); setChannels([]); }
   };
-  useEffect(() => { void load(); }, []);
+  // 打开时取一次：load 读 onCatalog，每次渲染换引用，列进依赖就成了每次渲染都重取
+  useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const probe = async (id: string) => {
     setProbing((m) => ({ ...m, [id]: true }));

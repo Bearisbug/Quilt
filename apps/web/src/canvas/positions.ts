@@ -1,4 +1,4 @@
-import { useRef, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useMemo, useRef, type Dispatch, type SetStateAction } from 'react';
 import type { ProjectDetailDto, ComponentDto, ScreenDto } from '@quilt/core/browser';
 import { api } from '@/lib/api';
 import type { useToast } from '@/lib/toast';
@@ -16,7 +16,7 @@ export function usePositionDrafts() {
   // 组件卡的坐标同一套竞态、同一套处理（REQ-EDIT-006）
   const dirtyCompPos = useRef(new Map<string, { x: number; y: number }>());
   // 每次 GET 回来先对账：服务端跟上的出栈，没跟上的用本地坐标盖回快照
-  const reconcile = (d: ProjectDetailDto): ProjectDetailDto => {
+  const reconcile = useCallback((d: ProjectDetailDto): ProjectDetailDto => {
     for (const [id, p] of dirtyPos.current) { const s = d.screens.find((x) => x.id === id); if (!s || (s.x === p.x && s.y === p.y)) dirtyPos.current.delete(id); }
     for (const [id, p] of dirtyCompPos.current) { const c = d.components.find((x) => x.id === id); if (!c || (c.x === p.x && c.y === p.y)) dirtyCompPos.current.delete(id); }
     return {
@@ -24,8 +24,8 @@ export function usePositionDrafts() {
       screens: dirtyPos.current.size ? d.screens.map((s) => ({ ...s, ...dirtyPos.current.get(s.id) })) : d.screens,
       components: dirtyCompPos.current.size ? d.components.map((c) => ({ ...c, ...dirtyCompPos.current.get(c.id) })) : d.components,
     };
-  };
-  return { dirtyPos, dirtyCompPos, reconcile };
+  }, []);
+  return useMemo(() => ({ dirtyPos, dirtyCompPos, reconcile }), [reconcile]);
 }
 export type PositionDrafts = ReturnType<typeof usePositionDrafts>;
 

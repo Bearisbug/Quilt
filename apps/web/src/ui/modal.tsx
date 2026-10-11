@@ -42,6 +42,8 @@ export function useModal<T extends HTMLElement>(
   const opener = useRef(document.activeElement as HTMLElement | null);
   // onClose 每次父组件重渲染都会换引用；用 ref 持有，陷阱只装一次，不然保存后列表刷新会把焦点甩回首字段
   const closeRef = useRef(onClose); closeRef.current = onClose;
+  // 陷阱只在挂载时装、卸载时拆：初始焦点按打开那一刻的参数定，归还目标按关闭那一刻 ref 指着的元素取（打开期间触发处可能换了）
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     const el = ref.current;
     const layer = el?.closest<HTMLElement>('[data-modal-layer]') ?? el;
@@ -73,6 +75,7 @@ export function useModal<T extends HTMLElement>(
       if (document.activeElement !== back) fallback?.current?.focus();
     };
   }, []);
+  /* eslint-enable react-hooks/exhaustive-deps */
   return ref;
 }
 

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "oxlint -c .oxlintrc.json src"
   },
   "dependencies": {
     "@quilt/core": "workspace:*",
@@ -22,6 +23,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
+    "oxlint": "^1.87.0",
     "tailwindcss": "^4.1.0",
     "typescript": "^7.0.2",
     "vite": "^8.2.2"
