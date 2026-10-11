@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { RunnerOptionDto, AgentSessionDto, AgentTool } from '@quilt/core';
+import type { RunnerOptionDto, AgentSessionDto, AgentTool } from '@quilt/core/browser';
 import { api } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import type { ComposerMode } from './Composer';

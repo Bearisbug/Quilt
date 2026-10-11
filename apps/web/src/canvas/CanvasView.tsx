@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { XYPanZoom, PanOnScrollMode, getViewportForBounds, type PanZoomInstance, type Viewport } from '@xyflow/system';
-import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type AnnotationDto, type ComponentDto, type ElementPathItem } from '@quilt/core';
+import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type AnnotationDto, type ComponentDto, type ElementPathItem } from '@quilt/core/browser';
 import { StyleGuideCard, STYLE_GUIDE_SIZE, styleGuideSize } from '@/canvas/StyleGuideCard';
 import { Minimap, type MiniRect, type ViewInfo } from '@/canvas/Minimap';
 import { EDGE_LIMIT, mergeEdges, shownEdges, edgeCurves, drawEdges, type Curve, type EdgeColors } from '@/canvas/edges';
@@ -449,17 +449,16 @@ export function CanvasView(p: CanvasProps) {
   // 组件预览页量完根元素就上报它的框：只认本画布里某张组件卡的 iframe 发来的（按 source 对号），钳到设备视口以内
   useEffect(() => {
     const onSize = (e: MessageEvent) => {
-      if (e.origin !== propsRef.current.previewOrigin) return;
-      const d = e.data as { type?: string; x?: number; y?: number; w?: number; h?: number } | null;
-      if (!d || d.type !== 'quilt:component-size') return;
+      if (e.origin !== propsRef.current.previewOrigin || !isPreviewMessage(e.data) || e.data.type !== 'quilt:component-size') return;
+      const d = e.data;
       let id: string | null = null;
       for (const [cid, frame] of compFrames.current) if (frame.contentWindow === e.source) { id = cid; break; }
       if (!id) return;
       const max = propsRef.current.screenSize;
-      const w = Math.min(max.w, Math.max(48, Math.ceil(Number(d.w) || 0)));
-      const h = Math.min(max.h, Math.max(32, Math.ceil(Number(d.h) || 0)));
-      const x = Math.min(max.w - w, Math.max(0, Math.floor(Number(d.x) || 0)));
-      const y = Math.min(max.h - h, Math.max(0, Math.floor(Number(d.y) || 0)));
+      const w = Math.min(max.w, Math.max(48, Math.ceil(d.w)));
+      const h = Math.min(max.h, Math.max(32, Math.ceil(d.h)));
+      const x = Math.min(max.w - w, Math.max(0, Math.floor(d.x)));
+      const y = Math.min(max.h - h, Math.max(0, Math.floor(d.y)));
       setCompSize((m) => { const o = m[id]; return o?.x === x && o?.y === y && o?.w === w && o?.h === h ? m : { ...m, [id]: { x, y, w, h } }; });
       setCompLive((s) => (s.has(id!) ? s : new Set(s).add(id!)));
     };

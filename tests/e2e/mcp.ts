@@ -2,25 +2,16 @@ import { mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { seed, seedJson, apiJson, EVIDENCE, API } from './lib.ts';
-import { connectMcp, callTool } from './mcp-client.ts';
+import { connectMcp, callTool, resourceText } from './mcp-client.ts';
+import { suite, expect, sleep, restartApi } from './harness.ts';
 
 // docs/TEST.md TC-AGENT-011（MCP 与画布同面，REQ-AGENT-002 v0.51）AI 执行脚本。纯 MCP / REST，不开浏览器。
 // 作业类工具只验「作业输入与 API-CORE-006 同义 + 终态」，模型行为由各自用例覆盖——API 以 LLM_DRIVER=stub 启动即可全程跑完。
 // 可用 QUILT_E2E_API 指到独立端口上的一套 API（配 DATABASE_URL=…quilt_test），不占用 3100 上的开发实例。
-const RUN = process.env.RUN ?? '099';
+const { RUN, results, cleanups, step, summary } = suite('MCP');
 await mkdir(EVIDENCE, { recursive: true });
 const health = await (await fetch(`${API}/v1/health`)).json() as { llm: string };
 if (health.llm !== 'stub') { console.log(`❌ TC-AGENT-011 阻塞：API 不是 stub 驱动（当前 ${health.llm}），作业类步骤要确定性驱动`); process.exit(2); }
-const results: { tc: string; result: string; note: string }[] = [];
-const record = (tc: string, result: string, note = '') => { results.push({ tc, result, note }); console.log(`${result === '通过' ? '✅' : '❌'} ${tc} ${result} ${note}`); };
-const ONLY = process.env.ONLY?.split(',').map((s) => s.trim()).filter(Boolean);
-const step = async (tc: string, fn: () => Promise<string | void>) => {
-  if (ONLY && !ONLY.includes(tc)) return;
-  try { const note = await fn(); record(tc, '通过', note ?? ''); }
-  catch (e) { record(tc, '失败', (e as Error).message.split('\n')[0].slice(0, 400)); }
-};
-const expect = (cond: unknown, msg: string) => { if (!cond) throw new Error(msg); };
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const OK_HTML = `<div class="min-h-dvh flex flex-col bg-background text-on-background"><header class="h-14 flex items-center justify-between px-4 bg-surface border-b border-outline-variant"><h1 class="text-lg font-semibold">Agent screen</h1></header><main class="flex-1 overflow-y-auto px-4 py-6 space-y-6"><div class="bg-surface rounded-lg border border-outline-variant p-4"><p class="text-sm">Pushed by an external agent.</p><a href="/s1" class="inline-flex items-center justify-center h-12 px-6 rounded-full bg-primary text-on-primary font-semibold">Back home</a></div></main></div>`;
 // 1×1 PNG：素材与参考图直传都用它（类型按魔数认定，尺寸不重要）
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
@@ -33,7 +24,7 @@ type Detail = { project: { exemplarScreenId: string | null }; screens: Screen[];
 
 seed('seed');
 await writeFile(PNG_PATH, PNG);
-const mcp = await connectMcp();
+let mcp = await connectMcp();
 const NEW_TOOLS = ['delete_screen', 'delete_component', 'delete_project', 'get_revision', 'restore_revision', 'list_candidates', 'adopt_candidate', 'move_screens', 'edit_element', 'regenerate_subtree', 'edit_component', 'propose_design_system', 'export_prototype', 'get_export', 'list_runners', 'create_upload_url', 'list_jobs', 'cancel_job', 'get_job_events', 'list_assets', 'create_asset', 'delete_asset', 'list_design_presets', 'create_design_preset', 'apply_design_preset', 'delete_design_preset', 'list_annotations', 'update_annotation', 'delete_annotation', 'send_annotations', 'list_messages', 'patch_screen', 'append_upload'].map((t) => `quilt.${t}`);
 // 工具调用助手：成功要 JSON、失败要错误类型
 const call = async <T = Record<string, unknown>>(name: string, args: Record<string, unknown>, what = name): Promise<T> => { const r = await callTool(mcp, name, args); expect(!r.isError, `${what} 出错：${r.text.slice(0, 300)}`); return r.json as T; };
@@ -123,7 +114,7 @@ await step('TC-AGENT-011', async () => {
   notes.push('直改');
 
   // 7 直传 + 素材：create_upload_url 按 mediaType 分流（v0.60 合并了 HTML 与参考图两个工具）——缺省 text/html 给 uploadId，image/* 给 attachmentId 且 bytes 必填；
-  //   签名 PUT 落对象；create_asset 读本机文件；预览域可取；相对路径 400、不存在 404；删素材
+  //   签名 PUT 落对象；create_asset 读本机文件；预览域可取；相对路径 400、不存在 404；不是普通文件（设备、目录）或超过 5 MB 的读之前就 400（v1.06）；删素材
   const htmlUpl = await call<{ mediaType: string; uploadId: string; putUrl: string }>('quilt.create_upload_url', { projectId: pid });
   expect(htmlUpl.mediaType === 'text/html' && !!htmlUpl.uploadId && htmlUpl.putUrl.includes(`/v1/uploads/${htmlUpl.uploadId}`), `HTML 直传地址不对：${JSON.stringify(htmlUpl)}`);
   await fail('quilt.create_upload_url', { projectId: pid, mediaType: 'image/png' }, '/errors/validation', '参考图直传缺 bytes');
@@ -139,6 +130,11 @@ await step('TC-AGENT-011', async () => {
   expect(previewGet.status === 200 && (previewGet.headers.get('content-type') ?? '').includes('image/png'), `预览域取素材应 200 image/png，实际 ${previewGet.status} ${previewGet.headers.get('content-type')}`);
   await fail('quilt.create_asset', { projectId: pid, path: 'relative.png' }, '/errors/validation', '相对路径');
   await fail('quilt.create_asset', { projectId: pid, path: '/nonexistent/quilt-e2e-missing.png' }, '/errors/not-found', '不存在的文件');
+  await fail('quilt.create_asset', { projectId: pid, path: '/dev/zero' }, '/errors/validation', '设备文件');
+  await fail('quilt.create_asset', { projectId: pid, path: os.tmpdir() }, '/errors/validation', '目录');
+  const big = path.join(os.tmpdir(), `quilt-e2e-big-${process.pid}.png`);
+  await writeFile(big, Buffer.concat([PNG, Buffer.alloc(6 * 1024 * 1024)]));
+  try { await fail('quilt.create_asset', { projectId: pid, path: big }, '/errors/validation', '超过 5 MB'); } finally { await rm(big, { force: true }); }
   await call('quilt.delete_asset', { assetId: asset.id });
   expect(!(await call<{ items: { id: string }[] }>('quilt.list_assets', { projectId: pid })).items.some((a) => a.id === asset.id), '删素材后仍在列表');
   notes.push('参考图直传 / 素材建取删');
@@ -287,17 +283,13 @@ await step('TC-AGENT-011', async () => {
   // 11 项目与设计系统：样板屏（golden 资源跟着变）、空 patch 400、约定节写回、对话记录
   expect((await call<{ exemplarScreenId: string | null }>('quilt.update_project', { projectId: pid, exemplarScreenId: s2 })).exemplarScreenId === s2, '样板屏未落库');
   const golden = await mcp.readResource({ uri: `quilt://projects/${pid}/golden` });
-  expect(String(golden.contents[0].text).includes('Screen 2'), 'golden 资源应是样板屏 s2 的正文');
+  expect(resourceText(golden).includes('Screen 2'), 'golden 资源应是样板屏 s2 的正文');
   expect((await call<{ exemplarScreenId: string | null }>('quilt.update_project', { projectId: pid, exemplarScreenId: null })).exemplarScreenId === null, '样板屏应能回落');
   await fail('quilt.update_project', { projectId: pid }, '/errors/validation', '空 patch');
   const v11 = (await call<{ version: number }>('quilt.get_design_contract', { projectId: pid })).version;
   const ds = await call<{ designSystem: { designMd: string; version: number } }>('quilt.update_design_system', { projectId: pid, expectedVersion: v11, conventions: ['正文 16px', '按钮全圆角'] });
   expect(ds.designSystem.designMd.includes('## 约定') && ds.designSystem.designMd.includes('正文 16px') && ds.designSystem.designMd.includes('按钮全圆角') && ds.designSystem.version === v11 + 1, '约定节未写回');
-  // stub 下作业几秒就结束，本条走到这里一分钟内建的作业可能已到限流上限（10 次 / 分钟）：撞上 429 就等一轮窗口再发
-  const msgKey = crypto.randomUUID();
-  const postMsg = () => apiJson<{ job: Job }>(`/v1/projects/${pid}/messages`, { method: 'POST', body: JSON.stringify({ content: '做一个记账 app', count: 2 }), headers: { 'Idempotency-Key': msgKey } });
-  let msg = await postMsg();
-  if (msg.status === 429) { await sleep(61_000); msg = await postMsg(); }
+  const msg = await apiJson<{ job: Job }>(`/v1/projects/${pid}/messages`, { method: 'POST', body: JSON.stringify({ content: '做一个记账 app', count: 2 }), headers: { 'Idempotency-Key': crypto.randomUUID() } });
   expect(msg.status === 202, `发消息应 202，实际 ${msg.status}`);
   await waitJob(msg.body.job.id, 120);
   const msgs = await call<{ items: { role: string; content: string; jobId: string | null }[]; nextCursor: string | null }>('quilt.list_messages', { projectId: pid, limit: 10 });
@@ -328,8 +320,12 @@ await step('TC-AGENT-018', async () => {
   // 发批注不收 runner、走账号的缺省通道：删掉种子按 .env 建的云端通道，缺省回落到 API 的 LLM_DRIVER=stub，不打真实模型
   for (const ch of (await apiJson<{ items: { id: string }[] }>('/v1/channels')).body.items) await apiJson(`/v1/channels/${ch.id}`, { method: 'DELETE' });
   expect((await apiJson<{ items: unknown[] }>('/v1/channels')).body.items.length === 0, '通道没删干净，发批注会打到真实模型');
-  // TC-AGENT-011 刚建过一批作业：等限流窗口（10 次 / 分钟）清空
-  await sleep(61_000);
+  // 本条要验真实的限流（10 次 / 分钟）：测试栈平时放到 1000（§3），这里按 10 重启 API——重启顺带清空计数窗口；收尾按测试栈缺省重启回来。
+  // 重启后原来的 MCP 会话失效，两头都重连
+  await restartApi({ QUILT_RATE_LIMIT_PER_MIN: '10' });
+  await mcp.close().catch(() => {});
+  mcp = await connectMcp();
+  cleanups.push(async () => { await restartApi(); await mcp.close().catch(() => {}); mcp = await connectMcp(); });
   const r = seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', 'Mcp18', '--device', 'mobile', '--screens', '3', '--no-shot');
   const pid = r.projectId; const [s1, s2, s3] = r.screens.map((s) => s.id);
 
@@ -440,6 +436,5 @@ await step('TC-AGENT-022', async () => {
 await mcp.close();
 await rm(PNG_PATH, { force: true });
 await writeFile(path.join(EVIDENCE, `run-${RUN}-tc-agent-011.txt`), results.map((x) => `${x.tc} ${x.result} ${x.note}`).join('\n') + '\n');
-console.log(`\n=== RUN-${RUN} MCP ===`, JSON.stringify(results.reduce<Record<string, number>>((m, x) => ((m[x.result] = (m[x.result] ?? 0) + 1), m), {})));
-console.log(results.map((x) => `${x.tc} ${x.result} ${x.note}`).join('\n'));
-process.exit(results.some((x) => x.result === '失败') ? 1 : 0);
+const counts = summary();
+process.exit(counts['失败'] ? 1 : 0);

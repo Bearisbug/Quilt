@@ -1,0 +1,371 @@
+// @ts-check
+// 预览运行时：内联进每版修订的 prelude（ADR-003）。职责：链接劫持 → 父页；接收 swap 在同文档内换 DOM；
+// 跨屏保留表单状态；把画布级快捷键转发给父页；隐藏桌面浏览器的滚动条；上报 ready/swapped。消息协议见 protocol.ts。
+(function () {
+  /** @typedef {import('./protocol.ts').PreviewToParent} Outgoing */
+  /** @typedef {import('./protocol.ts').ParentToPreview} Incoming */
+  /** @typedef {{ el: HTMLElement, kind: string, prev: { outline: string, offset: string }, badge: HTMLElement, timer: ReturnType<typeof setTimeout> | null }} Mark */
+  // 运行时在预览文档的 window 上读写的几样：跨屏保留的表单状态、组件预览标记（componentPreviewDocument 写入）、lucide 图标库
+  var win = /** @type {Window & { __quiltState?: Record<string, any>, __quiltComponent?: boolean, lucide?: { createIcons?: () => void } }} */ (window);
+  var state = (win.__quiltState = win.__quiltState || {});
+  // 卡片里是一台设备，桌面浏览器却会在它右缘画一条常驻滚动条——真机上没有这东西，它会被读成设计的一部分。
+  // 只隐藏滚动条像素，滚动能力全留（屏内 overflow-y:auto 的区域同理，所以用 *）。
+  var bars = document.createElement('style');
+  bars.setAttribute('data-quilt-ui', '');
+  bars.textContent = '*{scrollbar-width:none}*::-webkit-scrollbar{display:none}';
+  document.head.appendChild(bars);
+  function fields() { return /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name],textarea[name],select[name]')); }
+  function snapshotForms() {
+    fields().forEach(function (el) {
+      state[el.name] = el.type === 'checkbox' ? el.checked : el.value;
+    });
+  }
+  function restoreForms() {
+    fields().forEach(function (el) {
+      if (!(el.name in state)) return;
+      if (el.type === 'checkbox') el.checked = !!state[el.name]; else el.value = state[el.name];
+    });
+  }
+  function icons() { if (win.lucide && win.lucide.createIcons) win.lucide.createIcons(); }
+  // 换进来的 DOM 里的 <script> 不会执行（DOMParser 解析出的脚本是惰性的）：屏里的图表库、自写脚本（v0.43 允许）都要按原顺序重建一遍，
+  // 带 src 的等它加载完再跑下一个。不做的话图表屏只有首次打开能画出来，跳转、热更新、切变体、叠层打开后都是空白。
+  // 重跑的内联脚本包一层块作用域：同一个 window 里第二次执行顶层 const/let 会报「已声明」，整段脚本不跑
+  /** @param {ParentNode} root */
+  function runScripts(root) {
+    var list = Array.prototype.slice.call(root.querySelectorAll('script'));
+    (function next(i) {
+      if (i >= list.length) return;
+      var old = list[i]; var s = document.createElement('script');
+      for (var k = 0; k < old.attributes.length; k++) s.setAttribute(old.attributes[k].name, old.attributes[k].value);
+      if (old.src) { s.onload = s.onerror = function () { next(i + 1); }; old.replaceWith(s); }
+      else { s.textContent = old.type === 'module' ? old.textContent : '{\n' + old.textContent + '\n}'; old.replaceWith(s); next(i + 1); }
+    })(0);
+  }
+  /** @param {Outgoing} msg */
+  function send(msg) { parent.postMessage(msg, '*'); }
+  // 叠层屏（v0.63 REQ-PROTO-005）：把另一屏的根元素压在当前文档上——固定层 + 45% 暗遮罩，不换 DOM，底下那一屏与它的
+  // 滚动位置都留着。层带 data-quilt-ui：选元素态的穿透规则不会把遮罩当成可命中元素。点遮罩（或叠层根元素本身
+  // 露出来的透明区域）只上报 dismiss，关不关由父页定——导航栈在父页。
+  /** @type {HTMLElement[]} */
+  var overlays = [];
+  // 换 body 还没落地时（view transition 的回调是异步的）收到的压层请求先排队，换完再压——否则叠层挂在即将被换掉的旧 body 上，
+  // 跟着一起消失。整份重写（document.open）会连 window 上的监听一起抹掉，那段时间到的消息无处可排，所以父页要先等
+  // quilt:swapped / quilt:ready 再发压层
+  var swapping = false;
+  /** @type {{ html: string, route: string }[]} */
+  var queued = [];
+  // 叠层打开时按 qid 找元素只在最上面那层里找：每屏的 qid 都从 q1 编起，底下那一屏排在文档前面，全文档找会先命中它
+  function scope() { return overlays.length ? overlays[overlays.length - 1] : document; }
+  function flushOverlays() { swapping = false; var q = queued; queued = []; q.forEach(function (o) { openOverlay(o.html, o.route); }); }
+  function clearOverlays() { overlays.forEach(function (l) { l.remove(); }); overlays = []; }
+  function closeOverlay() { var l = overlays.pop(); if (l) l.remove(); }
+  /** @param {string} html @param {string} route */
+  function openOverlay(html, route) {
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    var root = doc.body.firstElementChild; if (!root) return;
+    var layer = document.createElement('div');
+    layer.setAttribute('data-quilt-ui', ''); layer.setAttribute('data-quilt-overlay-layer', route);
+    layer.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,0.45);overflow:auto;';
+    root = document.adoptNode(root);
+    layer.addEventListener('click', function (e) { if (mode === 'inspect') return; if (e.target === layer || e.target === root) { e.preventDefault(); send({ type: 'quilt:overlay-dismiss' }); } });
+    layer.appendChild(root);
+    document.body.appendChild(layer); overlays.push(layer); runScripts(layer); icons(); restoreForms();
+  }
+
+  document.addEventListener('input', snapshotForms, true);
+  // 导航源三种（REQ-PROTO-001）：链接 / data-href 点击、表单提交，统一发 navigate；表单一律不真提交
+  document.addEventListener('click', function (e) {
+    var t = /** @type {Element | null} */ (e.target);
+    var a = t && t.closest && t.closest('a[href],[data-href]');
+    if (!a) return;
+    // 组件预览（REQ-EDIT-006）：组件不是屏，没有路由也没有去处——链接一律惰性，点了什么都不发生，
+    // 也不报「去处还没设计」。组件卡的交互态是拿来试组件自己的状态的（tab 切换、开关），不是试跳转。
+    if (win.__quiltComponent) { e.preventDefault(); return; }
+    var href = a.hasAttribute('href') ? (a.getAttribute('href') || '') : (a.getAttribute('data-href') || '');
+    if (href.charAt(0) === '/') { e.preventDefault(); snapshotForms(); send({ type: 'quilt:navigate', href: href }); }
+    else if (href === '#') { e.preventDefault(); send({ type: 'quilt:dead' }); }
+  });
+  // 指针下有没有能朝这个方向滚的区域（元素或文档本身）
+  /** @param {Node | null} el @param {number} dx @param {number} dy */
+  function canScroll(el, dx, dy) {
+    for (var n = /** @type {Element | null} */ (el && el.nodeType === 1 ? el : el && el.parentElement); n; n = n.parentElement) {
+      var cs = getComputedStyle(n);
+      if (dy && /(auto|scroll)/.test(cs.overflowY) && (dy > 0 ? n.scrollTop + n.clientHeight < n.scrollHeight - 1 : n.scrollTop > 0)) return true;
+      if (dx && /(auto|scroll)/.test(cs.overflowX) && (dx > 0 ? n.scrollLeft + n.clientWidth < n.scrollWidth - 1 : n.scrollLeft > 0)) return true;
+    }
+    var d = document.scrollingElement;
+    return !!d && ((dy > 0 && d.scrollTop + innerHeight < d.scrollHeight - 1) || (dy < 0 && d.scrollTop > 0) || (dx > 0 && d.scrollLeft + innerWidth < d.scrollWidth - 1) || (dx < 0 && d.scrollLeft > 0));
+  }
+  // 触控板捏合（ctrl+wheel）落在 iframe 里时画布收不到，浏览器会把整页放大；截住并转发给父页做画布缩放。
+  // 组件预览（v0.80）：普通滚轮落在没有可滚区域的地方时同样转发（pan），父页平移画布——组件卡按内容定高，交互态下卡片区域原本是死区
+  document.addEventListener('wheel', function (e) {
+    if (!e.ctrlKey) {
+      if (!win.__quiltComponent || canScroll(/** @type {Node | null} */ (e.target), e.deltaX, e.deltaY)) return;
+      e.preventDefault();
+      send({ type: 'quilt:wheel', pan: true, deltaX: e.deltaX, deltaY: e.deltaY, x: e.clientX, y: e.clientY });
+      return;
+    }
+    e.preventDefault();
+    send({ type: 'quilt:wheel', deltaY: e.deltaY, x: e.clientX, y: e.clientY });
+  }, { passive: false });
+  document.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (win.__quiltComponent) return;
+    var f = /** @type {Element | null} */ (e.target);
+    var action = f && f.getAttribute ? (f.getAttribute('action') || '') : '';
+    if (action.charAt(0) === '/') { snapshotForms(); send({ type: 'quilt:navigate', href: action }); }
+  }, true);
+  // 画布级快捷键在预览文档里按下时转发给父页：Esc 退出、Alt+← 后退、⌘E 选择元素、⌘/ 输入框、⌘K 找屏，
+  // ⌥ + 字母（⌥N 批注、⌥D 设计系统……，v0.80）只在焦点不在可编辑元素上时——macOS 下它们在输入框里是打特殊字符的。
+  // v0.95：⌘S 保存检查器（一律拦掉浏览器的保存网页）；⌘Z 撤销、选择元素态下的 Delete / Backspace 删除元素，焦点在可编辑元素上时留给它自己
+  document.addEventListener('keydown', function (e) {
+    var mod = e.metaKey || e.ctrlKey;
+    var t = /** @type {Element | null} */ (e.target);
+    var editable = t && t.closest && t.closest('input, textarea, select, [contenteditable]');
+    var del = (e.key === 'Delete' || e.key === 'Backspace') && !mod && !e.altKey && mode === 'inspect' && !editable;
+    // 逐级选（v1.00）：层级状态在这里，就地处理、不转发
+    if (e.key === 'Enter' && mode === 'inspect' && !mod && !e.altKey && !editable && !e.isComposing) { e.preventDefault(); climb(e.shiftKey ? 'up' : 'down'); return; }
+    if (e.key === 'Escape' || (e.altKey && e.key === 'ArrowLeft') || (mod && (e.code === 'KeyE' || e.code === 'Slash' || e.code === 'KeyK' || e.code === 'KeyS')) || (mod && e.code === 'KeyZ' && !e.shiftKey && !editable) || (e.altKey && !mod && /^Key[A-Z]$/.test(e.code) && !editable) || del) {
+      e.preventDefault();
+      send({ type: 'quilt:key', key: e.key, code: e.code, altKey: e.altKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey });
+    }
+  });
+  // 选择元素模式（REQ-EDIT-001）：两层框都画在预览文档内——hover 框细虚线跟着鼠标走；选中框常驻（实线、界面蓝、左上角挂
+  // 「tag · qid」标签，和检查器标题对得上），随滚动 / 缩放重算，换 body 后由父页 quilt:reselect 接回。点击上报 qid 与几何，父页画检查器。
+  var mode = 'interact';
+  /** @type {HTMLElement | null} */
+  var box = null;
+  // 选择元素模式下让每个元素都可命中（v0.57）：设计里常给装饰层或被 <label> 包着的文字写 pointer-events:none，
+  // 点击于是永远落在外层容器上，里面的文字元素根本选不中。选择态是检查器的取景器，不该受设计自己的命中规则限制；
+  // 退出选择态时整条规则撤掉，交互态照旧按设计的命中规则走。
+  /** @type {HTMLStyleElement | null} */
+  var pierce = null;
+  /** @param {boolean} on */
+  function setPierce(on) {
+    if (on && !pierce) {
+      pierce = document.createElement('style');
+      pierce.setAttribute('data-quilt-ui', '');
+      // 必须排除运行时自己画的那几层：选中框为了和检查器对号也带 data-qid（setSelection），
+      // 它是 fixed、z-index 顶格、罩住选中元素外扩 4px 的一块板子。被这条规则强制成可命中之后，
+      // 它盖住的一切都点不动了——targetOf 遇到 data-quilt-ui 返回 null，于是 hover 不亮、点击不上报；
+      // 选中的要是根元素，整屏都选不动。带 !important 的作者样式压得过它行内那句普通的 pointer-events:none。
+      pierce.textContent = '[data-qid]:not([data-quilt-ui]){pointer-events:auto !important}';
+      document.head.appendChild(pierce);
+    } else if (!on && pierce) { pierce.remove(); pierce = null; }
+  }
+  function ensureBox() {
+    if (box) return box;
+    box = document.createElement('div');
+    box.setAttribute('data-quilt-ui', '');
+    box.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483646;border:1px dashed rgba(53,111,214,0.9);background:rgba(53,111,214,0.06);border-radius:4px;display:none';
+    document.body.appendChild(box);
+    return box;
+  }
+  // instant：键盘引起的移动（逐级选、路径预览）不带过渡，跟手的只有指针
+  /** @param {Element | null} el @param {boolean} [instant] */
+  function highlight(el, instant) {
+    var b = ensureBox();
+    b.style.transition = instant ? 'none' : 'left 60ms ease-out,top 60ms ease-out,width 60ms ease-out,height 60ms ease-out';
+    if (!el || el === selEl) { b.style.display = 'none'; return; }
+    var r = el.getBoundingClientRect();
+    b.style.display = 'block'; b.style.left = r.left - 2 + 'px'; b.style.top = r.top - 2 + 'px'; b.style.width = r.width + 4 + 'px'; b.style.height = r.height + 4 + 'px';
+  }
+  /** @type {HTMLElement | null} */
+  var selBox = null;
+  /** @type {HTMLElement | null} */
+  var selTag = null;
+  /** @type {Element | null} */
+  var selEl = null;
+  function ensureSel() {
+    if (selBox) return selBox;
+    selBox = document.createElement('div');
+    selBox.setAttribute('data-quilt-ui', ''); selBox.setAttribute('data-quilt-selection', '');
+    selBox.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;border:2px solid #356FD6;background:rgba(53,111,214,0.05);border-radius:4px;display:none;box-shadow:0 0 0 1px rgba(255,255,255,0.75)';
+    selTag = document.createElement('span');
+    selTag.style.cssText = 'position:absolute;left:-2px;font:600 11px/16px system-ui,sans-serif;padding:1px 7px;border-radius:999px;background:#356FD6;color:#fff;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,0.25)';
+    selBox.appendChild(selTag);
+    document.body.appendChild(selBox);
+    return selBox;
+  }
+  function placeSel() {
+    if (!selEl || !selBox || !selTag) return;
+    if (!selEl.isConnected) { setSelection(null); return; }
+    var r = selEl.getBoundingClientRect();
+    selBox.style.display = 'block'; selBox.style.left = r.left - 2 + 'px'; selBox.style.top = r.top - 2 + 'px'; selBox.style.width = r.width + 4 + 'px'; selBox.style.height = r.height + 4 + 'px';
+    selTag.style.top = r.top < 24 ? '2px' : '-20px';
+  }
+  /** @param {Element | null} el */
+  function setSelection(el) {
+    selEl = el;
+    var b = ensureSel();
+    if (!el) { b.style.display = 'none'; return; }
+    /** @type {HTMLElement} */ (selTag).textContent = el.tagName.toLowerCase() + ' · ' + (el.getAttribute('data-qid') || '');
+    b.setAttribute('data-qid', el.getAttribute('data-qid') || '');
+    placeSel();
+  }
+  // 修改中 / 已更新标记（REQ-EDIT-002）：父页按 qid 下发。元素本身描边（随滚动走），角标 fixed 定位、滚动 / 缩放时重算；
+  // 换 body 时这些节点连同角标一起消失，父页换完会重发
+  /** @type {Record<string, Mark>} */
+  var marks = {};
+  /** @param {Mark} m */
+  function placeBadge(m) { var r = m.el.getBoundingClientRect(); m.badge.style.left = Math.max(0, r.left) + 'px'; m.badge.style.top = Math.max(0, r.top - 18) + 'px'; }
+  /** @param {string} qid */
+  function unmark(qid) { var m = marks[qid]; if (!m) return; m.el.style.outline = m.prev.outline; m.el.style.outlineOffset = m.prev.offset; m.badge.remove(); if (m.timer) clearTimeout(m.timer); delete marks[qid]; }
+  /** @param {string} qid @param {'working' | 'done'} kind */
+  function mark(qid, kind) {
+    var el = /** @type {HTMLElement | null} */ (scope().querySelector('[data-qid="' + qid + '"]'));
+    if (!el) { unmark(qid); return; }
+    /** @type {Mark | null} */
+    var m = marks[qid];
+    if (m && m.el !== el) { unmark(qid); m = null; }
+    if (!m) {
+      m = marks[qid] = { el: el, kind: '', prev: { outline: el.style.outline, offset: el.style.outlineOffset }, badge: document.createElement('span'), timer: null };
+      m.badge.setAttribute('data-quilt-ui', ''); m.badge.setAttribute('data-quilt-mark', '');
+      document.body.appendChild(m.badge);
+    }
+    if (m.timer) { clearTimeout(m.timer); m.timer = null; }
+    var working = kind === 'working';
+    if (m.kind !== kind) {
+      m.kind = kind;
+      el.style.outline = '2px ' + (working ? 'dashed #6d8cff' : 'solid #22c55e'); el.style.outlineOffset = '2px';
+      m.badge.textContent = working ? '修改中…' : '已更新';
+      m.badge.setAttribute('data-kind', kind);
+      m.badge.style.cssText = 'position:fixed;z-index:2147483645;pointer-events:none;font:600 11px/16px system-ui,sans-serif;padding:1px 7px;border-radius:999px;color:#fff;box-shadow:0 1px 4px rgba(0,0,0,.25);background:' + (working ? '#6d8cff' : '#22c55e');
+      placeBadge(m);
+    }
+    // 「已更新」每次都重新计时：父页可能收口时打一次、换完 DOM 再补一次
+    if (!working) m.timer = setTimeout(function () { unmark(qid); }, 4000);
+  }
+  /** @param {{ working: string[], done?: string[] }} msg */
+  function applyMarks(msg) {
+    var working = msg.working || [], done = msg.done || [];
+    Object.keys(marks).forEach(function (q) { if (marks[q].kind === 'working' && working.indexOf(q) < 0 && done.indexOf(q) < 0) unmark(q); });
+    working.forEach(function (q) { mark(q, 'working'); });
+    done.forEach(function (q) { mark(q, 'done'); });
+  }
+  function replaceBadges() { Object.keys(marks).forEach(function (q) { placeBadge(marks[q]); }); placeSel(); }
+  window.addEventListener('scroll', replaceBadges, true);
+  window.addEventListener('resize', replaceBadges);
+  /** @param {Event} e */
+  function targetOf(e) { var el = /** @type {Element | null} */ (e.target); var t = el && el.closest && el.closest('[data-qid]'); return t && !t.hasAttribute('data-quilt-ui') ? t : null; }
+  // 逐级选（v1.00 REQ-EDIT-001）：指针下取到的是最里层元素。锚点 = 最近一次悬停 / 点中的最里层元素，当前层 = 锚点自身或它的某个
+  // 带 data-qid 的祖先（最高到屏根）。上一级 = 最近的带 data-qid 的祖先；下一级 = 沿锚点那条链往下一步。选中与悬停各记一份
+  /** @type {{ anchor: Element | null, cur: Element | null }} */
+  var hov = { anchor: null, cur: null };
+  /** @type {string | null} */
+  var anchorQid = null;
+  /** @param {string | null} q */
+  function byQid(q) { return q ? scope().querySelector('[data-qid="' + q + '"]') : null; }
+  /** @param {Element} el @returns {Element | null} */
+  function up(el) { var p = el.parentElement && el.parentElement.closest('[data-qid]'); return p && !p.hasAttribute('data-quilt-ui') && scope().contains(p) ? p : null; }
+  /** @param {Element} el @param {Element | null} anchor */
+  function down(el, anchor) { if (!anchor || anchor === el || !el.contains(anchor)) return null; /** @type {Element} */ var c = anchor; while (up(c) && up(c) !== el) c = /** @type {Element} */ (up(c)); return up(c) === el ? c : null; }
+  // 选中的锚点：还在、且仍在当前层之内就沿用，否则当前层自己就是锚点
+  /** @param {Element} el */
+  function selAnchor(el) { var a = byQid(anchorQid); if (!a || !el.contains(a)) { a = el; anchorQid = el.getAttribute('data-qid'); } return a; }
+  /** @param {Element} el */
+  function selectEl(el) { setSelection(el); highlight(null); send(selection(el, selAnchor(el))); }
+  /** @param {'up' | 'down'} dir */
+  function climb(dir) {
+    if (selEl && selEl.isConnected) {
+      var a = selAnchor(selEl);
+      var next = dir === 'up' ? up(selEl) : down(selEl, a);
+      if (next) selectEl(next);
+      return;
+    }
+    if (!hov.cur || !hov.cur.isConnected) return;
+    var n = dir === 'up' ? up(hov.cur) : down(hov.cur, hov.anchor);
+    if (n) { hov.cur = n; highlight(n, true); }
+  }
+  // 调用方只传带 data-qid 的元素（targetOf / up / byQid 都按 [data-qid] 取）
+  /** @param {Element} el */
+  function qidOf(el) { return /** @type {string} */ (el.getAttribute('data-qid')); }
+  /** @param {Element} t @param {Element | null} anchor @returns {Outgoing} */
+  function selection(t, anchor) {
+    var r = t.getBoundingClientRect();
+    var text = Array.prototype.filter.call(t.childNodes, function (n) { return n.nodeType === 3; }).map(function (n) { return n.textContent; }).join('').trim();
+    var comp = t.closest('[data-component]');
+    // path：从屏根到锚点，检查器据此画祖先路径
+    /** @type {{ qid: string, tag: string }[]} */
+    var path = [];
+    for (var p = /** @type {Element | null} */ (anchor || t); p; p = up(p)) path.unshift({ qid: qidOf(p), tag: p.tagName.toLowerCase() });
+    return { type: 'quilt:select', qid: qidOf(t), tag: t.tagName.toLowerCase(), text: text, classes: t.getAttribute('class') || '', href: t.getAttribute('href') || t.getAttribute('data-href') || t.getAttribute('action') || null, component: comp ? comp.getAttribute('data-component') : null, rect: { x: Math.round(r.left + window.scrollX), y: Math.round(r.top + window.scrollY), w: Math.round(r.width), h: Math.round(r.height) }, path: path };
+  }
+  // 指针换到另一个最里层元素时悬停的层级重置；还在同一个元素上时保留按键走到的那一层
+  document.addEventListener('mousemove', function (e) {
+    if (mode !== 'inspect') return;
+    var t = targetOf(e);
+    if (t !== hov.anchor) { hov.anchor = t; hov.cur = t; }
+    highlight(hov.cur);
+  }, true);
+  document.addEventListener('click', function (e) {
+    if (mode !== 'inspect') return;
+    e.preventDefault(); e.stopPropagation();
+    var t = targetOf(e); if (!t) return;
+    // 点中的是悬停框所在的那层（按键往上走过就是祖先），锚点仍是指针下的最里层元素
+    var el = t === hov.anchor && hov.cur && hov.cur.isConnected ? hov.cur : t;
+    anchorQid = t.getAttribute('data-qid');
+    selectEl(el);
+  }, true);
+
+  // 设计系统落在 <head> 里的三样：token 变量块、字体链接、Tailwind 配置。Tailwind CDN 运行时追加的 <style> 排在它们之后，不参与比较
+  /** @param {HTMLHeadElement} h */
+  function headKey(h) {
+    var st = h.querySelector('style'); var ln = h.querySelector('link[href*="fonts.googleapis.com/css"]');
+    /** @type {Element | null} */
+    var cfg = null; h.querySelectorAll('script:not([src])').forEach(function (s) { if (!cfg && s.textContent.indexOf('tailwind.config') === 0) cfg = s; });
+    return (st ? st.textContent : '') + '|' + (ln ? ln.getAttribute('href') : '') + '|' + (cfg ? /** @type {Element} */ (cfg).textContent : '');
+  }
+  /** @param {MessageEvent} e */
+  function onMessage(e) {
+    var msg = /** @type {Incoming} */ (e.data || {});
+    if (msg.type === 'quilt:mode') { mode = msg.mode === 'inspect' ? 'inspect' : 'interact'; if (mode !== 'inspect') { highlight(null); setSelection(null); hov = { anchor: null, cur: null }; anchorQid = null; } setPierce(mode === 'inspect'); document.body.style.cursor = mode === 'inspect' ? 'crosshair' : ''; return; }
+    // 父页的选中状态是事实源：选中 / 清空都同步到常驻框
+    if (msg.type === 'quilt:highlight') { setSelection(msg.qid ? scope().querySelector('[data-qid="' + msg.qid + '"]') : null); return; }
+    // 热更新后重选：同一 qid 还在就回一份新值（检查器字段跟着刷）并把常驻框接回去，不在了让父页清空
+    if (msg.type === 'quilt:reselect') {
+      var el = scope().querySelector('[data-qid="' + msg.qid + '"]');
+      if (el) { if (mode === 'inspect') setSelection(el); send(selection(el, selAnchor(el))); } else send({ type: 'quilt:deselect', qid: msg.qid });
+      return;
+    }
+    // 逐级选（v1.00）：焦点在父页时的 Enter / Shift+Enter、检查器祖先路径的点选与悬停预览
+    if (msg.type === 'quilt:climb') { if (mode === 'inspect') climb(msg.dir === 'up' ? 'up' : 'down'); return; }
+    if (msg.type === 'quilt:pick') { var picked = byQid(msg.qid); if (picked && mode === 'inspect') selectEl(picked); return; }
+    if (msg.type === 'quilt:peek') { if (mode === 'inspect') highlight(byQid(msg.qid), true); return; }
+    if (msg.type === 'quilt:mark') { applyMarks(msg); return; }
+    if (msg.type === 'quilt:overlay') { if (swapping) queued.push({ html: msg.html, route: msg.route }); else openOverlay(msg.html, msg.route); return; }
+    if (msg.type === 'quilt:overlay-close') { closeOverlay(); return; }
+    if (msg.type !== 'quilt:swap') return;
+    var route = msg.route;
+    clearOverlays(); queued = []; swapping = true;
+    var doc = new DOMParser().parseFromString(msg.html, 'text/html');
+    // 跳转回到顶部；同一屏换新修订（热更新）留在原处
+    var y = msg.keepScroll ? window.scrollY : 0;
+    if (headKey(doc.head) !== headKey(document.head)) {
+      // 新修订的设计系统和当前文档不同（回刷改了色 / 圆角 / 字体）：只换 body 不够，整份重写。
+      // document.open 不换 window——__quiltState 与要恢复的滚动位置都留得住；先摘掉本份监听，否则重写后的新运行时与这一份会各收一次消息
+      window.removeEventListener('message', onMessage);
+      state.__scrollY = y;
+      document.open(); document.write(msg.html); document.close();
+      return;
+    }
+    var apply = function () {
+      document.title = doc.title;
+      document.body.replaceWith(doc.body);
+      runScripts(document.body);
+      box = null; selBox = null; selTag = null; selEl = null; marks = {}; if (mode === 'inspect') document.body.style.cursor = 'crosshair';
+      restoreForms(); icons(); window.scrollTo(0, y);
+      flushOverlays();
+    };
+    var done = function () { send({ type: 'quilt:swapped', route: route, title: document.title }); };
+    if (document.startViewTransition) document.startViewTransition(apply).finished.then(done, done);
+    else { apply(); done(); }
+  }
+  window.addEventListener('message', onMessage);
+  window.addEventListener('DOMContentLoaded', function () {
+    icons(); restoreForms();
+    if (state.__scrollY) { window.scrollTo(0, state.__scrollY); delete state.__scrollY; }
+    send({ type: 'quilt:ready', title: document.title });
+    flushOverlays();
+  });
+})();

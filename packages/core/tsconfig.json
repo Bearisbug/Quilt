@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "lib": ["ES2023", "DOM"] },
+  "compilerOptions": { "lib": ["ES2023", "DOM"], "allowJs": true },
   "include": ["src"]
 }

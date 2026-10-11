@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type Ref } from 'react';
 import { ChevronDown, ChevronUp, Copy, Pencil, RotateCcw } from 'lucide-react';
-import type { JobKind, MessageDto } from '@quilt/core';
+import type { JobKind, MessageDto } from '@quilt/core/browser';
 import { Wordmark } from '@/ui/BrandMark';
 import { Button, IconButton } from '@/ui/ui';
 import { useToast } from '@/lib/toast';

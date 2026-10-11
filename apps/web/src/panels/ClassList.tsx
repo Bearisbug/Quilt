@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { COLOR_CLASS_NAMES, type Tokens } from '@quilt/core';
+import { COLOR_CLASS_NAMES, type Tokens } from '@quilt/core/browser';
 import { Select } from '@/ui/Select';
 import { IconButton } from '@/ui/ui';
 import { explainClass, splitClasses, stepClass, withColorToken } from '@/lib/twClass';

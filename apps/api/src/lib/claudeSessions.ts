@@ -10,10 +10,14 @@ import type { AgentSessionDto } from '@quilt/core';
 // 登记处与线上协议都没有文档（官方只承认导给 hook 的 CLAUDE_CODE_MESSAGING_SOCKET 环境变量），所以：
 // 只认 peerProtocol=1 的记录；socket 探活去掉尸体；投递失败让作业直接失败并写明原因，不静默。
 type Registry = {
-  pid?: number; sessionId?: string; cwd?: string; kind?: string; peerProtocol?: number;
+  pid?: number; sessionId?: string; cwd?: string; kind?: string; peerProtocol?: number; version?: string;
   messagingSocketPath?: string; name?: string; nameSource?: string; status?: string; updatedAt?: number;
 };
 export type LiveSession = AgentSessionDto & { socketPath: string };
+
+// 用真实会话跑通过 TC-AGENT-010 的 Claude Code 版本（TEST.md §7 登记）。会话间协议没有文档、随版本变（2.1.287 起每个会话多一份 0600 的
+// .key），不在这里的版本照常列出、照常投递，下拉里标「此版本未验证」。人工跑通一个版本加一个
+const VERIFIED_CLAUDE_VERSIONS: ReadonlySet<string> = new Set();
 
 /** 250 ms 连接探活（与 Claude Code 自己去尸体的做法一致） */
 function alive(socketPath: string): Promise<boolean> {
@@ -42,6 +46,7 @@ export async function listSessions(): Promise<LiveSession[]> {
       tool: 'claude-code' as const, open: true, sessionId: rec.sessionId, name: rec.name ?? rec.sessionId, named: rec.nameSource === 'user', cwd: rec.cwd ?? '',
       status: rec.status === 'idle' || rec.status === 'busy' ? rec.status : 'unknown',
       updatedAt: new Date(rec.updatedAt ?? 0).toISOString(), socketPath: rec.messagingSocketPath,
+      ...(VERIFIED_CLAUDE_VERSIONS.has(rec.version ?? '') ? {} : { unverifiedVersion: rec.version ?? '' }),
     };
   }))).filter((x): x is LiveSession => !!x).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   cache = { at: Date.now(), items };

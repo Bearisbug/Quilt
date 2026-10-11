@@ -30,3 +30,18 @@ test('打包入口的静态 import 图没有环', async () => {
   for (const file of edges.keys()) visit(file, []);
   assert.deepEqual(cycles, []);
 });
+
+// 浏览器边界（PERF-3 v1.06）：前端只经 @quilt/core/browser 引 core；这个出口打出来的依赖里不许有 linkedom 一系与预览运行时 / prelude——
+// 它们只在服务端用，进了前端包要多解析几百 KB，也没人发现（v1.05 之前前端包里有 29 处 xmlMode）
+test('@quilt/core/browser 不带服务端才用的模块，前端只从它引 core', async () => {
+  const { metafile } = await build({
+    entryPoints: [path.join(root, 'packages/core/src/browser.ts')],
+    bundle: true, platform: 'browser', format: 'esm', write: false, metafile: true, logLevel: 'silent',
+  });
+  const banned = Object.keys(metafile.inputs).filter((f) => /linkedom|htmlparser2|css-select|cssom|\/runtime\.ts$|\/prelude\.ts$|\/inject\.ts$|\/lint\.ts$|\/outline\.ts$|\/components\.ts$|\/export\.ts$/.test(f));
+  assert.deepEqual(banned, [], `浏览器出口带进了：${banned.join(', ')}`);
+  // grep 没匹配时退出码是 1，这里只看输出
+  const { spawnSync } = await import('node:child_process');
+  const hits = spawnSync('grep', ['-rln', "from '@quilt/core'", path.join(root, 'apps/web/src')], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean);
+  assert.deepEqual(hits, [], '前端应从 @quilt/core/browser 引 core');
+});

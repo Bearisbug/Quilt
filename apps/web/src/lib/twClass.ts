@@ -1,4 +1,4 @@
-import { COLOR_CLASS_NAMES, type Tokens } from '@quilt/core';
+import { COLOR_CLASS_NAMES, type Tokens } from '@quilt/core/browser';
 
 // 检查器「类名」一行一个时的说明与换档（v0.96 PAGE-CANVAS「类名编辑」）。纯函数。
 // 取值按 Tailwind v3 默认（屏用的是 Play CDN v3）；prelude 只改写了颜色、圆角四档与字体，这两样按本项目设计系统取

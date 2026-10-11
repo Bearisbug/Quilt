@@ -47,6 +47,7 @@ Object.assign(process.env, {
   PREVIEW_PORT: previewPort,
   WEB_DIST: path.join(dist, 'web'),
   QUILT_MIGRATIONS_DIR: path.join(dist, 'drizzle'),
+  QUILT_VENDOR_DIR: path.join(dist, 'vendor'),
   QUILT_VERSION: JSON.parse(readFileSync(path.join(dist, 'version.json'), 'utf8')).version,
   QUILT_OPEN_BROWSER: argv.includes('--no-open') ? '0' : '1',
 });

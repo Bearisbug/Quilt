@@ -77,7 +77,7 @@ export function registerProjectTools(c: ToolCtx) {
     const project = await ownedProject(user.id, a.projectId as string);
     const runner = a.runner as Runner | undefined;
     if (!!a.variantOf !== !!a.variantName) throw problems.validation([{ path: 'variantName', message: 'variantOf and variantName go together' }]);
-    const { imageKeys } = await prep(project.id, runner, a.attachmentIds);
+    const { imageKeys } = await prep(project.id, a.attachmentIds);
     return runJob(project.id, {
       kind: 'generate',
       input: {
@@ -104,7 +104,7 @@ export function registerProjectTools(c: ToolCtx) {
     write();
     const project = await ownedProject(user.id, a.projectId as string);
     const runner = a.runner as Runner | undefined;
-    const { imageKeys } = await prep(project.id, runner, a.attachmentIds);
+    const { imageKeys } = await prep(project.id, a.attachmentIds);
     return runJob(project.id, {
       kind: 'edit_screens',
       input: { screenIds: a.screenIds as string[], prompt: a.prompt as string, versions: (a.versions as number | undefined) ?? 1, runner, imageKeys, componentIds: a.componentIds as string[] | undefined },

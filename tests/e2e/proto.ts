@@ -2,25 +2,15 @@ import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { launch, openApp, seed, seedJson, apiJson, EVIDENCE, WEB, API, eventually } from './lib.ts';
 import { connectMcp, callTool } from './mcp-client.ts';
+import { suite, expect, waitJob, needLiveLlm } from './harness.ts';
 
 // docs/TEST.md PROTO 域（TC-PROTO-001~006）AI 执行脚本。用法同 core.ts（RUN= / ONLY= / LIVE_LLM=0）。
-const RUN = process.env.RUN ?? '005';
-const LIVE_LLM = process.env.LIVE_LLM !== '0';
-const ONLY = process.env.ONLY?.split(',').map((s) => s.trim()).filter(Boolean);
 await mkdir(EVIDENCE, { recursive: true });
-const results: { tc: string; result: string; note: string }[] = [];
 let page: import('playwright').Page;
-const record = (tc: string, result: string, note = '') => { results.push({ tc, result, note }); console.log(`${result === '通过' ? '✅' : result === '失败' ? '❌' : '⏭'} ${tc} ${result} ${note}`); };
-const step = async (tc: string, fn: () => Promise<string | void>) => {
-  if (ONLY && !ONLY.includes(tc)) return;
-  try { const note = await fn(); record(tc, '通过', note ?? ''); await page.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}.png`) }).catch(() => {}); }
-  catch (e) { record(tc, '失败', (e as Error).message.split('\n')[0].slice(0, 300)); await page.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}-fail.png`) }).catch(() => {}); }
-};
-const expect = (cond: unknown, msg: string) => { if (!cond) throw new Error(msg); };
-const waitJob = async (jobId: string, maxSec = 180) => {
-  for (let i = 0; i < maxSec / 3; i++) { await new Promise((r) => setTimeout(r, 3000)); const { body } = await apiJson<{ job: { status: string; output: Record<string, unknown> } }>(`/v1/jobs/${jobId}`); if (['succeeded', 'failed', 'cancelled'].includes(body.job.status)) return body.job; }
-  throw new Error('job timeout');
-};
+const { RUN, step, summary } = suite('PROTO', {
+  page: () => page,
+  onTimeout: async () => { await page.close().catch(() => {}); page = await ctx.newPage(); await openApp(page); },
+});
 
 seed('seed');
 const browser = await launch();
@@ -108,7 +98,7 @@ await step('TC-PROTO-003', async () => {
 });
 
 await step('TC-PROTO-004', async () => {
-  if (!LIVE_LLM) throw new Error('LIVE_LLM=0');
+  needLiveLlm();
   await page.goto(`${WEB}/p/${mapProject}`);
   await page.locator('[data-testid="screen-card"] img').first().waitFor({ timeout: 15000 });
   const fl = await focus('/s1');
@@ -232,7 +222,7 @@ await step('TC-PROTO-008', async () => {
 });
 
 await step('TC-PROTO-009', async () => {
-  if (!LIVE_LLM) throw new Error('LIVE_LLM=0');
+  needLiveLlm();
   const r = seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', 'Repair', '--device', 'mobile', '--screens', '2', '--unlinked');
   await page.goto(`${WEB}/p/${r.projectId}`);
   await page.locator('[data-testid="screen-card"] img').first().waitFor({ timeout: 15000 });
@@ -431,5 +421,4 @@ await step('TC-PROTO-013', async () => {
 });
 
 await browser.close();
-console.log(`\n=== RUN-${RUN} PROTO ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));
-console.log(results.map((r) => `${r.tc} ${r.result} ${r.note}`).join('\n'));
+summary();

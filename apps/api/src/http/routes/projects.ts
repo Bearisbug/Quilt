@@ -9,9 +9,7 @@ import { createJob, listJobs } from '../../services/jobs.ts';
 import { createUpload, dtos as attachmentDtos, resolveForMessage, type StoredAttachment } from '../../services/attachments.ts';
 import { createAsset, deleteAsset, listAssets } from '../../services/assets.ts';
 import { applyPreset, createPreset, deletePreset, listPresets } from '../../services/presets.ts';
-import { driverSupportsVision } from '../../lib/llm.ts';
 import { listChannels } from '../../services/channels.ts';
-const ownedChannelOrThrow = async (userId: string, id: string) => { if (!(await listChannels(userId)).some((c) => c.id === id)) throw problems.notFound(); };
 // 聊天通道（REQ-CORE-023）：Agent SDK 只认 Claude——必须是 agent-sdk 通道；缺省取第一条已验证的，一条都没有就点名去设置页加
 const CHAT_CHANNEL_HINT = '聊天需要「本机 Claude 订阅」通道：去设置页添加并验证一条';
 async function chatRunner(userId: string, runner: Runner | undefined): Promise<Runner> {
@@ -127,12 +125,8 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
   if (editComponent && compTargets!.length !== 1) throw problems.validation([{ path: 'targetComponentIds', message: '一次只能改一个组件' }]);
   // 参考图（REQ-CORE-012）：先把 id 解析成真实存在的对象，取不到就判非法——
   // 用户看得见自己贴了图，静默丢掉比报错更糟
+  // 通道是否属于本人、带图时是否支持视觉由 createJob 统一查（CH-2）
   const attachments = await resolveForMessage(project.id, body.attachmentIds);
-  if (attachments.length && body.runner?.kind === 'model' && !driverSupportsVision(body.runner.driver)) {
-    throw problems.validation([{ path: 'runner', message: `「${body.runner.driver}」通道不支持参考图，换一个支持视觉的通道再发` }]);
-  }
-  // 账号自建通道（REQ-CORE-013）：只记 id 进作业，凭据在 worker 运行时解密；先确认它属于当前账号
-  if (body.runner?.kind === 'channel') await ownedChannelOrThrow(user.id, body.runner.channelId);
   // 聊天（REQ-CORE-023 v0.45）：不看目标——选中的屏只是上下文提示；通道必须是本机 Claude 订阅
   const runner = body.mode === 'chat' ? await chatRunner(user.id, body.runner) : body.runner;
   const imageKeys = attachments.length ? attachments.map((a) => a.key) : undefined;
@@ -198,10 +192,6 @@ projectRoutes.post('/v1/projects/:projectId/messages/:messageId/retry', async (c
   if (comps.length) await assertOwnComponents(project.id, comps);
   const requested = body.runner ?? prev.runner;
   const attachments = await resolveForMessage(project.id, (msg.attachments as StoredAttachment[]).map((a) => a.id));
-  if (attachments.length && requested?.kind === 'model' && !driverSupportsVision(requested.driver)) {
-    throw problems.validation([{ path: 'runner', message: `「${requested.driver}」通道不支持参考图，换一个支持视觉的通道再发` }]);
-  }
-  if (requested?.kind === 'channel') await ownedChannelOrThrow(user.id, requested.channelId);
   const runner = old.kind === 'chat' ? await chatRunner(user.id, requested) : requested;
   const input = { kind: old.kind, input: { ...prev, runner, imageKeys: attachments.length ? attachments.map((a) => a.key) : undefined } } as CreateJobInput;
   const [res, status] = await startRound(c, user, project.id, input, runner, { content: msg.content, attachments }, prev.screenIds ?? null);

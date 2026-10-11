@@ -15,7 +15,7 @@ import type { ToolCtx } from '../ctx.ts';
 
 // 作业：状态 / 列表 / 取消 / 事件（拉取式，不是 SSE）；其余四种作业的入口；通道目录；投递到本机会话的作业由会话自己收口
 export function registerJobTools(c: ToolCtx) {
-  const { server, user, wrap, read, write, checkRunner, prep, runJob, runnerInput, attachmentsInput } = c;
+  const { server, user, wrap, read, write, prep, runJob, runnerInput, attachmentsInput } = c;
 
   server.registerTool('quilt.get_job', {
     description: 'Job status/output (queued | running | succeeded | failed | cancelled).',
@@ -77,7 +77,7 @@ export function registerJobTools(c: ToolCtx) {
   }, wrap(async (a) => {
     write();
     const { screen, project } = await ownedScreen(user.id, a.screenId as string);
-    const runner = await checkRunner(a.runner as Runner | undefined);
+    const runner = a.runner as Runner | undefined;
     return runJob(project.id, { kind: 'regenerate_subtree', input: { screenId: screen.id, qid: a.qid as string, prompt: a.prompt as string, expectedRevisionId: a.expectedRevisionId as string, runner } });
   }));
 
@@ -89,7 +89,7 @@ export function registerJobTools(c: ToolCtx) {
     const { component, project } = await ownedComponent(user.id, a.componentId as string);
     const runner = a.runner as Runner | undefined;
     if (runner?.kind === 'agent') throw problems.validation([{ path: 'runner', message: '改组件请换一个模型通道，本机会话不接这类作业' }]);
-    const { imageKeys } = await prep(project.id, runner, a.attachmentIds);
+    const { imageKeys } = await prep(project.id, a.attachmentIds);
     return runJob(project.id, { kind: 'edit_component', input: { componentId: component.id, prompt: a.prompt as string, runner, imageKeys } });
   }));
 
@@ -99,7 +99,7 @@ export function registerJobTools(c: ToolCtx) {
   }, wrap(async (a) => {
     write();
     const project = await ownedProject(user.id, a.projectId as string);
-    const runner = await checkRunner(a.runner as Runner | undefined);
+    const runner = a.runner as Runner | undefined;
     return runJob(project.id, { kind: 'propose_design_system', input: { instruction: a.instruction as string, screenId: a.screenId as string | undefined, runner } });
   }));
 

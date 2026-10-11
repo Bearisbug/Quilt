@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { chromium, type Browser, type BrowserContext, type BrowserContextOptions, type Page, type Request } from 'playwright';
-import { withOverlayStyle, withPaletteDarkMode, withScreenCsp } from '@quilt/core';
+import { withOverlayStyle, withPaletteDarkMode, withScreenCsp, vendorFileFor } from '@quilt/core';
 import { config } from '../config.ts';
 
 // 服务端截图（ADR-002）：单浏览器实例复用，按屏开 page。
@@ -115,8 +115,13 @@ const within = <T>(work: Promise<T>, ms: number, step: string): Promise<T> => {
 // 不缓存的话每张都重下一遍（实测约 5 s，外网抖动时整张拍不成）。只存 https 上 200 的响应，跳转前的地址一并记上；没取到的不存，下次照常走网络
 const vendorCache = new Map<string, { body: Buffer; contentType?: string; cors?: string }>();
 const VENDOR_TYPES = new Set(['script', 'stylesheet', 'font']);
+// Tailwind Play 与 lucide 不走外网：直接用仓库里的副本应答（§17 v1.06），种子、测试与刚重启的进程第一张截图也不等外网
+const vendorCopies = new Map<string, Buffer>();
+const vendorCopy = (file: string) => { let b = vendorCopies.get(file); if (!b) { b = readFileSync(path.join(config.vendorDir, file)); vendorCopies.set(file, b); } return b; };
 async function useVendorCache(context: BrowserContext) {
   await context.route(/^https:/, (route) => {
+    const copy = vendorFileFor(route.request().url());
+    if (copy) return route.fulfill({ body: vendorCopy(copy), contentType: 'text/javascript; charset=utf-8', headers: { 'access-control-allow-origin': '*' } });
     const hit = vendorCache.get(route.request().url());
     return hit ? route.fulfill({ body: hit.body, contentType: hit.contentType, headers: hit.cors ? { 'access-control-allow-origin': hit.cors } : {} }) : route.continue();
   });

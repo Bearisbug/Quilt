@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { fontFamilySchema, fontUrlSchema, parseConventions, type FontSource, type AssetDto, type ScreenDto, type DesignSystemDto, type Tokens, type ProjectDto } from '@quilt/core';
+import { fontFamilySchema, fontUrlSchema, parseConventions, type FontSource, type AssetDto, type ScreenDto, type DesignSystemDto, type Tokens, type ProjectDto } from '@quilt/core/browser';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button, Input, Panel, Textarea } from '@/ui/ui';

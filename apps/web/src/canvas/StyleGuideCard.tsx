@@ -1,4 +1,4 @@
-import type { AssetDto, ColorMode, Palette, Tokens } from '@quilt/core';
+import type { AssetDto, ColorMode, Palette, Tokens } from '@quilt/core/browser';
 import { toneClass, toneColor, useAssetTone } from '@/lib/assetTone';
 
 export const STYLE_GUIDE_SIZE = { w: 420, h: 640 };

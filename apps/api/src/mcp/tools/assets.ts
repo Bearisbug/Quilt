@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { MAX_ASSET_BYTES } from '@quilt/core';
 import { Problem, problems } from '../../lib/errors.ts';
 import { listAssets, createAsset, deleteAsset } from '../../services/assets.ts';
 import type { ToolCtx } from '../ctx.ts';
@@ -24,6 +25,11 @@ export function registerAssetTools(c: ToolCtx) {
     write();
     const p = a.path as string;
     if (!path.isAbsolute(p)) throw problems.validation([{ path: 'path', message: 'path must be absolute' }]);
+    // 读之前先看它是什么（ADR-016 v1.06）：目录、设备（/dev/zero 会一直读到内存耗尽）、管道与超过上限的文件不打开
+    const st = await stat(p).catch(() => null);
+    if (!st) throw new Problem(404, '/errors/not-found', `file not found: ${p}`);
+    if (!st.isFile()) throw problems.validation([{ path: 'path', message: 'path is not a regular file' }]);
+    if (st.size > MAX_ASSET_BYTES) throw problems.validation([{ path: 'path', message: `file is larger than ${MAX_ASSET_BYTES / 1024 / 1024} MB` }]);
     let body: Buffer;
     try { body = await readFile(p); }
     catch { throw new Problem(404, '/errors/not-found', `file not found: ${p}`); }

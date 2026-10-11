@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { and, eq, ne, sql, isNull, inArray } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
@@ -22,15 +24,13 @@ import {
   type ProjectAsset,
   OVERLAY_SCREEN_NOTE, screenSystemPrompt, planSystemPrompt, planUserPrompt, planOneScreenSystemPrompt, planOneScreenUserPrompt, screenUserPrompt, editUserPrompt, editPatchUserPrompt, subtreeUserPrompt, linkRepairPrompt,
   proposeDesignSystemSystemPrompt, proposeDesignSystemUserPrompt, parseConventions, REFERENCE_IMAGE_NOTE, FONT_FAMILIES, RADIUS_SCALES, MAX_CONVENTIONS,
-  DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput, type JobKind, type Presentation, failureText,
+  VENDOR, inputOf, jobInputSchemas, DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput, type JobKind, type Presentation, failureText,
 } from '@quilt/core';
 
+// 导出件内联的 lucide 取仓库里与屏同版本的副本（§17 v1.06），不走外网
 let lucideCache: string | null = null;
 async function lucideJs(): Promise<string> {
-  if (lucideCache) return lucideCache;
-  const res = await fetch('https://unpkg.com/lucide@latest/dist/umd/lucide.min.js');
-  if (!res.ok) throw new JobFailure('system', `lucide fetch ${res.status}`);
-  lucideCache = await res.text();
+  lucideCache ??= await readFile(path.join(config.vendorDir, VENDOR[1].file), 'utf8');
   return lucideCache;
 }
 
@@ -221,7 +221,7 @@ async function uniqueRoute(projectId: string, route: string): Promise<string> {
 // 每张新屏 × versions 版并行出屏；versions>1 时落为候选、current 指向第 1 版。
 // 规划器声明了入口屏（entryFrom）就对它跑一次补链——反向连线。
 async function runGenerate(ctx: Ctx) {
-  const input = ctx.job.input as { prompt: string; count: number | 'auto'; versions: number; anchor?: { x: number; y: number }; route?: string; name?: string; fromScreenId?: string; imageKeys?: string[]; componentIds?: string[]; variantOf?: string; variantName?: string; presentation?: 'push' | 'overlay' };
+  const input = inputOf(ctx.job, 'generate');
   const versions = Math.max(1, input.versions ?? 1);
   const existingRows = await db.select().from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id)).orderBy(schema.screens.createdAt);
   const existing: RegistryEntry[] = existingRows.filter((s) => !s.variantOf).map((s) => ({ route: s.route, name: s.name, purpose: s.purpose || undefined }));
@@ -326,7 +326,7 @@ async function runGenerate(ctx: Ctx) {
 
 // 改（REQ-CORE-006）：目标屏当前 HTML + 本次指令 + 祖先链上的历史指令；versions>1 落为候选
 async function runEditScreens(ctx: Ctx) {
-  const input = ctx.job.input as { prompt: string; screenIds: string[]; versions?: number; componentIds?: string[] };
+  const input = inputOf(ctx.job, 'edit_screens');
   const versions = Math.max(1, input.versions ?? 1);
   const screens = await db.select().from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id));
   const targets = screens.filter((s) => input.screenIds.includes(s.id) && s.currentRevisionId);
@@ -368,7 +368,7 @@ async function runEditScreens(ctx: Ctx) {
 
 // 设计系统提炼（REQ-EDIT-003）：只产出提案，写入由用户在预览里确认
 async function runProposeDesignSystem(ctx: Ctx): Promise<DesignProposalDto> {
-  const input = ctx.job.input as { instruction: string; screenId?: string };
+  const input = inputOf(ctx.job, 'propose_design_system');
   const existing = parseConventions(ctx.ds.designMd);
   const sampleBody = input.screenId ? await currentBody(input.screenId) : null;
   const system = proposeDesignSystemSystemPrompt(FONT_FAMILIES);
@@ -393,7 +393,7 @@ async function runProposeDesignSystem(ctx: Ctx): Promise<DesignProposalDto> {
 
 // REQ-EDIT-002：子树重生成——只发选中元素（+ 这屏的历史指令，ADR-012 v0.87），整段替换，兄弟节点 qid 不变（ADR-007）
 async function runRegenerateSubtree(ctx: Ctx) {
-  const input = ctx.job.input as { screenId: string; qid: string; prompt: string; expectedRevisionId: string };
+  const input = inputOf(ctx.job, 'regenerate_subtree');
   const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, input.screenId));
   if (!screen?.currentRevisionId || screen.currentRevisionId !== input.expectedRevisionId) throw new JobFailure('validation', 'revision conflict');
   ctx.planned = 1;
@@ -426,7 +426,7 @@ async function runRegenerateSubtree(ctx: Ctx) {
 
 // REQ-EDIT-003：设计系统回刷——确定性：旧 body + 新 prelude，不调 LLM
 async function runApplyDesignSystem(ctx: Ctx) {
-  const input = ctx.job.input as { screenIds: 'all' | string[] };
+  const input = inputOf(ctx.job, 'apply_design_system');
   const screens = (await db.select().from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id))).filter((s) => input.screenIds === 'all' || input.screenIds.includes(s.id));
   await pool(screens, config.screenConcurrency, async (screen) => {
     if (!screen.currentRevisionId || ctx.signal.aborted) return;
@@ -443,7 +443,7 @@ async function runApplyDesignSystem(ctx: Ctx) {
 
 // 改共享组件（REQ-EDIT-006）：一次模型调用只产出组件的单根元素（上下文带这个组件此前改成功的指令，ADR-012 v0.87）→ 校验 → 升版落库 → 所有用它的屏确定性回刷（零 LLM）
 async function runEditComponent(ctx: Ctx): Promise<{ component: string; applied: number; skipped: string[] }> {
-  const input = ctx.job.input as { componentId: string; prompt: string };
+  const input = inputOf(ctx.job, 'edit_component');
   const [comp] = await db.select().from(schema.components).where(and(eq(schema.components.id, input.componentId), eq(schema.components.projectId, ctx.project.id)));
   if (!comp) throw new JobFailure('validation', 'component not found');
   const uses = await db.select({ name: schema.screens.name }).from(schema.componentUses).innerJoin(schema.screens, eq(schema.screens.id, schema.componentUses.screenId))
@@ -551,6 +551,13 @@ export async function runJob(jobId: string): Promise<void> {
   const [claimed] = await db.update(schema.generationJobs).set({ status: 'running', startedAt: new Date() })
     .where(and(eq(schema.generationJobs.id, jobId), eq(schema.generationJobs.status, 'queued'))).returning();
   if (!claimed) return;
+  // 领取时按种类再校验一遍输入（CH-2 v1.06）：库里的行可能来自旧版本或手工写入，形状不对就以 validation 失败收尾，不在流水线中途出错
+  const checked = jobInputSchemas[claimed.kind as keyof typeof jobInputSchemas]?.safeParse(claimed.input);
+  if (checked && !checked.success) {
+    const issue = checked.error.issues[0];
+    await failJob(jobId, 'validation', `作业输入不合法：${issue.path.join('.') || 'input'} ${issue.message}`, ['running']).catch((x) => console.error(`[job ${jobId}] fail`, x));
+    return;
+  }
   // 领取之后的任何异常（查项目、落库事务里的数据库错误）都走统一失败收尾（§16 v1.03），不让作业停在 running
   try { await runClaimed(claimed); }
   catch (e) {

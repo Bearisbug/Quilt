@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Check, Layers, RotateCw, X } from 'lucide-react';
-import type { CandidatesDto, ScreenDto } from '@quilt/core';
+import type { CandidatesDto, ScreenDto } from '@quilt/core/browser';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { IconButton } from '@/ui/ui';

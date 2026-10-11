@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { DEVICE_TYPES, PRESENTATIONS, type Presentation } from './device.ts';
 import { TOKEN_COLOR_KEYS } from './tokens.ts';
-import { COMPONENT_NAME_RE, MAX_COMPONENT_HTML_BYTES } from './components.ts';
+import { COMPONENT_NAME_RE, MAX_COMPONENT_HTML_BYTES } from './component-meta.ts';
 import { ROUND_PRESETS } from './contract.ts';
 
 // 契约 schema（§8 / §9 / §24）：服务端校验与前端类型的唯一出处。
@@ -100,6 +100,18 @@ export const jobInputSchemas = {
   chat: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).max(20).optional(), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional() }),
 } as const;
 
+// 作业输入按种类的类型（CH-2 v1.06）：读点用 inputOf(job, kind) 取，schema 加字段、改字段时 tsc 能指出每个读点
+export type JobInputOf<K extends keyof typeof jobInputSchemas> = z.output<(typeof jobInputSchemas)[K]>;
+// 不分种类读输入时的形状（前端按 kind 反推覆盖屏集、作业行文案）：每个字段取它在各种类里类型的并集，全部可选
+type JobInputUnion = { [K in keyof typeof jobInputSchemas]: JobInputOf<K> }[keyof typeof jobInputSchemas];
+// 有的种类输入带字符串索引签名（keyof 是整个 string），按具名字段取，不然具体字段名会被吞掉
+type KeysOf<T> = T extends unknown ? keyof { [K in keyof T as string extends K ? never : K]: T[K] } : never;
+type FieldOf<T, F extends PropertyKey> = T extends unknown ? (F extends keyof T ? T[F] : never) : never;
+export type AnyJobInput = { [F in KeysOf<JobInputUnion>]?: FieldOf<JobInputUnion, F> };
+export function inputOf<K extends keyof typeof jobInputSchemas>(job: { kind: string; input: unknown }, kind: K): JobInputOf<K> {
+  if (job.kind !== kind) throw new Error(`作业种类是 ${job.kind}，不是 ${kind}`);
+  return job.input as JobInputOf<K>;
+}
 export const createJobSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('generate'), input: jobInputSchemas.generate }),
   z.object({ kind: z.literal('edit_screens'), input: jobInputSchemas.edit_screens }),
@@ -207,6 +219,8 @@ export const elementOpSchema = z.discriminatedUnion('type', [
   // 脱离共享（REQ-EDIT-006）：唯一允许落在共享组件实例上的直改
   z.object({ type: z.literal('detach') }),
 ]);
+// 直改的一条操作（API-EDIT-001）：前端与服务端同一个类型，从 schema 推导
+export type ElementOp = z.infer<typeof elementOpSchema>;
 export const applyElementEditSchema = z.object({ ops: z.array(elementOpSchema).min(1).max(10), expectedRevisionId: z.uuid() });
 // 组件里的元素直改（v0.57 `REQ-EDIT-006`）：组件不是屏，没有修订，乐观并发用组件版本号。
 // detach 不收——「脱离共享」说的是把某一屏里的实例摘出来，对组件本体不成立。
@@ -408,8 +422,9 @@ export type JobDto = { id: string; projectId: string; kind: JobKind; status: Job
 export type ProjectEventDto = { type: 'screen_changed' | 'job_changed'; data: unknown; at: string };
 /** 本机会话（API-AGENT-010）：Claude Code 正在运行的会话，或 Codex 线程库里的用户线程（v0.68）。
  *  named=false：Claude Code 是派生名（目录 + 后缀，前端显示 UUID），Codex 是没起过名、name 取的是标题。
- *  open：Claude Code 恒为 true；Codex = 线程此刻在某个 Codex 窗口里打开着。app：Codex 线程开在哪（桌面版 / VS Code / 终端） */
-export type AgentSessionDto = { tool: AgentTool; sessionId: string; name: string; named: boolean; cwd: string; status: 'idle' | 'busy' | 'unknown'; open: boolean; app?: 'desktop' | 'vscode' | 'cli'; updatedAt: string };
+ *  open：Claude Code 恒为 true；Codex = 线程此刻在某个 Codex 窗口里打开着。app：Codex 线程开在哪（桌面版 / VS Code / 终端）。
+ *  unverifiedVersion（v1.06）：Claude Code 版本没用真实会话验证过投递时给出版本号（登记里没写版本时为空串），下拉标「此版本未验证」 */
+export type AgentSessionDto = { tool: AgentTool; sessionId: string; name: string; named: boolean; cwd: string; status: 'idle' | 'busy' | 'unknown'; open: boolean; app?: 'desktop' | 'vscode' | 'cli'; updatedAt: string; unverifiedVersion?: string };
 export type JobEventDto = { seq: number; type: JobEventType; data: unknown; at: string };
 export type MessageDto = { id: string; projectId: string; role: 'user' | 'assistant'; content: string; attachments: AttachmentDto[]; jobId: string | null; jobKind: JobKind | null; affectedScreenIds: string[]; createdAt: string };
 export type ProjectDto = { id: string; name: string; deviceType: (typeof DEVICE_TYPES)[number]; status: 'active' | 'archived'; brief: string; exemplarScreenId: string | null; createdAt: string; updatedAt: string };

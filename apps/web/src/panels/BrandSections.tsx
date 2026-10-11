@@ -1,6 +1,6 @@
 import { useRef, useState, type DragEvent } from 'react';
 import { Copy, Trash2, Upload } from 'lucide-react';
-import { ASSET_MEDIA_TYPES, TOKEN_COLOR_KEYS, kebab, MAX_ASSET_BYTES, type AssetDto, type ColorMode, type Palette, type TokenColorKey, type Tokens } from '@quilt/core';
+import { ASSET_MEDIA_TYPES, TOKEN_COLOR_KEYS, kebab, MAX_ASSET_BYTES, type AssetDto, type ColorMode, type Palette, type TokenColorKey, type Tokens } from '@quilt/core/browser';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button } from '@/ui/ui';

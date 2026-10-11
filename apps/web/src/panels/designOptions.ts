@@ -1,4 +1,4 @@
-import { FONT_FAMILIES, type FontSource } from '@quilt/core';
+import { FONT_FAMILIES, type FontSource } from '@quilt/core/browser';
 
 export const FONTS = FONT_FAMILIES;
 // 字体来源（v0.44）：族名是自由文本，两份候选只是输入框的 datalist 提示

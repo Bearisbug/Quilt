@@ -1,19 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Bot, Component, Crosshair, Download, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MessageSquarePlus, MousePointerClick, Palette, Plus, Search, Settings, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
-import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, failureText, missingPagePrompt, type ProjectDetailDto, type MessageDto, type JobDto, type JobEventDto, type ScreenDto, type ComponentDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core';
+import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, SCREEN_COUNT_OPTIONS, failureText, missingPagePrompt, type ProjectDetailDto, type MessageDto, type JobDto, type JobEventDto, type ScreenDto, type ComponentDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core/browser';
 import { api, ApiError, loadConfig, subscribeProjectEvents, type LiveState } from '@/lib/api';
 import { mergeMessages } from '@/lib/messages';
 import { useToast } from '@/lib/toast';
-import { Button } from '@/ui/ui';
+import { Button, Spinner } from '@/ui/ui';
 import { TopNav } from '@/project/TopNav';
 import { ProjectSwitcher } from '@/project/ProjectSwitcher';
-import { SettingsModal } from '@/settings/SettingsModal';
 import { CanvasView, type CanvasApi } from '@/canvas/CanvasView';
 import { ScreenFinder, type FinderPick } from '@/canvas/ScreenFinder';
 import { ScreensPanel } from '@/panels/ScreensPanel';
 import { CanvasToolbar, type Tool } from '@/canvas/CanvasToolbar';
-import { isSettingsSection, type SettingsSection } from '@/settings/SettingsModal';
+import { isSettingsSection, type SettingsSection } from '@/settings/sections';
 import { ChatDock } from '@/composer/ChatDock';
 import { Composer, type ComposerHandle } from '@/composer/Composer';
 import { useRunnerPrefs } from '@/composer/useRunnerPrefs';
@@ -23,13 +22,24 @@ import { ArrangeBar } from '@/canvas/ArrangeBar';
 import { usePositionDrafts, usePositionUndo } from '@/canvas/positions';
 import { useUndoStack } from '@/canvas/undo';
 import { coveredScreens, jobLabel, roundPreset, presetView, presetBody, type JobInput, type RoundPreset } from '@/canvas/jobs';
+import { reconcileJobs, settleJob, progressText } from '@/canvas/jobTracker';
 import { DeleteDialog, MissingDialog, NewComponentDialog, VariantDialog } from '@/canvas/dialogs';
 import { RevisionPanel } from '@/panels/RevisionPanel';
-import { DesignPanel } from '@/panels/DesignPanel';
-import { InspectorPanel, type ElementSel, type DirectEdit, type InspectorKeys } from '@/panels/InspectorPanel';
+import type { ElementSel, DirectEdit, InspectorKeys } from '@/panels/InspectorPanel';
 import { AnnotationPanel } from '@/panels/AnnotationPanel';
-import { ProposalDialog } from '@/panels/ProposalDialog';
 import { AgentJobsPanel } from '@/panels/AgentJobsPanel';
+
+// 低频的面板与弹层按需加载（PERF-3 v1.06）：首屏不解析它们。画布空闲两秒后预取，真用到时多半已在缓存里；
+// 面板槽位在载入期间占位成同一个框、居中转圈，载入后原地出现，不跳
+const loadSettings = () => import('@/settings/SettingsModal');
+const loadDesign = () => import('@/panels/DesignPanel');
+const loadInspector = () => import('@/panels/InspectorPanel');
+const loadProposal = () => import('@/panels/ProposalDialog');
+const SettingsModal = lazy(() => loadSettings().then((m) => ({ default: m.SettingsModal })));
+const DesignPanel = lazy(() => loadDesign().then((m) => ({ default: m.DesignPanel })));
+const InspectorPanel = lazy(() => loadInspector().then((m) => ({ default: m.InspectorPanel })));
+const ProposalDialog = lazy(() => loadProposal().then((m) => ({ default: m.ProposalDialog })));
+const PanelLoading = () => <div className="flex flex-1 items-center justify-center"><Spinner /></div>;
 
 type Panel = 'revisions' | 'design' | 'inspect' | 'annotate' | 'agent' | 'screens' | null;
 const MINIMAP_KEY = 'quilt:minimap';
@@ -168,15 +178,12 @@ export function CanvasPage() {
     }).catch(() => { if (seq === msgSeq.current) setMsgState((st) => (st === 'ok' ? st : 'error')); });
   }, [projectId]);
   // 进行中作业的终态由 SSE 事件宣告；refresh 负责与后端对账：先剔除已经结束的（事件流与刷新之间的竞态会丢终态），
-  // 再认领还没跟踪的（首次加载、MCP / 另一个标签页建的作业）。runner=agent 的作业由本机 agent 面板跟踪，不进这里（ADR-015）。
-  // finishedRef 记住已宣告终态的 jobId：早于终态发出、晚于终态返回的那次 GET 还会列着它，没有这道白名单会把死作业重新认领回来
-  // （行上带取消键的幽灵作业，且新订阅从 seq 0 重放会把 succeeded 再处理一次——导出作业等于二次下载）。
+  // 作业对账的三个集合（含义见 canvas/jobTracker.ts）：已列出过、已宣告终态、本页开始跟踪时的详情请求序号
   const activeJobsRef = useRef<JobDto[]>([]);
   activeJobsRef.current = activeJobs;
-  const finishedRef = useRef(new Set<string>());
-  const seenRef = useRef(new Set<string>());
-  // 本页建的作业开始跟踪时的详情请求序号（v0.88）：之后发出的详情请求里它不在进行中，就是已经结束了——对账靠它撤掉从没被哪次详情列出过的作业
-  const trackedAt = useRef(new Map<string, number>());
+  const finishedRef = useRef<ReadonlySet<string>>(new Set());
+  const seenRef = useRef<ReadonlySet<string>>(new Set());
+  const trackedAt = useRef<ReadonlyMap<string, number>>(new Map());
   // 每个作业开始跟踪那一刻的屏集合：generate 成功后用它从结果里挑出「这一轮新造的屏」
   const beforeRef = useRef(new Map<string, Set<string>>());
   // 刚写出去、服务端还没回声的坐标（拖动与排列）归本地，服务端跟上即出栈——见 positions.ts 的 usePositionDrafts
@@ -198,27 +205,19 @@ export function CanvasPage() {
       hasDetail.current = true;
       setLoadFailure(null);
       setDetail(drafts.reconcile(d));
-      const live = new Set(d.activeJobs.map((j) => j.id));
-      for (const id of live) seenRef.current.add(id);
-      // 只剔除服务端确认过（某次 GET 列出过）、或在这次 GET 发出之前就已跟踪的作业：比作业先发出的 GET 快照里没有它，
-      // 无条件剔除会让它的行闪一下又回来，重连的订阅还会从 seq 0 重放一遍。只认「列出过」不够（v0.88）：事件流假死时
-      // 本页建的作业从建到结束都没被哪次 GET 列出过，重连后的整体重取也撤不掉它，行一直挂着「排队中…」
-      const gone = activeJobsRef.current.filter((j) => !live.has(j.id) && (seenRef.current.has(j.id) || (trackedAt.current.get(j.id) ?? Infinity) < seq));
-      if (gone.length) {
-        const dead = new Set(gone.map((j) => j.id));
+      // 撤哪些、认领哪些由 canvas/jobTracker.ts 的 reconcileJobs 定（取舍与 v0.76 / v0.88 的反例写在那里），这里只执行
+      const r = reconcileJobs(activeJobsRef.current, { seen: seenRef.current, finished: finishedRef.current, trackedAt: trackedAt.current }, d.activeJobs, seq);
+      seenRef.current = r.seen; finishedRef.current = r.finished; trackedAt.current = r.trackedAt;
+      if (r.gone.length) {
+        const dead = new Set(r.gone);
         setActiveJobs((prev) => prev.filter((j) => !dead.has(j.id)));
         setProgress((m) => { const next = { ...m }; for (const id of dead) delete next[id]; return next; });
-        for (const id of dead) { seenRef.current.delete(id); trackedAt.current.delete(id); }
         refreshMessages();
       }
-      const tracked = new Set(activeJobsRef.current.map((j) => j.id));
-      const claim = d.activeJobs.filter((j) => j.runner !== 'agent' && !tracked.has(j.id) && !finishedRef.current.has(j.id));
-      if (claim.length) {
-        for (const j of claim) if (!beforeRef.current.has(j.id)) beforeRef.current.set(j.id, new Set(d.screens.map((x) => x.id)));
-        setActiveJobs((prev) => [...prev, ...claim.filter((j) => !prev.some((x) => x.id === j.id))]);
+      if (r.claim.length) {
+        for (const j of r.claim) if (!beforeRef.current.has(j.id)) beforeRef.current.set(j.id, new Set(d.screens.map((x) => x.id)));
+        setActiveJobs((prev) => [...prev, ...r.claim.filter((j) => !prev.some((x) => x.id === j.id))]);
       }
-      // 后端不再列出的作业不会再被认领，白名单到此为止——不让它随会话无声长大
-      for (const id of finishedRef.current) if (!live.has(id)) finishedRef.current.delete(id);
       return d;
     } catch (e) {
       if (seq !== detailSeq.current) return null;
@@ -295,14 +294,13 @@ export function CanvasPage() {
     const setP = (text: string) => setProgress((m) => ({ ...m, [job.id]: text }));
     // 聊天作业的进度是助手每次工具调用的一句话（REQ-CORE-023）
     // 改组件（REQ-EDIT-006）：模型回来后先确定性回刷用它的屏，再逐屏截图
-    if (e.type === 'progress') setP(d.stage === 'chat' && typeof d.step === 'string' ? d.step : d.stage === 'retry' ? `供应商波动，正在重试（第 ${d.attempt} 次）…` : d.stage === 'component_synced' ? `已同步 ${d.screens ?? 0} 屏，正在截图…` : d.stage === 'running' ? (job.kind === 'chat' ? '助手在想…' : job.kind === 'edit_component' ? '正在改组件…' : job.kind === 'export_prototype' ? '正在打包原型…' : job.kind === 'apply_design_system' ? '正在回刷屏幕…' : job.kind === 'propose_design_system' ? '正在提炼约定…' : job.kind === 'edit_screens' || job.kind === 'regenerate_subtree' ? '正在改屏…' : '正在规划屏幕…') : d.stage === 'exported' ? '打包完成' : '排队中…');
+    if (e.type === 'progress') setP(progressText(job.kind, d));
     if (e.type === 'screen_planned') { setP(`正在生成「${d.name}」…`); scheduleRefresh(); }
     if (e.type === 'screen_html_ready') { setP('正在截图…'); scheduleRefresh(); }
     if (e.type === 'screen_screenshot_ready') scheduleRefresh();
     if (e.type === 'succeeded' || e.type === 'failed' || e.type === 'cancelled') {
-      finishedRef.current.add(job.id);
-      seenRef.current.delete(job.id);
-      trackedAt.current.delete(job.id);
+      const settled = settleJob({ seen: seenRef.current, finished: finishedRef.current, trackedAt: trackedAt.current }, job.id);
+      seenRef.current = settled.seen; finishedRef.current = settled.finished; trackedAt.current = settled.trackedAt;
       const before = beforeRef.current.get(job.id) ?? new Set<string>();
       beforeRef.current.delete(job.id);
       setActiveJobs((prev) => prev.filter((j) => j.id !== job.id));
@@ -423,7 +421,7 @@ export function CanvasPage() {
   // 追加而不是替换：并行作业各自成行，且 job.input 里带着目标屏，冲突判定不必等下一次 refresh
   const trackJob = (job: JobDto) => {
     if (!beforeRef.current.has(job.id)) beforeRef.current.set(job.id, new Set(screensRef.current.map((s) => s.id)));
-    if (!trackedAt.current.has(job.id)) trackedAt.current.set(job.id, detailSeq.current);
+    if (!trackedAt.current.has(job.id)) trackedAt.current = new Map(trackedAt.current).set(job.id, detailSeq.current);
     setActiveJobs((prev) => (prev.some((j) => j.id === job.id) ? prev : [...prev, job]));
   };
   const startJob = async (body: unknown, fallback: string) => {
@@ -481,7 +479,9 @@ export function CanvasPage() {
     setSelectedComponentIds([]); setTargetComponentIds(compIds);
     setAnchor(job.kind === 'generate' ? input.anchor ?? null : null);
     setPreset(!r || baseGone ? null : r.kind === 'missing' && !alive(r.fromScreenId) ? { ...r, fromScreenId: undefined } : r);
-    if (input.count !== undefined) setCount(input.count);
+    // schema 里屏数是 number | 'auto'，输入框的档位更窄：不在档位里的旧值不还原
+    const count = SCREEN_COUNT_OPTIONS.find((o) => o === input.count);
+    if (count !== undefined) setCount(count);
     if (input.versions !== undefined) setVersions(input.versions);
     composerRef.current?.load({ text: restored && !baseGone ? restored.text : user.content, images: user.attachments.map((a) => ({ id: a.id, url: a.url })) });
     showComposer();
@@ -522,7 +522,7 @@ export function CanvasPage() {
   // 取消一个在跑作业：行上的取消键按 id 取消，Esc 取消最新那一个（按一次取消一个）。
   // 记进 finishedRef 防被迟到的 GET 重新认领；行的消失由 cancelled 事件（或下一次对账）宣告
   const cancelJob = async (id: string) => {
-    try { await api.jobs.cancel(id); finishedRef.current.add(id); }
+    try { await api.jobs.cancel(id); finishedRef.current = new Set([...finishedRef.current, id]); }
     catch (e) {
       // 连按两次会撞上「它已经结束了」，这不是失败，不必打扰用户
       if (e instanceof ApiError && e.type === '/errors/job-finished') return;
@@ -532,6 +532,8 @@ export function CanvasPage() {
   const cancelNewest = () => { const j = runningJobs[0]; if (j) void cancelJob(j.id); };
   // 画布撤销栈（⌘Z，undo.ts）：位置改动与检查器的直改共用。拖动落库、多选排列在 positions.ts 的 usePositionUndo，这里只接线
   const undoStack = useUndoStack(toast);
+  // 预取按需加载的面板与弹层（见文件顶部）
+  useEffect(() => { const t = setTimeout(() => { void loadSettings(); void loadDesign(); void loadInspector(); void loadProposal(); }, 2000); return () => clearTimeout(t); }, []);
   const { onMove, arrange } = usePositionUndo({ drafts, screensRef, components, setDetail, refresh, toast, pushStep: undoStack.push, undo: () => void undoStack.undo() });
   // 检查器直改的撤销（v0.95）：回溯到改前那一版，expectedRevisionId 是这次直改落下的修订——之后被别的写入改过就不撤，免得把后来的改动一起冲掉。
   // 回溯会新建一版（内容同改前那一版）：记下「改前那一版现在由哪一版接替」，连按 ⌘Z 时下一步按接替的那一版比，否则第二下必定判成冲突。
@@ -957,7 +959,7 @@ export function CanvasPage() {
       </div>
       {/* 多选排列条（REQ-CORE-018）：选中 ≥ 2 屏且没聚焦时出现在画布顶部中央；候选就地展开时让位。排版与键盘在 ArrangeBar，算位在 arrange.ts，落库在 positions.ts */}
       {selectedScreens.length >= 2 && !focusedId && !inspectArmed && !annotateArmed && !candidates && <ArrangeBar count={selectedScreens.length} yieldToPanel={!!panelBody} onArrange={(k) => void arrange(k, selectedScreens)} />}
-      {settingsSection && <SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} returnTo={settingsTool} onCatalog={applyCatalog} />}
+      {settingsSection && <Suspense fallback={null}><SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} returnTo={settingsTool} onCatalog={applyCatalog} /></Suspense>}
       <ChatDock boxRef={dockRef} messages={messages} progress={progress} status={jobStatus} collapsed={chatCollapsed} onToggle={() => { if (chatCollapsed) setUnseenFailures(0); toggleChat(); }} onRemember={rememberConvention}
         onRetry={(u) => void retryRound(u)} onEdit={(u) => void editRound(u)} runningJobIds={runningJobIds} retrying={retrying} followSeq={followSeq} failed={unseenFailures}
         // 项目不存在时消息自然也取不到：那不是「没加载出来」，也不是还没聊过的空项目，画布区已经说明了
@@ -979,8 +981,8 @@ export function CanvasPage() {
       />
       {/* 项目没到手时只留三个本机开关与设置可用，其余写明为什么用不了 */}
       <CanvasToolbar groups={ready ? tools : tools.map((g) => g.map((t) => (['composer', 'minimap', 'links', 'settings'].includes(t.id) ? t : { ...t, unavailable: pendingReason })))} />
-      {panelBody && <div key={panel} ref={panelRef} className="chrome slide-in-right absolute bottom-4 right-[var(--rail-w)] top-16 z-20 flex w-[var(--panel-w)] flex-col overflow-hidden rounded-xl">{panelBody}</div>}
-      {proposal && detail && <ProposalDialog proposal={proposal} ds={detail.designSystem} busyReason={busyReason} screenCount={screens.length} batches={Math.ceil(screens.length / MAX_TARGETS)} onWrite={writeProposal} onFinish={finishProposal} onClose={() => setProposal(null)} />}
+      {panelBody && <div key={panel} ref={panelRef} className="chrome slide-in-right absolute bottom-4 right-[var(--rail-w)] top-16 z-20 flex w-[var(--panel-w)] flex-col overflow-hidden rounded-xl"><Suspense fallback={<PanelLoading />}>{panelBody}</Suspense></div>}
+      {proposal && detail && <Suspense fallback={null}><ProposalDialog proposal={proposal} ds={detail.designSystem} busyReason={busyReason} screenCount={screens.length} batches={Math.ceil(screens.length / MAX_TARGETS)} onWrite={writeProposal} onFinish={finishProposal} onClose={() => setProposal(null)} /></Suspense>}
       {newComponentOpen && <NewComponentDialog onCreate={createComponent} onClose={() => setNewComponentOpen(false)} />}
       {finderOpen && detail && <ScreenFinder screens={screens} components={components} links={detail.links} busy={busyScreens} onPick={(pick) => { setFinderOpen(false); reveal(pick); }} onClose={() => setFinderOpen(false)} />}
       {variantFor && <VariantDialog base={variantFor} onCreate={createVariant} onClose={() => setVariantFor(null)} />}

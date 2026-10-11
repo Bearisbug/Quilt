@@ -1,4 +1,4 @@
-import type { LinkDto } from '@quilt/core';
+import type { LinkDto } from '@quilt/core/browser';
 
 // 页面地图连线（REQ-PROTO-002，v1.02 ADR-029）：画在视口里一块等大的 canvas 上，每次镜头变化按当前镜头重画。
 // 几何与 SVG 时一致：从卡片侧边纵向居中处（高于 240 的卡取上 240 的中点）出发的三次贝塞尔，双向互链上下错开 36，

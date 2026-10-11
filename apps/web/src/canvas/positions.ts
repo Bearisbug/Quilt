@@ -1,5 +1,5 @@
 import { useRef, type Dispatch, type SetStateAction } from 'react';
-import type { ProjectDetailDto, ComponentDto, ScreenDto } from '@quilt/core';
+import type { ProjectDetailDto, ComponentDto, ScreenDto } from '@quilt/core/browser';
 import { api } from '@/lib/api';
 import type { useToast } from '@/lib/toast';
 import { computeArrangement, type ArrangeKind } from './arrange';

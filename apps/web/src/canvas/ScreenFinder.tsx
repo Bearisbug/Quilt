@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ScreenDto, ComponentDto, LinkDto } from '@quilt/core';
+import type { ScreenDto, ComponentDto, LinkDto } from '@quilt/core/browser';
 import { Button, Input } from '@/ui/ui';
 import { Overlay, useModal } from '@/ui/modal';
 

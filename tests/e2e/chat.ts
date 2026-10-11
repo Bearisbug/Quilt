@@ -1,26 +1,18 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { launch, openApp, seed, seedJson, apiJson, EVIDENCE, WEB } from './lib.ts';
+import { suite, expect, waitJob, LIVE_LLM } from './harness.ts';
 
 // docs/TEST.md TC-CORE-039（聊天模式，REQ-CORE-023）AI 执行脚本。
 // 真实回合走「本机 Claude 订阅」通道（Agent SDK），要本机 claude 已登录；LIVE_LLM=0 只跑校验与串行守卫。
-const RUN = process.env.RUN ?? '092';
-const LIVE_LLM = process.env.LIVE_LLM !== '0';
 const CHAT_MODEL = process.env.CHAT_MODEL ?? 'claude-sonnet-5';
 await mkdir(EVIDENCE, { recursive: true });
-const results: { tc: string; result: string; note: string }[] = [];
 let page: import('playwright').Page;
-const record = (tc: string, result: string, note = '') => { results.push({ tc, result, note }); console.log(`${result === '通过' ? '✅' : result === '失败' ? '❌' : '⏭'} ${tc} ${result} ${note}`); };
-const step = async (tc: string, fn: () => Promise<string | void>) => {
-  try { const note = await fn(); record(tc, '通过', note ?? ''); await page.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}.png`) }).catch(() => {}); }
-  catch (e) { record(tc, '失败', (e as Error).message.split('\n')[0].slice(0, 300)); await page.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}-fail.png`) }).catch(() => {}); }
-};
-const expect = (cond: unknown, msg: string) => { if (!cond) throw new Error(msg); };
+const { RUN, step, summary } = suite('CHAT', {
+  page: () => page,
+  onTimeout: async () => { await page.close().catch(() => {}); page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }); await openApp(page); },
+});
 type Job = { id: string; kind: string; status: string; output: Record<string, unknown> | null };
-const waitJob = async (jobId: string, maxSec: number): Promise<Job> => {
-  for (let i = 0; i < maxSec / 3; i++) { await new Promise((r) => setTimeout(r, 3000)); const { body } = await apiJson<{ job: Job }>(`/v1/jobs/${jobId}`); if (['succeeded', 'failed', 'cancelled'].includes(body.job.status)) return body.job; }
-  throw new Error('job timeout');
-};
 type Detail = { screens: { id: string; name: string; route: string; currentRevisionId: string }[]; activeJobs: { id: string; kind: string }[] };
 const detail = (id: string) => apiJson<Detail>(`/v1/projects/${id}`).then((r) => r.body);
 type Message = { role: string; content: string; jobId: string | null; affectedScreenIds: string[] };
@@ -113,4 +105,4 @@ await step('TC-CORE-039', async () => {
 });
 
 await browser.close();
-console.log(JSON.stringify({ run: RUN, results }, null, 2));
+summary();

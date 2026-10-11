@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { parseConventions, type DesignSystemDto, type Tokens, type DesignProposalDto } from '@quilt/core';
+import { parseConventions, type DesignSystemDto, type Tokens, type DesignProposalDto } from '@quilt/core/browser';
 import { Button } from '@/ui/ui';
 import { Overlay, useModal } from '@/ui/modal';
 import { RADIUS } from './designOptions';

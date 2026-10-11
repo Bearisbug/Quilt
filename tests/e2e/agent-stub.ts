@@ -1,19 +1,22 @@
 import { mkdir, writeFile, rm } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import net from 'node:net';
 import path from 'node:path';
 import { connectMcp, callTool } from './mcp-client.ts';
 
-// 假会话（TC-AGENT-009）：模仿 Claude Code 的会话登记处（<pid>.json）+ inbox socket。API 以 QUILT_CLAUDE_SESSIONS_DIR 指向同一目录启动，
+// 假会话（TC-AGENT-009）：模仿 Claude Code 的会话登记处（<pid>.json + 0600 的 <pid>.<hex>.key，字段按 2.1.287 的登记格式）+ inbox socket。API 以 QUILT_CLAUDE_SESSIONS_DIR 指向同一目录启动，
 // 画布投递的提示词就会写到这里的 socket。收到后按指令里的关键字行动（环境对每个作业都一样，只能从提示词里区分）：
 //   HANG → 什么都不做（供取消 / 屏锁用例）；FAIL → 直接 quilt.finish_job failed；STALE → 用假基线回写 → 409 → finish_job failed 带错误；
 //   其余 → 按提示词里的 expectedRevisionId 回写后 finish_job succeeded
 export type FakeSession = { sessionId: string; name: string; received: string[]; close: () => Promise<void> };
-export async function startFakeSession(opts: { dir: string; name: string; nameSource: 'user' | 'derived'; status?: 'idle' | 'busy'; updatedAt?: number; mcpUrl?: string }): Promise<FakeSession> {
+export async function startFakeSession(opts: { dir: string; name: string; nameSource: 'user' | 'derived'; status?: 'idle' | 'busy'; updatedAt?: number; mcpUrl?: string; version?: string }): Promise<FakeSession> {
   await mkdir(opts.dir, { recursive: true });
   const sessionId = crypto.randomUUID();
   const pid = 100000 + Math.floor(Math.random() * 800000); // 假 pid，只作文件名
   const sock = path.join(opts.dir, `${pid}.sock`);
   const file = path.join(opts.dir, `${pid}.json`);
+  // Quilt 不读 key；放一份是为了登记目录与真实的一样（每个会话一个 .json 一个 .key）
+  const keyFile = path.join(opts.dir, `${pid}.${randomBytes(32).toString('hex')}.key`);
   const received: string[] = [];
   const log = (s: string) => console.log(`[fake-session ${opts.name}] ${s}`);
 
@@ -50,6 +53,11 @@ export async function startFakeSession(opts: { dir: string; name: string; nameSo
   });
   await new Promise<void>((r) => server.listen(sock, r));
   const now = opts.updatedAt ?? Date.now();
-  await writeFile(file, JSON.stringify({ pid, sessionId, cwd: process.cwd(), startedAt: now, version: '2.1.257', peerProtocol: 1, peerFeatures: [], kind: 'interactive', entrypoint: 'cli', messagingSocketPath: sock, name: opts.name, nameSource: opts.nameSource, status: opts.status ?? 'idle', updatedAt: now }));
-  return { sessionId, name: opts.name, received, close: async () => { await new Promise<void>((r) => server.close(() => r())); await rm(file, { force: true }); await rm(sock, { force: true }); } };
+  await writeFile(keyFile, randomBytes(54).toString('base64'), { mode: 0o600 });
+  await writeFile(file, JSON.stringify({
+    pid, sessionId, cwd: process.cwd(), startedAt: now, procStart: new Date(now).toString(), version: opts.version ?? '2.1.287', peerProtocol: 1,
+    peerFeatures: ['notify_idle', 'reply_across_default_dirs', 'artifact_yield'], kind: 'interactive', entrypoint: 'cli', pidDomain: process.platform,
+    messagingSocketPath: sock, name: opts.name, nameSource: opts.nameSource, nameSince: now, status: opts.status ?? 'idle', updatedAt: now, statusUpdatedAt: now,
+  }));
+  return { sessionId, name: opts.name, received, close: async () => { await new Promise<void>((r) => server.close(() => r())); await rm(file, { force: true }); await rm(keyFile, { force: true }); await rm(sock, { force: true }); } };
 }

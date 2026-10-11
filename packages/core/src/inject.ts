@@ -1,4 +1,5 @@
 import { parseHTML } from 'linkedom';
+import type { ElementOp } from './schemas.ts';
 
 // 服务端注入（ADR-001/007）：body 内每个元素打稳定 data-qid；拼 prelude 成完整文档。
 export function injectQids(bodyHtml: string): string {
@@ -59,9 +60,6 @@ export function replaceSubtree(bodyHtml: string, qid: string, newHtml: string): 
   target.replaceWith(...nodes);
   return { body: document.body.innerHTML, newQids };
 }
-
-// detach（REQ-EDIT-006）：把元素所在的共享组件实例脱离共享——摘掉实例根的 data-component，这一屏里的这份从此归屏自己管
-export type ElementOp = { type: 'text'; value: string } | { type: 'classes'; value: string } | { type: 'style'; value: string } | { type: 'link'; value: string | null } | { type: 'remove' } | { type: 'detach' };
 
 // 导航属性按元素类型落位：<a> 用 href、<form> 用 action、其他元素用 data-href（运行时三者同劫持）
 const navAttrOf = (el: Element): string => (el.tagName === 'A' ? 'href' : el.tagName === 'FORM' ? 'action' : 'data-href');

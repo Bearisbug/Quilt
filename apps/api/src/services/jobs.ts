@@ -8,9 +8,10 @@ import { InProcessQueue } from '../lib/queue.ts';
 import { toolAvailable } from '../lib/agentCli.ts';
 import { findSession } from '../lib/claudeSessions.ts';
 import { findCodexThread } from '../lib/codexSessions.ts';
-import { runnerCatalog } from './channels.ts';
+import { runnerCatalog, listChannels } from './channels.ts';
+import { driverSupportsVision } from '../lib/llm.ts';
 import { hasActiveJob } from './screens.ts';
-import { estimateJob, type CreateJobInput, type JobRunner } from '@quilt/core';
+import { estimateJob, createJobSchema, type CreateJobInput, type JobRunner, type Runner } from '@quilt/core';
 import type { UserRow } from './user.ts';
 import type { JobRow } from './projects.ts';
 
@@ -91,6 +92,18 @@ const jobByKey = async (projectId: string, key: string): Promise<JobRow | undefi
   (await db.select().from(schema.generationJobs).where(and(eq(schema.generationJobs.projectId, projectId), eq(schema.generationJobs.idempotencyKey, key))))[0];
 
 // 作业创建（状态机 [*]→queued）：幂等 → 目标存在 → 限流 → 目标屏占用 → 落库 → 入队（model）或投递到本机会话（agent）。
+// 建作业的入口校验（CH-2 v1.06）：POST /jobs、发消息、重试、MCP 四个入口共用这一份——输入按作业种类过 schema
+// （重试拼回去的旧输入也过）；账号自建通道要属于本人；带参考图时通道要支持视觉（REQ-CORE-012，不支持就说清楚，不静默丢图）
+async function assertInput(user: UserRow, input: CreateJobInput) {
+  const checked = createJobSchema.safeParse(input);
+  if (!checked.success) throw problems.validation(checked.error.issues.map((i) => ({ path: ['input', ...i.path].join('.'), message: i.message })));
+  const { runner, imageKeys } = input.input as { runner?: Runner; imageKeys?: string[] };
+  if (runner?.kind === 'channel' && !(await listChannels(user.id)).some((c) => c.id === runner.channelId)) throw problems.notFound();
+  if (imageKeys?.length && runner?.kind === 'model' && !driverSupportsVision(runner.driver)) {
+    throw problems.validation([{ path: 'runner', message: `「${runner.driver}」通道不支持参考图，换一个支持视觉的通道再发` }]);
+  }
+}
+
 export async function createJob(args: { user: UserRow; projectId: string; input: CreateJobInput; idempotencyKey: string | null; requestId: string; runner?: JobRunner; withMessage?: { content: string; attachments?: unknown[] } }): Promise<{ job: JobRow; userMessage?: typeof schema.messages.$inferSelect; assistantMessage?: typeof schema.messages.$inferSelect; reused: boolean }> {
   const { user, projectId, input, idempotencyKey } = args;
   const runner: JobRunner = args.runner ?? 'model';
@@ -98,6 +111,7 @@ export async function createJob(args: { user: UserRow; projectId: string; input:
     const existing = await jobByKey(projectId, idempotencyKey);
     if (existing) return { job: existing, reused: true };
   }
+  await assertInput(user, input);
   await assertTargets(projectId, input);
   const releaseRate = assertRate(user.id);
   // 没带通道的 LLM 作业（MCP 建的、辅助作业）用用户自己配的默认通道；一条都没有才回落到 .env 的驱动

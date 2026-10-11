@@ -1,17 +1,12 @@
 import { parseHTML } from 'linkedom';
 import { injectQids } from './inject.ts';
+import { MAX_COMPONENT_HTML_BYTES } from './component-meta.ts';
 
 // 共享组件（REQ-EDIT-006 / ADR-019）：项目级的一段 HTML，屏里只放一个占位根元素（data-component="Name"），
 // 每次写入屏时由这里确定性地展开成组件的正式 HTML——改组件一次，所有屏零 LLM 同步。
 // 展开发生在注入阶段（qid 之前 / 回刷时保 qid），lint、大纲、截图、导出、MCP 看到的都是展开后的 DOM。
 export type SharedComponent = { name: string; html: string; activeClass: string | null; inactiveClass: string | null };
-/** 进提示词的卡：名字 + 一行结构摘要 + 占位写法；html 只在「与本次相关」时给全 */
-export type SharedComponentCard = { name: string; summary: string; tag: string; slots: string[]; html?: string };
 
-export const MAX_COMPONENT_HTML_BYTES = 64 * 1024;
-export const MAX_COMPONENTS_PER_PROJECT = 30;
-// 名字会进 data-component 属性值与提示词，不收引号、尖括号与反斜杠
-export const COMPONENT_NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N} _-]{0,39}$/u;
 
 const parse = (html: string) => parseHTML(`<!doctype html><html><body>${html}</body></html>`).document;
 const tokens = (s: string | null | undefined) => (s ?? '').split(/\s+/).filter(Boolean);
@@ -35,11 +30,6 @@ export function componentSlots(html: string): string[] {
   return Array.from(new Set(Array.from(parse(html).body.querySelectorAll('[data-slot]')).map((el) => el.getAttribute('data-slot') ?? '').filter(Boolean)));
 }
 
-/** 屏里放这个组件的写法：占位根元素 + 槽位示例 */
-export function componentPlacement(name: string, tag: string, slots: string[]): string {
-  const inner = slots.map((s) => `<span data-slot="${s}">${s}</span>`).join('');
-  return `<${tag} data-component="${name}">${inner}</${tag}>`;
-}
 
 /** 一行结构摘要，确定性、零 LLM：根标签 + 链接 / 按钮 / 输入 / 槽位 */
 export function componentSummary(html: string): string {
@@ -241,17 +231,3 @@ export function replaceWithPlaceholder(bodyHtml: string, qid: string, name: stri
   return document.body.innerHTML;
 }
 
-/** 提示词里的共享组件段（ADR-012 稳定前缀的一节）：每个组件一张卡，相关的附完整 HTML */
-export function sharedComponentsSection(cards: SharedComponentCard[]): string {
-  if (!cards.length) return '';
-  const lines = cards.map((c) => `  - ${c.name} — ${c.summary} · place with: ${componentPlacement(c.name, c.tag, c.slots)}`).join('\n');
-  const full = cards.filter((c) => c.html);
-  const fullText = full.length
-    ? `\nFULL HTML of the shared components relevant to this request (layout reference only — still place them with the tag above, never paste this in):\n${full.map((c) => `--- ${c.name} ---\n${c.html}`).join('\n')}\n`
-    : '';
-  return `
-SHARED COMPONENTS (project-level building blocks — Quilt fills in their HTML wherever you place them, and the designer edits them in ONE place):
-${lines}
-- Use a shared component wherever its role appears on a screen (a mobile main screen's bottom navigation IS the shared TabBar when one exists — never write your own). Emit exactly the placement tag, empty except for slot content. Never re-implement, restyle or add children to a shared component inside a screen: to change how one looks, the designer edits the component itself.
-${fullText}`;
-}

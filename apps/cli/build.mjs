@@ -1,5 +1,5 @@
 // 打包（REQ-CORE-017 / ADR-010 v0.32）：把 apps/api + packages/core 捆成一个 ESM 文件，node_modules 全部外置（由本包的 dependencies 提供）；
-// 前端静态文件与迁移 SQL 一起复制进 dist。`playwright` 换成 `playwright-core`：不在 npm install 时下载浏览器，截图优先用本机 Chrome / Edge。
+// 前端静态文件、迁移 SQL 与屏文档引用的外网脚本副本（packages/core/vendor）一起复制进 dist。`playwright` 换成 `playwright-core`：不在 npm install 时下载浏览器，截图优先用本机 Chrome / Edge。
 import { build } from 'esbuild';
 import { cp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -31,6 +31,7 @@ await build({
   logLevel: 'info',
 });
 await cp(path.join(root, 'apps/api/drizzle'), path.join(dist, 'drizzle'), { recursive: true });
+await cp(path.join(root, 'packages/core/vendor'), path.join(dist, 'vendor'), { recursive: true });
 await cp(webDist, path.join(dist, 'web'), { recursive: true });
 await writeFile(path.join(dist, 'version.json'), JSON.stringify({ version: pkg.version }));
 console.log(`built quilt-canvas ${pkg.version} → ${dist}`);

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import type { JobDto, RunnerOptionDto } from '@quilt/core';
+import type { JobDto, RunnerOptionDto } from '@quilt/core/browser';
 import { api } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button, EmptyState, IconButton, Panel, Spinner } from '@/ui/ui';

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { variantPrompt, type ScreenDto, type ComponentDto } from '@quilt/core';
+import { variantPrompt, type ScreenDto, type ComponentDto } from '@quilt/core/browser';
 import { ApiError } from '@/lib/api';
 import { Button, Input, Textarea } from '@/ui/ui';
 import { Overlay, useModal } from '@/ui/modal';

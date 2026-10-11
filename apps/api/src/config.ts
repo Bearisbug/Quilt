@@ -25,6 +25,8 @@ export const config = {
   /** 留空 = 内置 PGlite（$dataDir/db）；设了 = 外部 Postgres（开发 docker / 将来 SaaS） */
   databaseUrl: process.env.DATABASE_URL ?? '',
   migrationsDir: process.env.QUILT_MIGRATIONS_DIR ?? path.resolve(import.meta.dirname, '../drizzle'),
+  // 屏文档引用的外网脚本的副本（§17 v1.06）：开发态在 packages/core/vendor，打包后复制进 dist/vendor
+  vendorDir: process.env.QUILT_VENDOR_DIR ?? path.resolve(import.meta.dirname, '../../../packages/core/vendor'),
   apiPort, previewPort,
   // 本地版只绑回环地址；MCP 免鉴权另靠 Host / Origin 来源校验（lib/origin.ts，§15 安全）
   bindHost: env('BIND_HOST', '127.0.0.1'),
@@ -71,7 +73,8 @@ export const config = {
     total: llmDriver === 'stub' && process.env.QUILT_JOB_TIMEOUT_TOTAL_MS ? Number(process.env.QUILT_JOB_TIMEOUT_TOTAL_MS) : 0,
     perCall: 60_000, perScreen: 5_000, outputCharsPerSec: 240, max: 30 * 60_000,
   },
-  rateLimitJobsPerMinute: 10,
+  // 测试栈可调（只在 stub 驱动下生效，TEST.md §3）：stub 作业几秒一个，e2e 一分钟内就能建满 10 个，原来只能干等窗口
+  rateLimitJobsPerMinute: llmDriver === 'stub' && process.env.QUILT_RATE_LIMIT_PER_MIN ? Number(process.env.QUILT_RATE_LIMIT_PER_MIN) : 10,
   maxScreensPerProject: 200,
   maxScreenHtmlBytes: 256 * 1024,
   previewTokenMinutes: 10,

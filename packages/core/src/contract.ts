@@ -1,7 +1,7 @@
 import { COLOR_CLASS_NAMES, NEUTRAL_PALETTE, tokensFromSeed, type Tokens } from './tokens.ts';
 import { EDIT_BLOCK } from './edits.ts';
 import { DEVICE_SIZE, type DeviceType, type Presentation } from './device.ts';
-import { componentPlacement, sharedComponentsSection, type SharedComponentCard } from './components.ts';
+import { componentPlacement, sharedComponentsSection, type SharedComponentCard } from './component-meta.ts';
 
 // 设计契约（ADR-005 / ADR-012）：每次生成都带，体积与屏幕数无关。组件配方来自设计系统 components。
 export type ComponentRecipe = { name: string; html: string; note?: string };

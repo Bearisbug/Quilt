@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Select } from 'radix-ui';
 import { Check, ChevronDown, Pencil, Plus, Trash2, X } from 'lucide-react';
-import type { ProjectDto } from '@quilt/core';
+import type { ProjectDto } from '@quilt/core/browser';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { CreateProjectDialog } from '@/project/CreateProjectDialog';

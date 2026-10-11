@@ -9,7 +9,6 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@lobehub/icons": "^5.18.0",
     "@quilt/core": "workspace:*",
     "@xyflow/system": "^0.0.82",
     "lucide-react": "^1.46.0",

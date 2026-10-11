@@ -267,7 +267,7 @@ async function reshoot(variantArg: string, channel: Channel, items: string[]) {
       const base = path.join(outDir, t);
       const shot = await shoot(browser, fs.readFileSync(`${base}.html`, 'utf8'), m.device, base);
       Object.assign(m, shot, { reshot: true });
-      console.log(`${vname}/${channel} ${t} reshot attempts=${shot.attempts} errors=${JSON.stringify(shot.errors)}${shot.unstyled ? ' STILL UNSTYLED' : ''}`);
+      console.log(`${vname}/${channel} ${t} reshot attempts=${shot.attempts} errors=${JSON.stringify(shot.errors)}${'unstyled' in shot && shot.unstyled ? ' STILL UNSTYLED' : ''}`);
     }
   } finally {
     await browser.close();

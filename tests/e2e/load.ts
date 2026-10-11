@@ -3,27 +3,16 @@ import path from 'node:path';
 import type { Page, Route, Request } from 'playwright';
 import { launch, seed, seedJson, apiJson, EVIDENCE, WEB, eventually, pickOption, selectedValue } from './lib.ts';
 import { startOpenAiStub } from './openai-stub.ts';
+import { suite, expect, sleep } from './harness.ts';
 
 // docs/TEST.md 画布加载与数据新鲜度（v0.76）用例 TC-CORE-050~056 的 AI 执行脚本：组件卡首帧、首次适配、适配视图下限、
 // 聚焦过渡与热更新基线、截图换图、项目事件流断线、加载失败与外壳常驻、切项目不串状态、对话记录一致性；
 // v0.83 的 TC-CORE-075~078：不存在的项目、窄视口 toast 与失败角标、骨架动画与截图取不到、路由错误页。
 // 全部走 stub：composer 发出的请求经路由把通道改成 stub（种子会按 .env 建一条真实 Gemini 通道并设为缺省）。
-const RUN = process.env.RUN ?? '001';
 await mkdir(EVIDENCE, { recursive: true });
-const results: { tc: string; result: string; note: string }[] = [];
-const ONLY = process.env.ONLY?.split(',').map((s) => s.trim()).filter(Boolean);
 let current: Page | null = null;
-const record = (tc: string, result: string, note = '') => { results.push({ tc, result, note }); console.log(`${result === '通过' ? '✅' : '❌'} ${tc} ${result} ${note}`); };
-// 用例里登记的收尾（桩通道与它占的端口）：成败都在这条用例结束时做
-const cleanups: (() => Promise<unknown>)[] = [];
-const step = async (tc: string, fn: () => Promise<string | void>) => {
-  if (ONLY && !ONLY.includes(tc)) return;
-  try { const note = await fn(); record(tc, '通过', note ?? ''); await current?.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}.png`) }).catch(() => {}); }
-  catch (e) { record(tc, '失败', (e as Error).message.split('\n')[0].slice(0, 400)); await current?.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}-fail.png`) }).catch(() => {}); }
-  finally { for (const c of cleanups.splice(0)) await c().catch(() => {}); }
-};
-const expect = (cond: unknown, msg: string) => { if (!cond) throw new Error(msg); };
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// 每条用例自己开页面（newPage）：单步超时时关掉卡住的那一页所在的上下文
+const { RUN, cleanups, step, summary } = suite('LOAD', { page: () => current ?? undefined, onTimeout: async () => { await current?.context().close(); } });
 const STUB = { kind: 'model', driver: 'stub', model: 'stub' };
 type Detail = { project: { id: string; name: string }; screens: { id: string; route: string; currentRevisionId: string; screenshotUrl: string | null; previewUrl: string | null }[] };
 const detail = (pid: string) => apiJson<Detail>(`/v1/projects/${pid}`).then((r) => r.body);
@@ -955,7 +944,6 @@ await step('TC-CORE-078', async () => {
   return '未知路径「没有这个页面」+ 回到最近的项目；/settings 取列表失败「没连上 Quilt 服务」+ 重试落到设置；画布页渲染异常「页面出错了」+ 重新加载';
 });
 
-console.log('\n| 用例 | 结果 | 备注 |\n| --- | --- | --- |');
-for (const r of results) console.log(`| ${r.tc} | ${r.result} | ${r.note} |`);
+const counts = summary();
 await browser.close();
-process.exit(results.some((r) => r.result === '失败') ? 1 : 0);
+process.exit(counts['失败'] ? 1 : 0);

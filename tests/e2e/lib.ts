@@ -11,6 +11,16 @@ export const EVIDENCE = path.join(ROOT, 'docs/test-runs');
 // 预览域的 host（含端口）：从被测 API 的 /v1/config 取，隔离栈（3200 / 3201）上跑也对得上；取不到时回落到开发默认 3101
 export const previewHost = async (): Promise<string> => { try { const c = (await (await fetch(`${API}/v1/config`)).json()) as { previewOrigin?: string }; return c.previewOrigin ? new URL(c.previewOrigin).host : 'preview.localhost:3101'; } catch { return 'preview.localhost:3101'; } };
 
+// 取本机 *.localhost（预览域）上的地址：改连 127.0.0.1、Host 头保留原名。系统解析器在开着 fake-ip 代理的机器上
+// 会把 preview.localhost 解析到 198.18.x，直接 fetch 连不上（RUN-239，TC-CORE-035）
+export function localFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const u = new URL(url);
+  if (!u.hostname.endsWith('.localhost')) return fetch(url, init);
+  const host = u.host;
+  u.hostname = '127.0.0.1';
+  return fetch(u, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), Host: host } });
+}
+
 // 种子脚本：走 apps/api 的 pnpm scripts，返回最后一行输出
 export function seed(script: string, ...args: string[]): string {
   // `pnpm seed` 会删光当前库里的全部项目（本地版只有一个用户，种子数据就是全量重置）。

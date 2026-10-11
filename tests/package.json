@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --import tsx --test \"unit/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json",
     "e2e:smoke": "tsx e2e/smoke.ts",
     "e2e:core": "tsx e2e/core.ts",
     "e2e:proto": "tsx e2e/proto.ts",
@@ -19,8 +20,10 @@
     "mcp:call": "tsx e2e/mcp-call.ts"
   },
   "devDependencies": {
-    "@quilt/core": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@quilt/core": "workspace:*",
+    "@types/node": "^26.5.0",
+    "happy-dom": "^20.14.6",
     "playwright": "^1.63.0",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",

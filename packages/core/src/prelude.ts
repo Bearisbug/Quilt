@@ -6,6 +6,18 @@ import { RUNTIME_JS } from './runtime.ts';
 // 暗色配色在 <head> 里给 <html> 加 dark 类。Play CDN 默认按系统偏好，亮色项目在暗色系统里开交互态会命中 dark:，截图浏览器却命中不到
 const DARK_CLASS_SCRIPT = '<script data-quilt-dark>document.documentElement.classList.add("dark")</script>';
 
+// 屏文档引用的两个外网脚本钉死版本（§17 v1.06）：仓库里存同版本的副本（packages/core/vendor），预览域与截图用副本、不走外网；
+// 修订 HTML 里仍写外网地址，导出件与屏单独打开时照样能用。match 也认存量修订里没钉版本的写法（cdn.tailwindcss.com、lucide@latest）
+export const VENDOR = [
+  { url: 'https://cdn.tailwindcss.com/3.4.17', file: 'tailwind-play-3.4.17.js', match: /^https:\/\/cdn\.tailwindcss\.com(?:\/[\w.-]*)?\/?$/ },
+  { url: 'https://unpkg.com/lucide@1.55.0/dist/umd/lucide.min.js', file: 'lucide-1.55.0.min.js', match: /^https:\/\/unpkg\.com\/lucide@[\w.-]+\/dist\/umd\/lucide\.min\.js$/ },
+] as const;
+export const vendorFileFor = (url: string): string | null => VENDOR.find((v) => v.match.test(url))?.file ?? null;
+// 预览域下发：修订里这两个 <script src> 换成预览域自己的 /vendor/<file>；屏自己引的别的库不动
+export function withLocalVendor(html: string): string {
+  return html.replace(/<script src="(https:\/\/[^"]+)"><\/script>/g, (tag, url: string) => { const file = vendorFileFor(url); return file ? `<script src="/vendor/${file}"></script>` : tag; });
+}
+
 // 每版 HTML 的 <head> 由服务端拼装（ADR-005）：token CSS 变量 + Tailwind 映射 + 内联运行时。模型不生成这部分。
 export function buildPrelude(tokens: Tokens): string {
   const colorVars = colorVarsCss(tokens.colors);
@@ -17,19 +29,19 @@ export function buildPrelude(tokens: Tokens): string {
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     ...(font.link ? [font.link] : []),
-    '<script src="https://cdn.tailwindcss.com"></script>',
+    `<script src="${VENDOR[0].url}"></script>`,
     `<script>tailwind.config={darkMode:'class',theme:{extend:{colors:{${twColors}},borderRadius:{${twRadius}},fontFamily:{sans:${JSON.stringify(font.families)}}}}}</script>`,
     ...(isDarkPalette(tokens.colors) ? [DARK_CLASS_SCRIPT] : []),
     `<style>:root{${colorVars};${radiusVars}}html,body{margin:0;min-height:100%;background:var(--color-background);color:var(--color-on-background);font-family:${font.stack};-webkit-font-smoothing:antialiased}::view-transition-old(root),::view-transition-new(root){animation-duration:220ms}</style>`,
-    '<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>',
+    `<script src="${VENDOR[1].url}"></script>`,
     `<script data-quilt-runtime>${RUNTIME_JS}</script>`,
   ].join('\n');
 }
 
 // 屏文档的 CSP（§15 / ADR-004）：预览域下发（响应头，另加 frame-ancestors）与截图渲染（<meta>，见 withScreenCsp）共用这一份。
-// https: 放行 prelude 的 Tailwind / lucide CDN 与屏自带的开源库（REQ-CORE-022）。form-action 不继承 default-src，不写就等于放行——
+// https: 放行 prelude 的 Tailwind / lucide CDN 与屏自带的开源库（REQ-CORE-022），'self' 放行预览域自己下发的 /vendor 副本（v1.06）。form-action 不继承 default-src，不写就等于放行——
 // 屏里的脚本 form.submit() 一个 text/plain 表单就能往本机 API 发写请求（submit() 不触发 submit 事件，运行时拦不到）
-export const SCREEN_CSP = "default-src 'none'; style-src 'unsafe-inline' https:; script-src 'unsafe-inline' 'unsafe-eval' https:; img-src * data: blob:; font-src https: data:; connect-src https:; form-action 'none'; base-uri 'none'";
+export const SCREEN_CSP = "default-src 'none'; style-src 'unsafe-inline' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; img-src * data: blob:; font-src https: data:; connect-src https:; form-action 'none'; base-uri 'none'";
 
 // 截图浏览器用 page.setContent 渲染，没有响应头可带：CSP 以 <meta> 插在 doctype 之后、一切内容之前，屏的脚本全在它之后解析
 export function withScreenCsp(html: string): string {

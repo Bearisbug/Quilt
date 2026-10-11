@@ -1,20 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Tabs } from 'radix-ui';
 import { Cable, Gauge, X } from 'lucide-react';
-import type { RunnerOptionDto, UsageDto } from '@quilt/core';
+import type { RunnerOptionDto, UsageDto } from '@quilt/core/browser';
 import { api } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button, IconButton, Spinner } from '@/ui/ui';
 import { ChannelManager } from '@/settings/ChannelManager';
 import { Overlay, useModal } from '@/ui/modal';
+import { SETTINGS_SECTIONS, type SettingsSection } from '@/settings/sections';
 
 // 设置弹层（§13 导航 v0.29 / v0.32 本地版两节）：左栏分节、右栏只放当前节。分节即视图标识（INT-020）——进 URL 的 ?settings=<id>，由画布页读写。
-export const SETTINGS_SECTIONS = [
-  { id: 'usage', label: '本月用量', icon: Gauge },
-  { id: 'runners', label: '生成通道', icon: Cable },
-] as const;
-export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['id'];
-export const isSettingsSection = (v: string | null): v is SettingsSection => SETTINGS_SECTIONS.some((s) => s.id === v);
+// 分节表在 sections.ts：画布页要在首屏判断 URL，而本弹层按需加载
+const SECTION_ICONS = { usage: Gauge, runners: Cable } as const;
 
 const DRIVER_LABEL: Record<string, string> = { 'agent-sdk': '本机 Claude 订阅', codex: '本机 Codex 订阅', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI 兼容', stub: '桩' };
 const fmt = (n: number) => n.toLocaleString();
@@ -42,12 +39,12 @@ export function SettingsModal({ section, onSection, onClose, returnTo, onCatalog
           <div className="flex w-48 shrink-0 flex-col border-r border-line p-3">
             <h2 id="settings-title" className="px-2.5 pb-3 pt-1.5 text-base font-semibold">设置</h2>
             <Tabs.List aria-label="设置分节" className="scroll-nav flex min-h-0 flex-1 flex-col gap-0.5">
-              {SETTINGS_SECTIONS.map(({ id, label, icon: Icon }) => (
+              {SETTINGS_SECTIONS.map(({ id, label }) => { const Icon = SECTION_ICONS[id]; return (
                 <Tabs.Trigger key={id} value={id} data-testid={`settings-tab-${id}`}
                   className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-muted transition-colors duration-[var(--duration-fast)] hover:bg-panel-2 hover:text-fg data-[state=active]:bg-panel-2 data-[state=active]:font-medium data-[state=active]:text-fg focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-[-2px]">
                   <Icon size={15} aria-hidden="true" className="shrink-0" /><span className="truncate">{label}</span>
                 </Tabs.Trigger>
-              ))}
+              ); })}
             </Tabs.List>
           </div>
           <div className="scroll min-w-0 flex-1 p-6 pr-14">

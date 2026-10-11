@@ -11,3 +11,4 @@ docs/test-runs/
 /brand/
 spike-m0/
 .DS_Store
+.e2e/

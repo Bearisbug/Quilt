@@ -39,8 +39,10 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: numb
   }, [hover, t.id, t.kind, onDismiss]);
   // 只有错误与带动作的接指针（悬停暂停、可点）；普通信息条不挡底下画布的点击
   const closable = t.kind === 'error' || !!t.action;
+  // 悬停开始用 onMouseOver，不能用 onMouseEnter：指针原先所在的元素被移除时（点了「删除元素」，按钮随检查器清空消失），Chrome 只补发
+  // mouseover、不发 mouseout，React 的 onMouseEnter 是按 mouseout 合成的，于是一直不触发，提示条在指针下照常到点消失（TC-EDIT-034）
   return (
-    <div data-testid="toast" data-kind={t.kind} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+    <div data-testid="toast" data-kind={t.kind} onMouseOver={() => setHover(true)} onMouseLeave={() => setHover(false)}
       className={`fade-up ${closable ? 'pointer-events-auto' : ''} flex max-w-[28rem] items-start gap-2 rounded-md border bg-panel px-3.5 py-2 text-sm leading-relaxed text-fg [overflow-wrap:anywhere] shadow-lg ${t.kind === 'error' ? 'border-danger' : 'border-line'}`}>
       <span className="min-w-0 flex-1">{t.text}</span>
       {t.action && (

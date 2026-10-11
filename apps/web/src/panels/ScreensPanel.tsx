@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { ScreenDto, LinkDto } from '@quilt/core';
+import type { ScreenDto, LinkDto } from '@quilt/core/browser';
 import { Button, EmptyState, Panel } from '@/ui/ui';
 import { screenBadges } from '@/canvas/ScreenFinder';
 

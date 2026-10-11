@@ -1,24 +1,16 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { launch, openApp, seed, seedJson, apiJson, EVIDENCE, WEB, eventually } from './lib.ts';
+import { suite, expect, waitJob, LIVE_LLM } from './harness.ts';
 
 // docs/TEST.md TC-EDIT-012（共享组件，REQ-EDIT-006）AI 执行脚本。步骤 8 要真实 LLM；LIVE_LLM=0 只跑 1～7。
-const RUN = process.env.RUN ?? '093';
-const LIVE_LLM = process.env.LIVE_LLM !== '0';
 await mkdir(EVIDENCE, { recursive: true });
-const results: { tc: string; result: string; note: string }[] = [];
 let page: import('playwright').Page;
-const record = (tc: string, result: string, note = '') => { results.push({ tc, result, note }); console.log(`${result === '通过' ? '✅' : result === '失败' ? '❌' : '⏭'} ${tc} ${result} ${note}`); };
-const step = async (tc: string, fn: () => Promise<string | void>) => {
-  try { const note = await fn(); record(tc, '通过', note ?? ''); await page.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}.png`) }).catch(() => {}); }
-  catch (e) { record(tc, '失败', (e as Error).message.split('\n')[0].slice(0, 300)); await page.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}-fail.png`) }).catch(() => {}); }
-};
-const expect = (cond: unknown, msg: string) => { if (!cond) throw new Error(msg); };
+const { RUN, step, summary } = suite('COMPONENTS', {
+  page: () => page,
+  onTimeout: async () => { await page.close().catch(() => {}); page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }); await openApp(page); },
+});
 type Job = { id: string; kind: string; status: string; input: Record<string, unknown>; output: Record<string, unknown> | null };
-const waitJob = async (jobId: string, maxSec: number): Promise<Job> => {
-  for (let i = 0; i < maxSec / 3; i++) { await new Promise((r) => setTimeout(r, 3000)); const { body } = await apiJson<{ job: Job }>(`/v1/jobs/${jobId}`); if (['succeeded', 'failed', 'cancelled'].includes(body.job.status)) return body.job; }
-  throw new Error('job timeout');
-};
 type Comp = { id: string; name: string; version: number; nav: boolean; summary: string; usedBy: string[] };
 type Detail = { screens: { id: string; route: string; currentRevisionId: string }[]; components: Comp[] };
 const detail = (id: string) => apiJson<Detail>(`/v1/projects/${id}`).then((r) => r.body);
@@ -200,4 +192,4 @@ await step('TC-EDIT-012', async () => {
 });
 
 await browser.close();
-console.log(JSON.stringify({ run: RUN, results }, null, 2));
+summary();

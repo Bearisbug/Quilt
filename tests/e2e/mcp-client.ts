@@ -20,3 +20,6 @@ export async function callTool(client: Client, name: string, args: Record<string
   try { json = JSON.parse(text); } catch { /* plain text */ }
   return { text, json, isError: !!r.isError, image };
 }
+
+// 资源正文：readResource 的 contents 每项是 text 或 blob 之一，取第一项的文字（没有就空串）
+export const resourceText = (r: { contents: ({ text: string } | { blob: string })[] }): string => { const c = r.contents[0]; return c && 'text' in c ? c.text : ''; };

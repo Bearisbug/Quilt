@@ -2,25 +2,15 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { NEUTRAL_PALETTE, tokensFromSeed } from '@quilt/core';
 import { launch, openApp, seed, seedJson, apiJson, EVIDENCE, WEB, pickOption, selectedValue, eventually } from './lib.ts';
+import { suite, expect, softly, waitJob, needLiveLlm, restartApi } from './harness.ts';
 
 // docs/TEST.md EDIT 域（TC-EDIT-001~006）AI 执行脚本。
-const RUN = process.env.RUN ?? '006';
-const LIVE_LLM = process.env.LIVE_LLM !== '0';
-const ONLY = process.env.ONLY?.split(',').map((s) => s.trim()).filter(Boolean);
 await mkdir(EVIDENCE, { recursive: true });
-const results: { tc: string; result: string; note: string }[] = [];
 let page: import('playwright').Page;
-const record = (tc: string, result: string, note = '') => { results.push({ tc, result, note }); console.log(`${result === '通过' ? '✅' : result === '失败' ? '❌' : '⏭'} ${tc} ${result} ${note}`); };
-const step = async (tc: string, fn: () => Promise<string | void>) => {
-  if (ONLY && !ONLY.includes(tc)) return;
-  try { const note = await fn(); record(tc, '通过', note ?? ''); await page.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}.png`) }).catch(() => {}); }
-  catch (e) { record(tc, '失败', (e as Error).message.split('\n')[0].slice(0, 300)); await page.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}-fail.png`) }).catch(() => {}); }
-};
-const expect = (cond: unknown, msg: string) => { if (!cond) throw new Error(msg); };
-const waitJob = async (jobId: string, maxSec = 180) => {
-  for (let i = 0; i < maxSec / 3; i++) { await new Promise((r) => setTimeout(r, 3000)); const { body } = await apiJson<{ job: { status: string; output: Record<string, unknown> } }>(`/v1/jobs/${jobId}`); if (['succeeded', 'failed', 'cancelled'].includes(body.job.status)) return body.job; }
-  throw new Error('job timeout');
-};
+const { RUN, step, summary } = suite('EDIT', {
+  page: () => page,
+  onTimeout: async () => { await page.close().catch(() => {}); page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }); await openApp(page); },
+});
 type Detail = { screens: { id: string; route: string; currentRevisionId: string; screenshotUrl: string | null }[]; designSystem: { version: number; seedColor: string; tokens: { colors: Record<string, string> } } };
 const detail = (id: string) => apiJson<Detail>(`/v1/projects/${id}`).then((r) => r.body);
 const revisionHtml = async (screenId: string, revId: string) => { const r = await apiJson<{ revision: { htmlUrl: string; sourceKind: string; screenshotUrl: string | null } }>(`/v1/screens/${screenId}/revisions/${revId}`); return { ...r.body.revision, html: await (await fetch(r.body.revision.htmlUrl)).text() }; };
@@ -105,18 +95,19 @@ await step('TC-EDIT-002', async () => {
   const html = (await revisionHtml(editScreen, cur)).html;
   const qid = qidOf(html, 'id="toggle"')!;
   const revsBefore = (await apiJson<{ items: unknown[] }>(`/v1/screens/${editScreen}/revisions`)).body.items.length;
-  const bad = await apiJson<{ type: string; violations: { rule: string }[] }>(`/v1/screens/${editScreen}/elements/${qid}`, { method: 'POST', body: JSON.stringify({ ops: [{ type: 'style', value: 'color:#ff0000' }], expectedRevisionId: cur }) });
-  // v0.43：偏离不再阻断写入，改为断言修订照样落地、偏离被记下来
+  // ADR-005 v0.43：偏离设计契约不阻断写入——直改照样落修订，违规记进这一版的 lintReport，画布逐屏提示
+  const bad = await apiJson<{ revision: { id: string; lintReport: { violations: { rule: string }[] } } }>(`/v1/screens/${editScreen}/elements/${qid}`, { method: 'POST', body: JSON.stringify({ ops: [{ type: 'style', value: 'color:#ff0000' }], expectedRevisionId: cur }) });
   expect(bad.status === 201, `直改应照常落修订，返回 ${bad.status}`);
-  expect(bad.body.violations.some((v) => v.rule === 'no-raw-hex' || v.rule === 'no-inline-style'), 'violations 未指出裸色值/内联样式');
-  expect((await apiJson<{ items: unknown[] }>(`/v1/screens/${editScreen}/revisions`)).body.items.length === revsBefore, '违规仍产生了修订');
-  const ok = await apiJson<{ revision: { id: string } }>(`/v1/screens/${editScreen}/elements/${qid}`, { method: 'POST', body: JSON.stringify({ ops: [{ type: 'classes', value: 'inline-flex items-center justify-center h-12 px-6 rounded-full bg-secondary-container text-on-secondary-container font-semibold' }], expectedRevisionId: cur }) });
+  expect(bad.body.revision.lintReport.violations.some((v) => v.rule === 'no-raw-hex' || v.rule === 'no-inline-style'), `lintReport 没指出裸色值 / 内联样式：${JSON.stringify(bad.body.revision.lintReport).slice(0, 160)}`);
+  expect((await apiJson<{ items: unknown[] }>(`/v1/screens/${editScreen}/revisions`)).body.items.length === revsBefore + 1, '偏离契约的直改应多出一条修订');
+  const ok = await apiJson<{ revision: { id: string } }>(`/v1/screens/${editScreen}/elements/${qid}`, { method: 'POST', body: JSON.stringify({ ops: [{ type: 'classes', value: 'inline-flex items-center justify-center h-12 px-6 rounded-full bg-secondary-container text-on-secondary-container font-semibold' }], expectedRevisionId: bad.body.revision.id }) });
   expect(ok.status === 201, `token 类改动返回 ${ok.status} ${JSON.stringify(ok.body)}`);
+  return '偏离契约的直改照样落修订、lintReport 记下违规；token 类改动 201';
 });
 
 let subProject = ''; let subScreen = '';
 await step('TC-EDIT-003', async () => {
-  if (!LIVE_LLM) throw new Error('LIVE_LLM=0');
+  needLiveLlm();
   const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Subtree', '--device', 'mobile', '--screens', '1');
   subProject = r.projectId; subScreen = r.screens[0].id;
   const d = await detail(subProject);
@@ -244,12 +235,12 @@ await step('TC-EDIT-006', async () => {
   await page.goto(`${WEB}/p/${dsProject}?panel=design`);
   await page.locator('#ds-font').waitFor();
   seedJson('seed:design-system', '--project', dsProject, '--bump');
-  await pickOption(page, '#ds-font', 'Manrope');
+  await page.locator('#ds-font').fill('Manrope');
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByText('设计系统已被更新').waitFor({ timeout: 10000 });
   await page.reload();
   await page.locator('#ds-font').waitFor();
-  await pickOption(page, '#ds-font', 'Manrope');
+  await page.locator('#ds-font').fill('Manrope');
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByText('设计系统已保存').waitFor({ timeout: 10000 });
   const d = await detail(dsProject);
@@ -300,7 +291,7 @@ await step('TC-EDIT-007', async () => {
 
 // TC-EDIT-008 元素批注：攒一批再一起发（REQ-EDIT-004）
 await step('TC-EDIT-008', async () => {
-  if (!LIVE_LLM) throw new Error('LIVE_LLM=0');
+  needLiveLlm();
   const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Anno', '--device', 'mobile', '--screens', '1');
   const s1 = r.screens[0].id;
   await page.goto(`${WEB}/p/${r.projectId}`);
@@ -569,15 +560,6 @@ await step('TC-EDIT-011', async () => {
 
 // ---- v0.78 共用（TC-EDIT-013 / 014）----
 // 软断言：缺陷相关的检查不在第一处就停，整条跑完一并报（修复前一轮就能看到每一步的现象）；前置条件仍用 expect 硬停
-const softly = () => {
-  const errs: string[] = [];
-  const line = (e: unknown) => (e as Error).message.split('\n')[0].slice(0, 160);
-  return {
-    check: async (f: () => unknown) => { try { await f(); } catch (e) { errs.push(line(e)); } },
-    fail: (e: unknown) => { errs.push(`中断：${line(e)}`); },
-    done: () => { if (!errs.length) return; console.log(`   明细：\n   - ${errs.join('\n   - ')}`); throw new Error(`${errs.length} 处不符：${errs.join(' ｜ ')}`); },
-  };
-};
 const blurActive = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 const STUB_RUNNER = { kind: 'model', driver: 'stub', model: 'stub' };
 
@@ -904,7 +886,7 @@ await step('TC-EDIT-022', async () => {
     const r = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ kind: 'apply_design_system', input: { screenIds: 'all' } }) });
     expect(r.status === 202, `回刷 ${r.status}`);
     const t0 = Date.now();
-    let job: { status: string; output: Record<string, unknown> };
+    let job: Awaited<ReturnType<typeof waitJob>>;
     try { job = await waitJob(r.body.job.id, 120); }
     catch { throw new Error(`回刷作业 120 s 仍是 ${(await apiJson<{ job: { status: string } }>(`/v1/jobs/${r.body.job.id}`)).body.job.status}（截图卡住时跟着挂住）`); }
     const took = Math.round((Date.now() - t0) / 1000);
@@ -927,23 +909,14 @@ await step('TC-EDIT-022', async () => {
 // TC-EDIT-023 回刷超时收口（§11 超时）：超时基数用 QUILT_JOB_TIMEOUT_BASE_MS 改到 1 s、SCREEN_CONCURRENCY=1 重启 API，回刷两张截图要 ~20 s 的屏：
 // 超时 = 1 s + 2 × 5 s = 11 s，第一屏落修订、第二屏没轮到被跳过，作业 failed(timeout)。要 QUILT_E2E_RESTART（§3），跑完按原环境重启
 await step('TC-EDIT-023', async () => {
-  const RESTART = process.env.QUILT_E2E_RESTART;
-  expect(RESTART, '环境：未设 QUILT_E2E_RESTART（重启被测 API 的命令，§3）');
   const http = await import('node:http');
-  const { spawn } = await import('node:child_process');
-  const restart = (extra: Record<string, string>) => new Promise<void>((resolve, reject) => {
-    const env: Record<string, string | undefined> = { ...process.env, ...extra };
-    for (const k of ['QUILT_JOB_TIMEOUT_BASE_MS', 'SCREEN_CONCURRENCY']) if (!(k in extra)) delete env[k];
-    const p = spawn('sh', ['-c', RESTART!], { stdio: 'ignore', env });
-    p.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`重启命令退出码 ${code}`))));
-  });
   // 一张永远等不到的图：截图等 networkidle 等满 15 s、视口内图片再等 4 s，一张 ~20 s
   const hold = http.createServer(() => { /* 不回 */ });
   await new Promise<void>((r) => hold.listen(3987, '127.0.0.1', () => r()));
   const SLOW = (title: string) => `<div class="min-h-dvh bg-background p-6"><h1 class="text-xl">${title}</h1><img src="http://127.0.0.1:3987/hang.png" width="8" height="8" alt=""></div>`;
   let pid = '';
   try {
-    await restart({ QUILT_JOB_TIMEOUT_BASE_MS: '1000', SCREEN_CONCURRENCY: '1' });
+    await restartApi({ QUILT_JOB_TIMEOUT_BASE_MS: '1000', SCREEN_CONCURRENCY: '1' });
     pid = seedJson<{ projectId: string }>('seed:project', '--name', 'Timeout', '--device', 'mobile', '--screens', '1', '--no-shot').projectId;
     const [a, b] = await mcpScreens(pid, [{ name: 'Slow A', route: '/slow-a', html: SLOW('Slow A') }, { name: 'Slow B', route: '/slow-b', html: SLOW('Slow B') }]);
     const cur = async (sid: string) => (await revs082(sid))[0]?.id;
@@ -965,7 +938,7 @@ await step('TC-EDIT-023', async () => {
   } finally {
     if (pid) await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});
     hold.closeAllConnections(); hold.close();
-    await restart({});
+    await restartApi({});
   }
 });
 
@@ -1181,7 +1154,9 @@ await step('TC-EDIT-027', async () => {
   S.done();
   return '输出到上限的半截不落修订、当前版不变；回执说输出超限并建议拆开发；不重试';
 });
-if (hist) { await hist.stub.close(); await apiJson(`/v1/channels/${hist.channelId}`, { method: 'DELETE' }).catch(() => {}); }
+// hist 在 step 的回调里赋值，控制流分析看不到，这里按声明的类型取
+const h0 = hist as History | null;
+if (h0) { await h0.stub.close(); await apiJson(`/v1/channels/${h0.channelId}`, { method: 'DELETE' }).catch(() => {}); }
 
 // TC-EDIT-028 改元素之后截图及时换上（§17 Chromium 一行，v0.93）：截图浏览器在进程内缓存外网 CDN 的脚本、样式与字体，第二张起不再等外网；
 // 视口内的图一直等不到时按 4 s 软上限照常出图，不撞「载入到拍完」30 s 的上限
@@ -1625,21 +1600,12 @@ await step('TC-EDIT-032', async () => {
 // TC-EDIT-033 计划的修订全部落库后被时限中止，按成功收尾（§11 v1.03 GEN-3）：用 QUILT_JOB_TIMEOUT_TOTAL_MS 把时限定死在 5 s 重启 API，
 // 对一张截图要 ~20 s 的慢屏重生成一块（桩模型立刻回）：修订 1 s 内落库、5 s 时截图还没拍完。作业应 succeeded、current 已前移。要 QUILT_E2E_RESTART
 await step('TC-EDIT-033', async () => {
-  const RESTART = process.env.QUILT_E2E_RESTART;
-  expect(RESTART, '环境：未设 QUILT_E2E_RESTART（重启被测 API 的命令，§3）');
   const http = await import('node:http');
-  const { spawn } = await import('node:child_process');
-  const restart = (extra: Record<string, string>) => new Promise<void>((resolve, reject) => {
-    const env: Record<string, string | undefined> = { ...process.env, ...extra };
-    for (const k of ['QUILT_JOB_TIMEOUT_BASE_MS', 'QUILT_JOB_TIMEOUT_TOTAL_MS', 'SCREEN_CONCURRENCY']) if (!(k in extra)) delete env[k];
-    const p = spawn('sh', ['-c', RESTART!], { stdio: 'ignore', env });
-    p.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`重启命令退出码 ${code}`))));
-  });
   const hold = http.createServer(() => { /* 不回 */ });
   await new Promise<void>((r) => hold.listen(3987, '127.0.0.1', () => r()));
   let pid = '';
   try {
-    await restart({ QUILT_JOB_TIMEOUT_TOTAL_MS: '5000' });
+    await restartApi({ QUILT_JOB_TIMEOUT_TOTAL_MS: '5000' });
     pid = seedJson<{ projectId: string }>('seed:project', '--name', 'Landed', '--device', 'mobile', '--screens', '1', '--no-shot').projectId;
     const [sid] = await mcpScreens(pid, [{ name: 'Slow', route: '/slow', html: '<div class="min-h-dvh bg-background p-6"><h1 class="text-xl">Slow</h1><img src="http://127.0.0.1:3987/hang.png" width="8" height="8" alt=""></div>' }]);
     const rev0 = (await revs082(sid))[0]!.id;
@@ -1656,7 +1622,7 @@ await step('TC-EDIT-033', async () => {
   } finally {
     if (pid) await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});
     hold.closeAllConnections(); hold.close();
-    await restart({});
+    await restartApi({});
   }
 });
 
@@ -1860,5 +1826,4 @@ await step('TC-EDIT-036', async () => {
 });
 
 await browser.close();
-console.log(`\n=== RUN-${RUN} EDIT ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));
-console.log(results.map((r) => `${r.tc} ${r.result} ${r.note}`).join('\n'));
+summary();

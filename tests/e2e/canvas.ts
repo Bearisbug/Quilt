@@ -3,26 +3,17 @@ import path from 'node:path';
 import type { BrowserContext, Page } from 'playwright';
 import { launch, seed, seedJson, apiJson, EVIDENCE, WEB, eventually } from './lib.ts';
 import { connectMcp, callTool } from './mcp-client.ts';
+import { suite, expect, sleep } from './harness.ts';
 
 // docs/TEST.md 画布交互与键盘（v0.80）用例 TC-CORE-057~059 的 AI 执行脚本：Esc 由近及远、卡片标签与选中描边、
 // 空格平移、框选与 iframe、交互态组件卡的捏合与滚轮、小地图拖框、⌘A、工具栏几何、卡片键盘可达、iframe 里的 ⌥ 快捷键、减少动态效果。
 // 每一步各开一个新页面、各自记结果：修复前的复现轮要看到每条缺陷各自失败，不被前一步挡住。全程不调模型。
-const RUN = process.env.RUN ?? '001';
 await mkdir(EVIDENCE, { recursive: true });
-const results: { tc: string; result: string; note: string }[] = [];
-const ONLY = process.env.ONLY?.split(',').map((s) => s.trim()).filter(Boolean);
 let current: Page | null = null;
 let ctx: BrowserContext | null = null;
-const record = (tc: string, result: string, note = '') => { results.push({ tc, result, note }); console.log(`${result === '通过' ? '✅' : '❌'} ${tc} ${result} ${note}`); };
-const step = async (tc: string, n: string, fn: () => Promise<string | void>) => {
-  if (ONLY && !ONLY.includes(tc)) return;
-  const name = `${tc} 第 ${n} 步`;
-  const file = `run-${RUN}-${tc.toLowerCase()}-${n}`;
-  try { const note = await fn(); record(name, '通过', note ?? ''); await current?.screenshot({ path: path.join(EVIDENCE, `${file}.png`) }).catch(() => {}); }
-  catch (e) { record(name, '失败', (e as Error).message.split('\n')[0].slice(0, 400)); await current?.screenshot({ path: path.join(EVIDENCE, `${file}-fail.png`) }).catch(() => {}); }
-};
-const expect = (cond: unknown, msg: string) => { if (!cond) throw new Error(msg); };
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// 每一步自己开页面；单步超时时关掉卡住的那一页所在的上下文
+const { RUN, step: stepOf, summary } = suite('CANVAS', { page: () => current ?? undefined, onTimeout: async () => { await current?.context().close(); } });
+const step = (tc: string, n: string, fn: () => Promise<string | void>) => stepOf(tc, fn, { key: `${tc} 第 ${n} 步` });
 type View = { x: number; y: number; zoom: number };
 const seedProject = (name: string, ...args: string[]) => seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', name, ...args);
 const addComponent = async (pid: string, name: string, html: string, x: number, y: number) => {
@@ -661,8 +652,7 @@ await step('TC-CORE-079', '3', async () => {
   return `重取详情前后框都是 ${fmtFrame(after)}`;
 });
 
-await ctx?.close().catch(() => {});
-console.log('\n| 用例 | 结果 | 备注 |\n| --- | --- | --- |');
-for (const r of results) console.log(`| ${r.tc} | ${r.result} | ${r.note} |`);
+await (ctx as BrowserContext | null)?.close().catch(() => {});
+const counts = summary();
 await browser.close();
-process.exit(results.some((r) => r.result === '失败') ? 1 : 0);
+process.exit(counts['失败'] ? 1 : 0);

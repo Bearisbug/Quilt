@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { RevisionDto, ScreenDto } from '@quilt/core';
+import type { RevisionDto, ScreenDto } from '@quilt/core/browser';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button, EmptyState, Panel, Spinner } from '@/ui/ui';

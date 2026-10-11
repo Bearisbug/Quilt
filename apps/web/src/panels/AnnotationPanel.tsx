@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ScreenDto, AnnotationDto } from '@quilt/core';
+import type { ScreenDto, AnnotationDto } from '@quilt/core/browser';
 import { Button, EmptyState, Panel } from '@/ui/ui';
 import { ConfirmDialog } from '@/ui/modal';
 import type { ElementSel } from './InspectorPanel';

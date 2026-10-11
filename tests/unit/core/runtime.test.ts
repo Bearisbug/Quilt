@@ -1,0 +1,107 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import { Window, type HTMLElement as HappyElement } from 'happy-dom';
+import { RUNTIME_JS, previewMessageSchema, isPreviewMessage, type ParentToPreview } from '@quilt/core';
+
+// 预览运行时（packages/core/src/preview-runtime.js，v1.06）：在 happy-dom 里真跑一遍，运行时发给父页的每条消息都要过 previewMessageSchema——
+// 字段名拼错、漏字段在这里就失败，不必等 e2e 里「点了没反应」
+
+test('runtime.ts 由 preview-runtime.js 生成且是最新的', () => {
+  const r = spawnSync('node', [path.resolve(import.meta.dirname, '../../../packages/core/scripts/gen-runtime.mjs'), '--check'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+});
+
+// head 里先放一块 token 样式（同真实 prelude）：换屏按它判断设计系统变没变，没有它运行时自己加的滚动条样式会被当成设计系统，每次都整份重写
+const HEAD = '<style>:root{--color-primary:59 91 219}</style>';
+type KeyInit = ConstructorParameters<Window['KeyboardEvent']>[1];
+type WheelInit = ConstructorParameters<Window['WheelEvent']>[1] & { clientX?: number; clientY?: number; ctrlKey?: boolean };
+function preview(body: string, opts: { component?: boolean } = {}) {
+  const win = new Window({ url: 'http://preview.localhost/p/x', settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true } });
+  const sent: unknown[] = [];
+  // 消息对象出自 happy-dom 的 VM，原型链与本进程的不是同一个，deepStrictEqual 会判不等：按结构化克隆的样子转一遍再记
+  Object.defineProperty(win, 'parent', { configurable: true, value: { postMessage: (m: unknown) => sent.push(JSON.parse(JSON.stringify(m))) } });
+  win.document.head.innerHTML = HEAD;
+  win.document.body.innerHTML = body;
+  if (opts.component) (win as unknown as { __quiltComponent: boolean }).__quiltComponent = true;
+  (win as unknown as { eval: (s: string) => void }).eval(RUNTIME_JS);
+  win.dispatchEvent(new win.Event('DOMContentLoaded'));
+  const $ = (sel: string) => win.document.querySelector(sel) as HappyElement;
+  const post = (data: ParentToPreview) => win.dispatchEvent(new win.MessageEvent('message', { data }));
+  const key = (init: KeyInit, target = win.document.body) => target.dispatchEvent(new win.KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+  // happy-dom 的 WheelEvent 不带 MouseEvent 的 clientX / clientY / ctrlKey，补上
+  const wheel = (init: WheelInit, target = win.document.body) => {
+    const ev = new win.WheelEvent('wheel', { bubbles: true, cancelable: true, ...init });
+    Object.defineProperties(ev, { clientX: { value: init.clientX ?? 0 }, clientY: { value: init.clientY ?? 0 }, ctrlKey: { value: !!init.ctrlKey } });
+    return target.dispatchEvent(ev);
+  };
+  return { win, sent, $, post, key, wheel, close: () => win.happyDOM.close() };
+}
+
+const SCREEN = '<main data-qid="q1"><section data-qid="q2"><a data-qid="q3" href="/next">去下一屏</a><a data-qid="q4" href="#">还没设计</a></section><form action="/done"><input name="n"><button>提交</button></form></main>';
+
+test('屏：就绪、跳转、死链、表单、快捷键、捏合，每条都合协议', async () => {
+  const p = preview(SCREEN);
+  p.$('a[href="/next"]').click();
+  p.$('a[href="#"]').click();
+  p.$('form').dispatchEvent(new p.win.Event('submit', { bubbles: true, cancelable: true }));
+  p.key({ key: 'Escape', code: 'Escape' });
+  p.key({ key: 'ArrowLeft', code: 'ArrowLeft', altKey: true });
+  p.key({ key: 'k', code: 'KeyK', metaKey: true });
+  p.key({ key: 'a', code: 'KeyA' });   // 不是画布快捷键，不转发
+  p.wheel({ ctrlKey: true, deltaY: 12, clientX: 30, clientY: 40 });
+  p.wheel({ deltaY: 12 });             // 屏里的普通滚轮归屏自己
+  for (const m of p.sent) assert.ok(previewMessageSchema.safeParse(m).success, JSON.stringify(m));
+  assert.deepEqual(p.sent.map((m) => (m as { type: string }).type), ['quilt:ready', 'quilt:navigate', 'quilt:dead', 'quilt:navigate', 'quilt:key', 'quilt:key', 'quilt:key', 'quilt:wheel']);
+  assert.deepEqual(p.sent[3], { type: 'quilt:navigate', href: '/done' });
+  await p.close();
+});
+
+test('选择元素态：点选、逐级选、重选、取消，select 带祖先路径', async () => {
+  const p = preview(SCREEN);
+  p.post({ type: 'quilt:mode', mode: 'inspect' });
+  p.$('[data-qid="q3"]').click();
+  p.key({ key: 'Enter', code: 'Enter', shiftKey: true });   // 上一级
+  p.post({ type: 'quilt:reselect', qid: 'q2' });
+  p.post({ type: 'quilt:reselect', qid: 'q99' });
+  for (const m of p.sent) assert.ok(previewMessageSchema.safeParse(m).success, JSON.stringify(m));
+  const [first, climbed, again, gone] = p.sent.slice(1) as Record<string, unknown>[];
+  assert.equal(first.qid, 'q3');
+  assert.deepEqual(first.path, [{ qid: 'q1', tag: 'main' }, { qid: 'q2', tag: 'section' }, { qid: 'q3', tag: 'a' }]);
+  assert.equal(first.href, '/next');
+  assert.equal(climbed.qid, 'q2');
+  assert.equal(again.qid, 'q2');
+  assert.deepEqual(gone, { type: 'quilt:deselect', qid: 'q99' });
+  await p.close();
+});
+
+test('换屏与叠层：swapped 带路由，点遮罩报 overlay-dismiss', async () => {
+  const p = preview(SCREEN);
+  p.post({ type: 'quilt:swap', html: `<html><head>${HEAD}</head><body><main data-qid="q1">第二屏</main></body></html>`, route: '/next' });
+  p.post({ type: 'quilt:overlay', html: '<div data-qid="q1">弹层</div>', route: '/sheet' });
+  p.$('[data-quilt-overlay-layer]').click();
+  for (const m of p.sent) assert.ok(previewMessageSchema.safeParse(m).success, JSON.stringify(m));
+  assert.deepEqual(p.sent.slice(1), [{ type: 'quilt:swapped', route: '/next', title: '' }, { type: 'quilt:overlay-dismiss' }]);
+  await p.close();
+});
+
+test('组件预览：链接惰性，落在不可滚处的普通滚轮转成 pan', async () => {
+  const p = preview('<div data-component="Tab"><a href="/x">去</a></div>', { component: true });
+  p.$('a').click();
+  p.wheel({ deltaY: 8, deltaX: 2, clientX: 5, clientY: 6 });
+  for (const m of p.sent) assert.ok(previewMessageSchema.safeParse(m).success, JSON.stringify(m));
+  assert.deepEqual(p.sent.slice(1), [{ type: 'quilt:wheel', pan: true, deltaX: 2, deltaY: 8, x: 5, y: 6 }]);
+  await p.close();
+});
+
+test('isPreviewMessage：形状不对的 quilt:* 消息一律不认（屏脚本可以伪造）', () => {
+  assert.equal(isPreviewMessage({ type: 'quilt:wheel', x: 1, y: 2 }), false);
+  assert.equal(isPreviewMessage({ type: 'quilt:wheel', deltaY: Number.NaN, x: 1, y: 2 }), false);
+  assert.equal(isPreviewMessage({ type: 'quilt:wheel', deltaY: Infinity, x: 1, y: 2 }), false);
+  assert.equal(isPreviewMessage({ type: 'quilt:select', qid: 'q1' }), false);
+  assert.equal(isPreviewMessage({ type: 'quilt:whatever' }), false);
+  assert.equal(isPreviewMessage(null), false);
+  assert.equal(isPreviewMessage({ type: 'quilt:wheel', deltaY: -3, x: 1, y: 2 }), true);
+  assert.equal(isPreviewMessage({ type: 'quilt:component-size', componentId: 'c1', x: 0, y: 0, w: 320, h: 64 }), true);
+});

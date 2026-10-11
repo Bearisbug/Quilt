@@ -6,7 +6,9 @@ import { requestSource } from '../lib/origin.ts';
 import { UUID } from './app.ts';
 import { verifyPreview } from '../lib/signing.ts';
 import { storage } from '../lib/storage.ts';
-import { withCurrentRuntime, withPaletteDarkMode, withOverlayStyle, buildPrelude, SCREEN_CSP, type Tokens } from '@quilt/core';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { withCurrentRuntime, withPaletteDarkMode, withOverlayStyle, withLocalVendor, buildPrelude, SCREEN_CSP, VENDOR, type Tokens } from '@quilt/core';
 import { readAsset } from '../services/assets.ts';
 import { componentPreviewDocument } from '../services/components.ts';
 
@@ -17,6 +19,18 @@ import { componentPreviewDocument } from '../services/components.ts';
 export const previewApp = new Hono();
 
 previewApp.get('/healthz', (c) => c.text('ok'));
+
+// 外网脚本的副本（§17 v1.06）：/p/ 与 /c/ 下发时把 Tailwind Play 与 lucide 的地址换成这里，屏不再等外网。文件名带版本，内容不变，长缓存
+const vendorBodies = new Map<string, Buffer>();
+previewApp.get('/vendor/:file', async (c) => {
+  const file = c.req.param('file');
+  if (!VENDOR.some((v) => v.file === file)) return problem(c, 404, '/errors/not-found', '资源不存在');
+  let body = vendorBodies.get(file);
+  if (!body) { body = await readFile(path.join(config.vendorDir, file)); vendorBodies.set(file, body); }
+  c.header('Content-Type', 'text/javascript; charset=utf-8');
+  c.header('Cache-Control', 'public, max-age=31536000, immutable');
+  return c.body(new Uint8Array(body));
+});
 
 // 路径里的 id 与 /p/ 的 rev 都是 UUID（§14 v0.82）：不是的直接 404，同 /v1——原样进 uuid 列的查询会被 Postgres 报 22P02，落成 500
 for (const route of ['/p/:projectId/:id', '/c/:projectId/:id', '/a/:projectId/:id']) {
@@ -39,7 +53,7 @@ previewApp.get('/p/:projectId/:screenId', async (c) => {
     .where(and(eq(schema.screenRevisions.id, rev), eq(schema.screenRevisions.screenId, screenId), eq(schema.screens.projectId, projectId)));
   if (!row) return problem(c, 404, '/errors/not-found', '修订不存在');
   // 叠层屏（v0.63）：呈现方式是元数据，下发时临时注入透明背景，压在别的屏上时露出底下那一屏
-  const raw = withPaletteDarkMode(withCurrentRuntime((await storage.get(row.htmlKey)).toString('utf8')));
+  const raw = withLocalVendor(withPaletteDarkMode(withCurrentRuntime((await storage.get(row.htmlKey)).toString('utf8'))));
   const html = row.presentation === 'overlay' ? withOverlayStyle(raw) : raw;
   c.header('Content-Type', 'text/html; charset=utf-8');
   // 修订本身不可变，但这份响应不是：运行时每次下发都换成当前版本（上一行）。标成 immutable 时浏览器 10 分钟内
@@ -66,7 +80,7 @@ previewApp.get('/c/:projectId/:componentId', async (c) => {
   c.header('Cache-Control', 'no-cache');
   c.header('Content-Security-Policy', `${SCREEN_CSP}; frame-ancestors ${FRAME_ANCESTORS}`);
   c.header('Referrer-Policy', 'no-referrer');
-  return c.body(componentPreviewDocument(row, buildPrelude(ds.tokens as Tokens)));
+  return c.body(withLocalVendor(componentPreviewDocument(row, buildPrelude(ds.tokens as Tokens))));
 });
 
 // 项目素材（ADR-017）：不签名、不过期，凭 UUID 不可猜；URL 会被烤进修订 HTML，必须长期可用

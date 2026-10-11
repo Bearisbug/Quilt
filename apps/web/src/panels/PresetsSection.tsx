@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { BookmarkPlus, Trash2 } from 'lucide-react';
-import type { DesignPresetDto } from '@quilt/core';
+import type { DesignPresetDto } from '@quilt/core/browser';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button, Input } from '@/ui/ui';

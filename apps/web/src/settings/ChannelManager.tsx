@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { CHANNEL_VENDORS, LOCAL_CHANNEL_KINDS, VENDOR_PRESETS, type ChannelDto, type ChannelKind, type ChannelVendor, type ProbeResultDto, type RunnerOptionDto } from '@quilt/core';
+import { CHANNEL_VENDORS, LOCAL_CHANNEL_KINDS, VENDOR_PRESETS, type ChannelDto, type ChannelKind, type ChannelVendor, type ProbeResultDto, type RunnerOptionDto } from '@quilt/core/browser';
 import { api, ApiError, loadConfig } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button, Field, Input, cn } from '@/ui/ui';

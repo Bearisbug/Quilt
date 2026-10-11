@@ -1,6 +1,7 @@
-import { ROUND_PRESETS, ROUND_PRESET_PROMPTS, missingPagePrompt, presetNote, variantPrompt, type JobDto, type ScreenDto, type ComponentDto, type ScreenCount, type RoundPresetKind } from '@quilt/core';
+import { ROUND_PRESETS, ROUND_PRESET_PROMPTS, missingPagePrompt, presetNote, variantPrompt, type AnyJobInput, type JobDto, type ScreenDto, type ComponentDto, type RoundPresetKind } from '@quilt/core/browser';
 
-export type JobInput = { count?: ScreenCount; versions?: number; screenIds?: string[] | 'all'; screenId?: string; fromScreenId?: string; route?: string; prompt?: string; componentId?: string; componentIds?: string[]; variantOf?: string; variantName?: string };
+// 不分种类读作业输入的形状，从 core 的 schema 推出来（CH-2 v1.06）
+export type JobInput = AnyJobInput;
 // 一个在跑作业会改到哪些屏（REQ-CORE-020）。JobDto 不带 targetScreenId，只能按 kind 从 input 反推；
 // 口径与 apps/api/src/services/jobs.ts 的守卫对齐，但比它严：多屏 edit_screens 与回刷在后端落 target_screen_id=null，
 // 后端看不见它们实际改的屏（§16 真值表的缺口行），撞上的后果是一方作业 failed 或静默顶掉对方，所以前端按覆盖屏集拦。

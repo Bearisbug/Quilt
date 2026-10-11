@@ -2,7 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, u
 import { useNavigate } from 'react-router';
 import { Select } from 'radix-ui';
 import { ArrowUp, Check, ChevronDown, ChevronUp, ImagePlus, MapPin, Settings2, Square, X } from 'lucide-react';
-import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MAX_VERSIONS, SCREEN_COUNT_OPTIONS, estimateJob, type ScreenDto, type ComponentDto, type RunnerOptionDto, type AgentSessionDto, type AgentTool, type ScreenCount } from '@quilt/core';
+import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MAX_VERSIONS, SCREEN_COUNT_OPTIONS, estimateJob, type ScreenDto, type ComponentDto, type RunnerOptionDto, type AgentSessionDto, type AgentTool, type ScreenCount } from '@quilt/core/browser';
 import { IconButton } from '@/ui/ui';
 import { VendorIcon } from '@/ui/VendorIcon';
 
@@ -634,6 +634,7 @@ export function SessionSelect({ tool = 'claude-code', sessions, reason, value, o
                       {s.tool === 'codex'
                         ? <span className={`shrink-0 rounded-full border px-1.5 ${s.open ? 'border-line' : 'border-dashed border-line'}`}>{s.open ? '已打开' : '未打开'}</span>
                         : <span className={`shrink-0 rounded-full border px-1.5 ${s.status === 'busy' ? 'border-warn/60 text-warn' : 'border-line'}`}>{s.status === 'busy' ? '忙' : s.status === 'idle' ? '空闲' : '未知'}</span>}
+                      {s.unverifiedVersion !== undefined && <span className="shrink-0 rounded-full border border-dashed border-warn/60 px-1.5 text-warn" data-testid="session-unverified">此版本未验证{s.unverifiedVersion && ` · ${s.unverifiedVersion}`}</span>}
                     </span>
                   </span>
                   <Select.ItemIndicator className="flex shrink-0"><Check size={14} aria-hidden="true" /></Select.ItemIndicator>

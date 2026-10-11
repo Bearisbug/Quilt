@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ScreenDto, ComponentDto, RunnerOptionDto, AgentTool, Runner, Tokens, ElementPathItem } from '@quilt/core';
+import type { ScreenDto, ComponentDto, RunnerOptionDto, AgentTool, Runner, Tokens, ElementPathItem } from '@quilt/core/browser';
 import type { SessionList } from '@/composer/useRunnerPrefs';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';

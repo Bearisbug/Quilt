@@ -1,24 +1,17 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { launch, openApp, seed, seedJson, apiJson, pickOption, EVIDENCE, WEB, API } from './lib.ts';
-import { connectMcp, callTool } from './mcp-client.ts';
+import { connectMcp, callTool, resourceText } from './mcp-client.ts';
+import { suite, expect, sleep, LIVE_LLM, Skip, Manual } from './harness.ts';
 
 // docs/TEST.md AGENT 域（TC-AGENT-001 / 003 / 004 / 009 / 010）AI 执行脚本（v0.34 本地版：MCP 免鉴权、本机 agent = 投递到本机 Claude Code 会话）。
 // TC-AGENT-009 需要 API 与本脚本都以同一个 QUILT_CLAUDE_SESSIONS_DIR 启动（§3，假会话把登记文件与 socket 放进去）；TC-AGENT-010 是人工用例。
-const RUN = process.env.RUN ?? '009';
-const LIVE_LLM = process.env.LIVE_LLM !== '0';
-const ONLY = process.env.ONLY?.split(',').map((s) => s.trim()).filter(Boolean);
 await mkdir(EVIDENCE, { recursive: true });
-const results: { tc: string; result: string; note: string }[] = [];
 let page: import('playwright').Page;
-const record = (tc: string, result: string, note = '') => { results.push({ tc, result, note }); console.log(`${result === '通过' ? '✅' : result === '失败' ? '❌' : '⏭'} ${tc} ${result} ${note}`); };
-const step = async (tc: string, fn: () => Promise<string | void>) => {
-  if (ONLY && !ONLY.includes(tc)) return;
-  try { const note = await fn(); record(tc, note?.startsWith('跳过') ? '跳过' : note?.startsWith('待人工') ? '待人工' : '通过', note ?? ''); await page.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}.png`) }).catch(() => {}); }
-  catch (e) { record(tc, '失败', (e as Error).message.split('\n')[0].slice(0, 300)); await page.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-${tc.toLowerCase()}-fail.png`) }).catch(() => {}); }
-};
-const expect = (cond: unknown, msg: string) => { if (!cond) throw new Error(msg); };
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const { RUN, step, summary } = suite('AGENT', {
+  page: () => page,
+  onTimeout: async () => { await page.close().catch(() => {}); page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }); await openApp(page); },
+});
 const OK_HTML = `<div class="min-h-dvh flex flex-col bg-background text-on-background"><header class="h-14 flex items-center justify-between px-4 bg-surface border-b border-outline-variant"><h1 class="text-lg font-semibold">Agent screen</h1></header><main class="flex-1 overflow-y-auto px-4 py-6 space-y-6"><div class="bg-surface rounded-lg border border-outline-variant p-4"><p class="text-sm">Pushed by an external agent.</p><a href="/s1" class="inline-flex items-center justify-center h-12 px-6 rounded-full bg-primary text-on-primary font-semibold">Back home</a></div></main></div>`;
 type Job = { id: string; status: string; runner: string; output: { screenIds?: string[]; delivery?: { sessionId: string; name: string }; summary?: string; errorClass?: string; message?: string } | null };
 const jobOf = async (id: string) => (await apiJson<{ job: Job }>(`/v1/jobs/${id}`)).body.job;
@@ -73,9 +66,9 @@ await step('TC-AGENT-003', async () => {
   ingestProject = r.projectId;
   const mcp = await connectMcp();
   const md = await mcp.readResource({ uri: `quilt://projects/${ingestProject}/design.md` });
-  expect(String(md.contents[0].text).includes('## Colors'), 'design.md 资源不对');
+  expect(resourceText(md).includes('## Colors'), 'design.md 资源不对');
   const tokens = await mcp.readResource({ uri: `quilt://projects/${ingestProject}/tokens.json` });
-  expect(JSON.parse(String(tokens.contents[0].text)).tokens.colors.primary, 'tokens.json 资源不对');
+  expect(JSON.parse(resourceText(tokens)).tokens.colors.primary, 'tokens.json 资源不对');
   const contract = await callTool(mcp, 'quilt.get_design_contract', { projectId: ingestProject });
   expect((contract.json as { colorClasses: string[] }).colorClasses.includes('on-primary'), '设计契约缺 colorClasses');
   const val = await callTool(mcp, 'quilt.validate_screen', { projectId: ingestProject, html: OK_HTML });
@@ -109,22 +102,22 @@ await step('TC-AGENT-004', async () => {
 
 // v0.34（ADR-015 修订）：本机 agent = 投递到本机正在运行的 Claude Code 会话。用假会话（登记文件 + inbox socket，agent-stub.ts）验整条链：
 // 列表（名字 / UUID 规则）→ 输入框会话下拉 → 投递（提示词、running、回执）→ 持屏锁 → 取消 → finish_job 三种收口 → 选择记忆与失效
-// 作业创建限流 10 次 / 分钟（§15）：TC-AGENT-009 与 012 各建五六个作业，同一轮连着跑会撞上，012 开头等过 009 留下的窗口
-let burstAt = 0;
 await step('TC-AGENT-009', async () => {
   const DIR = process.env.QUILT_CLAUDE_SESSIONS_DIR ?? '';
-  if (!DIR) return '跳过：未设 QUILT_CLAUDE_SESSIONS_DIR（API 与本脚本都要以同一目录启动，§3）';
-  if (!claudeRunner.available) return `跳过：本机 claude 不可用（${claudeRunner.unavailableReason ?? ''}）`;
+  if (!DIR) throw new Skip('未设 QUILT_CLAUDE_SESSIONS_DIR（API 与本脚本都要以同一目录启动，§3）');
+  if (!claudeRunner.available) throw new Skip(`本机 claude 不可用（${claudeRunner.unavailableReason ?? ''}）`);
   const { startFakeSession } = await import('./agent-stub.ts');
   const named = await startFakeSession({ dir: DIR, name: 'Stub 会话', nameSource: 'user' });
-  const derived = await startFakeSession({ dir: DIR, name: 'quilt-ab', nameSource: 'derived', status: 'busy', updatedAt: Date.now() - 60_000 });
+  const derived = await startFakeSession({ dir: DIR, name: 'quilt-ab', nameSource: 'derived', status: 'busy', updatedAt: Date.now() - 60_000, version: '0.0.0' });
   try {
-    // 1 列表（API-AGENT-010）：两个假会话都在；起过名的 named=true，派生名 named=false 且带 busy；按最近活跃排序
+    // 1 列表（API-AGENT-010）：两个假会话都在；起过名的 named=true，派生名 named=false 且带 busy；按最近活跃排序；
+    //   没验证过的版本带 unverifiedVersion（v1.06，派生名那个登记的是 0.0.0）
     await sleep(2100); // 服务端列表缓存 2 s
-    const list = (await apiJson<{ items: { sessionId: string; name: string; named: boolean; status: string }[] }>('/v1/agent/sessions')).body.items;
+    const list = (await apiJson<{ items: { sessionId: string; name: string; named: boolean; status: string; unverifiedVersion?: string }[] }>('/v1/agent/sessions')).body.items;
     const li = list.findIndex((s) => s.sessionId === named.sessionId); const di = list.findIndex((s) => s.sessionId === derived.sessionId);
     expect(li >= 0 && list[li].named && list[li].name === 'Stub 会话', `列表里没有假会话「Stub 会话」——API 是否以同一个 QUILT_CLAUDE_SESSIONS_DIR 启动？${JSON.stringify(list).slice(0, 300)}`);
     expect(di >= 0 && !list[di].named && list[di].status === 'busy' && li < di, '派生名会话未标 named=false / busy，或排序不按最近活跃');
+    expect(list[di].unverifiedVersion === '0.0.0', `没验证过的版本应带 unverifiedVersion：${JSON.stringify(list[di])}`);
 
     const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'AgentJob', '--device', 'mobile', '--screens', '2', '--no-shot');
     const s1 = r.screens[0].id;
@@ -145,6 +138,7 @@ await step('TC-AGENT-009', async () => {
     await options.first().waitFor({ timeout: 5000 });
     const texts = await options.allInnerTexts();
     expect(texts.some((t) => t.includes('Stub 会话')) && texts.some((t) => t.includes(derived.sessionId)), `下拉未按「有名字显名字、派生名显 UUID」列出：${JSON.stringify(texts)}`);
+    expect(texts.some((t) => t.includes(derived.sessionId) && t.includes('此版本未验证 · 0.0.0')), `没验证过的版本在下拉里没标「此版本未验证」：${JSON.stringify(texts)}`);
     await page.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-tc-agent-009-sessions.png`) });
     await page.getByRole('option', { name: /Stub 会话/ }).click();
     expect((await sel.getAttribute('data-value')) === named.sessionId, '选中的会话没落到触发器');
@@ -239,19 +233,18 @@ await step('TC-AGENT-009', async () => {
     const gone = await send('会话已关', named.sessionId);
     expect(gone.status === 400 && gone.body.type === '/errors/validation', `旧 sessionId 直接 POST 应 400：${gone.status}`);
     return '列表 / 下拉按名字或 UUID；投递 → running + 回执；持锁 / 取消 / 取消后 finish_job 409；failed / 旧基线 409 / succeeded 三种收口；选择记忆、失效回到占位';
-  } finally { await named.close().catch(() => {}); await derived.close().catch(() => {}); burstAt = Date.now(); }
+  } finally { await named.close().catch(() => {}); await derived.close().catch(() => {}); }
 });
 
 // 真实 Claude Code：投递进真实会话要用户在终端确认权限门，AI 不代按——登记「待人工」，步骤见 TEST.md
-await step('TC-AGENT-010', async () => '待人工：投递到真实 Claude Code 会话需要在终端确认接收，按 TEST.md 的步骤人工执行');
+await step('TC-AGENT-010', async () => { throw new Manual('投递到真实 Claude Code 会话需要在终端确认接收，按 TEST.md 的步骤人工执行'); });
 
 // v0.68（ADR-020）：Codex 线程投递 + 本机 Codex 订阅通道。API 与本脚本都以同一个 QUILT_CODEX_HOME 启动，API 另以
 // QUILT_CODEX_BIN / QUILT_CODEX_OPENER 指向 codex-stub.mjs（§3）。脚本自建假线程库；「Codex 窗口」一侧由脚本扮演：
 // 读桩记下的队列消息，线程打开着（有写锁）才取走，经 MCP 回写并收口——与真 Codex 的行为一致
 await step('TC-AGENT-012', async () => {
   const HOME = process.env.QUILT_CODEX_HOME ?? '';
-  if (burstAt) await sleep(Math.max(0, burstAt + 61_000 - Date.now()));
-  if (!HOME) return '跳过：未设 QUILT_CODEX_HOME（API 与本脚本都要以同一目录启动，API 另设 QUILT_CODEX_BIN / QUILT_CODEX_OPENER 指向 tests/e2e/codex-stub.mjs，§3）';
+  if (!HOME) throw new Skip('未设 QUILT_CODEX_HOME（API 与本脚本都要以同一目录启动，API 另设 QUILT_CODEX_BIN / QUILT_CODEX_OPENER 指向 tests/e2e/codex-stub.mjs，§3）');
   const { DatabaseSync } = await import('node:sqlite');
   const { rm: rmrf, writeFile: wf, readFile: rf, open: fopen } = await import('node:fs/promises');
   await rmrf(HOME, { recursive: true, force: true });
@@ -451,8 +444,8 @@ await step('TC-AGENT-012', async () => {
 // v0.87（ADR-012）：投递给本机会话的改屏 / 局部重生成提示词带目标屏此前已生效的用户指令。假会话收到 HANG 不动手，看完提示词就取消
 await step('TC-AGENT-023', async () => {
   const DIR = process.env.QUILT_CLAUDE_SESSIONS_DIR ?? '';
-  if (!DIR) return '跳过：未设 QUILT_CLAUDE_SESSIONS_DIR（API 与本脚本都要以同一目录启动，§3）';
-  if (!claudeRunner.available) return `跳过：本机 claude 不可用（${claudeRunner.unavailableReason ?? ''}）`;
+  if (!DIR) throw new Skip('未设 QUILT_CLAUDE_SESSIONS_DIR（API 与本脚本都要以同一目录启动，§3）');
+  if (!claudeRunner.available) throw new Skip(`本机 claude 不可用（${claudeRunner.unavailableReason ?? ''}）`);
   const { startFakeSession } = await import('./agent-stub.ts');
   const fake = await startFakeSession({ dir: DIR, name: 'Stub 历史', nameSource: 'user' });
   // 每分钟 10 个作业的限流（§15）：前面的用例刚建过一批，撞上 429 就等 5 s 再发
@@ -507,8 +500,8 @@ await step('TC-AGENT-023', async () => {
 // v0.99（REQ-EDIT-006 / REQ-AGENT-003）：改组件交给本机会话。假会话收到 HANG 不动手，脚本以会话身份经 MCP 写回与收口
 await step('TC-AGENT-024', async () => {
   const DIR = process.env.QUILT_CLAUDE_SESSIONS_DIR ?? '';
-  if (!DIR) return '跳过：未设 QUILT_CLAUDE_SESSIONS_DIR（API 与本脚本都要以同一目录启动，§3）';
-  if (!claudeRunner.available) return `跳过：本机 claude 不可用（${claudeRunner.unavailableReason ?? ''}）`;
+  if (!DIR) throw new Skip('未设 QUILT_CLAUDE_SESSIONS_DIR（API 与本脚本都要以同一目录启动，§3）');
+  if (!claudeRunner.available) throw new Skip(`本机 claude 不可用（${claudeRunner.unavailableReason ?? ''}）`);
   const { startFakeSession } = await import('./agent-stub.ts');
   const fake = await startFakeSession({ dir: DIR, name: 'Stub 组件', nameSource: 'user' });
   const post = async <T,>(p: string, body: unknown) => { for (let i = 0; ; i++) { const r = await apiJson<T>(p, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(body) }); if (r.status !== 429 || i >= 15) return r; await sleep(5000); } };
@@ -607,5 +600,4 @@ await step('TC-AGENT-024', async () => {
 });
 
 await browser.close();
-console.log(`\n=== RUN-${RUN} AGENT ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));
-console.log(results.map((r) => `${r.tc} ${r.result} ${r.note}`).join('\n'));
+summary();

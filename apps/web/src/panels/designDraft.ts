@@ -1,4 +1,4 @@
-import { parseConventions, withConventions, type DesignSystemDto, type FontSource, type ProjectDto, type Tokens } from '@quilt/core';
+import { parseConventions, withConventions, type DesignSystemDto, type FontSource, type ProjectDto, type Tokens } from '@quilt/core/browser';
 import { RADIUS } from './designOptions';
 
 // 面板里能改的各格与它们的已保存值（REQ-EDIT-003 / REQ-EDIT-005 / REQ-CORE-016）
