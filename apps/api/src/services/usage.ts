@@ -39,6 +39,6 @@ export async function monthlyUsage(user: UserRow): Promise<UsageDto> {
   return { month, screens: row.screens, tokensIn: row.tokensIn, tokensOut: row.tokensOut, byDriver: byDriver.filter((d) => d.driver), inflight: await inflightUsage(user.id) };
 }
 
-export async function recordUsage(userId: string, jobId: string, tokensIn: number, tokensOut: number, screens: number, driver?: string, model?: string): Promise<void> {
-  await db.insert(schema.usageEntries).values({ userId, jobId, tokensIn, tokensOut, screens, driver, model }).onConflictDoNothing();
+export async function recordUsage(userId: string, jobId: string, tokensIn: number, tokensOut: number, screens: number, driver?: string, model?: string, cache: { read: number; write: number } = { read: 0, write: 0 }): Promise<void> {
+  await db.insert(schema.usageEntries).values({ userId, jobId, tokensIn, tokensOut, cacheReadTokens: cache.read, cacheWriteTokens: cache.write, screens, driver, model }).onConflictDoNothing();
 }

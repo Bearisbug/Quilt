@@ -4435,6 +4435,23 @@ await step('TC-CORE-093', async () => {
   } finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
 });
 
+// TC-CORE-094 一个作业内 6 个调用以内一波发完（ADR-012 v1.05）：内置桩的规划出 5 屏，每次调用拖 4 s——并行上限还是 4 时第 5 屏要等第一波，
+// html 落地比前 4 屏晚 4 s 以上；一波发完时 5 屏的 screen_html_ready 相差不到 2.5 s
+await step('TC-CORE-094', async () => {
+  const { projectId: pid } = seedJson<{ projectId: string }>('seed:project', '--name', 'OneWave', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const mcp = await connectMcp();
+  try {
+    const g = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ kind: 'generate', input: { prompt: '[stub-hold:4000] 一组屏', count: 'auto', versions: 1, runner: { kind: 'model', driver: 'stub', model: 'stub' } } }) });
+    expect(g.status === 202, `造屏 ${g.status}`);
+    const j = await waitJob(g.body.job.id, 120) as { status: string };
+    expect(j.status === 'succeeded', `造屏应成功：${j.status}`);
+    const ready = ((await callTool(mcp, 'quilt.get_job_events', { jobId: g.body.job.id })).json as { items: { type: string; at: string }[] }).items.filter((e) => e.type === 'screen_html_ready').map((e) => Date.parse(e.at));
+    const spread = Math.max(...ready) - Math.min(...ready);
+    expect(ready.length === 5 && spread < 2500, `5 屏应一波落地：${ready.length} 屏，最早与最晚相差 ${spread} ms`);
+    return `5 屏的 html 落地最早与最晚相差 ${spread} ms`;
+  } finally { await mcp.close(); await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
+});
+
 await browser.close();
 console.log('\n=== RUN-' + RUN + ' ===');
 const counts = results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {});

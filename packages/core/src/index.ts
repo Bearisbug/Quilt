@@ -6,6 +6,7 @@ export * from './runtime.ts';
 export * from './protocol.ts';
 export * from './lint.ts';
 export * from './inject.ts';
+export * from './edits.ts';
 export * from './outline.ts';
 export * from './components.ts';
 export * from './contract.ts';

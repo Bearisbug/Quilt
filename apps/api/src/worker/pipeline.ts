@@ -5,7 +5,7 @@ import { settleByJob } from '../services/annotations.ts';
 import { loadForModel } from '../services/attachments.ts';
 import { assetsForPrompt } from '../services/assets.ts';
 import { resolveChannelSpec } from '../services/channels.ts';
-import { completeWithRetry, ProviderError, type LlmDriver } from '../lib/llm.ts';
+import { completeWithRetry, ProviderError, type LlmDriver, type LlmEffort } from '../lib/llm.ts';
 import { emitJobEvent } from '../lib/events.ts';
 import { storage, objectKeys } from '../lib/storage.ts';
 import { screenshotHtml, extractTailwindCss } from '../lib/screenshot.ts';
@@ -17,10 +17,10 @@ import { runChatTurn, ChatFailure } from './chat.ts';
 import { failJob } from './failJob.ts';
 import { sharedComponentsOf, componentCards, reflowComponent, componentInstructions } from '../services/components.ts';
 import {
-  buildPrelude, lintScreenBody, injectQids, assembleDocument, extractBody, stripFences, buildPrototypeDocument, replaceSubtree, extractLinks,
+  buildPrelude, lintScreenBody, injectQids, reconcileQids, applyEdits, parseEditBlocks, assembleDocument, extractBody, stripFences, buildPrototypeDocument, replaceSubtree, extractLinks,
   expandComponents, validateComponentHtml, classifyComponentHtml, componentSummary, componentSystemPrompt, componentUserPrompt,
   type ProjectAsset,
-  OVERLAY_SCREEN_NOTE, screenSystemPrompt, planSystemPrompt, planUserPrompt, planOneScreenSystemPrompt, planOneScreenUserPrompt, screenUserPrompt, editUserPrompt, subtreeUserPrompt, linkRepairPrompt,
+  OVERLAY_SCREEN_NOTE, screenSystemPrompt, planSystemPrompt, planUserPrompt, planOneScreenSystemPrompt, planOneScreenUserPrompt, screenUserPrompt, editUserPrompt, editPatchUserPrompt, subtreeUserPrompt, linkRepairPrompt,
   proposeDesignSystemSystemPrompt, proposeDesignSystemUserPrompt, parseConventions, REFERENCE_IMAGE_NOTE, FONT_FAMILIES, RADIUS_SCALES, MAX_CONVENTIONS,
   DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput, type JobKind, type Presentation, failureText,
 } from '@quilt/core';
@@ -58,7 +58,7 @@ type JobRow = typeof schema.generationJobs.$inferSelect;
 type Ctx = {
   job: JobRow; project: typeof schema.projects.$inferSelect; ds: typeof schema.designSystems.$inferSelect;
   device: DeviceType; tokens: Tokens; prelude: string; signal: AbortSignal;
-  usage: { tokensIn: number; tokensOut: number; screens: number };
+  usage: { tokensIn: number; tokensOut: number; screens: number; cacheRead: number; cacheWrite: number };
   // 本作业用哪个驱动 / 模型 / 凭据（REQ-CORE-011 / 013）；缺省取 .env 的 LLM_DRIVER 与凭据
   runner: { driver?: LlmDriver; model?: string; apiKey?: string; baseUrl?: string };
   // 本作业的参考图（REQ-CORE-012），整轮只读一次对象存储
@@ -88,12 +88,35 @@ async function expandLatest(ctx: Ctx, body: string, route: string): Promise<stri
 
 // 参考图只跟第一次出屏 / 改屏的调用走；修复轮是「按 lint 违规改你上一版 HTML」，
 // 再把图塞一遍既多花 token 又会把模型往复刻方向带（REQ-CORE-012）
-async function llmCall(ctx: Ctx, system: string, prompt: string, model?: string, withImages = false) {
+// effort：按调用类型定思考深度（ADR-012 v1.05）——规划与提炼 low、改屏补丁 medium，其余不传（驱动缺省）
+async function llmCall(ctx: Ctx, system: string, prompt: string, model?: string, withImages = false, opts: { effort?: LlmEffort; maxTokens?: number } = {}) {
   const images = withImages ? ctx.images : undefined;
   const spec = ctx.runner.driver ? { driver: ctx.runner.driver, apiKey: ctx.runner.apiKey, baseUrl: ctx.runner.baseUrl } : undefined;
-  const r = await completeWithRetry({ system, prompt: withImages && images?.length ? `${REFERENCE_IMAGE_NOTE}\n\n${prompt}` : prompt, images, model: ctx.runner.model ?? model, spec, signal: ctx.signal }, (n, err) => { void emitJobEvent(ctx.job.id, 'progress', { stage: 'retry', attempt: n, error: err.message }).catch(() => {}); });
+  const r = await completeWithRetry({ system, prompt: withImages && images?.length ? `${REFERENCE_IMAGE_NOTE}\n\n${prompt}` : prompt, images, model: ctx.runner.model ?? model, spec, signal: ctx.signal, ...opts }, (n, err) => { void emitJobEvent(ctx.job.id, 'progress', { stage: 'retry', attempt: n, error: err.message }).catch(() => {}); });
   ctx.usage.tokensIn += r.tokensIn; ctx.usage.tokensOut += r.tokensOut;
+  ctx.usage.cacheRead += r.cacheRead ?? 0; ctx.usage.cacheWrite += r.cacheWrite ?? 0;
   return r.text;
+}
+
+// 扇出（ADR-012 v1.05）：一个作业内并行 ≤ min(6, max(4, 调用数))——6 个调用以内一波发完，不让第 5、6 屏等第一波连同截图跑完。
+// 走 API Key 的 Anthropic 通道先用同一系统提示发一次 max_tokens 0 写缓存：缓存要等第一个响应开始返回才能被读到，不预热的话首波各按全价写一次
+const fanOut = (calls: number) => Math.min(6, Math.max(config.screenConcurrency, calls));
+async function warmPrefix(ctx: Ctx, system: string, calls: number, model?: string) {
+  if (calls < 2 || (ctx.runner.driver ?? config.llmDriver) !== 'anthropic') return;
+  try { await llmCall(ctx, system, 'Warm-up: reply with nothing.', model, false, { maxTokens: 0 }); }
+  catch (e) { console.warn(`[job ${ctx.job.id}] cache warm-up skipped: ${(e as Error).message}`); }
+}
+
+// 改一屏（ADR-007 v1.05）：先要补丁块，按序套在当前 body 上；任一块对不上就整批作废，同一轮改用整屏提示词再要一次。
+// 产出里没有补丁块（模型判断改动占了大半屏、直接回整屏）时按整屏处理。返回的 body 还没对齐 qid，由 produceScreen 做
+async function editBody(ctx: Ctx, args: { system: string; name: string; route: string; body: string; instruction: string; prior: string[] }): Promise<string> {
+  const raw = await llmCall(ctx, args.system, editPatchUserPrompt(args.name, args.route, args.body, args.instruction, args.prior), undefined, true, { effort: 'medium' });
+  const edits = parseEditBlocks(raw);
+  if (!edits) return stripFences(raw);
+  const applied = applyEdits(args.body, edits);
+  if (!applied.errors.length) return applied.body;
+  console.warn(`[job ${ctx.job.id}] patch for ${args.route} did not apply (${applied.errors.map((e) => `#${e.index}:${e.matches}`).join(' ')}), rewriting the whole screen`);
+  return stripFences(await llmCall(ctx, args.system, editUserPrompt(args.name, args.route, args.body, args.instruction, args.prior), undefined, true));
 }
 
 function parseJsonObject<T>(text: string): T {
@@ -122,10 +145,11 @@ async function registry(ctx: Ctx): Promise<RegistryEntry[]> {
 // 参考屏合计 ≤ 40 KB（≈ 10K token 预算里给参考屏的份额），超了先丢排在后面的：一般是来源屏；
 // 出变体时默认屏排第一、样板屏在后——变体要照着默认屏改状态，丢了它模型就只能照样板屏重画整屏
 const REF_BUDGET = 40 * 1024;
-async function references(ctx: Ctx, opts: { sourceScreenId?: string | null; variant?: boolean } = {}): Promise<ReferenceScreen[]> {
+// omitScreenId（ADR-012 v1.05）：只改样板屏这一屏时，它的当前 HTML 已在用户提示的 CURRENT HTML 里，参考屏里不重复放
+async function references(ctx: Ctx, opts: { sourceScreenId?: string | null; variant?: boolean; omitScreenId?: string } = {}): Promise<ReferenceScreen[]> {
   const out: ReferenceScreen[] = [];
   const ex = await exemplarBody(ctx.project);
-  if (ex) out.push({ label: 'exemplar screen (the project\'s style anchor)', body: ex.body });
+  if (ex && ex.screenId !== opts.omitScreenId) out.push({ label: 'exemplar screen (the project\'s style anchor)', body: ex.body });
   if (opts.sourceScreenId && opts.sourceScreenId !== ex?.screenId) {
     const b = await currentBody(opts.sourceScreenId);
     if (b && opts.variant) out.unshift({ label: 'default screen (the new screen is this same screen in another state)', body: b });
@@ -137,8 +161,9 @@ async function references(ctx: Ctx, opts: { sourceScreenId?: string | null; vari
 const app = (ctx: Ctx, description: string) => ({ name: ctx.project.name, description, brief: ctx.project.brief });
 
 // 单屏单版：生成/编辑 → 展开共享组件 → lint（只报告）→ 注入 qid → 落修订 → 截图
-async function produceScreen(ctx: Ctx, args: { screenId: string; system: string; prompt: string; sourceKind: 'generate' | 'edit'; expectedRevisionId?: string | null; parentRevisionId?: string | null; candidateIndex?: number | null; advanceCurrent?: boolean; model?: string }) {
-  const raw = await llmCall(ctx, args.system, args.prompt, args.model, true);
+// 出屏给 prompt（调一次模型）；改屏给已经套好补丁的 body（editBody），qid 用 reconcileQids 对齐——没改的元素保住原来的 qid（ADR-007 v1.05）
+async function produceScreen(ctx: Ctx, args: { screenId: string; system: string; prompt?: string; body?: string; sourceKind: 'generate' | 'edit'; expectedRevisionId?: string | null; parentRevisionId?: string | null; candidateIndex?: number | null; advanceCurrent?: boolean; model?: string }) {
+  const raw = args.body ?? await llmCall(ctx, args.system, args.prompt!, args.model, true);
   const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, args.screenId));
   // 共享组件占位在这里展开成正式 HTML，再 lint、再打 qid——模型手写的副本也会被盖成正式版
   const body = await expandLatest(ctx, stripFences(raw), screen.route);
@@ -146,7 +171,7 @@ async function produceScreen(ctx: Ctx, args: { screenId: string; system: string;
   // v0.43：偏离设计契约不再触发修复回合，也不再让作业失败——token 是共享词汇表，不是判分标准。
   // 报告照算，进 lintReport 与 screen_html_ready 事件，画布逐屏显示偏离了什么
   let report: LintReport = lintScreenBody(body, routes, true);
-  const withQids = injectQids(body);
+  const withQids = args.sourceKind === 'edit' ? reconcileQids(body) : injectQids(body);
   report = lintScreenBody(withQids, routes, report.firstTry); // 违规带上 qid
   const html = assembleDocument(withQids, ctx.prelude, `${ctx.project.name} · ${screen.name}`);
   if (Buffer.byteLength(html) > config.maxScreenHtmlBytes) throw new JobFailure('validation', `screen html too large (${Buffer.byteLength(html)} bytes)`);
@@ -220,16 +245,16 @@ async function runGenerate(ctx: Ctx) {
   } else if (input.count === 1) {
     const planPrompt = planOneScreenUserPrompt(a, input.prompt, existing);
     let one: ReturnType<typeof parseOne>;
-    try { one = parseOne(await llmCall(ctx, planOneScreenSystemPrompt(), planPrompt)); }
-    catch { one = parseOne(await llmCall(ctx, planOneScreenSystemPrompt(), planPrompt + '\nReturn strictly valid JSON.')); }
+    try { one = parseOne(await llmCall(ctx, planOneScreenSystemPrompt(), planPrompt, undefined, false, { effort: 'low' })); }
+    catch { one = parseOne(await llmCall(ctx, planOneScreenSystemPrompt(), planPrompt + '\nReturn strictly valid JSON.', undefined, false, { effort: 'low' })); }
     planned = [one];
     entryFrom = one.entryFrom ?? null;
   } else {
     const system = planSystemPrompt({ count: input.count, empty });
     const planPrompt = planUserPrompt(a, input.prompt, existing);
     let plan: Plan;
-    try { plan = parsePlan(await llmCall(ctx, system, planPrompt)); }
-    catch { plan = parsePlan(await llmCall(ctx, system, planPrompt + '\nReturn strictly valid JSON.')); }
+    try { plan = parsePlan(await llmCall(ctx, system, planPrompt, undefined, false, { effort: 'low' })); }
+    catch { plan = parsePlan(await llmCall(ctx, system, planPrompt + '\nReturn strictly valid JSON.', undefined, false, { effort: 'low' })); }
     planned = plan.screens.slice(0, input.count === 'auto' ? 6 : input.count);
     entryFrom = empty ? null : (plan.entryFrom ?? null);
     // 应用简介（REQ-CORE-016）：只在空项目首轮、且用户没写过时落库
@@ -260,7 +285,8 @@ async function runGenerate(ctx: Ctx) {
   const tasks = created.flatMap((c) => Array.from({ length: versions }, (_, i) => ({ c, i })));
   ctx.planned = tasks.length;
   try {
-    await pool(tasks, config.screenConcurrency, async ({ c, i }) => {
+    await warmPrefix(ctx, system, tasks.length, empty ? config.modelInitial : undefined);
+    await pool(tasks, fanOut(tasks.length), async ({ c, i }) => {
       if (ctx.signal.aborted) return;
       await produceScreen(ctx, {
         screenId: c.screenId, system, prompt: screenUserPrompt(c.s, all, base ? { variant: { ofName: base.name, name: input.variantName! } } : {}), sourceKind: 'generate', model: empty ? config.modelInitial : undefined,
@@ -274,20 +300,21 @@ async function runGenerate(ctx: Ctx) {
     const blank = (await db.select({ id: schema.screens.id }).from(schema.screens).where(and(inArray(schema.screens.id, created.map((c) => c.screenId)), isNull(schema.screens.currentRevisionId)))).map((r) => r.id);
     if (blank.length) await db.delete(schema.screens).where(inArray(schema.screens.id, blank));
   }
-  // 新屏一落地就派生应用地图：懒生成补的那张屏此刻已能解析断链，不必等后面的反向连线跑完
-  if (ctx.produced.length) await db.transaction((tx) => deriveLinks(tx, ctx.project.id));
+  // 后面还要对入口屏跑反向连线时，新屏一落地先派生一次应用地图：懒生成补的那张屏此刻已能解析断链，不必等反向连线跑完。
+  // 没有反向连线时，收尾的那次派生紧接着就到，这里不重复（REL-5）
+  const entry = entryFrom ? existingRows.find((s) => s.route === entryFrom) : null;
+  if (ctx.produced.length && entry?.currentRevisionId && !ctx.signal.aborted) await db.transaction((tx) => deriveLinks(tx, ctx.project.id));
   // 样板屏（REQ-CORE-016）：没钦定过就以本次第 1 张整屏默认屏为默认——变体是某个状态、叠层是透明弹层，都当不了风格锚点
   const pin = base ? undefined : created.find((c) => c.s.presentation !== 'overlay');
   if (!ctx.project.exemplarScreenId && pin) {
     await db.update(schema.projects).set({ exemplarScreenId: pin.screenId }).where(and(eq(schema.projects.id, ctx.project.id), sql`${schema.projects.exemplarScreenId} is null`));
   }
-  // 反向连线（REQ-CORE-014）：对入口屏跑一次补链；入口屏此刻被用户改了（修订冲突）就跳过，不让整个造屏失败
-  const entry = entryFrom ? existingRows.find((s) => s.route === entryFrom) : null;
+  // 反向连线（REQ-CORE-014）：对入口屏跑一次接上跳转（补丁，ADR-007 v1.05）；入口屏此刻被用户改了（修订冲突）就跳过，不让整个造屏失败
   if (entry?.currentRevisionId && !ctx.signal.aborted) {
     try {
       const before = (await currentBody(entry.id)) ?? '';
-      const prompt = editUserPrompt(entry.name, entry.route, before, linkRepairPrompt(created.map((c) => c.s.route)), await priorInstructions(entry.id, entry.currentRevisionId));
-      const { body } = await produceScreen(ctx, { screenId: entry.id, system, prompt, sourceKind: 'edit', expectedRevisionId: entry.currentRevisionId });
+      const patched = await editBody(ctx, { system, name: entry.name, route: entry.route, body: before, instruction: linkRepairPrompt(created.map((c) => c.s.route)), prior: await priorInstructions(entry.id, entry.currentRevisionId) });
+      const { body } = await produceScreen(ctx, { screenId: entry.id, system, body: patched, sourceKind: 'edit', expectedRevisionId: entry.currentRevisionId });
       const had = new Set(extractLinks(before).map((l) => l.href));
       const added = Array.from(new Set(extractLinks(body).map((l) => l.href).filter((h) => !had.has(h))));
       ctx.entryRepair = { name: entry.name, added };
@@ -310,22 +337,24 @@ async function runEditScreens(ctx: Ctx) {
     throw new JobFailure('validation', !alive ? '目标屏都已被删除' : alive < new Set(input.screenIds).size ? '目标屏有的已被删除，其余还没有生成出内容' : '目标屏还没有生成出内容');
   }
   // 共享组件卡（REQ-EDIT-006）：框选的与目标屏本来就用的附完整 HTML
-  const system = screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], await registry(ctx), await references(ctx), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds, screenIds: targets.map((s) => s.id) }));
+  const system = screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], await registry(ctx), await references(ctx, { omitScreenId: targets.length === 1 ? targets[0].id : undefined }), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds, screenIds: targets.map((s) => s.id) }));
   const prepared = await Promise.all(targets.map(async (screen) => {
     const [rev] = await db.select().from(schema.screenRevisions).where(eq(schema.screenRevisions.id, screen.currentRevisionId!));
     const body = extractBody((await storage.get(rev.htmlKey)).toString('utf8'));
     const prior = await priorInstructions(screen.id, screen.currentRevisionId);
     // 叠层屏（v0.63）：改屏时也提醒它是压在别的屏上的弹层，否则模型会把它改回整页
     const instruction = screen.presentation === 'overlay' ? `${input.prompt}\n${OVERLAY_SCREEN_NOTE}` : input.prompt;
-    return { screen, base: screen.currentRevisionId!, prompt: editUserPrompt(screen.name, screen.route, body, instruction, prior) };
+    return { screen, base: screen.currentRevisionId!, body, instruction, prior };
   }));
   const tasks = prepared.flatMap((p) => Array.from({ length: versions }, (_, i) => ({ p, i })));
   ctx.planned = tasks.length;
   try {
-    await pool(tasks, config.screenConcurrency, async ({ p, i }) => {
+    await warmPrefix(ctx, system, tasks.length);
+    await pool(tasks, fanOut(tasks.length), async ({ p, i }) => {
       if (ctx.signal.aborted) return;
+      const body = await editBody(ctx, { system, name: p.screen.name, route: p.screen.route, body: p.body, instruction: p.instruction, prior: p.prior });
       await produceScreen(ctx, {
-        screenId: p.screen.id, system, prompt: p.prompt, sourceKind: 'edit',
+        screenId: p.screen.id, system, body, sourceKind: 'edit',
         expectedRevisionId: versions === 1 ? p.base : undefined, parentRevisionId: p.base,
         candidateIndex: versions > 1 ? i : null, advanceCurrent: versions === 1,
       });
@@ -345,8 +374,8 @@ async function runProposeDesignSystem(ctx: Ctx): Promise<DesignProposalDto> {
   const system = proposeDesignSystemSystemPrompt(FONT_FAMILIES);
   const user = proposeDesignSystemUserPrompt({ instruction: input.instruction, designMd: ctx.ds.designMd, tokens: ctx.tokens, existing, sampleBody: sampleBody ?? undefined });
   let raw: Partial<DesignProposalDto> & { tokens?: Record<string, unknown> };
-  try { raw = parseJsonObject(await llmCall(ctx, system, user)); }
-  catch { raw = parseJsonObject(await llmCall(ctx, system, user + '\nReturn strictly valid JSON.')); }
+  try { raw = parseJsonObject(await llmCall(ctx, system, user, undefined, false, { effort: 'low' })); }
+  catch { raw = parseJsonObject(await llmCall(ctx, system, user + '\nReturn strictly valid JSON.', undefined, false, { effort: 'low' })); }
   const conventions = (Array.isArray(raw.conventions) ? raw.conventions : existing).map((c) => String(c).trim()).filter(Boolean).slice(0, MAX_CONVENTIONS);
   const tokens: DesignProposalDto['tokens'] = {};
   const t = raw.tokens ?? {};
@@ -551,7 +580,7 @@ async function runClaimed(claimed: JobRow): Promise<void> {
   }
   const images = await loadForModel((claimed.input as { imageKeys?: string[] }).imageKeys);
   const assets = await assetsForPrompt(project.id);
-  const ctx: Ctx = { job: claimed, project, ds, device, tokens, prelude: buildPrelude(tokens), signal: abort.signal, usage: { tokensIn: 0, tokensOut: 0, screens: 0 }, runner, images, assets, produced: [], entryRepair: null };
+  const ctx: Ctx = { job: claimed, project, ds, device, tokens, prelude: buildPrelude(tokens), signal: abort.signal, usage: { tokensIn: 0, tokensOut: 0, screens: 0, cacheRead: 0, cacheWrite: 0 }, runner, images, assets, produced: [], entryRepair: null };
   await emitJobEvent(jobId, 'progress', { stage: 'running' });
   const timer = setTimeout(() => abort.abort(new Error('timeout')), timeoutMs);
   modelAborts.set(jobId, abort);
@@ -585,7 +614,7 @@ async function runClaimed(claimed: JobRow): Promise<void> {
 
   // 落库前复核取消（§16 竞态：worker vs cancel）
   const [fresh] = await db.select({ status: schema.generationJobs.status }).from(schema.generationJobs).where(eq(schema.generationJobs.id, jobId));
-  await recordUsage(job.createdBy, jobId, ctx.usage.tokensIn, ctx.usage.tokensOut, ctx.usage.screens, ctx.runner.driver ?? config.llmDriver, ctx.runner.model ?? config.model);
+  await recordUsage(job.createdBy, jobId, ctx.usage.tokensIn, ctx.usage.tokensOut, ctx.usage.screens, ctx.runner.driver ?? config.llmDriver, ctx.runner.model ?? config.model, { read: ctx.usage.cacheRead, write: ctx.usage.cacheWrite });
   if (fresh.status === 'cancelled') { await deriveIfProduced(ctx); return; }
   // 测试钩子，只在 stub 驱动时认：复核取消之后、落库之前停一会，造「取消与落库同时到达」（TEST.md §3）
   const finalizeHold = config.llmDriver === 'stub' ? Number(/\[stub-finalize-hold:(\d+)\]/.exec(String((job.input as { prompt?: string }).prompt ?? ''))?.[1] ?? 0) : 0;

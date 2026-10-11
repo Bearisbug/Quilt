@@ -6,7 +6,7 @@ import { agentSdkOutput, agentSdkTurn, ProviderError } from '../../../apps/api/s
 // 错误原文放在 result 里——当成产出往下传，改组件就报「0 个根元素」、通道验证照样通过
 test('agent-sdk result: success → text + usage; is_error → ProviderError carrying the API text', () => {
   const ok = agentSdkOutput({ subtype: 'success', is_error: false, result: '<div>ok</div>', usage: { input_tokens: 10, cache_read_input_tokens: 90, output_tokens: 5 } });
-  assert.deepEqual(ok, { text: '<div>ok</div>', tokensIn: 100, tokensOut: 5 });
+  assert.deepEqual(ok, { text: '<div>ok</div>', tokensIn: 100, tokensOut: 5, cacheRead: 90, cacheWrite: 0 });
 
   const msg = 'API Error: 400 Claude Code 2.1.263 does not support this model; version 2.1.280 or newer is required.';
   assert.throws(() => agentSdkOutput({ subtype: 'success', is_error: true, api_error_status: 400, result: msg }),
@@ -27,7 +27,7 @@ test('agent-sdk turn: the text is every reply of the turn in order, not just the
     yield { type: 'assistant', message: { content: [{ type: 'text', text: 'outline-variant">tail</section>' }] } };
     yield { type: 'result', subtype: 'success', is_error: false, result: 'outline-variant">tail</section>', usage: { input_tokens: 10, output_tokens: 7 } };
   }
-  assert.deepEqual(await agentSdkTurn(turn()), { text: '<aside>side</aside><section class="border border-outline-variant">tail</section>', tokensIn: 10, tokensOut: 7 });
+  assert.deepEqual(await agentSdkTurn(turn()), { text: '<aside>side</aside><section class="border border-outline-variant">tail</section>', tokensIn: 10, tokensOut: 7, cacheRead: 0, cacheWrite: 0 });
 
   // 续写用尽：最后一条是合成的报错消息（带 error），result 是报错原文且 is_error——按失败处理，不拼出半截产出
   const msg = "API Error: Claude's response exceeded the 32000 output token maximum.";

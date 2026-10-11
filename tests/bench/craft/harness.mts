@@ -4,6 +4,7 @@
 // 需要真实模型（Gemini 走 .env 的 GEMINI_API_KEY / Vertex，Sonnet 走本机 Claude 订阅），不写任何库。
 // 用法（在 tests/ 下）：
 //   npx tsx bench/craft/harness.mts plan                             补齐 plans.json 里缺的需求（已冻结的不重跑）
+//   npx tsx bench/craft/harness.mts plantime <label> [ids]           每条需求各规划一次，只记耗时、输出 token 与屏数（不改 plans.json），存 plantime-<label>.json
 //   npx tsx bench/craft/harness.mts gen <variant> <channel> [ids]    variant = base（当前代码）| <candidate.json>；channel = gemini | sonnet
 //   npx tsx bench/craft/harness.mts reshoot <variant> <channel> [brief-idx …]  用存下的 HTML 重拍（不调模型）
 //   npx tsx bench/craft/harness.mts pairs <a> <b> <channel> <label>  盲评对：路径只带中性标签，左右两种顺序
@@ -14,7 +15,7 @@
 // 候选 JSON：{ block, mobile?, desktop?, edits?: [{find, replace, device?}], designMdEdits?: [{find, replace, device?}] }，
 // block 插在 DESIGN SYSTEM 一节之前，edits 改系统提示词原文，designMdEdits 改默认 DESIGN.md 原文。
 // 产物在 CRAFT_BENCH_OUT（缺省 docs/test-runs/craft-bench，已 gitignore）。环境变量 AES_CONC：并发数（缺省 4；
-// Gemini 走 Vertex 时 4 并发会撞 120 s 请求超时，用 2）。本机 Claude 订阅每次调用会在 ~/.claude/projects/<cwd> 下留一份会话记录，跑完删掉。
+// Gemini 走 Vertex 时 4 并发会撞 120 s 请求超时，用 2）；AES_EFFORT：传给模型的 effort（low | medium | high，缺省不传 = 驱动缺省，§17 v1.05）。本机 Claude 订阅每次调用会在 ~/.claude/projects/<cwd> 下留一份会话记录，跑完删掉。
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
@@ -27,6 +28,7 @@ const HERE = import.meta.dirname;
 const DIR = process.env.CRAFT_BENCH_OUT ?? path.join(REPO, 'docs/test-runs/craft-bench');
 fs.mkdirSync(DIR, { recursive: true });
 const SEED = '#3B5BDB';
+const EFFORT = process.env.AES_EFFORT as 'low' | 'medium' | 'high' | undefined;
 type Brief = { id: string; name: string; device: 'mobile' | 'desktop'; prompt: string };
 type Planned = { name: string; route: string; purpose: string; links: string[]; sections: string[]; presentation?: 'push' | 'overlay' };
 type Plan = { brief?: string; screens: Planned[] };
@@ -95,11 +97,26 @@ async function plan() {
   await pool(briefs.filter((b) => !out[b.id]), 3, async (b) => {
     const system = core.planSystemPrompt({ count: 'auto', empty: true });
     const user = core.planUserPrompt({ name: b.name, description: b.prompt }, b.prompt, []);
-    const r = await completeWithRetry({ system, prompt: user, model: CHANNELS.sonnet.model, spec: CHANNELS.sonnet.spec });
+    const r = await completeWithRetry({ system, prompt: user, model: CHANNELS.sonnet.model, spec: CHANNELS.sonnet.spec, effort: EFFORT });
     out[b.id] = parsePlan(r.text);
     console.log(b.id, out[b.id].screens.map((s) => `${s.name} ${s.route}`).join(' | '));
     fs.writeFileSync(path.join(HERE, 'plans.json'), JSON.stringify(out, null, 2));
   });
+}
+
+async function plantime(label: string, ids: string[]) {
+  const rows: { brief: string; ms: number; tokensOut: number; screens: number; routes: string[]; error?: string }[] = [];
+  await pool(briefs.filter((b) => !ids.length || ids.includes(b.id)), 3, async (b) => {
+    const t0 = Date.now();
+    try {
+      const r = await completeWithRetry({ system: core.planSystemPrompt({ count: 'auto', empty: true }), prompt: core.planUserPrompt({ name: b.name, description: b.prompt }, b.prompt, []), model: CHANNELS.sonnet.model, spec: CHANNELS.sonnet.spec, effort: EFFORT });
+      const p = parsePlan(r.text);
+      rows.push({ brief: b.id, ms: Date.now() - t0, tokensOut: r.tokensOut, screens: p.screens.length, routes: p.screens.map((s) => s.route) });
+    } catch (e) { rows.push({ brief: b.id, ms: Date.now() - t0, tokensOut: 0, screens: 0, routes: [], error: (e as Error).message.slice(0, 200) }); }
+    const x = rows.at(-1)!;
+    console.log(`${label} ${b.id}：${Math.round(x.ms / 1000)} s，输出 ${x.tokensOut} token，${x.screens} 屏${x.error ? `（${x.error}）` : ''}`);
+  });
+  fs.writeFileSync(path.join(DIR, `plantime-${label}.json`), JSON.stringify(rows, null, 2));
 }
 
 function plannedFor(plans: Record<string, Plan>, b: Brief) {
@@ -186,7 +203,7 @@ async function gen(variantArg: string, channel: Channel, only?: string[]) {
       const t0 = Date.now();
       const rec: Record<string, unknown> = { brief: b.id, idx, device: b.device, screen: { name: s.name, route: s.route, purpose: s.purpose }, variant: vname, channel, systemChars: system.length };
       try {
-        const r = await completeWithRetry({ system, prompt: user, model: ch.model, spec: ch.spec, signal: AbortSignal.timeout(900_000) });
+        const r = await completeWithRetry({ system, prompt: user, model: ch.model, spec: ch.spec, effort: EFFORT, signal: AbortSignal.timeout(900_000) });
         const body = core.stripFences(r.text);
         const report = core.lintScreenBody(body, all.map((x) => x.route), true);
         const html = core.assembleDocument(core.injectQids(body), core.buildPrelude(projectDesign(b).tokens), `${b.name} · ${s.name}`);
@@ -340,6 +357,7 @@ const [cmd, ...rest] = process.argv.slice(2);
 if (cmd === 'audit') await audit(rest[0], rest[1] as Channel);
 else if (cmd === 'reshoot') await reshoot(rest[0], rest[1] as Channel, rest.slice(2));
 else if (cmd === 'plan') await plan();
+else if (cmd === 'plantime') await plantime(rest[0], rest.slice(1));
 else if (cmd === 'gen') await gen(rest[0], rest[1] as Channel, rest.slice(2));
 else if (cmd === 'pairs') pairs(rest[0], rest[1], rest[2] as Channel, rest[3]);
 else if (cmd === 'sysprompt') {

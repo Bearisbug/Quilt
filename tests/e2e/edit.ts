@@ -1806,6 +1806,59 @@ await step('TC-EDIT-035', async () => {
   return '别的屏有作业在跑时删约定、一句话改设计系统、记为约定照常可点；回刷所有屏不可点并写明是哪个作业；检查器写明这一屏正在改，⌘S 弹同样的提示；批注面板写明原因';
 });
 
+// TC-EDIT-036 改屏走补丁（ADR-007 / ADR-012 v1.05）：OpenAI 兼容桩看到的是补丁提示词，回一块把第一个 <h1> 换掉的补丁——新修订里标题变了、
+// 其余元素的 qid 一个不变；补丁对不上时同一轮改用整屏提示词再要一次；只改样板屏这一屏时参考屏里没有样板屏，和别的屏一起改时有
+await step('TC-EDIT-036', async () => {
+  const { startOpenAiStub } = await import('./openai-stub.ts');
+  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Patch', '--device', 'mobile', '--screens', '2', '--no-shot');
+  const pid = r.projectId; const [s1, s2] = r.screens.map((s) => s.id);
+  const S = softly();
+  const FIND = '<<<<<<< FIND';
+  const WHOLE = '<div class="min-h-dvh flex flex-col bg-background text-on-background"><h1 class="text-xl">整屏重写</h1></div>';
+  const stub = startOpenAiStub({ port: 3975, apiKey: 'good-key-0036', reply: (hit) => {
+    if (!hit.user.includes(FIND)) return WHOLE;   // 退回的整屏提示词（与通道验证）
+    const current = hit.user.split('\nCURRENT HTML:\n')[1] ?? '';
+    const h1 = /<h1[^>]*>[^<]*<\/h1>/.exec(current)?.[0] ?? '';
+    if (hit.user.includes('MISS') || !h1) return `${FIND}\n<h1 data-qid="q0">没有这一处</h1>\n=======\n<h1>x</h1>\n>>>>>>> REPLACE`;
+    return `${FIND}\n${h1}\n=======\n${h1.replace(/>[^<]*</, '>补丁标题<')}\n>>>>>>> REPLACE`;
+  } });
+  const qids = (html: string) => [...html.matchAll(/data-qid="(q\d+)"/g)].map((m) => m[1]).sort().join(',');
+  const current = async (sid: string) => { const d = await detail(pid); const s = d.screens.find((x) => x.id === sid)!; return { rev: s.currentRevisionId, html: (await revisionHtml(sid, s.currentRevisionId)).html }; };
+  const run = async (prompt: string, screenIds: string[], channelId: string) => {
+    const j = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ kind: 'edit_screens', input: { prompt, screenIds, versions: 1, runner: { kind: 'channel', channelId } } }) });
+    expect(j.status === 202, `建改屏作业 ${j.status}`);
+    return waitJob(j.body.job.id, 90) as Promise<{ status: string; output: { tokensOut?: number } }>;
+  };
+  try {
+    const ch = await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label: 'Stub 补丁', endpoint: stub.url, model: 'stub-36', apiKey: 'good-key-0036' }) });
+    expect((await apiJson<{ ok: boolean }>(`/v1/runners/channel:${ch.body.channel.id}/probe`, { method: 'POST' })).body.ok, '桩通道验证未通过');
+    const cid = ch.body.channel.id;
+    expect((await apiJson(`/v1/projects/${pid}`, { method: 'PATCH', body: JSON.stringify({ exemplarScreenId: s1 }) })).status === 200, '设样板屏失败');
+    // 1 只改样板屏 s1：一次调用、补丁提示词、参考屏里没有样板屏；新修订标题是「补丁标题」，qid 集合不变
+    const before = await current(s1);
+    stub.hits.length = 0;
+    const j1 = await run('标题改一下', [s1], cid);
+    const after = await current(s1);
+    await S.check(() => expect(j1.status === 'succeeded' && stub.hits.length === 1, `① 应一次调用成功：${j1.status}，${stub.hits.length} 次`));
+    await S.check(() => expect(stub.hits[0]?.user.includes(FIND) && !stub.hits[0]?.system.includes('exemplar screen'), '① 应是补丁提示词，且只改样板屏时参考屏里不放样板屏'));
+    await S.check(() => expect(after.rev !== before.rev && after.html.includes('>补丁标题<'), '① 新修订里标题没换成「补丁标题」'));
+    await S.check(() => expect(qids(after.html) === qids(before.html), `① 补丁之后 qid 集合变了：${qids(before.html).split(',').length} → ${qids(after.html).split(',').length}`));
+    // 2 两屏一起改：样板屏照旧在参考屏里
+    stub.hits.length = 0;
+    const j2 = await run('标题都改一下', [s1, s2], cid);
+    await S.check(() => expect(j2.status === 'succeeded' && stub.hits.length === 2 && stub.hits.every((h) => h.system.includes('exemplar screen')), `② 两屏一起改时参考屏里应有样板屏：${j2.status}，${stub.hits.length} 次`));
+    // 3 补丁对不上：同一轮里第二次调用是整屏提示词，落下的是整屏重写的结果，两次调用都计用量
+    stub.hits.length = 0;
+    const j3 = await run('MISS 改标题', [s2], cid);
+    const s2now = await current(s2);
+    await S.check(() => expect(j3.status === 'succeeded' && stub.hits.length === 2 && stub.hits[0].user.includes(FIND) && !stub.hits[1].user.includes(FIND), `③ 应先补丁、再退回整屏：${j3.status}，${stub.hits.map((h) => (h.user.includes(FIND) ? '补丁' : '整屏')).join(' → ')}`));
+    await S.check(() => expect(s2now.html.includes('整屏重写') && j3.output.tokensOut === 14, `③ 应落整屏重写的结果、用量记两次调用（tokensOut ${j3.output.tokensOut}）`));
+  } catch (e) { S.fail(e); }
+  finally { await stub.close(); await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
+  S.done();
+  return '只改样板屏：一次补丁调用、参考屏不放样板屏、标题换上且 qid 集合不变；两屏一起改：参考屏有样板屏；补丁对不上：同一轮退回整屏、用量记两次';
+});
+
 await browser.close();
 console.log(`\n=== RUN-${RUN} EDIT ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));
 console.log(results.map((r) => `${r.tc} ${r.result} ${r.note}`).join('\n'));

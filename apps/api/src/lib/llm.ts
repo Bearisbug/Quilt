@@ -5,10 +5,12 @@ import path from 'node:path';
 import { config } from '../config.ts';
 import { sha256 } from './signing.ts';
 import { codexBin } from './agentCli.ts';
+import { EDIT_BLOCK } from '@quilt/core';
 
 // LLM 适配层（§17 Claude API）。驱动：anthropic（生产，API key）| agent-sdk（本机 Claude 订阅，仅开发）| codex（本机 Codex 订阅，v0.68）
 // | gemini | openai（兼容端点）| stub（测试故障注入/回放）。
-export type LlmResult = { text: string; tokensIn: number; tokensOut: number; model: string; ms: number };
+// cacheRead / cacheWrite（v1.05）：读缓存、写缓存的输入 token，已含在 tokensIn 里；报不出的驱动不给
+export type LlmResult = { text: string; tokensIn: number; tokensOut: number; model: string; ms: number; cacheRead?: number; cacheWrite?: number };
 export class ProviderError extends Error { constructor(msg: string, public retryable: boolean) { super(msg); } }
 // 输出到上限被截断（§17，v0.90）：截掉的是屏的后半段与收尾脚本，原样返回会被存成一版残屏；同样的请求重试还会截在同一处
 const cutOff = (driver: string, reason: string) => new ProviderError(`${driver} output hit the token limit (${reason})`, false);
@@ -16,7 +18,10 @@ const cutOff = (driver: string, reason: string) => new ProviderError(`${driver} 
 // 参考图（REQ-CORE-012）：正文以 base64 随请求走，不给模型发 URL——签名 URL 会过期，
 // 而且让供应商回源取图等于把可用性押在我们的对象存储上。
 export type LlmImage = { mediaType: string; dataBase64: string };
-export type LlmArgs = { system: string; prompt: string; images?: LlmImage[]; model?: string; maxTokens?: number; signal?: AbortSignal; idleMs?: number };
+// effort（§17 v1.05）：按调用类型定思考深度——规划、提炼这类只出短 JSON 的调用用 low，出屏与改屏用 medium；
+// 只有 Anthropic 系的两个驱动（anthropic、agent-sdk）认它，其余驱动忽略
+export type LlmEffort = 'low' | 'medium' | 'high';
+export type LlmArgs = { system: string; prompt: string; images?: LlmImage[]; model?: string; maxTokens?: number; signal?: AbortSignal; idleMs?: number; effort?: LlmEffort };
 // 流式调用的空闲超时（§17 v1.03）：两次流事件之间超过它就判失败；整屏重写的桌面屏要写几分钟，不能用总超时
 const STREAM_IDLE_MS = 120_000;
 
@@ -32,7 +37,7 @@ class AnthropicLlm implements Llm {
   // 凭据与端点可由账号自建通道给出（REQ-CORE-013）；缺省回落到 .env
   constructor(private apiKey?: string, private baseUrl?: string) {}
   // 流式（§17 v1.03）：输出上限 64000，整屏重写的桌面屏要写几分钟——非流式 120 s 总超时写不完；空闲超时不重试，同样的请求大概率再卡一次
-  async complete({ system, prompt, images, model = config.model, maxTokens = 64000, signal, idleMs = STREAM_IDLE_MS }: LlmArgs) {
+  async complete({ system, prompt, images, model = config.model, maxTokens = 64000, signal, idleMs = STREAM_IDLE_MS, effort }: LlmArgs) {
     if (!this.client) {
       const { default: Anthropic } = await import('@anthropic-ai/sdk');
       this.client = new Anthropic({ apiKey: this.apiKey ?? config.anthropicApiKey, baseURL: this.baseUrl, maxRetries: 0 });
@@ -41,11 +46,23 @@ class AnthropicLlm implements Llm {
     const idle = new AbortController();
     let timer: NodeJS.Timeout | undefined;
     const kick = () => { clearTimeout(timer); timer = setTimeout(() => idle.abort(), idleMs); };
+    // 预热（ADR-012 v1.05）：max_tokens 0 只写系统提示的缓存、不生成，扇出之前发一次
+    if (maxTokens === 0) {
+      try {
+        const msg = await this.client.messages.create({ model, max_tokens: 0, system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: prompt }] }, { signal, timeout: 60_000 });
+        const u = msg.usage;
+        return { text: '', tokensIn: u.input_tokens + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), tokensOut: 0, model, ms: Date.now() - t0, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0 };
+      } catch (e) {
+        const status = (e as { status?: number }).status;
+        throw new ProviderError(`anthropic warm-up ${status ?? ''} ${(e as Error).message}`, false);
+      }
+    }
     try {
       kick();
       const stream = this.client.messages.stream(
         {
           model, max_tokens: maxTokens,
+          ...(effort ? { output_config: { effort } } : {}),
           system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
           // 图在文字之前：参考图要先被看到，后面的指令才有指代对象
           messages: [{ role: 'user', content: [
@@ -59,7 +76,7 @@ class AnthropicLlm implements Llm {
       const msg = await stream.finalMessage();
       if (msg.stop_reason === 'max_tokens') throw cutOff('anthropic', 'stop_reason=max_tokens');
       const text = msg.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('');
-      return { text, tokensIn: msg.usage.input_tokens + (msg.usage.cache_read_input_tokens ?? 0) + (msg.usage.cache_creation_input_tokens ?? 0), tokensOut: msg.usage.output_tokens, model, ms: Date.now() - t0 };
+      return { text, tokensIn: msg.usage.input_tokens + (msg.usage.cache_read_input_tokens ?? 0) + (msg.usage.cache_creation_input_tokens ?? 0), tokensOut: msg.usage.output_tokens, model, ms: Date.now() - t0, cacheRead: msg.usage.cache_read_input_tokens ?? 0, cacheWrite: msg.usage.cache_creation_input_tokens ?? 0 };
     } catch (e) {
       if (e instanceof ProviderError) throw e;
       if (idle.signal.aborted && !signal?.aborted) throw new ProviderError(`anthropic stream idle for ${idleMs / 1000}s`, false);
@@ -74,7 +91,7 @@ class AgentSdkLlm implements Llm {
   // 而 SDKUserMessage.message 就是 Anthropic 的 MessageParam，内容块可以带 image。
   // 带图时切到这个形态；不带图仍走字符串，少一层包装。
   readonly vision = true;
-  async complete({ system, prompt, images, model = config.model, signal }: LlmArgs) {
+  async complete({ system, prompt, images, model = config.model, signal, effort }: LlmArgs) {
     const { query } = await import('@anthropic-ai/claude-agent-sdk');
     const env: Record<string, string | undefined> = { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: 'quilt-api/0.1.0' };
     delete env.ANTHROPIC_API_KEY;
@@ -94,15 +111,20 @@ class AgentSdkLlm implements Llm {
           };
         })()
       : prompt;
-    const q = query({ prompt: promptArg, options: { systemPrompt: { type: 'custom', prompt: system }, tools: [], maxTurns: 1, model, permissionMode: 'dontAsk', settingSources: [], env, abortController: abort } });
-    return { ...await agentSdkTurn(q), model, ms: Date.now() - t0 };
+    // 不读本机的任何东西（ADR-018 v1.05）：settingSources 为空只挡住设置文件，Claude Code 仍会按工作目录注入那个仓库的 auto-memory、
+    // 用户邮箱与 git 环境，并把每次调用存成一个会话——所以在空的临时目录里跑、关掉 auto-memory、不落会话
+    const cwd = await mkdtemp(path.join(os.tmpdir(), 'quilt-agent-sdk-'));
+    try {
+      const q = query({ prompt: promptArg, options: { systemPrompt: { type: 'custom', prompt: system }, tools: [], maxTurns: 1, model, permissionMode: 'dontAsk', settingSources: [], settings: { autoMemoryEnabled: false }, persistSession: false, cwd, ...(effort ? { effort } : {}), env, abortController: abort } });
+      return { ...await agentSdkTurn(q), model, ms: Date.now() - t0 };
+    } finally { await rm(cwd, { recursive: true, force: true }).catch(() => {}); }
   }
 }
 
 type AgentSdkReply = { type: 'assistant'; error?: string; message: { content: { type: string; text?: string }[] } };
 /** 一轮的产出（§17，v0.90）：输出超过单次上限时 SDK 自带的 Claude Code 发「接着写」续上（最多 3 次），
  *  result 只装最后一段——文字取这一轮所有回答按序拼接；合成的报错消息（带 error）不算 */
-export async function agentSdkTurn(q: AsyncIterable<{ type: string; subtype?: string }>): Promise<{ text: string; tokensIn: number; tokensOut: number }> {
+export async function agentSdkTurn(q: AsyncIterable<{ type: string; subtype?: string }>): Promise<{ text: string; tokensIn: number; tokensOut: number; cacheRead: number; cacheWrite: number }> {
   const texts: string[] = [];
   for await (const m of q) {
     if (m.type === 'assistant' && !(m as AgentSdkReply).error) {
@@ -116,14 +138,14 @@ export async function agentSdkTurn(q: AsyncIterable<{ type: string; subtype?: st
 type AgentSdkResult = { subtype: string; is_error?: boolean; api_error_status?: number | null; result?: string; usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; output_tokens?: number } };
 /** SDK 的 result 消息 → 产出。API 报错（模型要求更新的 Claude Code、额度用完、过载）时 subtype 仍是 success，
  *  只在 is_error / api_error_status 上标出、错误原文在 result 里——不拦下的话它会被当成模型产出往下传（§17，v0.71） */
-export function agentSdkOutput(r: AgentSdkResult, texts: string[] = []): { text: string; tokensIn: number; tokensOut: number } {
+export function agentSdkOutput(r: AgentSdkResult, texts: string[] = []): { text: string; tokensIn: number; tokensOut: number; cacheRead: number; cacheWrite: number } {
   if (r.subtype !== 'success') throw new ProviderError(`agent-sdk ${r.subtype}`, true);
   if (r.is_error) {
     const status = r.api_error_status ?? 0;
     throw new ProviderError(`agent-sdk: ${String(r.result ?? '').trim().slice(0, 300)}`, status === 429 || status >= 500);
   }
   const u = r.usage ?? {};
-  return { text: texts.length ? texts.join('') : String(r.result ?? ''), tokensIn: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), tokensOut: u.output_tokens ?? 0 };
+  return { text: texts.length ? texts.join('') : String(r.result ?? ''), tokensIn: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), tokensOut: u.output_tokens ?? 0, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0 };
 }
 
 // 本机 Codex 订阅（v0.68 ADR-020）：每次拉起本机 codex exec，复用它的 ChatGPT 登录态。
@@ -277,6 +299,14 @@ class StubLlm implements Llm {
     const hold = Number(/\[stub-hold:(\d+)\]/.exec(`${system}\n${prompt}`)?.[1] ?? 0);
     if (hold) await new Promise((r) => setTimeout(r, hold));
     const isPlan = prompt.startsWith('App:');
+    // 改屏要补丁时（提示词里有补丁块的格式说明，ADR-007 v1.05）：[stub-patch] 回一块把第一个 <h1> 的文字换成「Patched title」的补丁，
+    // [stub-patch-miss] 回一块在 CURRENT HTML 里找不到的补丁（流水线随后退回整屏提示词，再来的那次回固定整屏）
+    const current = prompt.includes(EDIT_BLOCK.find) ? prompt.split('\nCURRENT HTML:\n')[1] : undefined;
+    const h1 = current && /<h1[^>]*>[^<]*<\/h1>/.exec(current)?.[0];
+    if (current && (prompt.includes('[stub-patch-miss]') || (prompt.includes('[stub-patch]') && h1))) {
+      const [find, replace] = prompt.includes('[stub-patch-miss]') ? ['<h1 data-qid="q0">not in this screen</h1>', '<h1>x</h1>'] : [h1!, h1!.replace(/>[^<]*</, '>Patched title<')];
+      return { text: `${EDIT_BLOCK.find}\n${find}\n${EDIT_BLOCK.sep}\n${replace}\n${EDIT_BLOCK.replace}`, tokensIn: 1000, tokensOut: 100, model, ms: 5 };
+    }
     const text = isPlan
       ? JSON.stringify({ screens: [
           { name: 'Home', route: '/home', purpose: 'Overview', links: ['/list', '/settings'], sections: ['header', 'hero', 'list'] },

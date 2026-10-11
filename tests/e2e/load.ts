@@ -388,8 +388,11 @@ await step('TC-CORE-085', async () => {
   expect(await page.locator('[data-testid="screen-card"] iframe').count() === 1, '画布上不止一个活 iframe');
   await page.keyboard.press('Escape');
   await page.locator('.card.focused').waitFor({ state: 'detached', timeout: 5000 });
+  // 放行时连闸门一起撤掉：截图排在队里、放行之后才拍好时，页面这时才来请求，不撤的话它会被扣住、再也等不到放行
+  gateRev = '';
   (release as unknown as (() => void) | null)?.();
-  await eventually(async () => expect(await shotIs(rev3), '放行后 /s1 没换上新截图'), 20000);
+  // 同一套里前面的用例种了几十屏，截图队列（并发 4）还排着它们的截图，这一张要排队：给 60 s
+  await eventually(async () => expect(await shotIs(rev3), '放行后 /s1 没换上新截图'), 60000);
 
   // 4 留着时又聚焦回这一屏：照常进入交互态（不卡在「加载中」）
   await focusS1();
@@ -432,12 +435,15 @@ await step('TC-CORE-053', async () => {
   // 每个回包到达时都已有更晚的请求发出，详情仍要跟着前进（只丢早于最近已应用的回包）
   const p2 = await newPage();
   let burst = false; let tick = 0; let held = 0;
+  // 页面关掉之后还在途的那一次会抛错：在这里接住，否则它成了进程级的未处理拒绝，整套 load.ts 在后面的用例里直接退出
   await p2.route(`**/v1/projects/${pid}`, async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
-    const resp = await route.fetch();
-    const body = await resp.json();
-    if (burst) { held += 1; body.project.name = `Tick ${++tick}`; await sleep(900); }
-    await route.fulfill({ response: resp, json: body });
+    try {
+      const resp = await route.fetch();
+      const body = await resp.json();
+      if (burst) { held += 1; body.project.name = `Tick ${++tick}`; await sleep(900); }
+      await route.fulfill({ response: resp, json: body });
+    } catch { await route.abort().catch(() => {}); }
   });
   await p2.route(`**/v1/projects/${pid}/events`, (route) => route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: `retry: 300\n\nevent: screen_changed\ndata: ${JSON.stringify({ projectId: pid, type: 'screen_changed', data: {}, at: new Date().toISOString() })}\n\n` }));
   await p2.goto(`${WEB}/p/${pid}`);
@@ -448,6 +454,8 @@ await step('TC-CORE-053', async () => {
   while (Date.now() - tb < 6000) { titles.add(await p2.title()); await sleep(100); }
   burst = false;
   const applied = [...titles].filter((t) => t.startsWith('Tick')).length;
+  // 事件流桩每 300 ms 重连一次，不关的话这一页会一直打详情 GET 到进程结束
+  await p2.context().close();
   expect(applied >= 3, `事件密集、详情慢时 6 s 里发了 ${held} 次详情 GET，页面只应用了 ${applied} 次`);
   return `${JSON.stringify(log.filter((x) => x.what.startsWith('events')).map((x) => x.t))} ms 各连一次；重连后重取详情与消息、提示撤掉；事件密集时 6 s 发出 ${held} 次慢详情 GET、应用了 ${applied} 次`;
 });

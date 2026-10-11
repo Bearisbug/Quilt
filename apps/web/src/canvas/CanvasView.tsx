@@ -741,11 +741,13 @@ export function CanvasView(p: CanvasProps) {
     const t = setTimeout(() => { pendingDone.current = []; }, 1500);
     return () => clearTimeout(t);
   }, [workingKey, iframeReady, postToPreview]); // eslint-disable-line react-hooks/exhaustive-deps
-  // 直改保存后：父页知道改的是哪个 qid，热更新换完 DOM 给它打「已更新」（没等到热更新就算了）
+  // 直改保存后：父页知道改的是哪个 qid，当场打一次「已更新」，再留一份给热更新换完 DOM 后补打（没等到热更新就算了）。
+  // 当场打这一次不能省：落修订的推送可能比保存的响应先到，那样 DOM 在登记之前就换完了，之后不会再有热更新来补。直改不改 qid，新旧 DOM 上都打得中
   const markDone = useCallback((qids: string[]) => {
     pendingDone.current = [...new Set([...pendingDone.current, ...qids])];
+    postToPreview({ type: 'quilt:mark', working: workingRef.current, done: qids });
     setTimeout(() => { pendingDone.current = pendingDone.current.filter((q) => !qids.includes(q)); }, 3000);
-  }, []);
+  }, [postToPreview]);
   const reselectAfterSwap = useCallback(() => {
     const qid = pendingReselect.current;
     pendingReselect.current = null;

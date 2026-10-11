@@ -94,7 +94,7 @@ export async function runChatTurn(a: ChatTurnArgs): Promise<ChatTurnResult> {
         prompt: promptArg,
         options: {
           systemPrompt: { type: 'custom', prompt: system },
-          tools: [], settingSources: [], cwd, env, abortController: abort,
+          tools: [], settingSources: [], settings: { autoMemoryEnabled: false }, cwd, env, abortController: abort,
           mcpServers: { quilt: { type: 'http', url: mcpUrl(), alwaysLoad: true } },
           permissionMode: 'bypassPermissions', allowDangerouslySkipPermissions: true,
           maxTurns: MAX_TURNS, model: a.model, resume, persistSession: true,

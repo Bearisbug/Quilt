@@ -246,6 +246,9 @@ export const usageEntries = pgTable('usage_entries', {
   jobId: uuid('job_id').unique(),
   tokensIn: integer('tokens_in').notNull().default(0),
   tokensOut: integer('tokens_out').notNull().default(0),
+  // 读缓存、写缓存的输入 token（v1.05 ADR-012），已含在 tokensIn 里；只有 Anthropic 与订阅驱动报得出，其余记 0
+  cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
+  cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
   screens: integer('screens').notNull().default(0),
   // 这笔用量出自哪个驱动 / 模型（REQ-CORE-011 通道可选后，同一账号会混用多个）
   driver: text('driver'),

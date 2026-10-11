@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
-import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENT_BYTES, PRESENTATIONS, elementOpSchema, routeSchema, type ElementOp, type Presentation } from '@quilt/core';
+import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENT_BYTES, PRESENTATIONS, applyEdits, elementOpSchema, routeSchema, type ElementOp, type Presentation, type TextEdit } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
 import { config } from '../../config.ts';
 import { Problem, problems, isUniqueViolation } from '../../lib/errors.ts';
@@ -105,14 +105,8 @@ export function registerScreenTools(c: ToolCtx) {
   }, wrap(async (a) => {
     write();
     const { screen } = await ownedScreen(user.id, a.screenId as string);
-    let body = (await currentBody(screen.id)) ?? '';
-    const errors: { path: string; message: string; matches: number }[] = [];
-    (a.edits as { find: string; replace: string; all?: boolean }[]).forEach((e, i) => {
-      const matches = body.split(e.find).length - 1;
-      if (matches === 0 || (matches > 1 && !e.all)) { errors.push({ path: `edits.${i}.find`, message: matches ? `matches ${matches} places; make find longer or pass all=true` : 'not found in the current body', matches }); return; }
-      body = e.all ? body.split(e.find).join(e.replace) : body.replace(e.find, () => e.replace);
-    });
-    if (errors.length) throw problems.unprocessable(errors);
+    const { body, errors } = applyEdits((await currentBody(screen.id)) ?? '', a.edits as TextEdit[]);
+    if (errors.length) throw problems.unprocessable(errors.map((e) => ({ path: `edits.${e.index}.find`, message: e.matches ? `matches ${e.matches} places; make find longer or pass all=true` : 'not found in the current body', matches: e.matches })));
     return ingestScreen(user.id, screen.projectId, { name: screen.name, route: screen.route, html: body, screenId: screen.id, expectedRevisionId: a.expectedRevisionId as string, jobId: a.jobId as string | undefined });
   }));
 

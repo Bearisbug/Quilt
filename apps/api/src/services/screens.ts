@@ -44,6 +44,7 @@ export async function createRevision(tx: Tx, args: {
     parentRevisionId: args.parentRevisionId === undefined ? screen.currentRevisionId : args.parentRevisionId,
     candidateIndex: args.candidateIndex ?? null,
   }).returning();
+  rememberRevisionLinks(id, args.html);
   if (args.advanceCurrent !== false) await tx.update(schema.screens).set({ currentRevisionId: rev.id, updatedAt: new Date() }).where(eq(schema.screens.id, args.screenId));
   return rev;
 }
@@ -91,6 +92,18 @@ export async function listCandidates(project: ProjectRow, jobId: string): Promis
   return { jobId, versions, screens: [...byScreen.values()] };
 }
 
+// 修订的链接与组件名（§28 v1.05）：修订不可变，解析一次按 id 记在进程内，不用失效。落修订时当场记下（手里正好有 HTML），
+// deriveLinks 在事务里只为没记过的修订（进程刚起时）读对象、解析，其余只剩 SQL。上限 20000 张，满了整体清空重来
+type RevisionLinks = { links: { qid: string; href: string }[]; names: string[] };
+const linksByRevision = new Map<string, RevisionLinks>();
+function rememberRevisionLinks(revisionId: string, html: string): RevisionLinks {
+  const body = extractBody(html);
+  const parsed = { links: extractLinks(body).map((l) => ({ qid: l.qid, href: l.href })), names: [...componentNamesIn(body)] };
+  if (linksByRevision.size >= 20_000) linksByRevision.clear();
+  linksByRevision.set(revisionId, parsed);
+  return parsed;
+}
+
 // 应用地图派生（ADR-008 / REQ-PROTO-002）：扫全部屏当前修订的链接，按 route 匹配。
 // 顺手重算哪些屏放着哪个共享组件（REQ-EDIT-006 component_uses）：同一趟读 HTML，不另跑一遍
 export async function deriveLinks(tx: Tx, projectId: string): Promise<void> {
@@ -102,9 +115,9 @@ export async function deriveLinks(tx: Tx, projectId: string): Promise<void> {
   const rows: (typeof schema.links.$inferInsert)[] = [];
   const uses: (typeof schema.componentUses.$inferInsert)[] = [];
   for (const rev of revs) {
-    const body = extractBody((await storage.get(rev.htmlKey)).toString('utf8'));
-    for (const l of extractLinks(body)) rows.push({ projectId, fromScreenId: rev.screenId, elementQid: l.qid, href: l.href, toScreenId: byRoute.get(l.href) ?? null });
-    for (const name of componentNamesIn(body)) uses.push({ projectId, screenId: rev.screenId, name });
+    const { links, names } = linksByRevision.get(rev.id) ?? rememberRevisionLinks(rev.id, (await storage.get(rev.htmlKey)).toString('utf8'));
+    for (const l of links) rows.push({ projectId, fromScreenId: rev.screenId, elementQid: l.qid, href: l.href, toScreenId: byRoute.get(l.href) ?? null });
+    for (const name of names) uses.push({ projectId, screenId: rev.screenId, name });
   }
   await tx.delete(schema.links).where(eq(schema.links.projectId, projectId));
   if (rows.length) await tx.insert(schema.links).values(rows);

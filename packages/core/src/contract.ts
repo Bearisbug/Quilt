@@ -1,4 +1,5 @@
 import { COLOR_CLASS_NAMES, NEUTRAL_PALETTE, tokensFromSeed, type Tokens } from './tokens.ts';
+import { EDIT_BLOCK } from './edits.ts';
 import { DEVICE_SIZE, type DeviceType, type Presentation } from './device.ts';
 import { componentPlacement, sharedComponentsSection, type SharedComponentCard } from './components.ts';
 
@@ -228,6 +229,29 @@ export function priorInstructionsBlock(subject: string, items: string[]): string
 export function editUserPrompt(screenName: string, route: string, currentBody: string, instruction: string, priorInstructions: string[] = []): string {
   const prior = priorInstructions.length ? `\n${priorInstructionsBlock('THIS SCREEN', priorInstructions)}` : '';
   return `Revise the screen "${screenName}" at route ${route} according to this instruction:\n${instruction}\n${prior}\nKeep the design system, recipes and all links intact unless the instruction says otherwise. Return the complete revised root element HTML only.\n\nCURRENT HTML:\n${currentBody}`;
+}
+// 改屏默认要补丁（ADR-007 v1.05）：只写改动，不重抄整屏——桌面屏整屏重写要输出几万 token、写几分钟。
+// 改动占了大半屏时模型可以直接回整屏；补丁对不上当前 HTML 时由流水线退回上面的整屏提示词再要一次
+export function editPatchUserPrompt(screenName: string, route: string, currentBody: string, instruction: string, priorInstructions: string[] = []): string {
+  const prior = priorInstructions.length ? `\n${priorInstructionsBlock('THIS SCREEN', priorInstructions)}` : '';
+  return `Revise the screen "${screenName}" at route ${route} according to this instruction:\n${instruction}\n${prior}\nKeep the design system, recipes and all links intact unless the instruction says otherwise.
+
+Reply with edits to CURRENT HTML instead of rewriting it: one or more blocks, each exactly
+
+${EDIT_BLOCK.find}
+text copied verbatim from CURRENT HTML
+${EDIT_BLOCK.sep}
+what replaces it (empty to delete)
+${EDIT_BLOCK.replace}
+
+- FIND is copied character for character from CURRENT HTML, data-qid attributes included, and occurs there exactly once. Make it just long enough to be unique — a whole opening tag with its data-qid usually is.
+- Blocks apply in order, each to the result of the previous one. Change only what the instruction asks; everything outside the blocks stays as it is.
+- Keep the data-qid of every element you keep; new elements need none.
+- Output only the blocks: no commentary, no code fences.
+- If the instruction rewrites most of the screen, return the complete revised root element HTML instead of blocks.
+
+CURRENT HTML:
+${currentBody}`;
 }
 
 // 聊天（REQ-CORE-023 / ADR-018）：住在 Quilt 进程里的助手的稳定前缀——每轮重发、随项目更新。

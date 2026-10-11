@@ -114,3 +114,47 @@ test('API 类驱动：输出上限、流式长输出、空闲超时、兼容端�
     server.close();
   }
 });
+
+// 预热、思考深度与缓存计数（ADR-012 v1.05）：max_tokens 0 走非流式、系统提示带 cache_control，写缓存的 token 记成 cacheWrite；
+// effort 进 output_config，不给就不带这个键；流式响应里读缓存的 token 记成 cacheRead（已含在 tokensIn 里）
+test('Anthropic：max_tokens 0 预热、effort 进 output_config、缓存读写进用量', async () => {
+  const seen: Record<string, unknown>[] = [];
+  const server = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      const body = JSON.parse(raw) as Record<string, unknown>;
+      seen.push(body);
+      if (!body.stream) {
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ id: 'msg_w', type: 'message', role: 'assistant', model: 'm', content: [], stop_reason: 'max_tokens', stop_sequence: null, usage: { input_tokens: 3, output_tokens: 0, cache_creation_input_tokens: 500, cache_read_input_tokens: 0 } }));
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      const ev = (type: string, data: unknown) => res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+      ev('message_start', { type: 'message_start', message: { id: 'msg_1', type: 'message', role: 'assistant', model: 'm', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 0, cache_read_input_tokens: 500, cache_creation_input_tokens: 0 } } });
+      ev('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+      ev('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '<div>ok</div>' } });
+      ev('content_block_stop', { type: 'content_block_stop', index: 0 });
+      ev('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 5 } });
+      ev('message_stop', { type: 'message_stop' });
+      res.end();
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const anthropic = llm.llmFor({ driver: 'anthropic', apiKey: 'k', baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}` });
+  try {
+    const warm = await anthropic.complete({ system: 'S', prompt: 'warm', model: 'm', maxTokens: 0 });
+    assert.deepEqual([warm.text, warm.tokensOut, warm.cacheWrite, warm.tokensIn], ['', 0, 500, 503]);
+    assert.equal(seen[0].max_tokens, 0);
+    assert.deepEqual((seen[0].system as { cache_control?: unknown }[])[0].cache_control, { type: 'ephemeral' });
+    const r = await anthropic.complete({ system: 'S', prompt: 'p', model: 'm', effort: 'medium' });
+    assert.deepEqual([r.text, r.cacheRead, r.tokensIn], ['<div>ok</div>', 500, 510]);
+    assert.deepEqual(seen[1].output_config, { effort: 'medium' });
+    await anthropic.complete({ system: 'S', prompt: 'p', model: 'm' });
+    assert.ok(!('output_config' in seen[2]), '不传 effort 时不该带 output_config');
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});
