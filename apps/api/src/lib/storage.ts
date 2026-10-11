@@ -98,5 +98,6 @@ export const storage: Storage = config.storageDriver === 's3' ? new S3Storage() 
 export const objectKeys = {
   revisionHtml: (projectId: string, screenId: string, revisionId: string) => `projects/${projectId}/screens/${screenId}/${revisionId}.html`,
   revisionShot: (projectId: string, screenId: string, revisionId: string) => `projects/${projectId}/screens/${screenId}/${revisionId}.png`,
+  revisionThumb: (projectId: string, screenId: string, revisionId: string) => `projects/${projectId}/screens/${screenId}/${revisionId}.thumb.webp`,
   exportHtml: (projectId: string, jobId: string) => `projects/${projectId}/exports/${jobId}.html`,
 };

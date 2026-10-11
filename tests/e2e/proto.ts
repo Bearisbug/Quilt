@@ -213,16 +213,22 @@ await step('TC-PROTO-008', async () => {
   await page.goto(`${WEB}/p/${formProject}`);
   await page.locator('[data-testid="screen-card"]').first().waitFor();
   await page.locator('[data-testid="link-edges"]').waitFor({ timeout: 5000 });
-  const counts = await page.locator('[data-testid="link-edge"]').evaluateAll((els) => els.map((e) => Number(e.getAttribute('data-count'))));
-  expect(counts.length >= 4, `连线条数 ${counts.length}，应 ≥ 4（s1→s2、s1→s3、s2→s3、s3→s1）`);
-  expect(Math.max(...counts) >= 3, `合并计数最大 ${Math.max(...counts)}，应 ≥ 3`);
+  // v1.02 起连线画在视口 canvas 上（ADR-029）：条数与最大计数读它的 data-*，另数一遍画出来的像素，确认真的画了
+  const edges = await page.locator('[data-testid="link-edges"]').evaluate((c) => {
+    const el = c as HTMLCanvasElement; const px = el.getContext('2d')!.getImageData(0, 0, el.width, el.height).data;
+    let ink = 0; for (let i = 3; i < px.length; i += 4) if (px[i] > 0) ink++;
+    return { drawn: Number(el.dataset.drawn), max: Number(el.dataset.maxCount), ink };
+  });
+  expect(edges.drawn >= 4, `连线条数 ${edges.drawn}，应 ≥ 4（s1→s2、s1→s3、s2→s3、s3→s1）`);
+  expect(edges.max >= 3, `合并计数最大 ${edges.max}，应 ≥ 3`);
+  expect(edges.ink > 0, '连线 canvas 上一个像素都没画');
   await page.getByTestId('toggle-links').click();
 
   await eventually(async () => expect((await page.locator('[data-testid="link-edges"]').count()) === 0, '关闭后连线仍显示'));
   expect((await page.locator('[data-testid="screen-card"][data-route="/s1"] .warn').count()) === 1, '关闭连线后断链标记消失');
   await page.getByTestId('toggle-links').click();
   await page.locator('[data-testid="link-edges"]').waitFor({ timeout: 5000 });
-  return `${counts.length} 条连线，最大计数 ${Math.max(...counts)}`;
+  return `${edges.drawn} 条连线，最大计数 ${edges.max}，画出 ${edges.ink} 个像素`;
 });
 
 await step('TC-PROTO-009', async () => {

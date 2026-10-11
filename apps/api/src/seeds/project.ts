@@ -1,14 +1,13 @@
-import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { createProject } from '../services/projects.ts';
-import { createRevision, deriveLinks } from '../services/screens.ts';
+import { createRevision, deriveLinks, storeRevisionShot } from '../services/screens.ts';
 import { buildPrelude, injectQids, assembleDocument, lintScreenBody, DEVICE_SIZE, type DeviceType, type Tokens } from '@quilt/core';
 import { screenshotHtml, closeScreenshotBrowser } from '../lib/screenshot.ts';
-import { storage, objectKeys } from '../lib/storage.ts';
 import { OWNER, arg, flag, userByEmail, done } from './_lib.ts';
 
-// pnpm seed:project --name X --device mobile|desktop --screens N [--revisions M] [--dangling] [--messages K] [--no-shot]
+// pnpm seed:project --name X --device mobile|desktop --screens N [--revisions M] [--dangling] [--messages K] [--no-shot] [--nav K] [--grid C]
 // fixture HTML 直接落库（不调 LLM）：每屏含 data-qid、路由 /s1…/sN 与互链；--dangling 让 /s1 多一条 /settings 断链。
+// --nav K：每屏多一列侧栏，链到其后的 K 屏（大项目的密集连线，TC-CORE-086）；--grid C：按 C 列排开（默认排成一行）
 const owner = await userByEmail(arg('owner', OWNER));
 const name = arg('name');
 const device = arg('device', 'mobile') as DeviceType;
@@ -19,6 +18,8 @@ const dangling = flag('dangling');
 const withForm = flag('form');
 const unlinked = flag('unlinked');
 const shot = !flag('no-shot');
+const nav = Number(arg('nav', '0'));
+const grid = Number(arg('grid', '0'));
 
 const { project, designSystem } = await createProject(owner.id, { name, deviceType: device });
 const prelude = buildPrelude(designSystem.tokens as Tokens);
@@ -35,12 +36,13 @@ function fixtureBody(i: number, rev: number): string {
 <a href="#" class="block text-center text-sm text-on-surface-variant">Coming soon (not designed)</a>`
     : '';
   // --unlinked：/s1 多一个没有任何跳转目标的主按钮（TC-PROTO-009 补链修复轮的靶子）
+  const sideNav = nav ? `<aside class="flex flex-col gap-1 p-4 border-b border-outline-variant">${Array.from({ length: nav }, (_, k) => routes[(i + 1 + k) % routes.length]).map((r) => `<a href="${r}" class="text-sm text-on-surface-variant">Section ${r.slice(1)}</a>`).join('')}</aside>` : '';
   const unlinkedBtn = unlinked && i === 0 ? '<button type="button" class="w-full inline-flex items-center justify-center h-12 px-6 rounded-full bg-primary text-on-primary font-semibold">Continue</button>' : '';
   const items = [1, 2, 3].map((k) => `<li><a href="${next}" class="flex items-center gap-3 py-3 border-b border-outline-variant"><span class="w-12 h-12 rounded-md bg-surface-variant"></span><span class="flex-1 text-sm">Item ${k} of screen ${i + 1}</span><i data-lucide="chevron-right" class="w-5 h-5"></i></a></li>`).join('');
   const list = Array.from({ length: 30 }, (_, k) => `<li class="py-2 text-sm border-b border-outline-variant">Row ${k + 1}</li>`).join('');
   return `<div class="min-h-dvh flex flex-col bg-background text-on-background">
 <header class="h-14 flex items-center justify-between px-4 bg-surface border-b border-outline-variant"><h1 class="text-lg font-semibold">Screen ${i + 1} v${rev}</h1>${extra}</header>
-<main class="flex-1 overflow-y-auto px-4 py-6 space-y-6">
+${sideNav}<main class="flex-1 overflow-y-auto px-4 py-6 space-y-6">
 <div class="bg-surface rounded-lg border border-outline-variant p-4 space-y-3"><label for="addr" class="text-sm font-medium">Address</label><input id="addr" name="address" class="w-full h-12 px-4 rounded-md bg-surface border border-outline-variant text-on-surface" placeholder="Your address"><button type="button" id="toggle" class="inline-flex items-center justify-center h-12 px-6 rounded-full bg-primary text-on-primary font-semibold" onclick="this.textContent = this.textContent === 'Follow' ? 'Following' : 'Follow'">Follow</button><button type="button" class="inline-flex items-center justify-center h-11 px-4 rounded-full border border-outline text-primary" onclick="this.textContent = 'cookie=' + document.cookie">Read parent cookie</button></div>
 ${form}${unlinkedBtn}
 <ul>${items}</ul>
@@ -53,7 +55,7 @@ ${form}${unlinkedBtn}
 
 const created: { id: string; route: string }[] = [];
 for (let i = 0; i < count; i++) {
-  const [screen] = await db.insert(schema.screens).values({ projectId: project.id, name: `Screen ${i + 1}`, route: routes[i], x: i * (size.w + 80), y: 0 }).returning();
+  const [screen] = await db.insert(schema.screens).values({ projectId: project.id, name: `Screen ${i + 1}`, route: routes[i], x: (grid ? i % grid : i) * (size.w + 80), y: grid ? Math.floor(i / grid) * (size.h + 120) : 0 }).returning();
   created.push({ id: screen.id, route: screen.route });
   for (let r = 1; r <= revisions; r++) {
     const body = injectQids(fixtureBody(i, r));
@@ -61,7 +63,7 @@ for (let i = 0; i < count; i++) {
     const rev = await db.transaction((tx) => createRevision(tx, { projectId: project.id, screenId: screen.id, html, sourceKind: 'generate', lintReport: lintScreenBody(body, routes, true), expectedRevisionId: undefined }));
     if (shot && rev && r === revisions) {
       const png = await screenshotHtml(html, size).catch(() => null);
-      if (png) { const key = objectKeys.revisionShot(project.id, screen.id, rev.id); await storage.put(key, png, 'image/png'); await db.update(schema.screenRevisions).set({ screenshotKey: key }).where(eq(schema.screenRevisions.id, rev.id)); }
+      if (png) await storeRevisionShot(project.id, screen.id, rev.id, png);
     }
   }
 }

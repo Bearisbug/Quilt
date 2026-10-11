@@ -325,6 +325,8 @@ export type DesignSystemDto = { id: string; projectId: string; seedColor: string
 export type ScreenDto = {
   id: string; projectId: string; name: string; route: string; purpose: string; x: number; y: number; width: number; height: number;
   currentRevisionId: string | null; currentRevisionSeq: number | null; screenshotUrl: string | null; previewUrl: string | null; lintPassed: boolean | null; deviations: number;
+  /** 截图缩到 1/4 的缩略图（v1.02 ADR-029）：画布全景下卡片用它；还没生成时为 null，卡片用 screenshotUrl */
+  thumbUrl: string | null;
   /** 待采用的候选批（REQ-CORE-015）：current 所属批次未结清且有 ≥ 2 版 */
   pendingCandidates: { jobId: string; count: number } | null;
   /** 状态变体（v0.62）：variantOf 指向默认屏、variantName 是状态名；默认屏两者皆空 */

@@ -2,9 +2,9 @@ import { and, eq, lt, isNull, isNotNull, sql, inArray, notInArray, desc } from '
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
 import { jobQueue, shotQueue } from '../services/jobs.ts';
-import { emitJobEvent, emitProjectEvent } from '../lib/events.ts';
+import { emitJobEvent, emitProjectEvent, notifyCanvas } from '../lib/events.ts';
 import { storage } from '../lib/storage.ts';
-import { storeRevisionShot, pointCurrentToFirstCandidate, deriveLinks } from '../services/screens.ts';
+import { storeRevisionShot, storeThumb, pointCurrentToFirstCandidate, deriveLinks } from '../services/screens.ts';
 import { screenshotHtml } from '../lib/screenshot.ts';
 import { DEVICE_SIZE, failureText, type DeviceType, type JobKind } from '@quilt/core';
 import { runJob } from './pipeline.ts';
@@ -54,8 +54,36 @@ export async function retryScreenshots(): Promise<number> {
       }
     }
     if (n) console.log(`[screenshot.retry] backfilled ${n}`);
+    await backfillThumbs();
     return n;
   } finally { retrying = false; }
+}
+
+// 缩略图补扫（v1.02 ADR-029 §25）：只补各屏当前修订——画布卡片只用它们的缩略图。每轮最多 200 条；
+// 回填带上截图键做条件，补的途中截图被作废（换呈现方式）就不写。做不出来的修订本进程内不再试（坏图不会自己变好），
+// 补完一个项目推一条 screen_changed，开着的画布重取详情换上缩略图
+const thumbFailed = new Set<string>();
+async function backfillThumbs() {
+  const rows = await db.select({ id: schema.screenRevisions.id, screenshotKey: schema.screenRevisions.screenshotKey, screenId: schema.screens.id, projectId: schema.screens.projectId })
+    .from(schema.screenRevisions)
+    .innerJoin(schema.screens, eq(schema.screens.currentRevisionId, schema.screenRevisions.id))
+    .where(and(isNotNull(schema.screenRevisions.screenshotKey), isNull(schema.screenRevisions.thumbKey), thumbFailed.size ? notInArray(schema.screenRevisions.id, [...thumbFailed]) : undefined))
+    .limit(200);
+  const touched = new Set<string>();
+  let n = 0;
+  for (const r of rows) {
+    try {
+      const thumbKey = await storeThumb(r.projectId, r.screenId, r.id, await storage.get(r.screenshotKey!));
+      const done = await db.update(schema.screenRevisions).set({ thumbKey })
+        .where(and(eq(schema.screenRevisions.id, r.id), eq(schema.screenRevisions.screenshotKey, r.screenshotKey!))).returning({ id: schema.screenRevisions.id });
+      if (done.length) { touched.add(r.projectId); n++; }
+    } catch (e) {
+      thumbFailed.add(r.id);
+      console.warn(`[thumbnail.retry] ${r.id}: ${(e as Error).message}`);
+    }
+  }
+  for (const projectId of touched) await notifyCanvas(projectId, { reason: 'thumbnail' });
+  if (rows.length) console.log(`[thumbnail.retry] backfilled ${n}/${rows.length}`);
 }
 
 // 进程在造屏 / 改屏中途退出时，runGenerate / runEditScreens 在 finally 里的收尾没跑（进程被杀时 finally 不执行）：按作业自己的

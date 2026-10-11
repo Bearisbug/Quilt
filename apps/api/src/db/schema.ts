@@ -75,6 +75,8 @@ export const screenRevisions = pgTable('screen_revisions', {
   candidateSettledAt: ts('candidate_settled_at'),
   htmlKey: text('html_key').notNull(),
   screenshotKey: text('screenshot_key'),
+  // 截图缩到 1/4 的 WebP（v1.02 ADR-029）：画布全景下卡片用它；与截图同一次写回、同时作废
+  thumbKey: text('thumb_key'),
   sourceKind: text('source_kind').notNull(),
   jobId: uuid('job_id'),
   lintReport: jsonb('lint_report').notNull(),

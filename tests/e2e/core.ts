@@ -436,6 +436,100 @@ await step('TC-CORE-081', async () => {
   } finally { await hiCtx.close(); }
 });
 
+// TC-CORE-086 大项目缩放与拖卡不掉帧（v1.02 ADR-029）：68 屏桌面真截图（2 倍屏原图 2560×1600）、每屏侧栏链到其后 10 屏（连同底栏与「下一屏」，合并后约 900 条连线）。
+// 改前（RUN-243 拷进测试库的 Shopilot 68 屏 / 706 条）：缩放一个来回解码 3.3 s、超过 50 ms 的长任务 7 次（最长 209 ms）；拖卡 48 / 82 帧超过 33 ms；点选 21 / 63
+await step('TC-CORE-086', async () => {
+  const { projectId } = seedJson<{ projectId: string }>('seed:project', '--name', 'Dense', '--device', 'desktop', '--screens', '68', '--grid', '9', '--nav', '10');
+  const hiCtx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+  const hi = await hiCtx.newPage();
+  const bad: string[] = [];
+  const check = (ok: unknown, msg: string) => { if (!ok) bad.push(msg); };
+  const shown = () => hi.evaluate(`[...document.querySelectorAll('[data-testid="screen-card"] img.shot:not(.pending)')].map((i) => ({ thumb: i.src.includes('.thumb.webp'), on: i.closest('[data-testid="screen-card"]').hasAttribute('data-onscreen') }))`) as Promise<{ thumb: boolean; on: boolean }[]>;
+  const edges = () => hi.evaluate(`(() => { const c = document.querySelector('[data-testid="link-edges"]'); return c && { total: +c.dataset.total, drawn: +c.dataset.drawn }; })()`) as Promise<{ total: number; drawn: number } | null>;
+  // rAF 帧间隔：手势前开、手势后收，数超过 33 ms 的
+  const rafStart = () => hi.evaluate(`window.__gaps = []; window.__last = 0; (function loop(t) { if (window.__last) window.__gaps.push(t - window.__last); window.__last = t; window.__raf = requestAnimationFrame(loop); })(0)`);
+  const rafStop = () => hi.evaluate(`(cancelAnimationFrame(window.__raf), { frames: window.__gaps.length, slow: window.__gaps.filter((g) => g > 33).length })`) as Promise<{ frames: number; slow: number }>;
+  const cardCenters = () => hi.locator('[data-testid="screen-card"][data-onscreen] .gesture').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }));
+  // 期望值按项目的连线算（同一对屏合并、断链与自环不算），不手写：种子的底栏与「下一屏」也连线
+  const { body: detail } = await apiJson<{ screens: { id: string; route: string; screenshotUrl: string | null }[]; links: { fromScreenId: string; toScreenId: string | null }[] }>(`/v1/projects/${projectId}`);
+  const pairs = new Set(detail.links.filter((l) => l.toScreenId && l.toScreenId !== l.fromScreenId).map((l) => `${l.fromScreenId}>${l.toScreenId}`));
+  const touching = (id: string) => [...pairs].filter((k) => k.startsWith(`${id}>`) || k.endsWith(`>${id}`)).length;
+  // 冷启动时截图浏览器取 Tailwind CDN 慢，种子偶尔丢头一两张截图（RUN-244）：按有截图的屏数等，至少 60 张才算大项目
+  const withShot = detail.screens.filter((s) => s.screenshotUrl).length;
+  expect(withShot >= 60 && pairs.size > 200, `前置不成立：有截图的屏 ${withShot}、连线 ${pairs.size}`);
+  try {
+    await hi.goto(`${WEB}/p/${projectId}`);
+    await hi.locator('[data-testid="screen-card"]').first().waitFor();
+    // 1 全景：有截图的卡都出图且都是缩略图；连线一条不画，顶部提示
+    await eventually(async () => expect((await shown()).length === withShot, `全景下 ${withShot} 张截图还没都显示（${(await shown()).length}）`), 60_000);
+    const s1 = await shown();
+    check(s1.every((x) => x.thumb), `全景下应全部用缩略图：原图 ${s1.filter((x) => !x.thumb).length} 张`);
+    const e1 = await edges();
+    check(e1 && e1.total === pairs.size && e1.drawn === 0, `${pairs.size} 条连线、没选屏时一条不画：${JSON.stringify(e1)}`);
+    check(((await hi.getByTestId('links-hint').textContent().catch(() => '')) ?? '').includes(`共 ${pairs.size} 条连线`), `没选屏时顶部应提示「共 ${pairs.size} 条连线，选中屏后只显示它进出的」`);
+    await hi.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-core-086-fit.png`) });
+    const box = (await hi.locator('[data-testid="canvas"]').boundingBox())!;
+    const cx = box.x + box.width / 2; const cy = box.y + box.height / 2;
+    await hi.mouse.move(cx, cy);
+    // 2 Ctrl+滚轮缩放一个来回（全景 → 约 160% → 全景，80 步）：图片解码合计 ≤ 500 ms，没有超过 100 ms 的长任务
+    const cdp = await hiCtx.newCDPSession(hi);
+    const trace: { name: string; ph: string; dur?: number }[] = [];
+    cdp.on('Tracing.dataCollected', (e: { value: typeof trace }) => { trace.push(...e.value); });
+    const traced = new Promise<void>((res) => cdp.once('Tracing.tracingComplete', () => res()));
+    await cdp.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline,toplevel,cc,blink', transferMode: 'ReportEvents' });
+    await hi.evaluate(`window.__long = 0; new PerformanceObserver((l) => { window.__long += l.getEntries().filter((e) => e.duration > 100).length; }).observe({ type: 'longtask' })`);
+    await hi.keyboard.down('Control');
+    for (let i = 0; i < 80; i++) { await hi.mouse.wheel(0, i < 40 ? -12 : 12); await hi.waitForTimeout(8); }
+    await hi.keyboard.up('Control');
+    await hi.waitForTimeout(1500);
+    await cdp.send('Tracing.end'); await traced; await cdp.detach();
+    const decodeMs = trace.filter((e) => e.ph === 'X' && (e.name === 'ImageDecodeTask' || e.name === 'Decode Image')).reduce((n, e) => n + (e.dur ?? 0), 0) / 1000;
+    const long = await hi.evaluate('window.__long') as number;
+    check(decodeMs <= 500, `缩放一个来回图片解码合计 ${Math.round(decodeMs)} ms（> 500）`);
+    check(long === 0, `缩放一个来回出现 ${long} 次超过 100 ms 的长任务`);
+    // 3 全景下拖视口中央那张卡 60 步：超过 33 ms 的帧 ≤ 5
+    const centers = await cardCenters();
+    centers.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
+    const c0 = centers[0];
+    await rafStart();
+    await hi.mouse.move(c0.x, c0.y); await hi.mouse.down();
+    for (let i = 1; i <= 60; i++) { await hi.mouse.move(c0.x + i * 3, c0.y + i * 2); await hi.waitForTimeout(8); }
+    await hi.mouse.up();
+    const drag = await rafStop();
+    check(drag.slow <= 5, `拖卡 ${drag.frames} 帧里 ${drag.slow} 帧超过 33 ms（> 5）`);
+    // 4 依次点选 12 张卡：超过 33 ms 的帧 ≤ 3；只画最后选中的那屏进出的连线，提示消失
+    await hi.waitForTimeout(500);
+    const picks = (await cardCenters()).slice(0, 12);
+    await rafStart();
+    for (const p of picks) { await hi.mouse.click(p.x, p.y); await hi.waitForTimeout(120); }
+    const sel = await rafStop();
+    check(sel.slow <= 3, `点选 ${sel.frames} 帧里 ${sel.slow} 帧超过 33 ms（> 3）`);
+    const e4 = await edges();
+    const pickedRoute = await hi.locator('.card.selected').getAttribute('data-route');
+    const picked = detail.screens.find((s) => s.route === pickedRoute)!;
+    check(e4 && e4.drawn === touching(picked.id), `选中 ${picked.route} 后只画它进出的 ${touching(picked.id)} 条：${JSON.stringify(e4)}`);
+    check((await hi.getByTestId('links-hint').count()) === 0, '选中屏后提示应消失');
+    await hi.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-core-086-selected.png`) });
+    // 5 放大到 100% 左右停住：视口里的卡换原图、视口外的仍是缩略图；缩回全景当帧降回缩略图
+    await hi.keyboard.press('Escape');
+    await hi.mouse.move(cx, cy);
+    await hi.keyboard.down('Control');
+    for (let i = 0; i < 30; i++) { await hi.mouse.wheel(0, -12); await hi.waitForTimeout(8); }
+    await hi.keyboard.up('Control');
+    await eventually(async () => { const s = await shown(); expect(s.some((x) => x.on && !x.thumb), '放大停住后视口里的卡还没换上原图'); }, 10_000).catch(() => {});
+    const s5 = await shown();
+    const wrong = s5.filter((x) => x.on === x.thumb);
+    check(s5.some((x) => x.on) && !wrong.length, `放大后应只有视口里的卡用原图：视口里 ${s5.filter((x) => x.on).length} 张，档位不对 ${wrong.length} 张`);
+    await hi.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-core-086-zoomed.png`) });
+    await hi.keyboard.down('Control');
+    for (let i = 0; i < 30; i++) { await hi.mouse.wheel(0, 12); await hi.waitForTimeout(8); }
+    await hi.keyboard.up('Control');
+    await eventually(async () => expect((await shown()).every((x) => x.thumb), '缩回全景后应全部降回缩略图'), 5_000).catch(() => check(false, '缩回全景后应全部降回缩略图'));
+    if (bad.length) throw new Error(bad.join('；'));
+    return `${pairs.size} 条连线、${withShot} 张截图；缩放一个来回解码 ${Math.round(decodeMs)} ms、长任务 ${long}；拖卡 ${drag.slow}/${drag.frames}、点选 ${sel.slow}/${sel.frames} 帧超过 33 ms；放大后视口里 ${s5.filter((x) => x.on).length} 张换原图`;
+  } finally { await hiCtx.close(); }
+});
+
 // TC-CORE-082 事件流假死时作业照样收尾（v0.88）：经 Vite 代理时 API 重启，代理不关浏览器这一侧，EventSource 停在 open、
 // 再也收不到任何事件（连 ping 都没有）；作业在服务端早结束了，行还挂着「排队中…」。无头下用包一层 EventSource 的探针
 // 把当前这条流冻住（只丢事件、不断开），模拟代理那一侧的假死
@@ -1474,9 +1568,11 @@ await step('TC-CORE-011', async () => {
     if (!stale || route.request().method() !== 'GET') return route.fallback();
     const kind = stale; stale = null;
     const res = await route.fetch();
-    const d = (await res.json()) as { screens: { id: string; screenshotUrl: string | null; previewUrl: string | null }[] };
+    const d = (await res.json()) as { screens: { id: string; screenshotUrl: string | null; thumbUrl: string | null; previewUrl: string | null }[] };
     for (const x of d.screens) if (x.id === focusScreens[0].id) {
+      // 卡片按缩放用原图或缩略图（v1.02），两张都换成过期的
       if (kind === 'shot' && x.screenshotUrl) x.screenshotUrl = x.screenshotUrl.replace(/exp=\d+/, 'exp=1000000000');
+      if (kind === 'shot' && x.thumbUrl) x.thumbUrl = x.thumbUrl.replace(/exp=\d+/, 'exp=1000000000');
       if (kind === 'preview') x.previewUrl = expired;
     }
     await route.fulfill({ response: res, json: d });

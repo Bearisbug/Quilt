@@ -3,6 +3,7 @@ import { XYPanZoom, PanOnScrollMode, getViewportForBounds, type PanZoomInstance,
 import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type AnnotationDto, type ComponentDto, type ElementPathItem } from '@quilt/core';
 import { StyleGuideCard, STYLE_GUIDE_SIZE, styleGuideSize } from '@/canvas/StyleGuideCard';
 import { Minimap, type MiniRect, type ViewInfo } from '@/canvas/Minimap';
+import { EDGE_LIMIT, mergeEdges, shownEdges, edgeCurves, drawEdges, type Curve, type EdgeColors } from '@/canvas/edges';
 
 // 角标里提示的进入选择元素模式的键，要与 Canvas.tsx 的键位表一致（REQ-EDIT-004）
 const INSPECT_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘E' : 'Ctrl+E';
@@ -104,6 +105,11 @@ const STYLE_GUIDE_POS = { x: -(STYLE_GUIDE_SIZE.w + 80), y: 0 };
 const MIN_ZOOM = 0.02;
 // 手势中往小缩到冻结栅格比例的这个倍数以下就重画一次（v0.86，见 applyTransform）
 const RERASTER_RATIO = 0.7;
+// 卡片截图的档位（v1.02 ADR-029）：缩略图是原图（2 倍屏）的 1/4，即卡片 CSS 宽的一半个像素；
+// 缩放 × 像素比 ≤ 0.5 时卡片在屏幕上占的像素不多于它，用缩略图不虚
+const wantsThumb = (zoom: number) => zoom * (window.devicePixelRatio || 1) <= 0.5;
+// 卡片正显示的这张（原图或缩略图）是不是当前修订的：退出聚焦的交接按它判
+const shotIsCurrent = (s: ScreenDto, src: string | undefined) => !!src && (src === s.screenshotUrl || src === s.thumbUrl);
 // 组件卡尺寸没记过时的紧凑占位高度（v0.76）：按设备整屏占位的话，每次加载都是一块 844 高的白板
 const COMP_PLACEHOLDER_H = 64;
 // 存下来的镜头要按当前数据校验再用（INT-019）：缩放超出 panzoom 的 [MIN_ZOOM, 2] 或存进去的是 NaN / 旧格式，
@@ -242,7 +248,7 @@ export function CanvasView(p: CanvasProps) {
     setPrevFocusedId(p.focusedId);
     const left = !p.focusedId && prevFocusedId ? byId[prevFocusedId] : undefined;
     setLinger(left?.currentRevisionId && iframeReady && focusedSrc && frameShows?.id === left.id && frameShows.rev === left.currentRevisionId
-      && !(left.screenshotUrl && shotShown.current.get(left.id) === left.screenshotUrl)
+      && !shotIsCurrent(left, shotShown.current.get(left.id))
       ? { id: left.id, rev: left.currentRevisionId, src: focusedSrc } : null);
     // 留着时又聚焦回这一屏：换 key 重挂——签名在 30 分钟窗口里不变，同一个 src 不会重载，等不到 quilt:ready
     if (p.focusedId && linger?.id === p.focusedId) setReloadKey((k) => k + 1);
@@ -262,26 +268,59 @@ export function CanvasView(p: CanvasProps) {
     for (const l of p.links) if (!l.toScreenId) m.set(l.fromScreenId, [...(m.get(l.fromScreenId) ?? []), l.href]);
     return m;
   }, [p.links]);
-  // 页面地图连线（REQ-PROTO-002）：同一对屏合并为一条并计数；自环不画
-  const edges = useMemo(() => {
-    const m = new Map<string, { from: string; to: string; count: number }>();
-    for (const l of p.links) {
-      if (!l.toScreenId || l.toScreenId === l.fromScreenId) continue;
-      const k = `${l.fromScreenId}>${l.toScreenId}`;
-      const e = m.get(k) ?? { from: l.fromScreenId, to: l.toScreenId, count: 0 };
-      e.count += 1; m.set(k, e);
+  // 页面地图连线（REQ-PROTO-002）：画在视口 canvas 上（v1.02 ADR-029，见 edges.ts）；超过 EDGE_LIMIT 条只画选中屏与聚焦屏进出的
+  const edges = useMemo(() => mergeEdges(p.links), [p.links]);
+  const edgeSel = useMemo(() => new Set([...p.selectedIds, ...(p.focusedId ? [p.focusedId] : [])]), [p.selectedIds, p.focusedId]);
+  const edgeShown = useMemo(() => shownEdges(edges, edgeSel), [edges, edgeSel]);
+  const edgeCurveList = useMemo(() => edgeCurves(edgeShown, edges, (id) => { const s = byId[id]; return s && { ...pos(s), w: s.width, h: s.height }; }), [edgeShown, edges, byId, pos]);
+  const edgeCanvas = useRef<HTMLCanvasElement | null>(null);
+  const edgeDraw = useRef<{ curves: Curve[]; colors: EdgeColors | null; frame: number }>({ curves: [], colors: null, frame: 0 });
+  // 按当前镜头重画：平移缩放每次变换都会调到，同一帧里只画一次
+  const paintEdges = useCallback(() => {
+    const d = edgeDraw.current;
+    if (d.frame || !edgeCanvas.current) return;
+    d.frame = requestAnimationFrame(() => {
+      d.frame = 0;
+      const c = edgeCanvas.current; const node = viewportRef.current;
+      if (!c || !node) return;
+      const dpr = window.devicePixelRatio || 1; const w = node.clientWidth; const h = node.clientHeight;
+      if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+      if (!d.colors) {
+        const cs = getComputedStyle(c);
+        d.colors = { line: cs.getPropertyValue('--color-accent').trim(), badge: cs.getPropertyValue('--color-accent').trim(), badgeText: cs.getPropertyValue('--color-on-accent').trim(), font: cs.fontFamily };
+      }
+      const g = c.getContext('2d');
+      if (g) drawEdges(g, d.curves, vp.current, { w, h }, dpr, d.colors);
+    });
+  }, []);
+  const edgeCanvasRef = useCallback((el: HTMLCanvasElement | null) => { edgeCanvas.current = el; edgeDraw.current.colors = null; if (el) paintEdges(); }, [paintEdges]);
+  useEffect(() => { edgeDraw.current.curves = edgeCurveList; paintEdges(); }, [edgeCurveList, paintEdges]);
+  useEffect(() => {
+    const node = viewportRef.current;
+    if (!node) return;
+    const ro = new ResizeObserver(() => paintEdges());
+    ro.observe(node);
+    return () => { ro.disconnect(); cancelAnimationFrame(edgeDraw.current.frame); edgeDraw.current.frame = 0; };
+  }, [paintEdges]);
+  // 卡片截图的档位（v1.02 ADR-029）：哪些卡用原图。缩放 × 像素比 ≤ 0.5 时一张都不用（缩略图的像素不少于卡片在屏幕上占的）；
+  // 大于时只给此刻与视口相交的卡——不靠懒加载：它按视口外一两屏的边距预取，取到的原图又被接班时的 decode() 当场解码。
+  // 升到原图只在首帧与手势停下时判；缩小越过门槛当帧就全部降回缩略图，否则缩小途中进视口的卡都去取原图
+  const [fullIds, setFullIds] = useState<ReadonlySet<string>>(() => new Set());
+  const fullRef = useRef(fullIds);
+  fullRef.current = fullIds;
+  const settleShots = useCallback((v: Viewport) => {
+    const node = viewportRef.current;
+    let next: Set<string> = new Set();
+    if (node && !wantsThumb(v.zoom)) {
+      const x0 = -v.x / v.zoom; const y0 = -v.y / v.zoom; const x1 = x0 + node.clientWidth / v.zoom; const y1 = y0 + node.clientHeight / v.zoom;
+      next = new Set(propsRef.current.screens.filter((s) => s.x < x1 && s.x + s.width > x0 && s.y < y1 && s.y + s.height > y0).map((s) => s.id));
     }
-    return Array.from(m.values());
-  }, [p.links]);
-  // 双向互链的两条边上下错开，免得箭头与计数叠在一起
-  const edgePath = (from: ScreenDto, to: ScreenDto, offset: number) => {
-    const a = pos(from); const b = pos(to);
-    const leftToRight = a.x + from.width / 2 <= b.x + to.width / 2;
-    const x1 = leftToRight ? a.x + from.width : a.x; const y1 = a.y + Math.min(from.height, 240) / 2 + offset;
-    const x2 = leftToRight ? b.x : b.x + to.width; const y2 = b.y + Math.min(to.height, 240) / 2 + offset;
-    const dx = Math.max(60, Math.abs(x2 - x1) / 2) * (leftToRight ? 1 : -1);
-    return { d: `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`, mx: (x1 + x2) / 2, my: (y1 + y2) / 2 };
-  };
+    const cur = fullRef.current;
+    if (next.size !== cur.size || [...next].some((id) => !cur.has(id))) setFullIds(next);
+  }, []);
+  const shotOf = (s: ScreenDto) => (!fullIds.has(s.id) && s.thumbUrl) || s.screenshotUrl;
+  // 镜头没动、屏变了（新屏落在视口里、屏被挪开）：按此刻的镜头再判一次
+  useEffect(() => { if (!movingTimer.current) settleShots(vp.current); }, [p.screens, settleShots]);
 
   // 落盘防抖 300 ms：平移缩放每帧都在变，逐帧写存储会把拖拽拖掉帧（INT-021）。无痕模式写不了就算了，
   // 退化成只本次会话有效，不能让存储异常打断渲染。
@@ -326,12 +365,14 @@ export function CanvasView(p: CanvasProps) {
       }
       if (movingTimer.current) clearTimeout(movingTimer.current);
       // 停下时顺手写 --canvas-zoom（v0.80）：选中描边与卡片焦点环按它保持屏幕像素宽度。逐帧写的话每帧全部卡片重算样式
-      movingTimer.current = window.setTimeout(() => { world.classList.remove('moving'); world.style.setProperty('--canvas-zoom', String(vp.current.zoom)); movingTimer.current = null; }, 200);
+      movingTimer.current = window.setTimeout(() => { world.classList.remove('moving'); world.style.setProperty('--canvas-zoom', String(vp.current.zoom)); movingTimer.current = null; settleShots(vp.current); }, 200);
     }
     candRef.current?.style.setProperty('--zoom', String(v.zoom));
+    paintEdges();
+    if (fullRef.current.size && wantsThumb(v.zoom)) settleShots(v);
     if (viewSubs.current.size) { const node = viewportRef.current; const info = { ...v, w: node?.clientWidth ?? 0, h: node?.clientHeight ?? 0 }; for (const cb of viewSubs.current) cb(info); }
     if (!autoView.current) scheduleSave();
-  }, [scheduleSave]);
+  }, [scheduleSave, paintEdges, settleShots]);
   // 防抖窗口里离开就把这一段丢了：触控板惯性滚动能持续几百毫秒，松手立刻刷新 / 切项目，
   // 丢的不是最后一点而是整段平移（起点还是上一次落盘的位置）。卸载与 pagehide 都补写一次。
   const flushView = useCallback(() => {
@@ -438,11 +479,12 @@ export function CanvasView(p: CanvasProps) {
   // **存过镜头、或这次打开后动过镜头就一次都不做**：那等于当着用户的面把镜头从他摆好的位置推走。
   // 想重新适配有工具栏的「适配视图」（F）——那是 INT-019 要求的重置入口。
   useLayoutEffect(() => {
-    if (savedView) return;
+    if (savedView) { settleShots(vp.current); return; }
     const t = fitTarget();
     if (!t) return;
     vp.current = t.v;
     if (worldRef.current) { worldRef.current.style.transform = `translate(${t.v.x}px, ${t.v.y}px) scale(${t.v.zoom})`; worldRef.current.style.setProperty('--canvas-zoom', String(t.v.zoom)); }
+    settleShots(t.v);
     if (p.screens.length) fitOnce.current = true;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (touched.current || fitOnce.current || !p.screens.length) return; fitOnce.current = true; setTimeout(() => autoFitRef.current(300), 0); }, [p.screens.length]);
@@ -672,14 +714,14 @@ export function CanvasView(p: CanvasProps) {
     postToPreview({ type: 'quilt:mode', mode: 'interact' });
     // inert 之后焦点若还停在 iframe 上，父页收不到键盘（Esc、快捷键成了死键）
     if (document.activeElement === iframeRef.current) iframeRef.current?.blur();
-    const url = propsRef.current.screens.find((x) => x.id === lingerOn.id)?.screenshotUrl;
-    if (url && shotShown.current.get(lingerOn.id) === url) setLinger(null);
+    const cur = propsRef.current.screens.find((x) => x.id === lingerOn.id);
+    if (cur && shotIsCurrent(cur, shotShown.current.get(lingerOn.id))) setLinger(null);
   }, [lingerOn, postToPreview]);
   // 卡片截图解码完成：这一版的截图接班，留下的 iframe 在同一次提交里撤掉
   const onShotShown = useCallback((id: string, src: string) => {
     shotShown.current.set(id, src);
     const s = propsRef.current.screens.find((x) => x.id === id);
-    setLinger((l) => (l && l.id === id && s?.currentRevisionId === l.rev && s.screenshotUrl === src ? null : l));
+    setLinger((l) => (l && l.id === id && s?.currentRevisionId === l.rev && shotIsCurrent(s, src) ? null : l));
   }, []);
   // 屏内标记：正显示的屏上有哪些 qid 在被改。作业结束 qid 离开集合 → 记为待「已更新」，等紧随其后的热更新换完 DOM 再打上；
   // 1.5 s 内没等到热更新（失败 / 取消）就作罢，只把「修改中」撤掉
@@ -1042,32 +1084,12 @@ export function CanvasView(p: CanvasProps) {
           值取自惰性初值、之后不再变（后续变换由 applyTransform 直接改 style），React 不会回头覆盖它 */}
       {/* 聚焦屏或组件时不画小地图：它压在可用区左上角，会挡住聚焦屏上那一块的点击 */}
       {p.minimap && !p.focusedId && !p.focusedComponentId && <Minimap rects={miniRects} onView={onView} onPanTo={panTo} onMoveView={moveView} />}
+      {/* 连线（v1.02 ADR-029）：压在世界层下面，卡片盖住它；不进无障碍树，供测试读的数在 data-* 上 */}
+      {p.showLinks && edges.length > 0 && <canvas ref={edgeCanvasRef} className="edges" aria-hidden="true" data-testid="link-edges" data-total={edges.length} data-drawn={edgeShown.length} data-max-count={Math.max(0, ...edgeShown.map((e) => e.count))} />}
+      {p.showLinks && edges.length > EDGE_LIMIT && !p.focusedId && p.selectedIds.length === 0 && (
+        <p data-testid="links-hint" className="pointer-events-none absolute left-0 right-[var(--chrome-right)] top-16 z-20 mx-auto w-max max-w-[calc(100%-2rem)] truncate rounded-full border border-line bg-panel/95 px-3 py-1.5 text-xs text-muted shadow-lg backdrop-blur">共 {edges.length} 条连线，选中屏后只显示它进出的</p>
+      )}
       <div ref={worldRef} className="world" style={initialWorldStyle}>
-        {/* 连线的计数徽标是 HTML，不是 SVG <text>：祖先的缩放比例一变，Chrome 要按新比例重排每一段 SVG 文字，
-            100 屏时每一步缩放都要重排上百个徽标。HTML 文字随 transform 缩放不重排 */}
-        {p.showLinks && edges.length > 0 && (<>
-          <svg className="edges" width={1} height={1} aria-hidden="true" data-testid="link-edges">
-            <defs><marker id="edge-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker></defs>
-            {edges.map((e) => {
-              const from = byId[e.from]; const to = byId[e.to];
-              if (!from || !to) return null;
-              const reverse = edges.some((r) => r.from === e.to && r.to === e.from);
-              const { d } = edgePath(from, to, reverse ? (e.from < e.to ? -36 : 36) : 0);
-              return (
-                <g key={`${e.from}>${e.to}`} data-testid="link-edge" data-count={e.count}>
-                  <path d={d} markerEnd="url(#edge-arrow)" />
-                </g>
-              );
-            })}
-          </svg>
-          {edges.map((e) => {
-            const from = byId[e.from]; const to = byId[e.to];
-            if (!from || !to) return null;
-            const reverse = edges.some((r) => r.from === e.to && r.to === e.from);
-            const { mx, my } = edgePath(from, to, reverse ? (e.from < e.to ? -36 : 36) : 0);
-            return <span key={`${e.from}>${e.to}`} className="edge-count" aria-hidden="true" style={{ transform: `translate(${mx - 14}px, ${my - 11}px)` }}>{e.count}</span>;
-          })}
-        </>)}
         {/* 按住空格时从风格指南卡上起手同样是平移（v0.80）：不带 nopan、不接住按下；获焦（只会来自键盘）时镜头把它摆进可用区 */}
         <div className={`styleguide${panReady ? '' : ' nopan'}${p.styleGuideSelected ? ' selected' : ''}`} style={{ transform: `translate(${STYLE_GUIDE_POS.x}px, ${STYLE_GUIDE_POS.y}px)` }}
           onPointerDown={(e) => { if (spaceDown.current) return; e.stopPropagation(); p.onSelectStyleGuide(); }} onMouseDown={keepPointerFocus}
@@ -1101,7 +1123,7 @@ export function CanvasView(p: CanvasProps) {
                 {/* 截图（或骨架）始终垫在底下（v0.76）：聚焦时 iframe 盖在上面、收到 quilt:ready 前透明，就绪才接班（卡片加 live，底层藏起）——
                     双击即撤掉截图的话，iframe 加载的 1 s 多里整张卡是白的，深色屏黑→白→黑 */}
                 {s.screenshotUrl ? (
-                  <CardShot url={s.screenshotUrl} width={s.width} height={s.height} alt={s.name} onError={p.onShotError}
+                  <CardShot url={shotOf(s)!} width={s.width} height={s.height} alt={s.name} onError={p.onShotError}
                     retryKey={shotRetry[s.id] ?? 0} onGiveUp={(failed) => markShot(s.id, failed)} onShown={(src) => onShotShown(s.id, src)}
                     fallback={<CardSkeleton desktop={desktop} delay={(idx % 6) * -230} />} failed={<CardSkeleton desktop={desktop} delay={0} failed />} />
                 ) : (

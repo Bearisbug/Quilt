@@ -10,7 +10,7 @@
 | Owner | @bug |
 | 关联设计文档 | `docs/DESIGN.md` |
 | 被测系统 | `~/Documents/Projects/Quilt`（Web 画布 + API/MCP 服务 + Worker + 预览域服务） |
-| 最后更新 | 2026-10-09（设计文档 v1.01） |
+| 最后更新 | 2026-10-10（设计文档 v1.02） |
 
 变更记录（登用例增改，不登执行轮次）：
 
@@ -18,11 +18,11 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-10-10 | 设计文档 v1.02（大项目画布掉帧：截图按缩放分级、连线改画 canvas、连线多时只画选中屏的）：新增 `TC-CORE-086`（68 屏桌面真截图 + 约 900 条连线：全景全用缩略图、没选屏不画连线并提示；缩放一个来回解码 ≤ 500 ms 且无长任务；拖卡与点选的慢帧上限；选中一屏只画它进出的；放大停住只有视口里的卡换原图、缩回当帧降档），在 `tests/e2e/core.ts`；`TC-PROTO-008` 第 1 步改读连线 canvas 的 `data-drawn` / `data-max-count` 并数画出的像素（此前读 SVG 的 `link-edge` 元素）；`TC-CORE-011` 第 2 步把缩略图地址一并换成过期的；`seed:project` 加 `--nav` / `--grid`，带截图的种子同时生成缩略图；单测加 `web/edges`（§3 清单与 §5 单测轮的纯函数清单同步） | @bug |
 | 2026-10-09 | 设计文档 v1.01（导出原型的文件名用项目名）：`TC-PROTO-005` 第 2 步预期改为下载文件名 `Export - Prototype.html`（原写「点下载、302 到签名 URL」，画布实际是作业成功后直接下载 `GET /v1/jobs/<id>/export`，一并改正），加第 5 步（项目改名 `健身/打卡` 后再下载同一份导出，文件名 `健身_打卡 - Prototype.html`），脚本加对应断言 | @bug |
 | 2026-10-08 | 设计文档 v1.00（选择元素可以逐级往上选）：新增 `TC-EDIT-031`（悬停时 `Shift+Enter` 扩大高亮、点一下选中那一层；选中后 `Shift+Enter` / `Enter` 上下移动；祖先路径点选与悬停预览；文案框里不触发；焦点在预览 iframe 里由运行时就地处理；组件卡同样可用），在 `tests/e2e/edit.ts` | @bug |
 | 2026-10-07 | 设计文档 v0.99（改组件可以交给本机会话）：新增 `TC-AGENT-024`（只选组件交给假会话：提示词写组件、`expectedVersion`、用在哪几屏与组件历史；带别的组件或过期版本的 `update_component` 被拒；带 `jobId` 写回后回刷到的屏记在作业名下，收口回执「本机 agent 已更新组件「X」，同步 N 屏」；会话没写组件时回执「没有改组件」且那一轮不进历史；面板写「改组件「X」」；重试同一轮可交给本机会话），在 `tests/e2e/agent.ts` | @bug |
 | 2026-10-07 | 设计文档 v0.98（素材瓦片的底色跟项目色板）：`TC-CORE-035` 第 6 步预期改为「判出深色标志的瓦片底色等于项目 `background`」，脚本加对应断言；单测加 `web/assetTone`（`toneColor` 的取色与回落门槛）| @bug |
-| 2026-10-07 | 设计文档 v0.97（顶栏去掉屏数与缩放比例，设置移到工具栏最下方）：`TC-CORE-022` 加第 3 步（顶栏没有「N 屏 · N%」、工具栏最末是「设置」、按它打开设置弹层、关闭后焦点回到它）；`TC-CORE-040` 第 2 步、`TC-CORE-032` 第 1 步、`TC-PROTO-011` 的缩放改读世界层 `transform` 的 `scale`（此前读顶栏的百分比） | @bug |
 
 ## 2. 测试范围 / 不测什么
 
@@ -61,7 +61,7 @@
 - 本机 Codex（`REQ-AGENT-003` / `REQ-CORE-013` v0.68，`ADR-020`）：`TC-AGENT-012` 用**假 Codex**验整条链——API 以 `QUILT_CODEX_HOME=/tmp/quilt-e2e-codex`、`QUILT_CODEX_BIN` 与 `QUILT_CODEX_OPENER` 都指向 `tests/e2e/codex-stub.mjs` 启动（另设 `OPENAI_API_KEY=sk-must-not-reach-codex`，验驱动会把它去掉），测试脚本也以同一个 `QUILT_CODEX_HOME` 运行（未设时登记「跳过」）。脚本自建假线程库（`state_5.sqlite`）；桩只记下 `queue` / 深链接 / `exec` 调用并回放 `exec` 的 JSONL（验证用的最小请求故意拖 18 s，与真 codex 冷启动相当，超过前端普通请求的 15 s 上限）；「Codex 窗口」一侧由脚本扮演——占住写锁文件表示线程打开着，读桩记下的队列消息、经 MCP 回写并收口。作业创建限流 10 次 / 分钟（§15），脚本在 `TC-AGENT-009` 之后先等过限流窗口再跑 012。`TC-AGENT-013`（真实 Codex）要本机 `codex` 已用 ChatGPT 登录、开着 Codex 桌面版，并临时把 Codex 的 `quilt` MCP 指到测试 API（`codex mcp add quilt --url http://127.0.0.1:3200/mcp` 加 `default_tools_approval_mode = "approve"`，测完改回 3100）；终端会话在伪终端里起 TUI（脚本替它回答终端能力探测与目录信任确认，只写进该伪终端，不动真实键盘鼠标）。
 - 聊天模式（`REQ-CORE-023` v0.45）：`TC-CORE-039` 要本机 `claude` 已登录——脚本经 API 建一条 `agent-sdk` 通道并探测通过后才发真实回合（模型 `CHAT_MODEL`，缺省 `claude-sonnet-5`；一轮 1～5 分钟，按订阅额度计费）；`LIVE_LLM=0` 只跑通道校验与串行守卫。SDK 会话文件落在 `~/.claude/projects/` 下按 `$dataDir/chat` 编码的目录，测试库与开发库共用该目录、会话 id 各自记在项目上，互不干扰。
 - MCP 与画布同面（`REQ-AGENT-002` v0.51）：`TC-AGENT-011` 由 `pnpm --filter @quilt/tests e2e:mcp` 执行，纯 MCP / REST、不开浏览器，要求 API 以 `LLM_DRIVER=stub` 启动（脚本先查 `/v1/health`，不是 stub 就退出）。为了不占用 3100 上的开发实例，可另起一套：`API_PORT=3200 PREVIEW_PORT=3201 API_ORIGIN=http://localhost:3200 PREVIEW_ORIGIN=http://preview.localhost:3201 DATABASE_URL=postgres://quilt:quilt@127.0.0.1:5439/quilt_test LLM_DRIVER=stub LLM_STUB= pnpm --filter @quilt/api dev`，脚本侧 `QUILT_E2E_API=http://localhost:3200 DATABASE_URL=…quilt_test`（种子脚本走同一个 `DATABASE_URL`）。`PREVIEW_ORIGIN` 必须一起改：`.env` 里写死的 3101 会让素材 URL 与截图渲染都打到开发实例的预览域。**浏览器用例也能在这套上跑**（v0.60 起）：先 `pnpm --filter @quilt/web build`，起 API 时再加 `WEB_DIST=$PWD/apps/web/dist WEB_ORIGIN=http://localhost:3200`（打包形态：API 同端口托管前端；`WEB_ORIGIN` 不改的话预览域的 `frame-ancestors` 还写着 6688，聚焦的 iframe 会整张拒载），脚本侧再加 `QUILT_E2E_WEB=http://localhost:3200`。
-- 单测（v0.60）：`pnpm test` 在 `tests/unit` 用 `node:test` 跑 `packages/core` 与前端纯函数的单测（不起库、不起浏览器，约 0.5 s）。TEST.md 不为单测逐条建 TC——测试文件名即覆盖范围（`core/inject`、`core/components`、`core/outline`、`core/lint`、`core/tokens`、`core/contract`、`core/failure`、`core/history`、`web/arrange`、`web/jobs`、`web/messages`、`web/designDraft`、`web/twClass`、`web/assetTone`、`api/codex`、`api/agentSdk`、`api/origin`、`api/llm`、`api/bundle`），失败按「单测轮」登记。`api/bundle` 按 `apps/cli/build.mjs` 同样的参数打一遍打包入口，断言静态 import 图无环（v0.82：环会让打包形态冷启动时顶层 await 永不落定、退出码 13）。
+- 单测（v0.60）：`pnpm test` 在 `tests/unit` 用 `node:test` 跑 `packages/core` 与前端纯函数的单测（不起库、不起浏览器，约 0.5 s）。TEST.md 不为单测逐条建 TC——测试文件名即覆盖范围（`core/inject`、`core/components`、`core/outline`、`core/lint`、`core/tokens`、`core/contract`、`core/failure`、`core/history`、`web/arrange`、`web/jobs`、`web/messages`、`web/designDraft`、`web/twClass`、`web/assetTone`、`web/edges`、`api/codex`、`api/agentSdk`、`api/origin`、`api/llm`、`api/bundle`），失败按「单测轮」登记。`api/bundle` 按 `apps/cli/build.mjs` 同样的参数打一遍打包入口，断言静态 import 图无环（v0.82：环会让打包形态冷启动时顶层 await 永不落定、退出码 13）。
 - LLM 故障注入：`LLM_STUB=503 pnpm dev` 让所有调用返回 503；`LLM_STUB=fixture` 回放固定 HTML（需要确定性时使用，用例中显式注明）。stub 驱动认指令里的 `[stub-hold:<毫秒>]`（写进系统提示或用户提示都算）：这次调用先拖这么久再回，且不理会中止信号——用来造「作业在跑的那一阵」与「模型已经在回来的路上时被取消」（`TC-EDIT-019`、`TC-CORE-065`，v0.79）。
 - 作业与 worker 健壮性（v0.79）：`TC-CORE-065` 要本机 docker 里的 `quilt-pg`，脚本用 `docker exec quilt-pg psql` 对被测库执行 `pg_terminate_backend`、只掐 `query ilike 'listen %'` 的连接（按 `current_database()` 过滤，别的库不受影响）。`TC-CORE-066` / `068` 在本机起**探针图**服务（3989 / 3988）：屏里一张指向它的图，探针回 404 时 `onerror` 挂一个不停清空 Tailwind 样式的定时器，截图的就绪判定等不到样式、这次拍摄失败；回 PNG 就一切正常——用它确定性地造「第一次拍摄失败」。`TC-CORE-068` 要重启被测 API：`QUILT_E2E_RESTART` 给一条命令，须以 SIGKILL 结束旧进程（模拟崩溃，`finally` 不执行）、再按本节的命令起新进程并轮询 `/v1/health` 到就绪（例如 `kill -9` 监听 API 端口的进程及其 `pnpm` / `tsx` 父进程后重起），未设时该用例失败并注明环境。`tests/e2e/openai-stub.ts` 的 `holdMs` 可以按请求给、`fail` 按请求回错误状态码；`codex-stub.mjs` 对 id 以 `eeee` 结尾的线程打开深链接失败（记 `open-failed`，模拟本机没装 Codex 桌面版）。真实调用会消耗额度，每条用例后置不做特殊清理。
 - 截图链与上传位（v0.82）：`TC-CORE-071` 要 `QUILT_E2E_RESTART` 与本机的 `ps` / `lsof`（按 `ppid` 与命令行里的 `--user-data-dir` 认截图浏览器）。`TC-EDIT-022` 的两张卡住的屏由屏自己的脚本造（把 `document.fonts.ready` 换成永不落定的 promise；页面加载完之后再调 `lucide.createIcons` 就死循环）。`TC-EDIT-023` 以 `QUILT_JOB_TIMEOUT_BASE_MS=1000 SCREEN_CONCURRENCY=1` 执行 `QUILT_E2E_RESTART`，要求重启命令把调用方的环境变量传给新进程（`stack.sh` 的 `env … pnpm` 即如此）；`QUILT_JOB_TIMEOUT_BASE_MS` 只在 `LLM_DRIVER=stub` 时生效，跑完不带它再重启一次；3987 端口起一个只收不回的服务当慢图。`TC-EDIT-028`（v0.93）在 3988 端口起同样的服务；它的第 1 步要截图浏览器能访问外网 CDN，第 2 步的 3 s 门槛靠同一进程里的外网缓存，API 重启后第一张照常走网络。`TC-AGENT-022` 要被测 API 用 fs 存储、数据目录在本机（`/v1/config` 的 `home`），脚本直接拨上传位文件的修改时间。
@@ -296,6 +296,21 @@
 | 1 | 开追踪；三轮：围绕视口里不同的点快速放大 30 下、停 400 ms、快速缩小 30 下、停 400 ms；关追踪 | 缺图块的帧 ≤ 2 且单帧缺块 ≤ 16（修复前每轮缩小 3～4 帧缺块、单帧最多 408 块，有整帧所有卡片都没画出来；放大方向本来就不缺） |
 
 后置：无。
+
+#### `TC-CORE-086` 大项目缩放与拖卡不掉帧 — 对应 `REQ-CORE-004`、`REQ-PROTO-002`（`ADR-029`）· 级别: 边缘 · 执行者: AI
+
+前置：`pnpm seed:project --name Dense --device desktop --screens 68 --grid 9 --nav 10`（带截图：每屏一张 2 倍屏原图 2560×1600 与一张 640×400 缩略图；9 列排开；每屏侧栏链到其后 10 屏，连同种子的底栏 4 个入口与「下一屏」，合并后约 900 条连线；期望值由脚本按项目的连线算）；单开一个 1440×900、设备像素比 2 的浏览器上下文打开该项目（首次打开即适配视图）。缩放用 `Ctrl`+滚轮（触控板捏合在浏览器里就是它），每步间隔 8 ms。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 等有截图的卡都显示（冷启动时截图浏览器取 Tailwind CDN 慢，种子偶尔丢头一两张截图，至少 60 张才算前置成立） | 全部是缩略图（`.thumb.webp`）；连线 canvas `data-total` 等于项目连线合并后的条数、`data-drawn=0`；顶部提示「共 N 条连线，选中屏后只显示它进出的」 |
+| 2 | 开追踪，在视口中央 `Ctrl`+滚轮放大 40 步再缩小 40 步，停 1.5 s 后关追踪 | 追踪里图片解码（`ImageDecodeTask` / `Decode Image`）合计 ≤ 500 ms；`longtask` 观察器没有超过 100 ms 的长任务（改前同类项目 3.3 s，超过 50 ms 的长任务 7 次、最长 209 ms） |
+| 3 | 拖住视口中央那张卡移动 60 步再松手，期间记 rAF 帧间隔 | 超过 33 ms 的帧 ≤ 5（改前 48 / 82） |
+| 4 | 依次单击视口里的 12 张卡（间隔 120 ms），期间记 rAF 帧间隔 | 超过 33 ms 的帧 ≤ 3（改前 21 / 63）；`data-drawn` 等于最后选中的那屏进出的条数；顶部提示消失 |
+| 5 | `Esc` 清掉选中，在视口中央 `Ctrl`+滚轮放大 30 步停住（约 100%），等到原图解码 | 视口里的卡都换成原图、视口外的仍是缩略图 |
+| 6 | 再缩小 30 步回到全景 | 5 s 内全部卡片回到缩略图 |
+
+后置：无。改前数字来自 RUN-243：Shopilot（68 屏、706 条连线）拷进测试库后用同一套场景量的。
 
 #### `TC-CORE-082` 事件流假死时作业照样收尾 — 对应 `REQ-CORE-005` · 级别: 边缘 · 执行者: AI
 
@@ -644,7 +659,7 @@
 | # | 操作 | 预期 |
 | --- | --- | --- |
 | 1 | 直接 curl 过期预览 URL | HTTP 403，`type` 为 `/errors/preview-token-invalid` |
-| 2 | 打开画布，第一次详情回包里 /s1 的 `screenshotUrl` 换成过期截图 URL（v0.76） | 截图 403 后页面静默重取详情（10 s 内至多一次），8 s 内 /s1 卡片换上新签名的截图（`naturalWidth > 0`）；不出现破图、不弹错误提示 |
+| 2 | 打开画布，第一次详情回包里 /s1 的 `screenshotUrl` 换成过期截图 URL（v0.76；v1.02 起 `thumbUrl` 一并换掉——卡片按缩放用其中一张） | 截图 403 后页面静默重取详情（10 s 内至多一次），8 s 内 /s1 卡片换上新签名的截图（`naturalWidth > 0`）；不出现破图、不弹错误提示 |
 | 3 | 重新打开，第一次详情回包里 /s1 的 `previewUrl` 换成过期预览 URL；双击 /s1 | iframe 里是 403 JSON、等不到就绪——`load` 后 2 s 页面重取详情，用新签名重载；卡片期间一直显示截图（iframe 透明），不露出 403 JSON；最终 `#toggle` 可见、角标「交互中」、iframe `src` 不再是过期那条 |
 | 4 | 交互中让父页取 /s2 预览文档的请求一律失败（路由 abort），点屏里去 /s2 的链接；再改成只失败第一次、又点一次（v0.76 屏内取页） | 第一次：toast「「Screen 2」这一屏没取到，稍后再试一次」，角标仍是 /s1，页面没有未捕获异常；第二次：先重取签名再取一次，跳到 /s2（角标 /s2） |
 | 5 | 另开一个装了假时钟的上下文打开同一项目，快进 4 分 30 秒（v0.76 签名续取） | 5 s 内页面静默重取一次详情（页面可见、距上次取到详情满 4 分钟） |
@@ -1316,7 +1331,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
-| 1 | 查看画布 | 卡片之间有带箭头的连线（`data-testid=link-edge`）≥ 4 条（s1→s2、s1→s3、s2→s3、s3→s1）；同一对屏合并为一条并标注条数，最大计数 ≥ 3 |
+| 1 | 查看画布 | 卡片之间有带箭头的连线：连线 canvas（`data-testid=link-edges`，v1.02 起不是 SVG）的 `data-drawn` ≥ 4（s1→s2、s1→s3、s2→s3、s3→s1），同一对屏合并为一条并标注条数，`data-max-count` ≥ 3；canvas 上有画出来的像素 |
 | 2 | 点工具栏「连线」 | 连线全部消失；/s1 卡片上的「断链 /settings」标记仍在 |
 | 3 | 再点「连线」 | 连线恢复；刷新页面后开关状态保持 |
 
@@ -1920,7 +1935,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 冒烟级 = `TC-CORE-003`、`TC-CORE-005`、`TC-CORE-010`、`TC-CORE-012`、`TC-CORE-018`、`TC-CORE-031`、`TC-PROTO-001`、`TC-AGENT-001`——建项目 → 生成 → 聚焦 → 对话改屏 → 恢复 → 一键安装冷启动，加播放与 MCP 各一条主链路。
 
-- **单测轮**（`pnpm test`，v0.60）：每次改动都跑，在 typecheck 之后、e2e 之前；改到纯函数（注入 / 组件展开 / 大纲 / lint / token / 约定 / 排列算位 / 作业文案 / 历史指令 / 类名说明与换档 / 素材瓦片取色）先补或改对应单测再改实现，e2e 只留给要起库、起浏览器才能验的路径。
+- **单测轮**（`pnpm test`，v0.60）：每次改动都跑，在 typecheck 之后、e2e 之前；改到纯函数（注入 / 组件展开 / 大纲 / lint / token / 约定 / 排列算位 / 作业文案 / 历史指令 / 类名说明与换档 / 素材瓦片取色 / 连线几何与过滤）先补或改对应单测再改实现，e2e 只留给要起库、起浏览器才能验的路径。
 - **全量轮**（全部用例）：首次成稿、每个里程碑出口、跨功能域改动、地基变更（环境 / 数据模型 / prelude 与 lint 规则 / 运行形态）。
 - **局部轮**（受影响用例 + 冒烟级）：单一功能改动。受影响用例 = 本次设计文档改动触及的 `REQ-*` 所对应的 TC（如只改回溯逻辑 → `REQ-CORE-007` → `TC-CORE-014`、`TC-CORE-015`）；无 REQ 变更的改动按功能域圈定；影响面不确定时升级为全量轮。
 - **提示词轮**（`TC-CORE-084`，v0.91）：改动出屏系统提示词的文字（`craftRules`、`screenSystemPrompt` 的输出规则、默认 DESIGN.md）时跑，按它事先登记的通过标准判定；不改这些文字的改动不跑——它要真实模型，一轮约 72 次出屏与 108 次评审，不进全量轮。stub 驱动的 e2e 测不出提示词好坏。
@@ -2101,6 +2116,8 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | RUN-240 | 2026-10-07 | 未提交工作树（设计文档 v0.99，在 v0.98 之上） | AI(Claude Code) | 复现 + 局部轮（改组件交给本机会话，`REQ-EDIT-006` / `REQ-AGENT-003`）：typecheck；单测轮；新用例 `TC-AGENT-024` 先在改动前的服务端代码上跑一次（`git stash` 掉 `apps/api/src` 后重启被测 API）、再在改动后跑；AGENT、MCP、COMPONENTS 整套，`TC-EDIT-019` / `025`（组件作业与组件历史），`TC-CORE-062`（重试与组件契约）；冒烟级 `TC-CORE-003` / `005` / `010` / `012` / `018` / `031`、`TC-PROTO-001`。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态（`apps/web/dist` 重建），`LIVE_LLM=0`、`GEMINI_API_KEY=`；install 停栈后用 `env -u npm_config_allow_scripts` 运行 | typecheck 通过，单测 88/88。改动前 `TC-AGENT-024` 在第 1 步失败：`400 /errors/validation`「请求参数不合法」，`errors[0]` = `runner`「改组件请换一个模型通道，本机会话不接这类作业」，与用户截图同一个报错；改动后首跑通过。e2e：AGENT 7/7 · 待人工 1（`TC-AGENT-010`）、MCP 3/3（`TC-AGENT-011` 首跑撞限流，单跑通过，见明细）、COMPONENTS 1/1、EDIT 2/2、CORE 4/6（`005` / `012` 需真实模型，基线）、PROTO 1/1、INSTALL 1/1（冷启动 5042 ms）；`core.ts` 固定输出的 `020` 待人工、`006` 跳过 |
 | RUN-241 | 2026-10-08 | 未提交工作树（设计文档 v1.00，在 v0.99 之上） | AI(Claude Code) | 全量轮（运行时属于 prelude，按地基变更跑）：typecheck；单测轮；CORE（`core.ts` / `load.ts` / `canvas.ts`）、PROTO、EDIT、COMPONENTS、AGENT、MCP、CHAT 九套整套，外加 install 套件；新用例 `TC-EDIT-031` 先单跑调通（脚本三处修正，见明细）；全量轮之后修正检查器的 Tab 顺序，再单跑 `TC-EDIT-029` / `031` 与全量轮里新出现失败的 `TC-CORE-056` / `061` / `068`。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态（`apps/web/dist` 重建），`LIVE_LLM=0`、`GEMINI_API_KEY=`；AGENT 与 MCP 两套之间隔一分钟（RUN-240 的限流教训）；install 停栈后用 `env -u npm_config_allow_scripts` 运行 | typecheck 通过，单测 88/88。全量轮：`core.ts` 51/60、LOAD 11/12、CANVAS 25/25、PROTO 10/12、EDIT 19/24、COMPONENTS 1/1、AGENT 7/7 · 待人工 1、MCP 3/3、CHAT 1/1、INSTALL 1/1（冷启动 6061 ms）；`core.ts` 固定输出的 `020` 待人工、`006` 跳过。失败归因：本次改动引入 1（`TC-EDIT-029`，已修，单跑通过）；需真实模型 6、§7 遗留 1（`TC-CORE-023`）、HEAD 同现 4（`TC-CORE-035` / `037`、`TC-EDIT-002` / `006`）、环境 1（`TC-CORE-027`），与 RUN-200 同一批；既有不稳 1（`TC-CORE-047`）；连跑偶发 3（`TC-CORE-056` / `061` / `068`，单跑通过）。修正后单跑 `TC-EDIT-029` / `031`、`TC-CORE-056` / `061` / `068` 5/5 通过 |
 | RUN-242 | 2026-10-09 | 未提交工作树（设计文档 v1.01，在 v1.00 之上） | AI(Claude Code) | 局部轮（只动 `API-PROTO-002` 的下载响应头）：typecheck；PROTO 整套（含 `TC-PROTO-005` 新增的第 5 步与文件名断言）；`TC-CORE-061`（同样下载导出、断言附件头）。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态（`apps/web/dist` 重新构建），`LIVE_LLM=0` | typecheck 通过。PROTO 9/12：`TC-PROTO-005` 通过（下载名 `Export - Prototype.html`，改名后 `健身_打卡 - Prototype.html`，响应头带 `filename*`）；失败 3：需真实模型 2（`TC-PROTO-004` / `009`，基线）、`TC-PROTO-001` 整套里首个用例超时 1（单跑通过，见明细）。`TC-CORE-061` 通过 |
+| RUN-243 | 2026-10-10 | 未提交工作树（设计文档 v1.01 的前端 → v1.02 前后对照） | AI(Claude Code) | 性能剖析轮（不对应 TC，给 v1.02 找根因、定 `TC-CORE-086` 的阈值）：开发库 Shopilot（68 屏桌面、706 条连线、2 个组件）按行拷进 `quilt_test`（换新项目 id，对象文件 APFS 克隆，开发库只读）；无头 Edge 1440×900、设备像素比 2，GPU 光栅化（Apple M4 Pro，ANGLE Metal / Skia Graphite）；录 Chromium 追踪。场景：全景平移 90 步、`Ctrl`+滚轮缩放一个来回 80 步、50% 平移、全景拖卡 60 步、依次点选 12 张卡；改前另做三组对照（截图换成 640 宽、关掉连线、两者都做）。改后另加「放大停住再缩回」（停在 30%、42%、68%）与 `⌘A` 全选（706 条全画）。脚本在 `Quilt-wt/fix-tools/perf/` | 改前：缩放一个来回图片解码 3,305 ms、超过 50 ms 的长任务 7 次（最长 209 ms），GPU 主线程 1,853 ms；拖卡超过 33 ms 的帧 48 / 82；点选 21 / 63；全景与 50% 平移不掉帧。对照：只换小图，缩放解码 0；只关连线，拖卡 3 / 68、点选 2 / 80；两者都做，缩放 GPU 主线程 227 ms。canvas 画 706 条曲线加箭头与徽标每帧 0.4 ms（中位）。改后：缩放一个来回解码 0、长任务 0、GPU 主线程 256 ms；拖卡 0 / 62，全画 706 条时 0 / 60；点选 0 / 89；放大到 68% 停住再缩回解码 60 ms、无慢帧；停在 30%（视口里 17 张换原图）解码合计 755 ms、单次最长 17 ms、无慢帧。中途发现一版实现缩小时等停下才降档，放大到 68% 再缩回解码 3,159 ms、长任务 5 次——改为缩小越过门槛当帧降档、升档只给视口里的卡后消失 |
+| RUN-244 | 2026-10-10 | 未提交工作树（设计文档 v1.02，在 v1.01 之上） | AI(Claude Code) | 全量轮（截图写回与卡片取图是所有流程的公共路径）：typecheck；单测轮；CORE（`core.ts` / `load.ts` / `canvas.ts`）、PROTO、EDIT、COMPONENTS、AGENT、MCP、CHAT 九套整套，外加 install 套件；新用例 `TC-CORE-086` 先单跑调通（脚本两处修正，见明细）；全量轮之后前端只动了两行（没有连线 canvas 时不排 rAF、一处写法），重新构建后单跑 `TC-CORE-086`；全量轮新出现的失败 `TC-CORE-083` / `085` 单跑；浏览器验收脚本（1440×900 设备像素比 2、390×844 设备像素比 3：提示的位置与截断、横向溢出、console，选中一屏后连线 canvas 的像素，关掉连线）。隔离栈 3410 / 3411 + `quilt_test` + stub + 打包形态（`apps/web/dist` 重新构建），`LIVE_LLM=0`、`GEMINI_API_KEY=`；AGENT 与 MCP 两套之间隔一分钟 | typecheck 通过，单测 92/92（新增 `web/edges` 4 条）。全量轮：`core.ts` 53/61（另 `020` 待人工、`006` 跳过）、LOAD 11/12、CANVAS 25/25、PROTO 10/12、EDIT 20/24、COMPONENTS 1/1、AGENT 7/7 · 待人工 1、MCP 3/3、CHAT 1/1、INSTALL 1/1（冷启动 3520 ms）。`TC-CORE-086` 全量轮通过（908 条连线、68 张截图；缩放一个来回解码 25 ms、长任务 0；拖卡 0/61、点选 0/90 帧超过 33 ms；放大后视口里 3 张换原图），重新构建后单跑通过（解码 0 ms，拖卡 0/62、点选 0/89）。失败归因：需真实模型 6、§7 遗留 1（`TC-CORE-023`）、HEAD 同现 4（`TC-CORE-035` / `037`、`TC-EDIT-002` / `006`）、环境 1（`TC-CORE-027`），与 RUN-200 同一批；既有不稳 1（`TC-CORE-047`）；新出现 2 条都是外网 Tailwind CDN 不稳（`TC-CORE-083` 单跑一过一不过、`085` 单跑通过，见明细）。浏览器验收：两个视口 console 0、无横向溢出，提示完整显示不截断；1440 下选中一屏画出它进出的 24 条（9,798 个像素）、提示消失；关掉连线后 canvas 与提示都撤 |
 | RUN-114 | 2026-09-23 | 未提交工作树（设计文档 v0.65：审查缺陷回写） | AI(Claude Code) | 单测轮 34/34；e2e 局部轮：`TC-AGENT-011`（含新增 7c / 8a）、`TC-AGENT-003` / `004`；`TC-PROTO-001` / `012`（含新增 5～6b）；`TC-CORE-007` / `010` / `011` / `018` / `023` / `034` / `036` / `040` / `041`（含新增断言）；`TC-EDIT-001` / `005` / `007` / `012`。隔离栈 3200 / 3201 + `quilt_test` + stub + 打包形态，逐套串行 | 通过 18/19 · 失败 1（`TC-CORE-023`，与 RUN-112 同一步、HEAD 同现，判环境） |
 | RUN-113 | 2026-09-23 | 未提交工作树（设计文档 v0.64：MCP 写屏改小步——`patch_screen` / `append_upload`、`get_screen` 只给 body） | AI(Claude Code) | 局部轮（`REQ-AGENT-002` → `TC-AGENT-011` 全部步骤含新增 7b；`get_screen` 口径变化波及的 `TC-AGENT-003` / `004`）。隔离环境 3200 / 3201 + `quilt_test` + stub，纯 MCP / API，未托管前端 | 通过 2/3 · 失败 1（`TC-AGENT-003`：MCP 部分——`get_screen` 只给 body、截图就绪——已过，随后打开浏览器页 `locator.waitFor` 超时：本栈没托管前端，判环境） |
 | RUN-112 | 2026-09-23 | 未提交工作树（设计文档 v0.60 工程底座 + v0.61 找屏与总览 + v0.62 状态变体 + v0.63 叠层屏） | AI(Claude Code) | 单测轮 `pnpm test` 31/31；e2e 局部轮（新增 `TC-CORE-040` / `041`、`TC-PROTO-012`；重构影响面：`TC-CORE-003` / `007` / `012` / `018` / `023` / `034` / `036`、`TC-EDIT-001` / `005`、`TC-AGENT-001` / `003` / `004` / `011`）。隔离环境：3200 / 3201 + `quilt_test` + stub 驱动 + 打包形态（`WEB_DIST` + `WEB_ORIGIN=3200`，§3），3100 / 5173 归另一会话 | 通过 15/17 · 失败 1（`TC-CORE-023`，HEAD 同现、判环境）· 未跑 1（`TC-EDIT-008` 需真实模型）· 跳过 / 待人工 2（`TC-AGENT-009` / `010`） |
@@ -2169,6 +2186,13 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | RUN-241 | TC-CORE-005 / 012 / 023 / 027 / 035 / 037、TC-PROTO-004 / 009、TC-EDIT-002 / 003 / 006 / 008 | 失败 | 与 RUN-200 同一批：需真实模型、§7 遗留、环境、HEAD 同现 | 基线 |
 | RUN-242 | TC-PROTO-001 | 失败 → 通过 | 整套的第一个用例，`locator.waitFor` 15 s 超时；本次只改了导出下载的响应头，不碰该用例走的聚焦与跳转 | 单跑通过；RUN-241 整套里同一用例通过 |
 | RUN-242 | TC-PROTO-004 / 009 | 失败 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-244 | TC-CORE-086 | 调通（脚本） | 两处脚本问题：① 期望写死 680 条连线、选中一屏 20 条，漏算了种子的底栏（每屏链 `/s1`–`/s4`）与「下一屏」链接，实际合并后 908 条、一屏 24 条左右——改为按项目连线现算；② 冷启动时截图浏览器取 Tailwind CDN 慢，种子偶尔丢头一两张截图，「等 68 张都显示」等不到——改为按有截图的屏数等、至少 60 张才算前置成立 | 单跑与全量轮都通过 |
+| RUN-244 | TC-CORE-011 / TC-PROTO-008 | 单跑缺前置 | 全量轮之前按用例单跑：两条都依赖前面步骤建的项目（`focusScreens`、`formProject`），单跑时取不到 | 全量轮通过 |
+| RUN-244 | TC-CORE-081 | 失败 → 通过 | 调试期间单跑两次「25 张截图还没都解码」：逐张看卡片，缺图的一两张没有发出任何图片请求——种子里 `/s1`（`/s2`）的截图没拍成。同一台机器上只调 `screenshotHtml`、不经缩略图代码的探针 4 次里 2 次头一张报「页面未就绪：Tailwind CDN 未生效或图标库未加载」（冷启动 15–20 s）；`curl` 取 `cdn.tailwindcss.com` 3 次里 1 次 TLS 连接失败 | 环境：外网 CDN 不稳；全量轮通过 |
+| RUN-244 | TC-CORE-085 | 失败 → 通过 | 全量轮第一步「截图没加载出来」：同上，种子头一张 `/s1` 没拍成，还没走到退出聚焦的交接 | 单跑通过（退出后 iframe 留 173 帧至新截图接班、0 帧骨架）；不是本次改动引入 |
+| RUN-244 | TC-CORE-083 | 失败（不稳） | 等预览文档里 Tailwind 生效 20 s 超时；单跑两次一过一不过；用例只看屏里的 `dark:` 变体，不经过卡片取图与连线 | 环境：外网 CDN 不稳 |
+| RUN-244 | TC-CORE-047 | 失败（不稳） | 「② ↓ 应能走到最后一行」，与 RUN-213 / RUN-230 / RUN-241 同一现象 | 既有不稳 |
+| RUN-244 | TC-CORE-005 / 012 / 023 / 027 / 035 / 037、TC-PROTO-004 / 009、TC-EDIT-002 / 003 / 006 / 008 | 失败 | 与 RUN-200 同一批：需真实模型、§7 遗留、环境、HEAD 同现 | 基线 |
 | RUN-240 | TC-AGENT-011 | 失败 → 通过 | 整套连跑时 `quilt.edit_screens` 返回 `429 /errors/rate-limited`：每人每分钟 10 个作业的限流，`agent.ts` 末尾新加的 `TC-AGENT-024` 建了 5 个作业，`mcp.ts` 在同一分钟里开跑。等过一分钟单跑通过 | 环境（用例顺序与限流），不是产品回归；连跑 AGENT 与 MCP 两套之间隔一分钟 |
 | RUN-240 | TC-AGENT-024 | 失败（改动前）→ 通过 | 改动前的服务端拒绝「只选组件 + 本机会话」：第 1 步 `400`，`path: runner` | 产品改动（设计文档 v0.99）后通过 |
 | RUN-240 | TC-CORE-005 / 012 | 失败 | `LIVE_LLM=0`，需真实模型 | 基线 |

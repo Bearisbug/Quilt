@@ -292,11 +292,8 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) tran
    要排在上面几条 animation 简写之后：同等特异度下简写会把 play-state 写回 running */
 .card:not([data-onscreen]) .skeleton::before, .card:not([data-onscreen]) .skeleton *, .comp:not([data-onscreen]) .skeleton::before, .comp:not([data-onscreen]) .skeleton *,
 .card.live .skeleton::before, .card.live .skeleton *, .comp.live .skeleton::before, .comp.live .skeleton * { animation-play-state: paused; }
-/* 页面地图连线（REQ-PROTO-002）：世界坐标系里的 SVG，随画布缩放 */
-.world .edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-.world .edges path { fill: none; stroke: var(--color-accent); stroke-width: 2.5; stroke-linecap: round; opacity: 0.85; }
-.world .edges marker path { fill: var(--color-accent); stroke: none; opacity: 1; }
-.world .edge-count { position: absolute; left: 0; top: 0; width: 28px; height: 22px; border-radius: 11px; background: var(--color-accent); color: var(--color-on-accent); font-size: 13px; font-weight: 600; line-height: 22px; text-align: center; pointer-events: none; font-variant-numeric: tabular-nums; }
+/* 页面地图连线（REQ-PROTO-002，v1.02 ADR-029）：与视口等大的 canvas，排在世界层之前、被卡片盖住；颜色取自这里的 token（CanvasView 读一次） */
+.viewport > .edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .card .gesture { position: absolute; inset: 0; border-radius: inherit; cursor: default; }
 /* 卡片的键盘焦点环（v0.80）：雾蓝、外扩到选中描边之外，两层分得开；宽度同样按 --canvas-zoom 反算 */
 .card .gesture:focus-visible, .comp .gesture:focus-visible { outline: calc(2px / var(--canvas-zoom, 1)) solid var(--color-accent-strong); outline-offset: calc(8px / var(--canvas-zoom, 1)); }

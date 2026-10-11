@@ -104,6 +104,7 @@ export async function screenDtos(project: ProjectRow, rows: ScreenRow[]): Promis
       id: s.id, projectId: s.projectId, name: s.name, route: s.route, purpose: s.purpose, x: s.x, y: s.y, width: size.w, height: size.h,
       currentRevisionId: rev?.id ?? null, currentRevisionSeq: rev?.seq ?? null,
       screenshotUrl: rev?.screenshotKey ? await storage.signedUrl(rev.screenshotKey) : null,
+      thumbUrl: rev?.thumbKey ? await storage.signedUrl(rev.thumbKey) : null,
       previewUrl: rev ? `${config.previewOrigin}/p/${project.id}/${s.id}?rev=${rev.id}&t=${previewToken}` : null,
       lintPassed: rev ? (rev.lintReport as { passed?: boolean }).passed ?? null : null,
       // 偏离条数（v0.43）：契约是透镜不是闸门，画布只报「偏离了几处」，取舍由设计师做

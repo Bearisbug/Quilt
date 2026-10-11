@@ -43,7 +43,7 @@ miscRoutes.put('/v1/attachments/:projectId/:id', async (c) => {
 // fs 存储驱动的签名对象读取（截图 / 修订 HTML 下载）；修订不可变，允许缓存。
 // HTML（修订、导出原型）是不可信内容，而这里是 API origin（打包形态即画布 origin）：一律附件 + sandbox，
 // 在浏览器里打开是下载而不是渲染，否则屏的脚本就在画布同源下执行（§15「对象下发」）
-const TYPES: Record<string, string> = { '.png': 'image/png', '.html': 'text/html; charset=utf-8', '.json': 'application/json' };
+const TYPES: Record<string, string> = { '.png': 'image/png', '.webp': 'image/webp', '.html': 'text/html; charset=utf-8', '.json': 'application/json' };
 miscRoutes.get('/v1/objects/:key{.+}', async (c) => {
   const key = decodeURIComponent(c.req.param('key'));
   const exp = Number(c.req.query('exp') ?? 0);

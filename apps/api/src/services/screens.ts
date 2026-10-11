@@ -3,6 +3,7 @@ import { db, schema, type Db } from '../db/client.ts';
 import { problems } from '../lib/errors.ts';
 import { notifyCanvas } from '../lib/events.ts';
 import { storage, objectKeys } from '../lib/storage.ts';
+import { thumbnailOf } from '../lib/screenshot.ts';
 import { config } from '../config.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
 import { extractLinks, extractBody, outlineBody, componentNamesIn, screenInstructionHistory, type RevisionDto, type SourceKind, type CandidatesDto, DEVICE_SIZE, type DeviceType, type Presentation } from '@quilt/core';
@@ -196,15 +197,23 @@ export async function deleteScreen(projectId: string, screenId: string): Promise
 }
 
 // 截图写回（§16 v0.77）：渲染要几秒，期间屏或整个项目可能已被删、对象前缀已清过。先写对象再按修订行条件回填，
-// 行已不在就清掉这一屏（项目也不在了就清整个项目）的前缀——否则刚写的 PNG 没有任何行指向它，再也没人清。返回 null = 屏已删
+// 行已不在就清掉这一屏（项目也不在了就清整个项目）的前缀——否则刚写的 PNG 没有任何行指向它，再也没人清。返回 null = 屏已删。
+// 缩略图（v1.02 ADR-029）随截图一起写、同一条 UPDATE 回填；做不出来只回填截图，留给 screenshot.retry 补
 export async function storeRevisionShot(projectId: string, screenId: string, revisionId: string, png: Buffer): Promise<string | null> {
   const key = objectKeys.revisionShot(projectId, screenId, revisionId);
   await storage.put(key, png, 'image/png');
-  const rows = await db.update(schema.screenRevisions).set({ screenshotKey: key }).where(eq(schema.screenRevisions.id, revisionId)).returning({ id: schema.screenRevisions.id });
+  const thumbKey = await storeThumb(projectId, screenId, revisionId, png).catch((e: Error) => { console.warn(`[thumbnail] ${revisionId}: ${e.message}`); return null; });
+  const rows = await db.update(schema.screenRevisions).set({ screenshotKey: key, thumbKey }).where(eq(schema.screenRevisions.id, revisionId)).returning({ id: schema.screenRevisions.id });
   if (rows.length) return key;
   const [project] = await db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.id, projectId));
   await storage.deletePrefix(project ? `projects/${projectId}/screens/${screenId}/` : `projects/${projectId}/`).catch(() => {});
   return null;
+}
+
+export async function storeThumb(projectId: string, screenId: string, revisionId: string, png: Buffer): Promise<string> {
+  const key = objectKeys.revisionThumb(projectId, screenId, revisionId);
+  await storage.put(key, await thumbnailOf(png), 'image/webp');
+  return key;
 }
 
 // 呈现方式（v0.63）是整个家族的：变体是同一屏的另一个状态，播放按默认屏的路由找屏，所以默认屏改了变体跟着改。
@@ -212,7 +221,7 @@ export async function storeRevisionShot(projectId: string, screenId: string, rev
 export async function setFamilyPresentation(tx: Tx, screenId: string, presentation: Presentation): Promise<string[]> {
   const rows = await tx.update(schema.screens).set({ presentation, updatedAt: new Date() }).where(or(eq(schema.screens.id, screenId), eq(schema.screens.variantOf, screenId))).returning({ rev: schema.screens.currentRevisionId });
   const revs = rows.map((r) => r.rev).filter((r): r is string => !!r);
-  if (revs.length) await tx.update(schema.screenRevisions).set({ screenshotKey: null }).where(inArray(schema.screenRevisions.id, revs));
+  if (revs.length) await tx.update(schema.screenRevisions).set({ screenshotKey: null, thumbKey: null }).where(inArray(schema.screenRevisions.id, revs));
   return revs;
 }
 

@@ -1,0 +1,1 @@
+ALTER TABLE "screen_revisions" ADD COLUMN "thumb_key" text;

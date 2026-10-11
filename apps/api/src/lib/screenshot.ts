@@ -179,6 +179,26 @@ export async function screenshotHtml(html: string, size: { w: number; h: number 
   });
 }
 
+// 卡片缩略图（v1.02 ADR-029）：截图缩到 1/4、编码成 WebP。用同一个浏览器，空白页里做：屏自己的脚本碰不到它
+export async function thumbnailOf(png: Buffer): Promise<Buffer> {
+  return inPage({}, 5_000, async (page) => {
+    const b64 = await page.evaluate(async (src) => {
+      const bitmap = await createImageBitmap(new Blob([Uint8Array.from(atob(src), (c) => c.charCodeAt(0))], { type: 'image/png' }));
+      const w = Math.max(1, Math.round(bitmap.width / 4)); const h = Math.max(1, Math.round(bitmap.height / 4));
+      const small = await createImageBitmap(bitmap, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' });
+      const canvas = new OffscreenCanvas(w, h);
+      canvas.getContext('2d')!.drawImage(small, 0, 0);
+      const blob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.8 });
+      if (blob.type !== 'image/webp') throw new Error(`浏览器编码不出 WebP（得到 ${blob.type}）`); // 不支持时会静默退回 PNG
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return btoa(bin);
+    }, png.toString('base64'));
+    return Buffer.from(b64, 'base64');
+  });
+}
+
 // 导出用：把全部屏放进一页让 Tailwind Play CDN 生成并集 CSS，抽出来内联（REQ-PROTO-004）
 export async function extractTailwindCss(prelude: string, bodies: string[], timeoutMs = 20_000): Promise<string> {
   return inPage({ viewport: { width: 1280, height: 800 } }, timeoutMs * 2, async (page) => {
