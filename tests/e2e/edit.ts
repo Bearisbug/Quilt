@@ -1410,6 +1410,130 @@ await step('TC-EDIT-030', async () => {
   return '一行一个、说明按项目取值；‹ › 换档且到头不可点；颜色下拉换 token；删行 / 加行 / 失焦拆行；未收录与非 token 色有标注；打字不横跳；⌘S 按行序存回';
 });
 
+// TC-EDIT-031 逐级选（REQ-EDIT-001 v1.00）：Shift+Enter 选父级、Enter 回到子级；悬停时扩大高亮、选中后移动选中；检查器祖先路径点选与悬停预览
+await step('TC-EDIT-031', async () => {
+  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Climb', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const pid = r.projectId;
+  const S = softly();
+  type Box = { x: number; y: number; w: number; h: number } | null;
+  const near = (a: Box, b: Box) => !!a && !!b && Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1 && Math.abs(a.w - b.w) <= 1 && Math.abs(a.h - b.h) <= 1;
+  // 屏内两层框：悬停框是虚线那层（外扩 2 px），选中框带 data-quilt-selection、标签写「tag · qid」
+  const probe = (frameSel: string) => ({
+    frame: async () => (await page.locator(frameSel).elementHandle())!.contentFrame(),
+    hover: async (): Promise<Box> => (await (await page.locator(frameSel).elementHandle())!.contentFrame())!.evaluate(() => {
+      const b = Array.from(document.querySelectorAll<HTMLElement>('div[data-quilt-ui]')).find((d) => d.style.borderStyle === 'dashed');
+      if (!b || b.style.display === 'none') return null;
+      const r = b.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+    }),
+    rect: async (q: string): Promise<Box> => (await (await page.locator(frameSel).elementHandle())!.contentFrame())!.evaluate((s) => {
+      const r = document.querySelector(s)!.getBoundingClientRect(); return { x: Math.round(r.x - 2), y: Math.round(r.y - 2), w: Math.round(r.width + 4), h: Math.round(r.height + 4) };
+    }, q),
+    label: async () => (await (await page.locator(frameSel).elementHandle())!.contentFrame())!.evaluate(() => document.querySelector('[data-quilt-selection] span')?.textContent ?? ''),
+  });
+  // 画布上的卡片带缩放：Playwright 按 iframe 内坐标算的指针位置会偏到别的元素上，这里按 iframe 的实际缩放自己换算
+  const pointAt = async (frameSel: string, q: string) => {
+    const fr = page.locator(frameSel);
+    const box = (await fr.boundingBox())!;
+    const inner = await (await (await fr.elementHandle())!.contentFrame())!.evaluate((s) => { const r = document.querySelector(s)!.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, vw: window.innerWidth }; }, q);
+    const k = box.width / inner.vw;
+    return { x: box.x + inner.x * k, y: box.y + inner.y * k };
+  };
+  const current = async () => (await page.locator('[data-testid="el-path"] [aria-current="location"]').innerText().catch(() => '')).trim();
+  const crumbs = async () => (await page.locator('[data-testid="el-path"] button').allInnerTexts()).map((t) => t.trim()).join(' › ');
+  const at = (tag: string, msg: string) => eventually(async () => expect((await current()) === tag, `${msg}：当前层是 ${await current()}`), 5000);
+  try {
+    const comp = await apiJson<{ component: { id: string } }>(`/v1/projects/${pid}/components`, { method: 'POST', body: JSON.stringify({ name: 'Box', html: '<section class="p-4"><div><p><span>x</span></p></div></section>' }) });
+    expect(comp.status === 201, `建组件 Box ${comp.status}`);
+    // 组件卡默认落在左下会被对话面板盖住，摆在右边又会被检查器盖住：摆到风格指南左边、竖向居中
+    await apiJson(`/v1/components/${comp.body.component.id}`, { method: 'PATCH', body: JSON.stringify({ x: -1000, y: 300 }) });
+    await page.goto(`${WEB}/p/${pid}`);
+    const card = page.locator('[data-testid="screen-card"][data-route="/s1"]');
+    await card.waitFor({ timeout: 15000 });
+    await page.keyboard.press('ControlOrMeta+e');
+    await page.getByTestId('armed-hint').waitFor({ timeout: 5000 });
+    await card.locator('.gesture').click();
+    await page.locator('.card.focused .badge', { hasText: '选择元素中' }).waitFor({ timeout: 20000 });
+    const fl = page.frameLocator('.card.focused iframe');
+    const P1 = probe('.card.focused iframe');
+    const SPAN = 'ul li a span.flex-1';
+    await fl.locator(SPAN).first().waitFor({ timeout: 15000 });
+    await page.waitForTimeout(400);
+    // 1 悬停在最里层的 span 上，焦点在画布：Shift+Enter 两次，悬停框扩到 a、li；还没选中
+    const p1 = await pointAt('.card.focused iframe', SPAN);
+    await page.mouse.move(p1.x, p1.y, { steps: 4 });
+    await S.check(() => eventually(async () => expect(near(await P1.hover(), await P1.rect(SPAN)), '① 悬停框应先在 span 上'), 3000));
+    await page.keyboard.press('Shift+Enter');
+    await S.check(() => eventually(async () => expect(near(await P1.hover(), await P1.rect('ul li a')), '① 第一次 Shift+Enter 悬停框应框住 a'), 3000));
+    await page.keyboard.press('Shift+Enter');
+    await S.check(() => eventually(async () => expect(near(await P1.hover(), await P1.rect('ul li')), '① 第二次 Shift+Enter 悬停框应框住 li'), 3000));
+    await S.check(async () => expect((await page.getByTestId('el-path').count()) === 0, '① 还没点，检查器不该有选中'));
+    // 2 不动指针点一下：选中 li，路径到 span，li 当前、a / span 在它之下
+    await page.mouse.down(); await page.mouse.up();
+    await at('li', '② 点一下应选中悬停框所在的 li');
+    await S.check(async () => expect((await crumbs()) === 'div › main › ul › li › a › span', `② 祖先路径不对：${await crumbs()}`));
+    await S.check(async () => expect((await P1.label()).startsWith('li · '), `② 选中框标签不对：${await P1.label()}`));
+    // 3 焦点在检查器上按 Shift+Enter：选中上移到 ul
+    await S.check(() => eventually(async () => expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.testid) === 'inspector-body', '③ 点选后焦点应在检查器上'), 3000));
+    await page.keyboard.press('Shift+Enter');
+    await at('ul', '③ Shift+Enter 应选中 ul');
+    await S.check(() => eventually(async () => expect((await P1.label()).startsWith('ul · '), `③ 选中框标签应跟到 ul：${await P1.label()}`), 3000));
+    // 4 Enter 沿锚点链往下走，到 span 为止
+    for (const tag of ['li', 'a', 'span']) { await page.keyboard.press('Enter'); await at(tag, `④ Enter 应回到 ${tag}`); }
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(400);
+    await S.check(async () => expect((await current()) === 'span', `④ 到锚点后再按 Enter 应停在 span：${await current()}`));
+    // 5 点路径上的 main：选中 main、路径不变；Enter 回到 ul
+    await page.locator('[data-testid="el-path"] button', { hasText: /^main$/ }).click();
+    await at('main', '⑤ 点路径上的 main 应选中它');
+    await S.check(async () => expect((await crumbs()) === 'div › main › ul › li › a › span', `⑤ 路径应不变：${await crumbs()}`));
+    await page.locator('[data-testid="inspector-body"]').focus();
+    await page.keyboard.press('Enter');
+    await at('ul', '⑤ 从 main 按 Enter 应回到 ul');
+    // 6 悬停路径上的 div：屏上悬停框框住屏根，移开撤掉
+    const rootCrumb = page.locator('[data-testid="el-path"] button').first();
+    await rootCrumb.hover();
+    await S.check(() => eventually(async () => expect(near(await P1.hover(), await P1.rect('body > div[data-qid]')), '⑥ 悬停路径上的 div 应在屏上框住屏根'), 3000));
+    await page.getByTestId('inspector-body').hover({ position: { x: 10, y: 200 } });
+    await S.check(() => eventually(async () => expect((await P1.hover()) === null, '⑥ 移开后悬停框应撤掉'), 3000));
+    // 7 Tab 从检查器直接进文案框（路径按钮不进 Tab 序）；文案框里 Shift+Enter 不换选中
+    await page.locator('[data-testid="inspector-body"]').focus();
+    await page.keyboard.press('Tab');
+    await S.check(async () => expect(await page.evaluate(() => document.activeElement?.id) === 'el-text', `⑦ 从检查器按 Tab 应进文案框：${await page.evaluate(() => document.activeElement?.tagName + ' ' + (document.activeElement?.getAttribute('data-qid') ?? ''))}`));
+    await page.locator('#el-text').focus();
+    await page.keyboard.press('Shift+Enter');
+    await page.waitForTimeout(400);
+    await S.check(async () => expect((await current()) === 'ul', `⑦ 文案框里按 Shift+Enter 不该换选中：${await current()}`));
+    // 8 焦点在预览 iframe 里：运行时就地处理
+    await page.locator('.card.focused iframe').focus();
+    await page.keyboard.press('Shift+Enter');
+    await S.check(() => at('main', '⑧ 焦点在 iframe 里按 Shift+Enter 应上移到 main'));
+    // 9 组件卡：Esc 退出这一屏后选择元素态仍开着，双击组件卡聚焦它就在它上面选元素；点 span，Shift+Enter 两次
+    await page.keyboard.press('Escape');
+    await page.locator('.card.focused').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
+    const compCard = page.locator('[data-testid="component-card"][data-name="Box"]');
+    await page.locator('[data-testid="component-card"][data-name="Box"][data-ready]').waitFor({ timeout: 20000 });
+    await page.keyboard.press('f');
+    await page.waitForTimeout(600);
+    await compCard.locator('.gesture').dblclick();
+    await eventually(async () => expect((await page.locator('.comp.focused').count()) === 1, '⑨ 选择元素态下双击组件卡没聚焦它'));
+    const cf = page.frameLocator('.comp.focused iframe');
+    await cf.locator('section span').waitFor({ timeout: 15000 });
+    await page.waitForTimeout(400);
+    const p9 = await pointAt('.comp.focused iframe', 'section span');
+    await page.mouse.click(p9.x, p9.y);
+    await at('span', '⑨ 组件里点 span 应选中它');
+    await S.check(async () => expect((await crumbs()) === 'section › div › p › span', `⑨ 组件的祖先路径不对：${await crumbs()}`));
+    await page.locator('[data-testid="inspector-body"]').focus();
+    await page.keyboard.press('Shift+Enter');
+    await S.check(() => at('p', '⑨ 组件里 Shift+Enter 应选中 p'));
+    await page.keyboard.press('Shift+Enter');
+    await S.check(() => at('div', '⑨ 再按应选中 div'));
+  } catch (e) { S.fail(e); }
+  finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
+  S.done();
+  return '悬停 Shift+Enter 扩到 a、li，点中 li；选中后 Shift+Enter / Enter 上下走、到锚点为止；路径点选不改路径、悬停预览；文案框里不触发；iframe 里就地处理；组件卡同样可用';
+});
+
 await browser.close();
 console.log(`\n=== RUN-${RUN} EDIT ===`, JSON.stringify(results.reduce<Record<string, number>>((m, r) => ((m[r.result] = (m[r.result] ?? 0) + 1), m), {})));
 console.log(results.map((r) => `${r.tc} ${r.result} ${r.note}`).join('\n'));

@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { XYPanZoom, PanOnScrollMode, getViewportForBounds, type PanZoomInstance, type Viewport } from '@xyflow/system';
-import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type AnnotationDto, type ComponentDto } from '@quilt/core';
+import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type AnnotationDto, type ComponentDto, type ElementPathItem } from '@quilt/core';
 import { StyleGuideCard, STYLE_GUIDE_SIZE, styleGuideSize } from '@/canvas/StyleGuideCard';
 import { Minimap, type MiniRect, type ViewInfo } from '@/canvas/Minimap';
 
@@ -50,7 +50,7 @@ export type CanvasProps = {
   /** 正展开候选的屏：展开层画在世界层、盖在该卡片原位（节点由父组件提供） */
   candidateStack: { screenId: string; node: ReactNode } | null;
   /** null = 热更新后元素已不在（被删 / 子树换了 qid），父页清空选中；component = 元素所在的共享组件名（REQ-EDIT-006） */
-  onElementSelect: (sel: { qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number } } | null) => void;
+  onElementSelect: (sel: { qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number }; path?: ElementPathItem[] } | null) => void;
   /** 当前选中元素的 qid：热更新换了修订后让运行时按它重选，检查器不必退回空态 */
   selectedQid: string | null;
   /** 正在被子树重生成作业改的元素（REQ-EDIT-002）：聚焦屏内描边 + 「修改中…」，回写后换成「已更新」；未聚焦的卡片标「局部修改中」 */
@@ -93,6 +93,8 @@ export type CanvasApi = {
   fitView: () => boolean; goBack: () => void; highlight: (qid: string | null) => void; focus: (id: string) => void; resetToOwn: () => void; createAtCenter: () => void; markDone: (qids: string[]) => void;
   /** 键盘进入交互（屏或组件卡，v0.80）：就绪后焦点移进 iframe，退出后焦点回到这张卡 */
   enter: (id: string) => void;
+  /** 逐级选（v1.00）：发给此刻处于选择元素态的那个 iframe——Shift+Enter / Enter、祖先路径的点选与悬停预览 */
+  climb: (dir: 'up' | 'down') => void; pick: (qid: string) => void; peek: (qid: string | null) => void;
   reveal: (id: string) => void; panTo: (x: number, y: number) => void; onView: (cb: (v: ViewInfo) => void) => () => void;
 };
 
@@ -555,6 +557,14 @@ export function CanvasView(p: CanvasProps) {
   }, [focused, p, baseByRoute, rebuild]);
 
   const highlight = useCallback((qid: string | null) => postToPreview({ type: 'quilt:highlight', qid }), [postToPreview]);
+  // 逐级选（v1.00）：聚焦的组件卡优先（组件卡的 iframe 常驻，选择元素态就在它上面），否则聚焦的屏
+  const postToInspected = useCallback((msg: ParentToPreview) => {
+    const cid = propsRef.current.focusedComponentId;
+    (cid ? compFrames.current.get(cid) : iframeRef.current)?.contentWindow?.postMessage(msg, propsRef.current.previewOrigin);
+  }, []);
+  const climb = useCallback((dir: 'up' | 'down') => postToInspected({ type: 'quilt:climb', dir }), [postToInspected]);
+  const pick = useCallback((qid: string) => postToInspected({ type: 'quilt:pick', qid }), [postToInspected]);
+  const peek = useCallback((qid: string | null) => postToInspected({ type: 'quilt:peek', qid }), [postToInspected]);
   // 回到这张卡片自己的屏：重挂 iframe（src 不变时 React 不会重新加载，只能靠换 key）并清空导航栈
   // 清空后由下面的 effect 用「当前这一轮的 props」重新钉住——这里直接读 propsRef 会拿到上一轮的
   // previewUrl（调用方常常是 await refresh() 之后紧接着调，state 还没落到下一次渲染），于是重载出旧修订
@@ -751,7 +761,7 @@ export function CanvasView(p: CanvasProps) {
     if (a && a !== document.body && a !== compFrames.current.get(id) && a !== iframeRef.current) return;
     requestAnimationFrame(() => gestures.current.get(id)?.focus({ preventScroll: true }));
   }, [p.focusedId, p.focusedComponentId]);
-  useEffect(() => { propsRef.current.registerApi?.({ fitView, goBack, highlight, focus: focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView, enter: enterByKey }); }, [fitView, goBack, highlight, focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView, enterByKey]);
+  useEffect(() => { propsRef.current.registerApi?.({ fitView, goBack, highlight, focus: focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView, enter: enterByKey, climb, pick, peek }); }, [fitView, goBack, highlight, focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView, enterByKey, climb, pick, peek]);
   // 切状态变体（v0.62）：同一 iframe 换成该变体的当前修订，镜头不动、导航栈不动；选中的元素属于换掉的那份 DOM，清空。
   // 正显示的是一层叠层时只换这一层，底下那一屏留着（与热更新的叠层分支同理）
   const swapVariant = useCallback(async (id: string) => {
@@ -825,7 +835,7 @@ export function CanvasView(p: CanvasProps) {
         }
         // 交互态组件卡上的捏合与滚轮（v0.80）：与屏同一条 quilt:wheel，按这张卡的 iframe 换算
         if (m.type === 'quilt:wheel') { frameWheel(compFrames.current.get(p.focusedComponentId), m); return; }
-        if (m.type === 'quilt:select') { p.onElementSelect({ qid: m.qid, tag: m.tag, text: m.text, classes: m.classes, href: m.href ?? null, component: m.component ?? null, rect: m.rect }); return; }
+        if (m.type === 'quilt:select') { p.onElementSelect({ qid: m.qid, tag: m.tag, text: m.text, classes: m.classes, href: m.href ?? null, component: m.component ?? null, rect: m.rect, path: m.path }); return; }
         if (m.type === 'quilt:deselect') { p.onElementSelect(null); return; }
       }
       // 只认聚焦 iframe 发来的：候选展开层里的活 iframe（REQ-CORE-015）也跑同一套运行时，它们的 ready / navigate / key 不能动聚焦态
@@ -837,7 +847,7 @@ export function CanvasView(p: CanvasProps) {
         if (kbFocusPending.current) { kbFocusPending.current = false; iframeRef.current?.focus(); }
       }
       if (msg.type === 'quilt:swapped') reselectAfterSwap();
-      if (msg.type === 'quilt:select') p.onElementSelect({ qid: msg.qid, tag: msg.tag, text: msg.text, classes: msg.classes, href: msg.href ?? null, component: msg.component ?? null, rect: msg.rect });
+      if (msg.type === 'quilt:select') p.onElementSelect({ qid: msg.qid, tag: msg.tag, text: msg.text, classes: msg.classes, href: msg.href ?? null, component: msg.component ?? null, rect: msg.rect, path: msg.path });
       if (msg.type === 'quilt:deselect') p.onElementSelect(null);
       if (msg.type === 'quilt:navigate') {
         // 叠层里指回它底下那一屏的链接（契约要求叠层带这样一个关闭动作）是关闭，不是再跳一次

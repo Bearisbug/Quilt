@@ -12,7 +12,8 @@ export type PreviewToParent =
   | { type: 'quilt:wheel'; deltaY: number; x: number; y: number; deltaX?: number; pan?: boolean }
     // rect 为屏文档坐标（含滚动偏移），与 fullPage:false 的截图同一坐标系，供画布层画批注气泡（REQ-EDIT-004 / ADR-003）
     // component：元素所在的共享组件名（自身或祖先带 data-component，REQ-EDIT-006），检查器据此挡住直改、给「改组件 / 脱离共享」
-  | { type: 'quilt:select'; qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number } }
+    // path（v1.00 逐级选）：从屏根到锚点（最近一次悬停 / 点中的最里层元素）的祖先链，当前选中是其中一级
+  | { type: 'quilt:select'; qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number }; path?: ElementPathItem[] }
     // 父页在热更新后要求按 qid 重选（quilt:reselect），元素已不在时回这个：检查器清空
   | { type: 'quilt:deselect'; qid: string };
 
@@ -27,7 +28,14 @@ export type ParentToPreview =
     // 热更新换了修订后按 qid 重新选中同一元素（回 quilt:select 带新值；元素没了回 quilt:deselect）
   | { type: 'quilt:reselect'; qid: string }
     // 屏内标记（REQ-EDIT-002）：working = 正在被作业改的元素（描边 + 「修改中…」角标），done = 刚回写完的（绿描边 + 「已更新」，运行时 4 s 后自撤）
-  | { type: 'quilt:mark'; working: string[]; done?: string[] };
+  | { type: 'quilt:mark'; working: string[]; done?: string[] }
+    // 逐级选（v1.00 REQ-EDIT-001）：climb = 焦点在父页时的 Shift+Enter（up）/ Enter（down）；pick = 检查器祖先路径点了某一级；
+    // peek = 路径上悬停 / 聚焦某一级，在屏上画悬停框（null 撤掉）
+  | { type: 'quilt:climb'; dir: 'up' | 'down' }
+  | { type: 'quilt:pick'; qid: string }
+  | { type: 'quilt:peek'; qid: string | null };
+
+export type ElementPathItem = { qid: string; tag: string };
 
 export function isPreviewMessage(data: unknown): data is PreviewToParent {
   return !!data && typeof data === 'object' && typeof (data as { type?: unknown }).type === 'string' && (data as { type: string }).type.startsWith('quilt:');

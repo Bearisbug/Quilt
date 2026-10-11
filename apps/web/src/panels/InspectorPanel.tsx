@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ScreenDto, ComponentDto, RunnerOptionDto, AgentTool, Runner, Tokens } from '@quilt/core';
+import type { ScreenDto, ComponentDto, RunnerOptionDto, AgentTool, Runner, Tokens, ElementPathItem } from '@quilt/core';
 import type { SessionList } from '@/composer/useRunnerPrefs';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
@@ -16,7 +16,7 @@ const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator
 
 // 元素检查器（REQ-EDIT-001 / REQ-EDIT-002）：本地直改零 token；AI 只重生成选中子树。
 // component（REQ-EDIT-006）：元素所在的共享组件名——在组件里的元素不直改，给「改组件 / 脱离共享」两个出口
-export type ElementSel = { qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number } };
+export type ElementSel = { qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number }; path?: ElementPathItem[] };
 // classes 按行存（v0.96 一行一个）：打到一半的空行、带空格的行要能留着，保存时才规范化
 type ElementDraft = { base: string; text?: string; classes?: string[]; link?: string; prompt?: string };
 // 直改落库后报给画布的撤销栈（v0.95）：屏的直改记下改前改后两版，⌘Z 回溯到改前那一版；组件的直改撤不了，只报一声占住这一步
@@ -29,10 +29,37 @@ const SUBTREE_SESSION_KEY: Record<AgentTool, string> = { 'claude-code': 'quilt:a
 const readKey = (k: string) => { try { return localStorage.getItem(k) ?? ''; } catch { return ''; } };
 // 「记为共享组件」的默认名：按元素标签给个常见叫法，用户可改
 const COMPONENT_NAME_BY_TAG: Record<string, string> = { nav: 'TabBar', header: 'AppBar', aside: 'Sidebar', footer: 'Footer' };
+// 逐级选（v1.00 REQ-EDIT-001）：从屏根到锚点（最近一次点中的最里层元素）的祖先路径。当前层加粗、带 aria-current；
+// 当前层以下（回锚点的那几级）淡色仍可点。点一级选中它，悬停一级在屏上画悬停框。
+// 按钮不进 Tab 序：键盘走层级用 Shift+Enter / Enter，Tab 要从检查器直接进文案框
+function ElementPath({ sel, onPick, onPeek }: { sel: ElementSel; onPick?: (qid: string) => void; onPeek?: (qid: string | null) => void }) {
+  const path = sel.path?.length ? sel.path : [{ qid: sel.qid, tag: sel.tag }];
+  const at = path.findIndex((p) => p.qid === sel.qid);
+  return (
+    <div className="space-y-1">
+      <nav aria-label="元素层级" data-testid="el-path">
+        <ol className="flex flex-wrap items-center gap-y-0.5 text-xs">
+          {path.map((p, i) => (
+            <li key={p.qid} className="flex items-center">
+              {i > 0 && <span aria-hidden className="px-0.5 text-muted">›</span>}
+              <button type="button" tabIndex={-1} data-qid={p.qid} aria-current={i === at ? 'location' : undefined} title={`${p.tag} · ${p.qid}`}
+                className={`inline-flex h-6 items-center rounded-md px-1.5 font-mono hover:bg-panel-2 ${i === at ? 'font-semibold text-fg' : i > at ? 'text-muted opacity-60' : 'text-muted'}`}
+                onClick={() => onPick?.(p.qid)} onMouseEnter={() => onPeek?.(p.qid)} onMouseLeave={() => onPeek?.(null)}>
+                {p.tag}
+              </button>
+            </li>
+          ))}
+        </ol>
+      </nav>
+      <p className="text-xs text-muted">Shift+Enter 选父级 · Enter 回到子级</p>
+    </div>
+  );
+}
+
 // 目标是一张屏，或一个共享组件（v0.57 `REQ-EDIT-006`）——组件也能选元素直改，op 与屏同一套，
 // 只是落在组件自己的 HTML 上、乐观并发用版本号，改完由服务端回刷所有用它的屏。
 // 组件没有 AI 子树重生成（整块重写走输入框的「改组件」）、没有批注、也不能再「记为共享组件」。
-export function InspectorPanel({ screen, component, sel, routes = [], busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent, keysRef, onDirectEdit, tokens }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes?: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void; keysRef?: { current: InspectorKeys | null }; onDirectEdit?: (e: DirectEdit) => void; tokens?: Tokens }) {
+export function InspectorPanel({ screen, component, sel, routes = [], busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent, keysRef, onDirectEdit, tokens, onPathPick, onPathPeek }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes?: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void; keysRef?: { current: InspectorKeys | null }; onDirectEdit?: (e: DirectEdit) => void; tokens?: Tokens; onPathPick?: (qid: string) => void; onPathPeek?: (qid: string | null) => void }) {
   const toast = useToast();
   // 改了没存的文案 / 类名 / 跳转与重生成说明按元素暂存（v0.78）：点别的元素再点回来还在。
   // 直改三格记着起草时元素的原值：元素本身变了（保存后热更新重选、别处改了它）就作废、回到新值；说明不随元素内容作废
@@ -158,6 +185,7 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
       {!sel ? <EmptyState title={component ? '在组件里点选一个元素' : '在屏幕里点选一个元素'} hint="选择模式下移动鼠标会高亮元素，点击即选中；Esc 退出交互。" /> : sel.component && !component ? (
         // 共享组件实例里的元素（REQ-EDIT-006）：直改会在下一次写入时被组件展开顶掉，所以不给字段，只给两个出口
         <div ref={bodyRef} tabIndex={-1} className="scroll flex-1 space-y-4 p-3 focus:outline-none">
+          <ElementPath sel={sel} onPick={onPathPick} onPeek={onPathPeek} />
           <div className="text-xs text-muted">&lt;{sel.tag}&gt; · {sel.qid}</div>
           <div className="space-y-2 rounded-md border border-line bg-panel-2 p-3 text-xs" data-testid="el-component-lock" data-component={sel.component}>
             <p className="leading-cn">这是共享组件「<b className="text-fg">{sel.component}</b>」的一部分——改它会同步到所有用它的屏。</p>
@@ -170,6 +198,7 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
         </div>
       ) : (
         <div ref={bodyRef} tabIndex={-1} className="scroll flex-1 space-y-4 p-3 focus:outline-none" data-testid="inspector-body">
+          <ElementPath sel={sel} onPick={onPathPick} onPeek={onPathPeek} />
           <div className="text-xs text-muted">&lt;{sel.tag}&gt; · {sel.qid}</div>
           <div className="space-y-1.5">
             <label htmlFor="el-text" className="block text-xs font-medium text-muted">文案</label>

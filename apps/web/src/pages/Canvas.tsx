@@ -764,6 +764,7 @@ export function CanvasPage() {
   const keyState = {
     plain, alted, toggleInspect, toggleComposer, undo: undoStack.undo, saveElement, blocked, closeModals, openFinder: () => setFinderOpen(true), expanded: !!candidates, busy, cancel: cancelNewest,
     focused: !!focusedId || !!focusedComponentId, exitFocus: () => { setFocusedId(null); setFocusedComponentId(null); },
+    inspecting: inspectMode, climb: (dir: 'up' | 'down') => canvasApi.current?.climb(dir),
     panel: !!panel, closePanel: () => setPanel(null),
     selection: selectedIds.length > 0 || selectedComponentIds.length > 0, clearSelection: () => { setSelectedIds([]); setSelectedComponentIds([]); },
     // ⌘A 全选屏与共享组件卡（组件卡与屏一样进选中集合，REQ-EDIT-006）
@@ -800,6 +801,11 @@ export function CanvasPage() {
       if ((e.target as HTMLElement)?.closest('input, textarea, select, [contenteditable]')) return;
       const k = keyRef.current;
       const mod = e.metaKey || e.ctrlKey;
+      // 逐级选（v1.00）：选择元素态下 Shift+Enter 选父级、Enter 回到子级；焦点在按钮、链接、卡片这类控件上时 Enter 留给它自己
+      if (e.key === 'Enter' && k.inspecting && !mod && !e.altKey && !e.isComposing && !k.blocked
+        && !(e.target as HTMLElement).closest('button, a[href], [role="button"], [role="link"], [role="tab"], [role="option"], [role="menuitem"], [tabindex]:not([tabindex="-1"])')) {
+        e.preventDefault(); k.climb(e.shiftKey ? 'up' : 'down'); return;
+      }
       if (mod && e.code === 'KeyE') { e.preventDefault(); if (!k.blocked) k.toggleInspect(); return; }
       if (mod && e.code === 'KeyA') { e.preventDefault(); if (!k.blocked) k.selectAll(); return; }
       // ⌘Z 撤销画布位置（拖动 / 对齐 / 等距）与检查器的直改（v0.95）；对话改屏、回溯这些内容历史在修订树里，不进这个栈
@@ -872,8 +878,8 @@ export function CanvasPage() {
     : panel === 'design' ? <DesignPanel ds={detail.designSystem} project={detail.project} screens={screens} assets={detail.assets} busy={busy} onClose={() => setPanel(null)} onSaved={refresh} onApplyAll={applyDesignSystem} onPropose={(i) => propose(i)} />
     : panel === 'screens' ? <ScreensPanel screens={screens} links={detail.links} busy={busyScreens} onPick={(id) => reveal({ kind: 'screen', id })} onClose={() => setPanel(null)} />
     : panel === 'agent' ? <AgentJobsPanel projectId={projectId} screens={screens} components={components} runners={runners} onClose={() => setPanel(null)} onChanged={refresh} />
-    : panel === 'inspect' && focusedComponent ? <InspectorPanel component={focusedComponent} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyComponents.has(focusedComponent.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} tokens={tokens} onClose={() => setPanel(null)} onEdited={() => { setElementSel(null); refresh(); }} />
-    : panel === 'inspect' && shownScreen ? <InspectorPanel screen={shownScreen} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyScreens.has(shownScreen.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} tokens={tokens} runners={runners} composerRunnerId={runnerId} sessionLists={lists} onSessionsOpen={(tool) => void loadSessionsFor(tool)} workingQids={workingSubtrees.filter((w) => w.screenId === shownScreen.id).map((w) => w.qid)} onClose={() => setPanel(null)} onEdited={(qid) => { canvasApi.current?.markDone([qid]); refresh(); }} onRegenerate={regenerateSubtree} onEditComponent={onEditComponent} />
+    : panel === 'inspect' && focusedComponent ? <InspectorPanel component={focusedComponent} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyComponents.has(focusedComponent.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} tokens={tokens} onPathPick={(qid) => canvasApi.current?.pick(qid)} onPathPeek={(qid) => canvasApi.current?.peek(qid)} onClose={() => setPanel(null)} onEdited={() => { setElementSel(null); refresh(); }} />
+    : panel === 'inspect' && shownScreen ? <InspectorPanel screen={shownScreen} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyScreens.has(shownScreen.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} tokens={tokens} onPathPick={(qid) => canvasApi.current?.pick(qid)} onPathPeek={(qid) => canvasApi.current?.peek(qid)} runners={runners} composerRunnerId={runnerId} sessionLists={lists} onSessionsOpen={(tool) => void loadSessionsFor(tool)} workingQids={workingSubtrees.filter((w) => w.screenId === shownScreen.id).map((w) => w.qid)} onClose={() => setPanel(null)} onEdited={(qid) => { canvasApi.current?.markDone([qid]); refresh(); }} onRegenerate={regenerateSubtree} onEditComponent={onEditComponent} />
     : panel === 'annotate' && shownScreen ? <AnnotationPanel screen={shownScreen} sel={elementSel} items={screenAnnotations} busy={busyScreens.has(shownScreen.id)} onClose={() => { setPanel(null); setFocusedId(null); }} onAdd={addAnnotation} onUpdate={updateAnnotation} onRemove={removeAnnotation} onSend={sendAnnotations} />
     : null;
 
