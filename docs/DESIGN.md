@@ -10,20 +10,20 @@
 | 项目画像 | 生产产品（全部核心节生效） |
 | Owner | @bug |
 | 评审人 | @bug（产品 / 架构） |
-| 最后更新 | 2026-10-08（v1.00） |
+| 最后更新 | 2026-10-09（v1.01） |
 | 关联 | 契约 `api/openapi.yaml`（实现期建立） · 仓库 `github.com/Bearisbug/Quilt` · 安装 `npx quilt-canvas`（包 `apps/cli`） · 调研结论见会话记录 2026-09-07/08/09 |
 
 变更记录：
 
-更早的版本（v0.4–v0.95）在 `docs/CHANGELOG.md`；本表只留 v0.1–v0.3 与最近 5 版，再往前的随每次出版移过去。
+更早的版本（v0.4–v0.96）在 `docs/CHANGELOG.md`；本表只留 v0.1–v0.3 与最近 5 版，再往前的随每次出版移过去。
 
 | 日期 | 版本 | 改动 | 作者 |
 | --- | --- | --- | --- |
+| 2026-10-09 | v1.01 | **导出原型的文件名用项目名**（`API-PROTO-002` 补一句；§19 导出场景加一条 And）。用户反馈下载目录里是一串 `quilt-prototype-924976f9 (8).html`，看不出是哪个项目。此前文件名取项目 id 前 8 位。改为 `<项目名> - Prototype.html`：项目名里文件系统不收的字符（`/ \ : * ? " < > |` 与控制字符）换成 `_`；`filename*=UTF-8''…` 给完整名，中文项目名靠它，`filename=` 留一个非 ASCII 换成 `_` 的兜底。名字取下载那一刻的项目名。`quilt.get_export` 给 agent 的签名对象地址不变，仍以 `<作业 id>.html` 下发（§15「对象下发」） | @bug |
 | 2026-10-08 | v1.00 | **选择元素可以逐级往上选**（`REQ-EDIT-001` 补一句；`PAGE-CANVAS` 选中框一段之后加「逐级选」；`ADR-003` 运行时转发键一句）。用户反馈：想选一个大块元素，点下去总落在指针下最里层的小元素上，没有办法走到它的父级。用户定：`Shift+Enter` 选父级、`Enter` 回到刚才那层子级（Figma 的约定，`Tab` 留给检查器里的焦点移动）；悬停时按键扩大 / 缩回高亮，点一下选中高亮着的那层，已选中时按键直接移动选中；检查器顶部加一条祖先路径，点任一级选中、悬停或聚焦时在屏上高亮。 | @bug |
 | 2026-10-07 | v0.99 | **改组件可以交给本机会话**（`REQ-EDIT-006`、`REQ-AGENT-003`、`API-CORE-010` 各改一句；§8 `quilt.update_component` 加 `jobId`，`quilt.finish_job` 与 `quilt.edit_component` 两行；§11 `edit_component` 一段与 running → succeeded 一行；本机 agent 面板一句）。用户在 Ofcourt 只选中「Header Tab」组件、通道选「交给本机 Claude Code」发「改」，只得到「请求参数不合法」：发消息接口按设计拒绝「改组件 + 本机会话」，理由是投递流程只为屏做过；而本机会话本来就能经 MCP 改组件（`quilt.get_design_contract` 读、`quilt.update_component` 写、服务端确定性回刷）。改动：这个组合建 `runner=agent` 的 `edit_component` 并投递，提示词写目标组件、`expectedVersion`、用在哪几屏、这个组件此前的指令与组件写法；`quilt.update_component` 带 `jobId` 时回刷出的修订记在该作业名下；收口回执写「本机 agent 已更新组件「X」，同步 N 屏」；面板写「改组件「X」」。MCP 的 `quilt.edit_component` 仍不接 `runner.kind=agent`：调用方本身就是会话，自己用 `update_component` 写。 | @bug |
 | 2026-10-07 | v0.98 | **素材瓦片的底色跟项目色板**（`PAGE-CANVAS` 设计系统面板一段的缩略图一句；`REQ-CORE-019` 不变）。用户反馈 Ofcourt 的风格指南卡片上，深绿标志衬白、奶白标志衬黑，而这套品牌的浅底是奶白、深底是深绿。瓦片此前只按图的亮度在中性浅灰 `#f4f4f6` 与近黑 `#101216` 之间二选一，与项目配色无关。改为：深色标志衬项目的 `background`，浅色标志衬项目的 `primary`；该色与标志拉不开亮度（`background` 亮度 < 0.85 / `primary` 亮度 > 0.3，亮度算法与判图相同）时仍回落到原来的中性底，读不出亮度时仍是棋盘格。风格指南卡片与面板缩略图同一规则 | @bug |
 | 2026-10-07 | v0.97 | **顶栏去掉屏数与缩放比例，设置移到工具栏最下方**（`PAGE-CANVAS` 外壳的顶栏与工具栏两句、设置弹层的入口一句、前端性能一句）。用户要求去掉顶栏右侧的「1 屏 · 75%」，「设置」改成工具栏最下方的齿轮图标按钮。顶栏只留项目切换器与设备形态；工具栏在上下文组之后加一组，只有「设置」，打开设置弹层，关闭后焦点回到这个按钮 | @bug |
-| 2026-10-06 | v0.96 | **检查器的类名一行一个、带说明与换档**（`REQ-EDIT-001` 补一句；`PAGE-CANVAS` 检查器一段新增「类名编辑」）。用户要求 Tailwind 类名改成一行一个，并配一张映射表写清每个参数的含义，方便快速调整；形态选了「一行一个类 + 行尾说明」，调整方式选了「数值类带档位切换」。此前类名是一个多行文本框，一长串类挤在一起，要改 `px-6` 得先在串里找到它、再记得 Tailwind 的刻度。改为：一行一个类，正下方一句中文说明（作用 + 本项目的实际取值，圆角与颜色按设计系统取；检查器约 300px 宽，说明与类名并排时类名被截断，所以放在下方）；带档位的类 ‹ › 换到相邻一档，颜色类给 token 色下拉；保存时按行序拼回。新增 `TC-EDIT-030`，单测 `web/twClass` | @bug |
 | 2026-09-09 | v0.1 | 初稿：M1–M5 全范围数据模型、接口契约、状态机、流程、页面、ADR | @bug |
 | 2026-09-09 | v0.2 | Owner 逐项签字批准；新增 `REQ-CORE-010` 设计系统可视化（M1 只读风格指南卡片 + 面板）；⚠ ADR 由 Proposed 转 Accepted；M0 spike 时间盒定 3 天；拍板 Google 登录推迟、金标准屏用内置模板库 | @bug |
 | 2026-09-09 | v0.3 | M0 spike 结论回写（§26 出口达成；ADR-002/003/005 补实证与后果；§28 新增 4 条发现）；spike 代码在 `spike-m0/`（gitignore），不进生产 | @bug |
@@ -481,7 +481,7 @@ erDiagram
   - v0.85（`ADR-025`）：快照与 `preset` 增 `tokenExt`，套用时与其余输入一起写入项目设计系统
   - 错误：`404 /errors/not-found`（预设不存在或不属于当前账号）、`409 /errors/version-conflict`、`422 /errors/validation`（名字为空 / 超长）
 - **`API-PROTO-001` getAppMap** — 实现 `REQ-PROTO-002`：`GET /projects/{projectId}/app-map`；响应 `{ nodes:[{screenId, route}], edges:[{fromScreenId, qid, href, toScreenId|null}] }`（`toScreenId=null` 即断链）；`no-store`
-- **`API-PROTO-002` downloadExport** — 实现 `REQ-PROTO-004`（v0.62 起只导出默认屏；v0.63 `template[data-presentation=overlay]` 由导出运行时压层呈现）：`GET /jobs/{jobId}/export`；作业 `kind=export_prototype` 成功后可下载单文件 HTML（`Content-Disposition: attachment`）；`?inline=1` 时 `302` 到签名对象地址，该地址 v0.75 起同样以附件下发（§15「对象下发」），导出原型要下载后在本地打开；未完成 `409 /errors/job-not-finished`
+- **`API-PROTO-002` downloadExport** — 实现 `REQ-PROTO-004`（v0.62 起只导出默认屏；v0.63 `template[data-presentation=overlay]` 由导出运行时压层呈现）：`GET /jobs/{jobId}/export`；作业 `kind=export_prototype` 成功后可下载单文件 HTML（`Content-Disposition: attachment`）；文件名是 `<项目名> - Prototype.html`（v1.01），取下载那一刻的项目名，`/ \ : * ? " < > |` 与控制字符换成 `_`，完整名放 `filename*=UTF-8''<百分号编码>`，`filename=` 是把非 ASCII 字符换成 `_` 的兜底；`?inline=1` 时 `302` 到签名对象地址，该地址 v0.75 起同样以附件下发（§15「对象下发」），导出原型要下载后在本地打开；未完成 `409 /errors/job-not-finished`
 
 ### EDIT（M3）
 
@@ -1910,6 +1910,7 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
   Given 项目有 6 屏且互相链接
   When 调用 API-CORE-006 kind=export_prototype 并在成功后调用 API-PROTO-002
   Then 下载得到单个 HTML，离线打开后 hash 路由可在 6 屏间跳转，外观与画布一致
+  And 下载文件名是「<项目名> - Prototype.html」，项目名里有 / 时换成 _
 
 场景: 元素文案本地直改 (REQ-EDIT-001)
   Given 某屏元素 qid=q17 文案为「登录」

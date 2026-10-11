@@ -137,6 +137,8 @@ await step('TC-PROTO-005', async () => {
   const dl = page.waitForEvent('download', { timeout: 120000 });
   await page.getByRole('button', { name: '导出原型' }).click();
   const download = await dl;
+  expect(download.suggestedFilename() === 'Export - Prototype.html', `下载文件名应是「Export - Prototype.html」：${download.suggestedFilename()}`);
+  const exportUrl = download.url();
   const file = path.join(EVIDENCE, `run-${RUN}-export.html`);
   await download.saveAs(file);
   const html = await readFile(file, 'utf8');
@@ -159,7 +161,16 @@ await step('TC-PROTO-005', async () => {
   }
   expect(visited.size >= 3, `仅到达 ${visited.size} 屏`);
   await offline.close();
-  return `导出 ${Math.round(html.length / 1024)} KB，离线可跳转 ${visited.size} 屏`;
+  // 5 改名后再下载同一份导出：文件名取下载那一刻的项目名，/ 换成 _，中文走 filename*
+  const renamed = await apiJson(`/v1/projects/${projectId}`, { method: 'PATCH', body: JSON.stringify({ name: '健身/打卡' }) });
+  expect(renamed.status === 200, `项目改名失败：${renamed.status}`);
+  const cd = (await fetch(exportUrl)).headers.get('content-disposition') ?? '';
+  expect(cd.includes("filename*=UTF-8''"), `响应头应带 filename*：${cd}`);
+  const dl2 = page.waitForEvent('download', { timeout: 10000 });
+  await page.evaluate((u) => { location.assign(u); }, exportUrl);
+  const name2 = (await dl2).suggestedFilename();
+  expect(name2 === '健身_打卡 - Prototype.html', `改名后的下载文件名应是「健身_打卡 - Prototype.html」：${name2}`);
+  return `导出 ${Math.round(html.length / 1024)} KB，离线可跳转 ${visited.size} 屏；下载名「${download.suggestedFilename()}」，改名后「${name2}」`;
 });
 
 await step('TC-PROTO-006', async () => {

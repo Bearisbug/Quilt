@@ -44,6 +44,13 @@ jobRoutes.post('/v1/jobs/:jobId/candidates/adopt', async (c) => {
   return c.json({ adopted, skipped });
 });
 
+// 「<项目名> - Prototype.html」：文件系统不收的字符换成 _；中文名靠 filename*（RFC 6266），filename 是 ASCII 兜底
+function exportDisposition(projectName: string) {
+  const name = `${projectName.replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '_')} - Prototype.html`;
+  const encoded = encodeURIComponent(name).replace(/['()]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${name.replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encoded}`;
+}
+
 // API-PROTO-002：导出作业完成后下载单文件原型
 jobRoutes.get('/v1/jobs/:jobId/export', async (c) => {
   const user = requireUser(c);
@@ -51,9 +58,10 @@ jobRoutes.get('/v1/jobs/:jobId/export', async (c) => {
   const key = (job.output as { exportKey?: string } | null)?.exportKey;
   if (job.kind !== 'export_prototype' || job.status !== 'succeeded' || !key) throw problems.jobNotFinished();
   if (c.req.query('inline') === '1') return c.redirect(await storage.signedUrl(key), 302);
+  const project = await ownedProject(user.id, job.projectId);
   const body = await storage.get(key);
   c.header('Content-Type', 'text/html; charset=utf-8');
-  c.header('Content-Disposition', `attachment; filename="quilt-prototype-${job.projectId.slice(0, 8)}.html"`);
+  c.header('Content-Disposition', exportDisposition(project.name));
   c.header('Cache-Control', 'private, no-store');
   return c.body(new Uint8Array(body));
 });
