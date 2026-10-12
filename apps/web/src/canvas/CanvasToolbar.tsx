@@ -71,11 +71,12 @@ export function CanvasToolbar({ groups }: { groups: Tool[][] }) {
     // scroll-padding 同值，键盘移到首尾时滚动也把焦点环留在可见区里。
     // z-30 高于右侧滑出面板（z-20）：提示画在工具栏这一层里、向左展开正好落在面板上，同层的话被后渲染的面板整块盖住
     // 顶端固定在顶栏下方（v0.80，与右侧滑出面板同一上沿）：上下文组只在末尾增减，垂直居中的话选中一屏全部按钮上移 61 px，用户正要点的按钮被挪走
-    <div ref={wrapRef} className="chrome absolute right-3 top-16 z-30 flex max-h-[calc(100%-7rem)] flex-col rounded-full p-0.5">
+    // 不装盒（§13.1 方向 A）：没有外框与投影，底色与画布同色——卡片平移经过时照样被它盖住，图标不会压在设计稿上
+    <div ref={wrapRef} className="absolute right-3 top-16 z-30 flex max-h-[calc(100%-7rem)] flex-col rounded-md bg-(--semantic-color-surface-canvas) p-0.5">
       <div ref={railRef} data-fade={fade || undefined} className="rail flex min-h-0 scroll-py-1 flex-col items-center gap-0.5 p-1" role="toolbar" aria-orientation="vertical" aria-label="画布工具" onKeyDown={onKeyDown}>
         {groups.map((group, gi) => (
           <Fragment key={gi}>
-            {gi > 0 && <span className="my-1 h-px w-6 shrink-0 bg-line" aria-hidden="true" />}
+            {gi > 0 && <span className="my-1 h-px w-6 shrink-0 bg-border-subtle" aria-hidden="true" />}
             {group.map((t) => {
               cursor += 1;
               const at = cursor;
@@ -108,13 +109,13 @@ export function CanvasToolbar({ groups }: { groups: Tool[][] }) {
       {tip && (
         <div
           aria-hidden="true" data-testid="tool-tip" style={{ top: tip.top }}
-          className="tip-in pointer-events-none absolute right-full mr-2 w-56 -translate-y-1/2 rounded-md border border-line bg-panel px-2.5 py-1.5 text-xs text-fg shadow-lg"
+          className="inverse tip-in pointer-events-none absolute right-full mr-2 w-56 -translate-y-1/2 rounded-sm px-2.5 py-1.5 type-label shadow-(--semantic-elevation-overlay)"
         >
           <span className="flex items-baseline gap-1.5 whitespace-nowrap font-medium">
             {tip.tool.label}
-            {tip.tool.hint && <kbd className="rounded border border-line bg-panel-2 px-1 py-px font-sans text-[10px] text-muted">{tip.tool.hint}</kbd>}
+            {tip.tool.hint && <kbd className="kbd px-1 type-caption">{tip.tool.hint}</kbd>}
           </span>
-          {(tip.tool.unavailable || tip.tool.desc) && <span className="mt-1 block leading-relaxed text-muted">{tip.tool.unavailable || tip.tool.desc}</span>}
+          {(tip.tool.unavailable || tip.tool.desc) && <span className="mt-1 block font-normal">{tip.tool.unavailable || tip.tool.desc}</span>}
         </div>
       )}
     </div>

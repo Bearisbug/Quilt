@@ -111,60 +111,60 @@ export function DesignPanel({ ds, project, screens, assets, busyReason, onClose,
       <div className="scroll flex-1 space-y-4 p-3">
         {/* 持久记忆（REQ-CORE-016）：应用简介每次生成都带；样板屏在画布上选中后用工具栏更换 */}
         <div className="space-y-1.5">
-          <label htmlFor="ds-brief" className="block text-xs font-medium text-muted">应用简介（每次生成都会带上）</label>
+          <label htmlFor="ds-brief" className="block type-label font-medium text-text-secondary">应用简介（每次生成都会带上）</label>
           <Textarea id="ds-brief" data-testid="ds-brief" rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="首轮生成后会自动写一段：这是什么 APP、给谁用、调性。可以改。" className="resize-y font-normal" />
           <div className="flex justify-end"><Button size="sm" pending={savingBrief} disabled={brief.trim() === project.brief.trim()} onClick={saveBrief}>保存简介</Button></div>
         </div>
-        <div className="rounded-md border border-line px-3 py-2 text-xs" data-testid="ds-exemplar">
-          <span className="text-muted">样板屏：</span>{exemplar ? <><b className="text-fg">{exemplar.name}</b> <span className="text-muted">{exemplar.route}</span></> : <span className="text-muted">还没有（首轮生成后默认第 1 屏）</span>}
-          <p className="mt-0.5 text-muted">生成和修改时都以它为风格参照；在画布上选中一屏后用工具栏「设为样板」更换。</p>
+        <div className="rounded-md border border-border-subtle px-3 py-2 type-label" data-testid="ds-exemplar">
+          <span className="text-text-secondary">样板屏：</span>{exemplar ? <><b className="text-text-primary">{exemplar.name}</b> <span className="text-text-secondary">{exemplar.route}</span></> : <span className="text-text-secondary">还没有（首轮生成后默认第 1 屏）</span>}
+          <p className="mt-0.5 text-text-secondary">生成和修改时都以它为风格参照；在画布上选中一屏后用工具栏「设为样板」更换。</p>
         </div>
         <div className="grid grid-cols-6 gap-1">
-          {Object.entries(tokens.colors).map(([k, v]) => <div key={k} title={`${k} ${v}`} className="h-6 rounded-sm border border-line" style={{ background: v }} />)}
+          {Object.entries(tokens.colors).map(([k, v]) => <div key={k} title={`${k} ${v}`} className="h-6 rounded-sm border border-border-subtle" style={{ background: v }} />)}
         </div>
         <PaletteSection tokens={tokens} palette={palette} colorMode={colorMode} savedColorMode={ds.colorMode} onChange={(next) => set({ palette: next.palette, colorMode: next.colorMode })} />
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <label htmlFor="ds-seed" className="block text-xs font-medium text-muted">种子色</label>
+            <label htmlFor="ds-seed" className="block type-label font-medium text-text-secondary">种子色</label>
             <div className="flex items-center gap-2">
-              <input id="ds-seed" type="color" value={/^#[0-9A-Fa-f]{6}$/.test(seed) ? seed : '#000000'} onChange={(e) => setSeed(e.target.value.toUpperCase())} className="h-9 w-10 cursor-pointer rounded-md border border-line bg-canvas p-1" aria-label="选择种子色" />
-              <input aria-label="种子色十六进制" value={seed} onChange={(e) => setSeed(e.target.value)} className="h-9 w-full rounded-md border border-line bg-canvas px-2 font-mono text-sm" />
+              <input id="ds-seed" type="color" value={/^#[0-9A-Fa-f]{6}$/.test(seed) ? seed : '#000000'} onChange={(e) => setSeed(e.target.value.toUpperCase())} className="h-9 w-10 cursor-pointer focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) p-1" aria-label="选择种子色" />
+              <input aria-label="种子色十六进制" value={seed} onChange={(e) => setSeed(e.target.value)} className="h-9 w-full focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) px-2 font-mono type-body" />
             </div>
           </div>
           <div className="space-y-1.5">
-            <label htmlFor="ds-font" className="block text-xs font-medium text-muted">字体</label>
+            <label htmlFor="ds-font" className="block type-label font-medium text-text-secondary">字体</label>
             <Input id="ds-font" data-testid="ds-font" list="ds-font-options" value={font} onChange={(e) => { setFont(e.target.value); setFontError(null); }}
               placeholder={fontSource === 'system' ? '例如 PingFang SC' : '例如 Plus Jakarta Sans'} autoComplete="off" spellCheck={false}
               aria-invalid={!!fontError} aria-describedby={fontError ? 'ds-font-error' : undefined} />
             <datalist id="ds-font-options">{(fontSource === 'system' ? SYSTEM_FONTS : FONTS).map((f) => <option key={f} value={f} />)}</datalist>
-            {fontError && <p id="ds-font-error" className="text-xs text-danger" role="alert">{fontError}</p>}
+            {fontError && <p id="ds-font-error" className="type-label text-error" role="alert">{fontError}</p>}
           </div>
         </div>
         <fieldset>
-          <legend className="mb-1.5 block text-xs font-medium text-muted">字体来源</legend>
+          <legend className="mb-1.5 block type-label font-medium text-text-secondary">字体来源</legend>
           <div className="grid grid-cols-3 gap-2" data-testid="ds-font-source" data-value={fontSource}>
             {FONT_SOURCE_OPTIONS.map((s) => (
-              <label key={s.key} className={`flex h-9 cursor-pointer items-center justify-center whitespace-nowrap rounded-md border px-1 text-sm ${fontSource === s.key ? 'border-accent bg-accent/10' : 'border-line text-muted hover:border-line-strong'}`}>
+              <label key={s.key} className={`flex h-9 cursor-pointer items-center justify-center whitespace-nowrap rounded-md border px-1 type-body ${fontSource === s.key ? 'border-primary bg-(--semantic-color-surface-selected)' : 'border-border-subtle text-text-secondary state-layer'}`}>
                 <input type="radio" name="font-source" value={s.key} className="sr-only" checked={fontSource === s.key} onChange={() => { setFontSource(s.key); setFontError(null); setFontUrlError(null); }} />{s.label}
               </label>
             ))}
           </div>
-          <p className="mt-1.5 text-xs text-muted">{FONT_SOURCE_OPTIONS.find((s) => s.key === fontSource)?.hint}</p>
+          <p className="mt-1.5 type-label text-text-secondary">{FONT_SOURCE_OPTIONS.find((s) => s.key === fontSource)?.hint}</p>
         </fieldset>
         {fontSource === 'url' && (
           <div className="space-y-1.5">
-            <label htmlFor="ds-font-url" className="block text-xs font-medium text-muted">字体样式表地址（https，含 @font-face）</label>
+            <label htmlFor="ds-font-url" className="block type-label font-medium text-text-secondary">字体样式表地址（https，含 @font-face）</label>
             <Input id="ds-font-url" data-testid="ds-font-url" value={fontUrl} onChange={(e) => { setFontUrl(e.target.value); setFontUrlError(null); }}
               placeholder="https://fonts.bunny.net/css?family=manrope:400,600" inputMode="url" autoComplete="off" spellCheck={false} className="font-mono"
               aria-invalid={!!fontUrlError} aria-describedby={fontUrlError ? 'ds-font-url-error' : undefined} />
-            {fontUrlError && <p id="ds-font-url-error" className="text-xs text-danger" role="alert">{fontUrlError}</p>}
+            {fontUrlError && <p id="ds-font-url-error" className="type-label text-error" role="alert">{fontUrlError}</p>}
           </div>
         )}
         <fieldset>
-          <legend className="mb-1.5 block text-xs font-medium text-muted">圆角</legend>
+          <legend className="mb-1.5 block type-label font-medium text-text-secondary">圆角</legend>
           <div className="grid grid-cols-3 gap-2">
             {RADIUS.map((r) => (
-              <label key={r.key} className={`flex h-9 cursor-pointer items-center justify-center rounded-md border text-sm ${radius === r.key ? 'border-accent bg-accent/10' : 'border-line text-muted hover:border-line-strong'}`}>
+              <label key={r.key} className={`flex h-9 cursor-pointer items-center justify-center rounded-md border type-body ${radius === r.key ? 'border-primary bg-(--semantic-color-surface-selected)' : 'border-border-subtle text-text-secondary state-layer'}`}>
                 <input type="radio" name="radius" value={r.key} className="sr-only" checked={radius === r.key} onChange={() => setRadius(r.key)} />{r.label}
               </label>
             ))}
@@ -172,35 +172,35 @@ export function DesignPanel({ ds, project, screens, assets, busyReason, onClose,
         </fieldset>
         {/* 约定（REQ-EDIT-003）：DESIGN.md 里唯一由系统维护的一节，可删不可手写 */}
         <div className="space-y-1.5">
-          <div className="block text-xs font-medium text-muted">约定（跨屏生效的规则，{conventions.length} 条）</div>
-          {conventions.length === 0 ? <p className="text-xs text-muted">还没有。改屏后在回执上点「记为约定」，或在下面用一句话改设计系统。</p> : (
+          <div className="block type-label font-medium text-text-secondary">约定（跨屏生效的规则，{conventions.length} 条）</div>
+          {conventions.length === 0 ? <p className="type-label text-text-secondary">还没有。改屏后在回执上点「记为约定」，或在下面用一句话改设计系统。</p> : (
             <ul className="flex flex-col gap-1" data-testid="ds-conventions">
               {conventions.map((c, i) => (
-                <li key={i} className="flex items-start justify-between gap-2 rounded-md border border-line px-2 py-1.5 text-xs">
-                  <span className="min-w-0 flex-1 leading-cn [overflow-wrap:anywhere]">{c}</span>
-                  <button type="button" aria-label={`删除约定：${c}`} onClick={() => setPendingConvention(i)} className="shrink-0 rounded-md px-1 text-muted hover:text-danger focus-visible:outline-2 focus-visible:outline-accent">删除</button>
+                <li key={i} className="flex items-start justify-between gap-2 rounded-md border border-border-subtle px-2 py-1.5 type-label">
+                  <span className="min-w-0 flex-1 leading-(--semantic-typography-body-line-height) [overflow-wrap:anywhere]">{c}</span>
+                  <button type="button" aria-label={`删除约定：${c}`} onClick={() => setPendingConvention(i)} className="shrink-0 rounded-md px-1 text-text-secondary state-layer focus-ring">删除</button>
                 </li>
               ))}
             </ul>
           )}
         </div>
-        <div className="space-y-1.5 border-t border-line pt-3">
-          <label htmlFor="ds-instruction" className="block text-xs font-medium text-muted">用一句话改设计系统</label>
+        <div className="space-y-1.5 border-t border-border-subtle pt-3">
+          <label htmlFor="ds-instruction" className="block type-label font-medium text-text-secondary">用一句话改设计系统</label>
           <Textarea id="ds-instruction" data-testid="ds-instruction" rows={2} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder="例如：所有列表项都带头像；正文字号整体大一档"
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && instruction.trim()) { e.preventDefault(); onPropose(instruction.trim()); setInstruction(''); } }} />
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] text-muted">先提炼成绝对规则给你预览，确认后才写入</span>
+            <span className="type-caption text-text-secondary">先提炼成绝对规则给你预览，确认后才写入</span>
             <Button size="sm" variant="primary" data-testid="ds-propose" disabled={!instruction.trim()} onClick={() => { onPropose(instruction.trim()); setInstruction(''); }}>提炼并预览</Button>
           </div>
         </div>
         <div className="space-y-1.5">
-          <label htmlFor="ds-md" className="block text-xs font-medium text-muted">DESIGN.md（进入每次生成的上下文）</label>
-          <textarea id="ds-md" value={md} onChange={(e) => setMd(e.target.value)} rows={18} className="w-full resize-y rounded-md border border-line bg-canvas p-2 font-mono text-xs leading-relaxed [overflow-wrap:anywhere]" />
+          <label htmlFor="ds-md" className="block type-label font-medium text-text-secondary">DESIGN.md（进入每次生成的上下文）</label>
+          <textarea id="ds-md" value={md} onChange={(e) => setMd(e.target.value)} rows={18} className="w-full resize-y focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) p-2 font-mono type-label leading-relaxed [overflow-wrap:anywhere]" />
         </div>
         <PresetsSection projectId={ds.projectId} version={ds.version} busy={dirty}
           onApplied={() => { onSaved(); setAskApply(screens.length > 0); }} />
         <AssetsSection projectId={ds.projectId} items={assets} colors={tokens.colors} onChanged={onSaved} />
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+        <div className="flex flex-wrap items-center justify-between gap-2 type-label text-text-secondary">
           <span>版本 {ds.version}{dirty ? ' · 有未保存改动' : ''}</span>
           <div className="flex gap-2">
             {dirty && <Button size="sm" onClick={discard} data-testid="ds-discard">放弃改动</Button>}
@@ -211,7 +211,7 @@ export function DesignPanel({ ds, project, screens, assets, busyReason, onClose,
               title={dirty ? '先保存——回刷用的是已保存的那份设计系统' : '把最新设计系统应用到所有屏幕'}>回刷所有屏</Button>
           </div>
         </div>
-        {busyReason && <p className="text-right text-[11px] text-warn" data-testid="ds-apply-blocked">{busyReason}，等它结束再回刷</p>}
+        {busyReason && <p className="text-right type-caption text-warning" data-testid="ds-apply-blocked">{busyReason}，等它结束再回刷</p>}
       </div>
       {askApply && <ApplyAllDialog count={screens.length} blocked={busyReason} returnTo={saveRef} fallback={applyRef} onConfirm={() => void applyAll()} onClose={() => setAskApply(false)} />}
       {pendingConvention !== null && conventions[pendingConvention] !== undefined && (
@@ -232,10 +232,10 @@ function ApplyAllDialog({ count, blocked, returnTo, fallback, onConfirm, onClose
   return (
     <Overlay onClose={onClose}>
       <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="ds-apply-title" data-testid="ds-apply-ask" tabIndex={-1}
-        className="w-full max-w-xs rounded-lg border border-line bg-panel p-5 shadow-2xl fade-up outline-none">
-        <h2 id="ds-apply-title" className="text-sm font-semibold">回刷所有屏？</h2>
-        <p className="mt-1 text-xs text-muted">现有 {count} 屏的 HTML 还是旧 token 烤出来的。回刷按新设计系统给每屏重出一版——确定性改写，不调模型；不刷就只有以后新造的屏用新设计系统。</p>
-        {blocked && <p className="mt-2 text-xs text-warn" data-testid="ds-apply-ask-blocked">{blocked}，等它结束再回刷</p>}
+        className="w-full max-w-xs rounded-lg border border-border-subtle bg-surface-overlay p-5 shadow-(--semantic-elevation-overlay) fade-up outline-none">
+        <h2 id="ds-apply-title" className="type-heading3 font-medium">回刷所有屏？</h2>
+        <p className="mt-1 type-label text-text-secondary">现有 {count} 屏的 HTML 还是旧 token 烤出来的。回刷按新设计系统给每屏重出一版——确定性改写，不调模型；不刷就只有以后新造的屏用新设计系统。</p>
+        {blocked && <p className="mt-2 type-label text-warning" data-testid="ds-apply-ask-blocked">{blocked}，等它结束再回刷</p>}
         <div className="mt-4 flex justify-end gap-2">
           <Button size="sm" onClick={onClose}>以后再说</Button>
           <Button size="sm" variant="primary" data-testid="ds-apply-confirm" disabled={!!blocked} onClick={() => { onConfirm(); onClose(); }}>回刷 {count} 屏</Button>

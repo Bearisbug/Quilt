@@ -29,10 +29,13 @@ export const previewMessageSchema = z.discriminatedUnion('type', [
 ]);
 export type PreviewToParent = z.infer<typeof previewMessageSchema>;
 
+export type MarkPalette = { line: string; onLine: string; halo: string; success: string };
+
 export type ParentToPreview =
     // keepScroll：同一屏换新修订（聚焦态热更新）时保留滚动位置；跳转不传，回到顶部
   | { type: 'quilt:swap'; html: string; route: string; keepScroll?: boolean }
-  | { type: 'quilt:mode'; mode: 'interact' | 'inspect' }
+    // marks（v1.08）：画布标记的颜色，父页取当前外观的 tokens 变量（§13.1「画布标记」），运行时据此画选中框、悬停框与修改标记，不写死颜色
+  | { type: 'quilt:mode'; mode: 'interact' | 'inspect'; marks: MarkPalette }
     // 叠层屏（v0.63）：把 html 的根元素压在当前文档上（45% 暗遮罩 + 根元素），不换 DOM；swap 会先清掉全部叠层
   | { type: 'quilt:overlay'; html: string; route: string }
   | { type: 'quilt:overlay-close' }

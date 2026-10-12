@@ -23,7 +23,7 @@ export function ClassList({ rows, onChange, tokens, labelledBy }: { rows: string
   };
   const colorOptions = COLOR_CLASS_NAMES.map((name) => {
     const hex = tokens?.colors[camel(name) as keyof Tokens['colors']];
-    return { value: name, label: name, icon: <span className="size-3 shrink-0 rounded-sm border border-line" style={{ background: hex }} aria-hidden="true" /> };
+    return { value: name, label: name, icon: <span className="size-3 shrink-0 rounded-sm border border-border-subtle" style={{ background: hex }} aria-hidden="true" /> };
   });
   return (
     <div role="group" aria-labelledby={labelledBy} className="space-y-1" data-testid="class-list">
@@ -35,7 +35,7 @@ export function ClassList({ rows, onChange, tokens, labelledBy }: { rows: string
         return (
           <div key={i} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-1" data-testid="class-row" data-class={cls}>
             <input value={cls} onChange={(e) => set(i, e.target.value)} onBlur={() => tidy(i)} aria-label={`类名 ${i + 1}`} spellCheck={false}
-              className="h-7 w-full rounded-md border border-line bg-canvas px-1.5 font-mono text-xs" />
+              className="h-7 w-full focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) px-1.5 font-mono type-label" />
             <div className="flex items-center">
               {steppable ? (<>
                 <IconButton size="2xs" tip="none" label={`第 ${i + 1} 行调小一档`} unavailable={down === null && '已到最小一档'} onClick={() => down && set(i, down)} data-testid="class-down"><ChevronLeft size={14} aria-hidden="true" /></IconButton>
@@ -44,14 +44,14 @@ export function ClassList({ rows, onChange, tokens, labelledBy }: { rows: string
               <IconButton size="2xs" tip="none" label={`删掉 ${cls || `第 ${i + 1} 行`}`} onClick={() => onChange(rows.filter((_, j) => j !== i))} data-testid="class-remove"><X size={14} aria-hidden="true" /></IconButton>
             </div>
             <div className="col-span-2 flex flex-wrap items-center gap-x-2 gap-y-1 px-1.5 pb-1.5 pt-0.5">
-              <p className={`text-xs leading-snug [overflow-wrap:anywhere] ${info.known ? 'text-muted' : 'text-muted/70'}`} data-testid="class-desc">
-                {info.color?.swatch && !info.color.token && <span className="mr-1 inline-block size-2.5 rounded-sm border border-line align-middle" style={{ background: info.color.swatch }} aria-hidden="true" />}
+              <p className={`type-label leading-snug [overflow-wrap:anywhere] ${info.known ? 'text-text-secondary' : 'text-(--semantic-color-text-tertiary)'}`} data-testid="class-desc">
+                {info.color?.swatch && !info.color.token && <span className="mr-1 inline-block size-2.5 rounded-sm border border-border-subtle align-middle" style={{ background: info.color.swatch }} aria-hidden="true" />}
                 {info.text}
               </p>
               {info.color && (
                 <div className="w-44">
                   <Select value={info.color.token ?? ''} onChange={(token) => token && set(i, withColorToken(cls, info.color!.prefix, token))} options={colorOptions}
-                    placeholder="换成 token 色" aria-label={`第 ${i + 1} 行换色`} data-testid="class-color" className="h-7 px-1.5 text-xs" />
+                    placeholder="换成 token 色" aria-label={`第 ${i + 1} 行换色`} data-testid="class-color" className="h-7 px-1.5 type-label" />
                 </div>
               )}
             </div>
@@ -60,7 +60,7 @@ export function ClassList({ rows, onChange, tokens, labelledBy }: { rows: string
       })}
       <input value={adding} onChange={(e) => setAdding(e.target.value)} placeholder="添加类名…（回车加入）" aria-label="添加类名" spellCheck={false} data-testid="class-add"
         onKeyDown={(e) => { if (e.key !== 'Enter') return; e.preventDefault(); const parts = splitClasses(adding); if (parts.length) onChange([...rows, ...parts]); setAdding(''); }}
-        className="h-7 w-full rounded-md border border-dashed border-line bg-transparent px-1.5 font-mono text-xs" />
+        className="h-7 w-full rounded-md border border-dashed border-border-subtle bg-transparent px-1.5 font-mono type-label" />
     </div>
   );
 }

@@ -62,10 +62,17 @@ export const brandFirstRun = await (async (): Promise<string> => {
   await page.goto(`${WEB}/`, { waitUntil: 'networkidle' });
   await page.getByText('还没有项目').waitFor({ timeout: 15000 });
   await page.waitForTimeout(600);
-  const sym = await page.locator('img[src="/brand/symbol-reverse.svg"]').evaluate((el) => {
+  // 浅色外观用石墨灰版、深色外观用反白版（v1.08）：两张都在文档里，按外观显示其中一张
+  const visibleSymbol = () => page.locator('img[src^="/brand/symbol-"]:visible').evaluate((el) => {
     const i = el as HTMLImageElement; const r = i.getBoundingClientRect();
-    return { w: r.width, h: r.height, natural: i.naturalWidth, pad: parseFloat(getComputedStyle(i.parentElement!).paddingTop) };
+    return { src: i.getAttribute('src'), w: r.width, h: r.height, natural: i.naturalWidth, pad: parseFloat(getComputedStyle(i.parentElement!).paddingTop) };
   });
+  const sym = await visibleSymbol();
+  expect(sym.src === '/brand/symbol-graphite.svg', `浅色外观下显示的符号是 ${sym.src}，应是石墨灰版`);
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+  const dark = await visibleSymbol();
+  await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+  expect(dark.src === '/brand/symbol-reverse.svg' && dark.natural > 0, `深色外观下显示的符号是 ${dark.src}（naturalWidth ${dark.natural}），应是反白版`);
   expect(sym.natural > 0, '品牌符号未加载（naturalWidth=0）');
   expect(sym.w >= 64 && sym.h >= 64, `符号 ${sym.w}×${sym.h} 低于品牌下限 64 px`);
   expect(Math.abs(sym.pad - sym.w / 8) < 1, `安全区不是坐标框的 1/8：padding ${sym.pad} vs ${sym.w / 8}`);
@@ -77,7 +84,7 @@ export const brandFirstRun = await (async (): Promise<string> => {
   expect(wm.family === 'Space Grotesk' && wm.weight === '500', `字标字体/字重不符：${JSON.stringify(wm)}`);
   expect(Math.abs(wm.tracking / wm.size + 0.03) < 0.005, `字标字距不是 -0.03 em：${wm.tracking}px / ${wm.size}px`);
   await shot(page, 'CORE-026-first-run');
-  return `首屏符号 ${Math.round(sym.w)} px、字标 Space Grotesk 500`;
+  return `首屏符号 ${Math.round(sym.w)} px（浅色石墨灰版、深色反白版）、字标 Space Grotesk 500`;
 })().catch((e: Error) => e.message);
 seed('seed');
 await openApp(page);

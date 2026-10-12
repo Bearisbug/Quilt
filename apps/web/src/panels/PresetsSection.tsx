@@ -35,32 +35,32 @@ export function PresetsSection({ projectId, version, busy, onApplied }: {
   };
 
   return (
-    <div className="space-y-1.5 border-t border-line pt-3" data-testid="presets-panel">
+    <div className="space-y-1.5 border-t border-border-subtle pt-3" data-testid="presets-panel">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted">设计预设（跨项目复用这套视觉）</span>
+        <span className="type-label font-medium text-text-secondary">设计预设（跨项目复用这套视觉）</span>
         <Button ref={saveRef} size="sm" data-testid="preset-save" disabled={busy} onClick={() => setSaveOpen(true)}>
           <BookmarkPlus size={14} aria-hidden="true" />存为预设
         </Button>
       </div>
-      {loadError && <p role="alert" className="flex items-center justify-between gap-2 rounded-md border border-danger/60 bg-danger/10 px-3 py-2 text-xs text-danger"><span>预设列表没取到</span><Button size="sm" onClick={load}>重试</Button></p>}
+      {loadError && <p role="alert" className="flex items-center justify-between gap-2 rounded-md border border-error/60 bg-error/10 px-3 py-2 type-label text-error"><span>预设列表没取到</span><Button size="sm" onClick={load}>重试</Button></p>}
       {items === null ? (loadError ? null :
         <ul className="flex flex-col gap-1" aria-busy="true">
-          {[0, 1].map((i) => <li key={i} className="h-9 animate-pulse rounded-md bg-panel-2" />)}
+          {[0, 1].map((i) => <li key={i} className="h-9 animate-pulse rounded-md bg-(--semantic-color-surface-sunken)" />)}
         </ul>
       ) : items.length === 0 ? (
-        <p className="text-xs text-muted">还没有预设。把这个项目的配色、字体、圆角、DESIGN.md 与素材存成一份，新建别的项目时就能直接开局。</p>
+        <p className="type-label text-text-secondary">还没有预设。把这个项目的配色、字体、圆角、DESIGN.md 与素材存成一份，新建别的项目时就能直接开局。</p>
       ) : (
         <ul className="flex flex-col gap-1" data-testid="preset-list">
           {items.map((p) => (
-            <li key={p.id} className="flex items-center gap-2 rounded-md border border-line p-1.5" data-testid="preset-item" data-name={p.name}>
-              <span className="size-5 shrink-0 rounded-sm border border-line" style={{ background: p.palette?.[p.colorMode]?.primary ?? p.seedColor }} aria-hidden="true" />
+            <li key={p.id} className="flex items-center gap-2 rounded-md border border-border-subtle p-1.5" data-testid="preset-item" data-name={p.name}>
+              <span className="size-5 shrink-0 rounded-sm border border-border-subtle" style={{ background: p.palette?.[p.colorMode]?.primary ?? p.seedColor }} aria-hidden="true" />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs text-fg" title={p.name}>{p.name}</span>
-                <span className="block truncate text-[11px] text-muted">{p.assetCount ? `${p.assetCount} 个素材 · ` : ''}{p.fontFamily} · {p.createdAt.slice(0, 10)}</span>
+                <span className="block truncate type-label text-text-primary" title={p.name}>{p.name}</span>
+                <span className="block truncate type-caption text-text-secondary">{p.assetCount ? `${p.assetCount} 个素材 · ` : ''}{p.fontFamily} · {p.createdAt.slice(0, 10)}</span>
               </span>
               <Button size="sm" data-testid="preset-apply" disabled={busy} onClick={() => setApplying(p)}>套用</Button>
               <button type="button" aria-label={`删除预设「${p.name}」`} data-testid="preset-delete" onClick={() => setPendingDelete(p)}
-                className="shrink-0 rounded-md p-1 text-muted hover:text-danger focus-visible:outline-2 focus-visible:outline-accent"><Trash2 size={14} aria-hidden="true" /></button>
+                className="shrink-0 rounded-md p-1 text-text-secondary state-layer focus-ring"><Trash2 size={14} aria-hidden="true" /></button>
             </li>
           ))}
         </ul>
@@ -99,7 +99,7 @@ function SavePresetDialog({ projectId, returnTo, onClose, onSaved }: {
   return (
     <Overlay onClose={onClose}>
       <form ref={ref} role="dialog" aria-modal="true" aria-labelledby="pre-title" tabIndex={-1} data-testid="preset-save-dialog"
-        className="w-full max-w-xs rounded-lg border border-line bg-panel p-5 shadow-2xl fade-up outline-none"
+        className="w-full max-w-xs rounded-lg border border-border-subtle bg-surface-overlay p-5 shadow-(--semantic-elevation-overlay) fade-up outline-none"
         onSubmit={async (e) => {
           e.preventDefault();
           if (!name.trim()) return;
@@ -107,12 +107,12 @@ function SavePresetDialog({ projectId, returnTo, onClose, onSaved }: {
           try { await api.presets.create({ projectId, name: name.trim(), includeAssets }); toast(`已存为预设「${name.trim()}」`); onSaved(); }
           catch { toast('存预设失败', 'error'); setPending(false); }
         }}>
-        <h2 id="pre-title" className="text-sm font-semibold">存为设计预设</h2>
-        <p className="mt-1 text-xs text-muted">存的是配色、字体、圆角、DESIGN.md 与组件配方；之后新建项目可以直接用它开局。</p>
+        <h2 id="pre-title" className="type-heading3 font-medium">存为设计预设</h2>
+        <p className="mt-1 type-label text-text-secondary">存的是配色、字体、圆角、DESIGN.md 与组件配方；之后新建项目可以直接用它开局。</p>
         <div className="mt-4 space-y-3">
           <Input autoFocus data-testid="preset-name" aria-label="预设名" value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：Ofcourt Rally" maxLength={80} />
-          <label className="flex items-center gap-2 text-xs text-fg">
-            <input type="checkbox" checked={includeAssets} onChange={(e) => setIncludeAssets(e.target.checked)} data-testid="preset-with-assets" className="size-4 accent-[var(--color-accent)]" />
+          <label className="flex items-center gap-2 type-label text-text-primary">
+            <input type="checkbox" checked={includeAssets} onChange={(e) => setIncludeAssets(e.target.checked)} data-testid="preset-with-assets" className="size-4 accent-primary" />
             连素材一起存（logo 等，套用时复制给目标项目）
           </label>
         </div>

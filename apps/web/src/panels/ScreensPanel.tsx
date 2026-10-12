@@ -29,10 +29,10 @@ export function ScreensPanel({ screens, links, busy, onPick, onClose }: { screen
   const rows = ordered.filter((o) => matches(o.s, filter));
   return (
     <Panel title={`屏 · ${screens.length}`} className="h-full" actions={<Button size="sm" onClick={onClose}>关闭</Button>}>
-      <div className="flex flex-wrap gap-1 border-b border-line p-2" role="group" aria-label="筛选">
+      <div className="flex flex-wrap gap-1 border-b border-border-subtle p-2" role="group" aria-label="筛选">
         {FILTERS.map((f) => (
           <button key={f.key} type="button" aria-pressed={filter === f.key} data-testid={`screens-filter-${f.key}`} onClick={() => setFilter(f.key)}
-            className={`rounded-full border px-2 py-0.5 text-xs tabular-nums ${filter === f.key ? 'border-accent bg-accent/15 text-fg' : 'border-line text-muted hover:text-fg'}`}>
+            className={`rounded-sm border px-2 py-0.5 type-label tabular-nums ${filter === f.key ? 'border-primary bg-(--semantic-color-surface-selected) text-text-primary' : 'border-border-subtle text-text-secondary state-layer'}`}>
             {f.label} {counts[f.key]}
           </button>
         ))}
@@ -42,14 +42,14 @@ export function ScreensPanel({ screens, links, busy, onPick, onClose }: { screen
           {rows.map(({ s, depth }) => (
             <li key={s.id}>
               <button type="button" data-testid="screens-row" data-id={s.id} onClick={() => onPick(s.id)}
-                className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-accent"
+                className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left type-body state-layer focus-ring"
                 style={depth ? { paddingLeft: `${0.5 + depth * 1}rem` } : undefined}>
                 <span className="min-w-0 truncate">
-                  {depth > 0 && <span className="mr-1 rounded-full border border-line px-1 text-[10px] text-muted">变体</span>}
-                  {s.presentation === 'overlay' && <span className="mr-1 rounded-full border border-line px-1 text-[10px] text-muted">叠层</span>}
-                  <b className="text-fg">{s.name}</b> <span className="text-muted">{s.route}</span>
+                  {depth > 0 && <span className="mr-1 rounded-sm border border-border-subtle px-1 type-caption text-text-secondary">变体</span>}
+                  {s.presentation === 'overlay' && <span className="mr-1 rounded-sm border border-border-subtle px-1 type-caption text-text-secondary">叠层</span>}
+                  <b className="text-text-primary">{s.name}</b> <span className="text-text-secondary">{s.route}</span>
                 </span>
-                {(() => { const b = screenBadges(s, links, busy); return b.length ? <span className="shrink-0 text-[11px] text-muted">{b.join(' · ')}</span> : null; })()}
+                {(() => { const b = screenBadges(s, links, busy); return b.length ? <span className="shrink-0 type-caption text-text-secondary">{b.join(' · ')}</span> : null; })()}
               </button>
             </li>
           ))}

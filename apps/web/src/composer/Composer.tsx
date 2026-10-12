@@ -351,13 +351,13 @@ export function Composer(p: ComposerProps) {
       {busy && (
         <ul className="mb-2.5 space-y-1 px-0.5" aria-label="进行中的作业" data-testid="running-jobs">
           {p.running.slice(0, MAX_ROWS).map((j, i) => (
-            <li key={j.id} data-testid="running-job" data-job-id={j.id} className="fade-up flex items-center gap-2 rounded-lg bg-panel-2 py-1 pl-2.5 pr-1 text-xs">
-              <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-accent motion-reduce:animate-none" aria-hidden="true" />
+            <li key={j.id} data-testid="running-job" data-job-id={j.id} className="fade-up flex items-center gap-2 rounded-lg bg-(--semantic-color-surface-sunken) py-1 pl-2.5 pr-1 type-label">
+              <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate">
-                <span className="font-medium text-fg">{j.label}</span>
+                <span className="font-medium text-text-primary">{j.label}</span>
                 {/* 进度必须有兜底：progress 只来自实时事件流，首次加载认领来的作业（本机会话 / 另一个标签页建的）
                     在下一个事件到达前是空的，只写标签的行看起来是卡住的。口径与对话气泡的空回执一致 */}
-                <span className="text-muted"> · {j.progress ?? '排队中…'}</span>
+                <span className="text-text-secondary"> · {j.progress ?? '排队中…'}</span>
               </span>
               {/* 最新那行的取消键标出 Esc：优先级链里 Esc 取消的正是这一个 */}
               <IconButton
@@ -367,7 +367,7 @@ export function Composer(p: ComposerProps) {
             </li>
           ))}
           {p.running.length > MAX_ROWS && (
-            <li className="px-2.5 text-xs text-muted">+{p.running.length - MAX_ROWS} 个作业在跑</li>
+            <li className="px-2.5 type-label text-text-secondary">+{p.running.length - MAX_ROWS} 个作业在跑</li>
           )}
         </ul>
       )}
@@ -375,54 +375,54 @@ export function Composer(p: ComposerProps) {
       <div className="mb-2.5 flex items-center gap-2 px-0.5">
         <ul className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" aria-label="本次的目标">
           {p.anchor && (
-            <li className="inline-flex items-center gap-1 rounded-full bg-panel-2 py-1 pl-2.5 pr-1 text-xs font-medium text-fg" data-testid="anchor-chip">
+            <li className="inline-flex items-center gap-1 rounded-sm bg-(--semantic-color-surface-sunken) py-1 pl-2.5 pr-1 type-label font-medium text-text-primary" data-testid="anchor-chip">
               <MapPin size={12} aria-hidden="true" /><span>新屏 · 此处</span>
-              <button type="button" aria-label="取消锚点" onClick={p.onRemoveAnchor} className="grid size-5 place-items-center rounded-full text-muted transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"><X size={12} /></button>
+              <button type="button" aria-label="取消锚点" onClick={p.onRemoveAnchor} className="grid size-5 place-items-center rounded-sm text-text-secondary transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring"><X size={12} /></button>
             </li>
           )}
           {preset && (
-            <li className="inline-flex items-center gap-1.5 rounded-full bg-panel-2 py-1 pl-2.5 pr-1 text-xs font-medium text-fg" data-testid="preset-chip">
+            <li className="inline-flex items-center gap-1.5 rounded-sm bg-(--semantic-color-surface-sunken) py-1 pl-2.5 pr-1 type-label font-medium text-text-primary" data-testid="preset-chip">
               <span className="max-w-48 truncate">{preset.label}</span>
-              <button type="button" aria-label={`去掉「${preset.label}」，改成普通的一轮`} onClick={p.onRemovePreset} className="grid size-5 place-items-center rounded-full text-muted transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">
+              <button type="button" aria-label={`去掉「${preset.label}」，改成普通的一轮`} onClick={p.onRemovePreset} className="grid size-5 place-items-center rounded-sm text-text-secondary transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
                 <X size={12} />
               </button>
             </li>
           )}
           {p.targets.map((t, i) => (
-            <li key={t.id} className={`inline-flex items-center gap-1.5 rounded-full bg-panel-2 py-1 pl-2.5 pr-1 text-xs font-medium ${i < p.maxTargets ? 'text-fg' : 'text-warn'}`} data-testid="target-chip">
+            <li key={t.id} className={`inline-flex items-center gap-1.5 rounded-sm bg-(--semantic-color-surface-sunken) py-1 pl-2.5 pr-1 type-label font-medium ${i < p.maxTargets ? 'text-text-primary' : 'text-warning'}`} data-testid="target-chip">
               <span className="max-w-32 truncate">{t.name}</span>
-              <button type="button" aria-label={`不再以「${t.name}」为目标`} onClick={() => p.onRemoveTarget(t.id)} className="grid size-5 place-items-center rounded-full text-muted transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">
+              <button type="button" aria-label={`不再以「${t.name}」为目标`} onClick={() => p.onRemoveTarget(t.id)} className="grid size-5 place-items-center rounded-sm text-text-secondary transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
                 <X size={12} />
               </button>
             </li>
           ))}
           {/* 共享组件目标（REQ-EDIT-006）：与屏标签同一排、同一形状，前缀「组件 ·」区分 */}
           {p.componentTargets.map((c) => (
-            <li key={c.id} className="inline-flex items-center gap-1.5 rounded-full bg-panel-2 py-1 pl-2.5 pr-1 text-xs font-medium text-fg" data-testid="component-chip" data-name={c.name}>
+            <li key={c.id} className="inline-flex items-center gap-1.5 rounded-sm bg-(--semantic-color-surface-sunken) py-1 pl-2.5 pr-1 type-label font-medium text-text-primary" data-testid="component-chip" data-name={c.name}>
               <span className="max-w-40 truncate">组件 · {c.name}</span>
-              <button type="button" aria-label={`不再以组件「${c.name}」为目标`} onClick={() => p.onRemoveComponentTarget(c.id)} className="grid size-5 place-items-center rounded-full text-muted transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">
+              <button type="button" aria-label={`不再以组件「${c.name}」为目标`} onClick={() => p.onRemoveComponentTarget(c.id)} className="grid size-5 place-items-center rounded-sm text-text-secondary transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
                 <X size={12} />
               </button>
             </li>
           ))}
           {/* 动词行是变长文本：放在可截断的 flex 项里，改字不挤动旁边的按钮（RESP-010） */}
-          <li className={`min-w-0 truncate text-xs ${over && !chat ? 'text-warn' : 'text-muted'}`} data-testid="verb-line" aria-live="polite">
+          <li className={`min-w-0 truncate type-label ${over && !chat ? 'text-warning' : 'text-text-secondary'}`} data-testid="verb-line" aria-live="polite">
             {over && !chat ? `已选 ${p.targets.length} 屏，一次最多改 ${p.maxTargets} 屏，只会发送前 ${p.maxTargets} 屏` : verb}
           </li>
         </ul>
         {(p.targets.length > 0 || p.anchor || p.componentTargets.length > 0 || preset) && (
-          <button type="button" data-testid="clear-targets" onClick={p.onClearTargets} className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-muted transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">清空</button>
+          <button type="button" data-testid="clear-targets" onClick={p.onClearTargets} className="shrink-0 rounded-md px-1.5 py-0.5 type-label text-text-secondary transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">清空</button>
         )}
       </div>
       {shots.length > 0 && (
         <ul className="mb-2.5 flex flex-wrap gap-2 px-0.5" aria-label="本次参考图">
           {shots.map((sh) => (
             <li key={sh.key} className="group relative">
-              <img src={sh.url} alt={sh.name} className="size-16 rounded-lg border border-line object-cover" />
-              {!sh.id && <span className="absolute inset-0 grid place-items-center rounded-lg bg-ink/60 text-[10px] text-fg">上传中…</span>}
+              <img src={sh.url} alt={sh.name} className="size-16 rounded-lg border border-border-subtle object-cover" />
+              {!sh.id && <span className="absolute inset-0 grid place-items-center"><span className="inverse rounded-sm px-1.5 type-caption">上传中…</span></span>}
               <button
                 type="button" aria-label={`移除参考图「${sh.name}」`} onClick={() => removeShot(sh.key)}
-                className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-line bg-panel text-muted transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+                className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-sm border border-border-subtle bg-surface-bg text-text-secondary transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring"
               ><X size={11} /></button>
             </li>
           ))}
@@ -435,14 +435,14 @@ export function Composer(p: ComposerProps) {
           id="chat-input" ref={taRef} name="content" rows={1} value={text}
           onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
           onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-          className="scroll relative z-10 block w-full resize-none bg-transparent px-1 text-[15px] leading-7 text-fg caret-fg placeholder:text-transparent focus-visible:outline-none"
+          className="scroll relative z-10 block w-full resize-none bg-transparent px-1 type-heading3 leading-7 text-text-primary caret-text-primary placeholder:text-transparent outline-none"
           placeholder={phrases[0]}
         />
       </div>
       {/* 冲突理由就地写在发送键上方：发送键只是 aria-disabled，输入照旧可改——换个目标或等这一轮完事就能发（A11Y-007 / IA-009） */}
-      {shownReason && <p data-testid="send-blocked-reason" role="status" className="mt-2 px-1 text-right text-xs text-warn">{shownReason}</p>}
+      {shownReason && <p data-testid="send-blocked-reason" role="status" className="mt-2 px-1 text-right type-label text-warning">{shownReason}</p>}
       {/* 工具条允许换行：390px 视口放不下「通道 + 参考图 + 屏数 + 版数 + 发送」一整行，右侧档位组折到下一行而不是撑破外框 */}
-      <div ref={barRef} className="composer-bar mt-3 flex items-center justify-between gap-2 border-t border-line pt-3">
+      <div ref={barRef} className="composer-bar mt-3 flex items-center justify-between gap-2 border-t border-border-subtle pt-3">
         {/* 左组不能写 min-w-0：里面的控件都是 shrink-0，盒子缩了内容不缩，只会溢出去压在右边的档位上，
             而「放不下就换行」也因为左组总能缩到放得下而永远不触发（RESP-004） */}
         <div className="flex flex-1 items-center gap-2">
@@ -450,12 +450,12 @@ export function Composer(p: ComposerProps) {
           <Segmented label="动词：造 / 改，或聊天" testId="mode" value={p.mode} options={[{ value: 'design', label: '造 / 改' }, { value: 'chat', label: '聊天' }]} onChange={p.onMode} />
           {/* 通道选择（REQ-CORE-011）。清单来自服务端，只含标识与显示名；聊天模式只列 agent-sdk 通道，一条都没有就就地写明去哪加（INT-013） */}
           {p.runnersFailed ? (
-            <button type="button" data-testid="runners-failed" onClick={p.onReloadRunners} className="min-w-0 truncate rounded-md px-1.5 py-1 text-xs text-warn transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">
+            <button type="button" data-testid="runners-failed" onClick={p.onReloadRunners} className="min-w-0 truncate rounded-md px-1.5 py-1 type-label text-warning transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
               通道清单没加载出来 · 重试
             </button>
           ) : p.runners.length > 0 && <RunnerSelect runners={p.runners} value={p.runnerId} onChange={p.onRunnerChange} maxWidth={bar.runnerMax} />}
           {chat && !chatChannelOk && !p.runnersFailed && (
-            <button type="button" data-testid="chat-no-channel" onClick={() => navigate('?settings=runners')} className="min-w-0 truncate rounded-md px-1.5 py-1 text-xs text-warn transition-colors duration-[var(--duration-fast)] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">
+            <button type="button" data-testid="chat-no-channel" onClick={() => navigate('?settings=runners')} className="min-w-0 truncate rounded-md px-1.5 py-1 type-label text-warning transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
               聊天需要「本机 Claude 订阅」通道，去设置页添加
             </button>
           )}
@@ -479,12 +479,12 @@ export function Composer(p: ComposerProps) {
           {!chat && creating && !agentRunner && !compOnly && !preset && (
             <Segmented label="屏数（几张不同的屏）" testId="count" value={p.count} options={SCREEN_COUNT_OPTIONS.map((o) => ({ value: o, label: o === 'auto' ? '自动' : String(o) }))} onChange={p.onCount} />
           )}
-          {!chat && creating && !agentRunner && !compOnly && !preset && <span className="h-5 w-px bg-line" aria-hidden="true" />}
+          {!chat && creating && !agentRunner && !compOnly && !preset && <span className="h-5 w-px bg-border-subtle" aria-hidden="true" />}
           {!chat && !agentRunner && !compOnly && <Segmented label="版数（同一屏的几种画法）" testId="versions" value={p.versions} options={Array.from({ length: MAX_VERSIONS }, (_, i) => ({ value: i + 1, label: `${i + 1} 版` }))} onChange={p.onVersions} compact />}
           {/* 这个 40px 插槽永远是发送键（停止归在跑作业行上的取消键）；反色实心只给此刻唯一的主动作 */}
           <IconButton
             type="submit" size="sm" tone={text.trim() || preset ? 'invert' : 'default'} label={chat ? '发送（聊）' : compOnly ? '发送（改组件）' : creating ? '发送（造）' : '发送（改）'} hint="Enter" tip="top-end"
-            className={text.trim() || preset ? undefined : 'bg-panel-2'}
+            className={text.trim() || preset ? undefined : 'bg-(--semantic-color-surface-sunken)'}
             unavailable={p.blockedReason ?? localReason ?? (!text.trim() && !preset && (chat ? '先说点什么' : compOnly ? '先说要怎么改组件' : creating ? '先描述要造的屏' : '先说要怎么改'))}
           >
             {sending ? <span className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" /> : <ArrowUp size={16} />}
@@ -508,12 +508,12 @@ function Segmented<T extends string | number>({ label, testId, value, options, o
     (ref.current?.querySelector(`[data-testid="${testId}-${String(options[next].value)}"]`) as HTMLButtonElement | null)?.focus();
   };
   return (
-    <div ref={ref} role="radiogroup" aria-label={label} title={label} data-testid={`${testId}-group`} className="inline-flex h-8 shrink-0 items-center rounded-lg border border-line p-0.5">
+    <div ref={ref} role="radiogroup" aria-label={label} title={label} data-testid={`${testId}-group`} className="inline-flex h-8 shrink-0 items-center rounded-md border border-border-subtle bg-(--semantic-color-surface-sunken) p-0.5">
       {options.map((o, i) => (
         <button
           key={String(o.value)} type="button" role="radio" aria-checked={i === idx} tabIndex={i === idx ? 0 : -1} data-testid={`${testId}-${String(o.value)}`}
           onClick={() => onChange(o.value)} onKeyDown={onKey}
-          className={`h-7 ${compact ? 'min-w-9 px-1' : 'min-w-7 px-1.5'} rounded-[calc(var(--radius-lg)-2px)] text-xs tabular-nums transition-colors duration-[var(--duration-fast)] ${i === idx ? 'bg-accent text-on-accent' : 'text-muted hover:text-fg'} focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1`}
+          className={`h-7 ${compact ? 'min-w-9 px-1' : 'min-w-7 px-1.5'} rounded-sm type-label tabular-nums ${i === idx ? 'bg-surface-raised text-text-primary shadow-(--semantic-elevation-raised)' : 'text-text-secondary state-layer'} focus-ring`}
         >{o.label}</button>
       ))}
     </div>
@@ -533,7 +533,7 @@ function Placeholder({ phrases, active }: { phrases: string[]; active: boolean }
   if (!active) return null;
   const text = phrases[i % phrases.length];
   return (
-    <span key={text} aria-hidden="true" className="phrase-in pointer-events-none absolute inset-x-0 top-0 block truncate px-1 text-[15px] leading-7 text-muted">
+    <span key={text} aria-hidden="true" className="phrase-in pointer-events-none absolute inset-x-0 top-0 block truncate px-1 type-heading3 leading-7 text-text-secondary">
       {text}
     </span>
   );
@@ -554,11 +554,11 @@ export function RunnerSelect({ runners, value, onChange, disabled, testId = 'run
     <Select.Root value={current} onValueChange={(v) => { if (v === MANAGE_ID) navigate('?settings=runners'); else onChange(v); }} disabled={disabled}>
       <Select.Trigger
         aria-label="生成通道" data-testid={testId} data-value={value} style={maxWidth ? { maxWidth } : undefined}
-        className="group flex h-9 max-w-44 shrink-0 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium text-muted transition-[color,background-color] duration-[var(--duration-fast)] hover:bg-panel-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 data-[state=open]:bg-panel-2 data-[state=open]:text-fg disabled:pointer-events-none disabled:opacity-50 sm:max-w-56"
+        className="group flex h-9 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2.5 type-label font-medium text-text-secondary transition-[color,background-color] duration-(--semantic-motion-duration-fast) data-[state=open]:bg-(--semantic-color-surface-selected) data-[state=open]:text-text-primary disabled:pointer-events-none sm:max-w-56 state-layer focus-ring"
       >
         {/* 当前通道名直接渲染（v0.78）：Radix 默认要等选项挂上后才把名字填进来，输入框首次量宽时触发器还是空的，宽度量小了 */}
         <span className="min-w-0 truncate"><Select.Value placeholder={usable.length ? '选择通道' : '没有可用通道'}>{cur ? <span className="flex min-w-0 items-center gap-2"><VendorIcon vendor={cur.vendor} size={14} className="shrink-0" /><span className="truncate">{cur.label}</span></span> : undefined}</Select.Value></span>
-        <Select.Icon className="flex shrink-0 opacity-60 transition-transform duration-[var(--duration-base)] ease-out group-data-[state=open]:rotate-180">
+        <Select.Icon className="flex shrink-0 opacity-60 transition-transform duration-(--semantic-motion-duration-base) ease-(--semantic-motion-easing-standard) group-data-[state=open]:rotate-180">
           <ChevronDown size={14} aria-hidden="true" />
         </Select.Icon>
       </Select.Trigger>
@@ -571,10 +571,10 @@ export function RunnerSelect({ runners, value, onChange, disabled, testId = 'run
         >
           <Select.Viewport>
             <RunnerGroup label="云端模型" items={cloud} />
-            {cloud.length > 0 && agents.length > 0 && <Select.Separator className="my-1.5 h-px bg-line" />}
+            {cloud.length > 0 && agents.length > 0 && <Select.Separator className="my-1.5 h-px bg-border-subtle" />}
             <RunnerGroup label="本机 agent" items={agents} />
-            {usable.length === 0 && <p className="px-2.5 py-2 text-xs text-muted">没有验证通过的通道，先去设置页添加一个。</p>}
-            <Select.Separator className="my-1.5 h-px bg-line" />
+            {usable.length === 0 && <p className="px-2.5 py-2 type-label text-text-secondary">没有验证通过的通道，先去设置页添加一个。</p>}
+            <Select.Separator className="my-1.5 h-px bg-border-subtle" />
             {/* 做成选项而不是普通按钮：Radix Select 的内容区只让方向键在选项间走，普通按钮键盘够不着；
                 选中它不改通道、只跳设置页 */}
             <Select.Item value={MANAGE_ID} textValue="管理通道" data-testid="manage-channels" className={ITEM_CLS}>
@@ -588,7 +588,7 @@ export function RunnerSelect({ runners, value, onChange, disabled, testId = 'run
 }
 
 const MANAGE_ID = '__manage_channels__';
-const ITEM_CLS = 'relative flex cursor-pointer select-none items-center gap-2 rounded-xl px-2.5 py-2 text-sm text-muted outline-none data-[highlighted]:bg-panel-2 data-[highlighted]:text-fg data-[state=checked]:text-fg';
+const ITEM_CLS = 'relative flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-2 type-body text-text-secondary outline-none data-[highlighted]:bg-(--semantic-color-surface-selected) data-[highlighted]:text-text-primary data-[state=checked]:text-text-primary';
 
 // 投递会话下拉（REQ-AGENT-003 v0.34 / v0.68）。Claude Code：本机正在运行的交互式会话，起过名的显示名字、派生名（目录 + 后缀）显示会话 UUID，
 // 每项带目录名与 idle / busy。Codex：线程库里的用户线程，显示名字（没起过名就是标题），每项带目录名、开在哪个应用、已打开 / 未打开——
@@ -608,33 +608,33 @@ export function SessionSelect({ tool = 'claude-code', sessions, reason, value, o
     <Select.Root value={current} onValueChange={onChange} disabled={disabled} onOpenChange={(open) => { if (open) onOpen(); }}>
       <Select.Trigger
         aria-label="投递到哪个会话" data-testid={testId} data-value={current ?? ''}
-        className="group flex h-9 min-w-0 max-w-44 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium text-muted transition-[color,background-color] duration-[var(--duration-fast)] hover:bg-panel-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 data-[state=open]:bg-panel-2 data-[state=open]:text-fg disabled:pointer-events-none disabled:opacity-50 sm:max-w-56"
+        className="group flex h-9 min-w-0 max-w-44 items-center gap-1.5 rounded-lg px-2.5 type-label font-medium text-text-secondary transition-[color,background-color] duration-(--semantic-motion-duration-fast) data-[state=open]:bg-(--semantic-color-surface-selected) data-[state=open]:text-text-primary disabled:pointer-events-none sm:max-w-56 state-layer focus-ring"
       >
         <span className="min-w-0 truncate"><Select.Value placeholder="选择会话" /></span>
-        <Select.Icon className="flex shrink-0 opacity-60 transition-transform duration-[var(--duration-base)] ease-out group-data-[state=open]:rotate-180">
+        <Select.Icon className="flex shrink-0 opacity-60 transition-transform duration-(--semantic-motion-duration-base) ease-(--semantic-motion-easing-standard) group-data-[state=open]:rotate-180">
           <ChevronDown size={14} aria-hidden="true" />
         </Select.Icon>
       </Select.Trigger>
       <Select.Portal>
         {/* 会话可能有几十个：内容高度封顶在触发器上方的可用空间，Radix 的 Viewport 自己滚（滚动条隐藏，上下端给箭头提示，RESP-016） */}
         <Select.Content position="popper" side="top" align="start" sideOffset={8} collisionPadding={12} onKeyDown={(e) => e.stopPropagation()} className="menu z-50 flex max-h-[var(--radix-select-content-available-height)] min-w-72 max-w-[min(26rem,calc(100vw-1.5rem))] flex-col p-1.5">
-          <Select.ScrollUpButton className="flex h-6 shrink-0 items-center justify-center text-muted"><ChevronUp size={14} aria-hidden="true" /></Select.ScrollUpButton>
+          <Select.ScrollUpButton className="flex h-6 shrink-0 items-center justify-center text-text-secondary"><ChevronUp size={14} aria-hidden="true" /></Select.ScrollUpButton>
           <Select.Viewport className="min-h-0 flex-1">
             <Select.Group>
-              <Select.Label className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold tracking-wide text-muted">{SESSION_COPY[tool].group}</Select.Label>
-              {sessions === null && <p className="px-2.5 py-2 text-xs text-muted">正在找会话…</p>}
-              {sessions?.length === 0 && <p className="px-2.5 py-2 text-xs text-muted" data-testid="session-empty">{reason ?? SESSION_COPY[tool].empty}</p>}
+              <Select.Label className="px-2.5 pb-1 pt-1.5 type-overline font-medium text-text-secondary">{SESSION_COPY[tool].group}</Select.Label>
+              {sessions === null && <p className="px-2.5 py-2 type-label text-text-secondary">正在找会话…</p>}
+              {sessions?.length === 0 && <p className="px-2.5 py-2 type-label text-text-secondary" data-testid="session-empty">{reason ?? SESSION_COPY[tool].empty}</p>}
               {items.map((s) => (
                 <Select.Item key={s.sessionId} value={s.sessionId} textValue={label(s)} data-testid="session-option" data-named={s.named ? '' : undefined} data-open={s.open ? '' : undefined} className={ITEM_CLS}>
                   <span className="min-w-0 flex-1">
-                    <Select.ItemText><span className={s.named || s.tool === 'codex' ? '' : 'font-mono text-xs'}>{label(s)}</span></Select.ItemText>
-                    <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted">
+                    <Select.ItemText><span className={s.named || s.tool === 'codex' ? '' : 'font-mono type-label'}>{label(s)}</span></Select.ItemText>
+                    <span className="mt-0.5 flex items-center gap-1.5 type-caption text-text-secondary">
                       <span className="truncate">{basename(s.cwd)}</span>
                       {s.app && <span className="shrink-0">{APP_LABEL[s.app]}</span>}
                       {s.tool === 'codex'
-                        ? <span className={`shrink-0 rounded-full border px-1.5 ${s.open ? 'border-line' : 'border-dashed border-line'}`}>{s.open ? '已打开' : '未打开'}</span>
-                        : <span className={`shrink-0 rounded-full border px-1.5 ${s.status === 'busy' ? 'border-warn/60 text-warn' : 'border-line'}`}>{s.status === 'busy' ? '忙' : s.status === 'idle' ? '空闲' : '未知'}</span>}
-                      {s.unverifiedVersion !== undefined && <span className="shrink-0 rounded-full border border-dashed border-warn/60 px-1.5 text-warn" data-testid="session-unverified">此版本未验证{s.unverifiedVersion && ` · ${s.unverifiedVersion}`}</span>}
+                        ? <span className={`shrink-0 rounded-sm border px-1.5 ${s.open ? 'border-border-subtle' : 'border-dashed border-border-subtle'}`}>{s.open ? '已打开' : '未打开'}</span>
+                        : <span className={`shrink-0 rounded-sm border px-1.5 ${s.status === 'busy' ? 'border-warning/60 text-warning' : 'border-border-subtle'}`}>{s.status === 'busy' ? '忙' : s.status === 'idle' ? '空闲' : '未知'}</span>}
+                      {s.unverifiedVersion !== undefined && <span className="shrink-0 rounded-sm border border-dashed border-warning/60 px-1.5 text-warning" data-testid="session-unverified">此版本未验证{s.unverifiedVersion && ` · ${s.unverifiedVersion}`}</span>}
                     </span>
                   </span>
                   <Select.ItemIndicator className="flex shrink-0"><Check size={14} aria-hidden="true" /></Select.ItemIndicator>
@@ -642,7 +642,7 @@ export function SessionSelect({ tool = 'claude-code', sessions, reason, value, o
               ))}
             </Select.Group>
           </Select.Viewport>
-          <Select.ScrollDownButton className="flex h-6 shrink-0 items-center justify-center text-muted"><ChevronDown size={14} aria-hidden="true" /></Select.ScrollDownButton>
+          <Select.ScrollDownButton className="flex h-6 shrink-0 items-center justify-center text-text-secondary"><ChevronDown size={14} aria-hidden="true" /></Select.ScrollDownButton>
         </Select.Content>
       </Select.Portal>
     </Select.Root>
@@ -653,7 +653,7 @@ function RunnerGroup({ label, items }: { label: string; items: RunnerOptionDto[]
   if (!items.length) return null;
   return (
     <Select.Group>
-      <Select.Label className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold tracking-wide text-muted">{label}</Select.Label>
+      <Select.Label className="px-2.5 pb-1 pt-1.5 type-overline font-medium text-text-secondary">{label}</Select.Label>
       {items.map((r) => (
         <Select.Item key={r.id} value={r.id} textValue={r.label} className={ITEM_CLS}>
           <span className="min-w-0 flex-1 truncate">

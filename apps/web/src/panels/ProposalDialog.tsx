@@ -55,40 +55,40 @@ export function ProposalDialog({ proposal, ds, busyReason, screenCount, batches,
   const ref = useModal<HTMLDivElement>(dismiss, undefined, undefined, { initialFocus: 'self' });
   return (
     <Overlay onClose={dismiss}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="dsp-title" data-testid="ds-proposal" tabIndex={-1} className="flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-2xl fade-up outline-none">
-        <header className="shrink-0 border-b border-line px-4 py-3">
-          <h2 id="dsp-title" className="text-sm font-semibold">{step === 'preview' ? '写入设计系统？' : '按新约定重生成所有屏？'}</h2>
-          {proposal.summary && step === 'preview' && <p className="mt-1 text-xs text-muted">{proposal.summary}</p>}
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="dsp-title" data-testid="ds-proposal" tabIndex={-1} className="flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-border-subtle bg-surface-overlay shadow-(--semantic-elevation-overlay) fade-up outline-none">
+        <header className="shrink-0 border-b border-border-subtle px-4 py-3">
+          <h2 id="dsp-title" className="type-heading3 font-medium">{step === 'preview' ? '写入设计系统？' : '按新约定重生成所有屏？'}</h2>
+          {proposal.summary && step === 'preview' && <p className="mt-1 type-label text-text-secondary">{proposal.summary}</p>}
         </header>
         {step === 'preview' ? (
           <div className="scroll min-h-0 flex-1 space-y-4 p-4">
             <div>
-              <div className="mb-1.5 text-xs font-medium text-muted">约定（写入后的完整清单，取消勾选的不写）</div>
-              {proposal.conventions.length === 0 ? <p className="text-xs text-muted">这条指令没有提炼出跨屏规则。</p> : (
+              <div className="mb-1.5 type-label font-medium text-text-secondary">约定（写入后的完整清单，取消勾选的不写）</div>
+              {proposal.conventions.length === 0 ? <p className="type-label text-text-secondary">这条指令没有提炼出跨屏规则。</p> : (
                 <ul className="flex flex-col gap-1">
                   {proposal.conventions.map((c, i) => {
                     const isNew = !existing.includes(c);
                     return (
-                      <li key={i} className="flex items-start gap-2 text-xs">
-                        <input id={`dsp-c-${i}`} type="checkbox" checked={keep[i]} onChange={(e) => setKeep((k) => k.map((v, j) => (j === i ? e.target.checked : v)))} className="mt-0.5 size-3.5 accent-accent" />
-                        <label htmlFor={`dsp-c-${i}`} className="min-w-0 flex-1 leading-cn [overflow-wrap:anywhere]">{c}{isNew && <span className="ml-1 rounded-full bg-accent/15 px-1.5 text-[10px] text-accent-strong">新</span>}</label>
+                      <li key={i} className="flex items-start gap-2 type-label">
+                        <input id={`dsp-c-${i}`} type="checkbox" checked={keep[i]} onChange={(e) => setKeep((k) => k.map((v, j) => (j === i ? e.target.checked : v)))} className="mt-0.5 size-3.5 accent-primary" />
+                        <label htmlFor={`dsp-c-${i}`} className="min-w-0 flex-1 leading-(--semantic-typography-body-line-height) [overflow-wrap:anywhere]">{c}{isNew && <span className="ml-1 rounded-sm bg-(--semantic-color-surface-selected) px-1.5 type-caption text-primary">新</span>}</label>
                       </li>
                     );
                   })}
                 </ul>
               )}
               {existing.filter((c) => !proposal.conventions.includes(c)).length > 0 && (
-                <p className="mt-1.5 text-[11px] text-muted">将移除：{existing.filter((c) => !proposal.conventions.includes(c)).join('；')}</p>
+                <p className="mt-1.5 type-caption text-text-secondary">将移除：{existing.filter((c) => !proposal.conventions.includes(c)).join('；')}</p>
               )}
             </div>
             {tokenRows.length > 0 && (
               <div>
-                <div className="mb-1.5 text-xs font-medium text-muted">token 变更</div>
-                <ul className="flex flex-col gap-1 text-xs">
+                <div className="mb-1.5 type-label font-medium text-text-secondary">token 变更</div>
+                <ul className="flex flex-col gap-1 type-label">
                   {tokenRows.map((r) => (
                     <li key={r.label} className="flex items-center gap-2">
-                      <span className="w-12 text-muted">{r.label}</span>
-                      {r.label === '种子色' ? <><span className="inline-block size-4 rounded-sm border border-line" style={{ background: r.from }} /><span>{r.from}</span><span className="text-muted">→</span><span className="inline-block size-4 rounded-sm border border-line" style={{ background: r.to }} /><span>{r.to}</span></> : <><span>{r.from}</span><span className="text-muted">→</span><span>{r.to}</span></>}
+                      <span className="w-12 text-text-secondary">{r.label}</span>
+                      {r.label === '种子色' ? <><span className="inline-block size-4 rounded-sm border border-border-subtle" style={{ background: r.from }} /><span>{r.from}</span><span className="text-text-secondary">→</span><span className="inline-block size-4 rounded-sm border border-border-subtle" style={{ background: r.to }} /><span>{r.to}</span></> : <><span>{r.from}</span><span className="text-text-secondary">→</span><span>{r.to}</span></>}
                     </li>
                   ))}
                 </ul>
@@ -96,13 +96,13 @@ export function ProposalDialog({ proposal, ds, busyReason, screenCount, batches,
             )}
           </div>
         ) : (
-          <div className="p-4 text-xs leading-cn text-muted">
+          <div className="p-4 type-label leading-(--semantic-typography-body-line-height) text-text-secondary">
             约定已写入。现有 {screenCount} 屏还是老样子——重生成会对每一屏跑一次模型（按屏计费{batches > 1 ? `，分 ${batches} 个作业发出` : ''}），不重生成则只对以后新造的屏生效。
             {/* 重生成要改全部屏，与在跑作业冲突：就地写原因（PAGE-CANVAS「作业进行中时的面板」） */}
-            {busyReason && <p className="mt-2 text-warn" data-testid="ds-proposal-blocked">{busyReason}，等它结束再重生成</p>}
+            {busyReason && <p className="mt-2 text-warning" data-testid="ds-proposal-blocked">{busyReason}，等它结束再重生成</p>}
           </div>
         )}
-        <footer className="flex shrink-0 justify-end gap-2 border-t border-line px-4 py-3">
+        <footer className="flex shrink-0 justify-end gap-2 border-t border-border-subtle px-4 py-3">
           {step === 'preview' ? (
             <>
               <Button key="cancel" size="sm" onClick={onClose}>取消</Button>

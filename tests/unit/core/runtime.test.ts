@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { Window, type HTMLElement as HappyElement } from 'happy-dom';
 import { RUNTIME_JS, previewMessageSchema, isPreviewMessage, type ParentToPreview } from '@quilt/core';
@@ -39,6 +40,10 @@ function preview(body: string, opts: { component?: boolean } = {}) {
   return { win, sent, $, post, key, wheel, close: () => win.happyDOM.close() };
 }
 
+// 画布标记色（v1.08）：父页取当前外观的 tokens 变量随 quilt:mode 发来，运行时不写颜色。两套取 brand/ 的浅、深色值
+const LIGHT = { line: '#C64A0B', onLine: '#FFFFFF', halo: '#FFFFFF', success: '#14713A' };
+const DARK = { line: '#E05A24', onLine: '#0E0D0B', halo: '#0E0D0B', success: '#5FD3A4' };
+
 const SCREEN = '<main data-qid="q1"><section data-qid="q2"><a data-qid="q3" href="/next">去下一屏</a><a data-qid="q4" href="#">还没设计</a></section><form action="/done"><input name="n"><button>提交</button></form></main>';
 
 test('屏：就绪、跳转、死链、表单、快捷键、捏合，每条都合协议', async () => {
@@ -60,7 +65,7 @@ test('屏：就绪、跳转、死链、表单、快捷键、捏合，每条都�
 
 test('选择元素态：点选、逐级选、重选、取消，select 带祖先路径', async () => {
   const p = preview(SCREEN);
-  p.post({ type: 'quilt:mode', mode: 'inspect' });
+  p.post({ type: 'quilt:mode', mode: 'inspect', marks: LIGHT });
   p.$('[data-qid="q3"]').click();
   p.key({ key: 'Enter', code: 'Enter', shiftKey: true });   // 上一级
   p.post({ type: 'quilt:reselect', qid: 'q2' });
@@ -74,6 +79,32 @@ test('选择元素态：点选、逐级选、重选、取消，select 带祖先�
   assert.equal(again.qid, 'q2');
   assert.deepEqual(gone, { type: 'quilt:deselect', qid: 'q99' });
   await p.close();
+});
+
+test('标记颜色由父页给：选中框、标签、修改标记用 marks 的颜色，外观切换后当场换色', async () => {
+  const p = preview(SCREEN);
+  p.post({ type: 'quilt:mode', mode: 'inspect', marks: LIGHT });
+  p.$('[data-qid="q3"]').click();
+  p.post({ type: 'quilt:mark', working: ['q2'], done: ['q4'] });
+  const sel = () => p.$('[data-quilt-selection]');
+  const css = (el: HappyElement) => el.getAttribute('style') ?? '';
+  assert.match(css(sel()), /border[^;]*#C64A0B/i);
+  assert.match(css(sel()), /box-shadow: 0 0 0 1px #FFFFFF,\s*inset 0 0 0 1px #FFFFFF/i);
+  assert.match(css(sel().firstElementChild as HappyElement), /background: #C64A0B/i);
+  assert.match(css(p.$('[data-qid="q2"]')), /outline-color: #C64A0B; outline-style: dashed/i);
+  assert.match(css(p.$('[data-qid="q4"]')), /outline-color: #14713A; outline-style: solid/i);
+  p.post({ type: 'quilt:mode', mode: 'inspect', marks: DARK });
+  assert.match(css(sel()), /border[^;]*#E05A24/i);
+  assert.match(css(sel().firstElementChild as HappyElement), /color: #0E0D0B/i);
+  assert.match(css(p.$('[data-qid="q2"]')), /outline-color: #E05A24; outline-style: dashed/i);
+  assert.match(css(p.$('[data-quilt-mark][data-kind="done"]')), /background: #5FD3A4/i);
+  await p.close();
+});
+
+test('运行时源码里没有写死的颜色（叠层遮罩那一处除外，它是用户原型的遮罩）', () => {
+  const src = fs.readFileSync(path.resolve(import.meta.dirname, '../../../packages/core/src/preview-runtime.js'), 'utf8');
+  const colors = src.match(/#[0-9a-f]{3,8}\b|rgba?\([^)]*\)/gi) ?? [];
+  assert.deepEqual(colors, ['rgba(0,0,0,0.45)']);
 });
 
 test('换屏与叠层：swapped 带路由，点遮罩报 overlay-dismiss', async () => {

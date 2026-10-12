@@ -6,7 +6,7 @@ import { cn } from '@/ui/ui';
 // 工具的顶栏只有 48 px 高，两者都放不下，所以分成两个组件各司其职：
 //   <Wordmark> 字标——Space Grotesk 500 / -0.03 em，是唯一能跟着 chrome 缩小的品牌元素；
 //   <BrandSymbol> 完整符号——只用在放得下 64 px 的地方，低于下限直接报错而不是偷偷缩。
-// 深色外壳上一律用反白版（BRAND.md §3「Ink 深底优先反白」）。
+// 浅色外观用石墨灰版、深色外观用反白版（brand/DESIGN.md「资产映射」）：两张都在文档里、按 dark: 变体显隐，首帧就是对的那张。
 
 export function Wordmark({ className }: { className?: string }) {
   return <span className={cn('wordmark', className)}>Quilt</span>;
@@ -25,7 +25,8 @@ export function BrandSymbol({ size = MIN_PX, label, className }: { size?: number
     <span className={cn('block shrink-0', className)} style={{ padding: pad }}>
       {/* 固定 1:1 的矢量，源尺寸可控，不需要 object-fit（VIS-006）；
           显式宽高避免加载期跳动，alt 在加载失败时兜底出文字（PERF-003） */}
-      <img src="/brand/symbol-reverse.svg" alt={label ?? ''} width={size} height={size} style={{ width: size, height: size }} className="block" />
+      <img src="/brand/symbol-graphite.svg" alt={label ?? ''} width={size} height={size} style={{ width: size, height: size }} className="block dark:hidden" />
+      <img src="/brand/symbol-reverse.svg" alt={label ?? ''} width={size} height={size} style={{ width: size, height: size }} className="hidden dark:block" />
     </span>
   );
 }

@@ -31,17 +31,17 @@ export function ArrangeBar({ count, yieldToPanel, onArrange }: { count: number; 
   };
   return (
       <div role="toolbar" aria-orientation="horizontal" aria-label={`排列已选的 ${count} 屏`} data-testid="arrange-bar" onKeyDown={onKey}
-        className={`absolute left-0 right-[var(--chrome-right)] top-16 z-20 mx-auto flex w-max items-center gap-0.5 rounded-full border border-line bg-panel/95 p-1 shadow-lg backdrop-blur${yieldToPanel ? ' [@media(max-width:48rem)]:hidden' : ''}`}>
-        <span className="whitespace-nowrap px-2 text-xs text-muted tabular-nums">{count} 屏</span>
+        className={`absolute left-0 right-[var(--chrome-right)] top-16 z-20 mx-auto flex w-max items-center gap-0.5 rounded-md chrome p-1${yieldToPanel ? ' [@media(max-width:48rem)]:hidden' : ''}`}>
+        <span className="whitespace-nowrap px-2 type-label text-text-secondary tabular-nums">{count} 屏</span>
         {ALIGN_BTNS.map(([k, label, Icon], i) => (
           <IconButton key={k} ref={(el) => { refs.current[i] = el; }} tabIndex={i === cursor ? 0 : -1} size="xs" tip="bottom" label={label} data-testid={`arrange-${k}`} onFocus={() => setCursor(i)} onClick={() => { setCursor(i); onArrange(k); }}><Icon size={16} aria-hidden="true" /></IconButton>
         ))}
-        <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
+        <span className="mx-1 h-5 w-px bg-border-subtle" aria-hidden="true" />
         {SPACE_BTNS.map(([k, label, Icon], i) => {
           const at = ALIGN_BTNS.length + i;
           return <IconButton key={k} ref={(el) => { refs.current[at] = el; }} tabIndex={at === cursor ? 0 : -1} size="xs" tip="bottom" label={label} desc="保住最左 / 最上和最右 / 最下两屏，中间按间隙均分" unavailable={count < 3 ? '至少选 3 屏' : false} data-testid={`arrange-${k}`} onFocus={() => setCursor(at)} onClick={() => { setCursor(at); onArrange(k); }}><Icon size={16} aria-hidden="true" /></IconButton>;
         })}
-        <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
+        <span className="mx-1 h-5 w-px bg-border-subtle" aria-hidden="true" />
         {LAYOUT_BTNS.map(([k, label, Icon], i) => {
           const at = ALIGN_BTNS.length + SPACE_BTNS.length + i;
           return <IconButton key={k} ref={(el) => { refs.current[at] = el; }} tabIndex={at === cursor ? 0 : -1} size="xs" tip="bottom" label={label} desc={k === 'hrow' ? `按当前左右顺序排成一行，间距 ${LAYOUT_GAP}` : `按当前上下顺序排成一列，间距 ${LAYOUT_GAP}`} data-testid={`arrange-${k}`} onFocus={() => setCursor(at)} onClick={() => { setCursor(at); onArrange(k); }}><Icon size={16} aria-hidden="true" /></IconButton>;

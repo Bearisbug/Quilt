@@ -35,19 +35,19 @@ export function PaletteSection({ tokens, palette, colorMode, savedColorMode, onC
   return (
     <div className="space-y-1.5" data-testid="palette-section">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted">色板来源</span>
+        <span className="type-label font-medium text-text-secondary">色板来源</span>
         <div className="flex items-center gap-2">
           {palette?.dark && (
-            <div className="flex rounded-md border border-line p-0.5" role="group" aria-label="色板模式" data-testid="palette-mode">
+            <div className="flex rounded-md border border-border-subtle p-0.5" role="group" aria-label="色板模式" data-testid="palette-mode">
               {(['light', 'dark'] as const).map((m) => (
                 <button key={m} type="button" aria-pressed={colorMode === m} data-testid={`palette-mode-${m}`}
                   onClick={() => onChange({ palette, colorMode: m })}
-                  className={`rounded px-2 py-0.5 text-[11px] ${colorMode === m ? 'bg-accent text-white' : 'text-muted hover:text-fg'}`}>{m === 'light' ? '亮' : '暗'}</button>
+                  className={`rounded-sm px-2 py-0.5 type-caption ${colorMode === m ? 'bg-primary text-on-primary' : 'text-text-secondary state-layer'}`}>{m === 'light' ? '亮' : '暗'}</button>
               ))}
             </div>
           )}
           <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} data-testid="palette-toggle"
-            className="rounded-md px-1.5 py-0.5 text-[11px] text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">
+            className="rounded-md px-1.5 py-0.5 type-caption text-text-secondary state-layer focus-ring">
             {overridden ? `品牌色板 · ${overridden} 键覆盖` : '种子派生'}{open ? ' ▴' : ' ▾'}
           </button>
         </div>
@@ -62,26 +62,26 @@ export function PaletteSection({ tokens, palette, colorMode, savedColorMode, onC
               const stale = !isBrand && colorMode !== savedColorMode;
               const value = active[key] ?? tokens.colors[key];
               return (
-                <li key={key} className="flex items-center gap-1.5 rounded-md border border-line px-1.5 py-1" data-token={key} data-source={isBrand ? 'brand' : 'derived'}>
-                  <label className="relative size-5 shrink-0 cursor-pointer rounded-sm border border-line" style={{ background: value }}>
+                <li key={key} className="flex items-center gap-1.5 rounded-md border border-border-subtle px-1.5 py-1" data-token={key} data-source={isBrand ? 'brand' : 'derived'}>
+                  <label className="relative size-5 shrink-0 cursor-pointer rounded-sm border border-border-subtle" style={{ background: value }}>
                     <span className="sr-only">改 {kebab(key)} 的颜色</span>
                     <input type="color" value={value} onChange={(e) => setKey(key, e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" />
                   </label>
                   {/* 名字与色值分两行：并排放在窄面板里会把色值截断，而色值才是这里要看的东西 */}
                   <span className="min-w-0 flex-1 leading-tight">
-                    <span className={`block truncate text-[11px] ${isBrand ? 'text-fg' : 'text-muted'}`} title={kebab(key)}>{kebab(key)}</span>
-                    <span className="block font-mono text-[10px] text-muted">{stale ? '保存后按新模式派生' : value}</span>
+                    <span className={`block truncate type-caption ${isBrand ? 'text-text-primary' : 'text-text-secondary'}`} title={kebab(key)}>{kebab(key)}</span>
+                    <span className="block font-mono type-caption text-text-secondary">{stale ? '保存后按新模式派生' : value}</span>
                   </span>
                   {isBrand && (
                     <button type="button" aria-label={`把 ${kebab(key)} 退回种子派生`} onClick={() => dropKey(key)}
-                      className="shrink-0 rounded px-1 text-[11px] text-muted hover:text-danger focus-visible:outline-2 focus-visible:outline-accent">×</button>
+                      className="shrink-0 rounded-sm px-1 type-caption text-text-secondary state-layer focus-ring">×</button>
                   )}
                 </li>
               );
             })}
           </ul>
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] text-muted">改过的键标为品牌色，其余仍由种子派生</span>
+            <span className="type-caption text-text-secondary">改过的键标为品牌色，其余仍由种子派生</span>
             <Button size="sm" disabled={!overridden} data-testid="palette-clear" onClick={() => onChange({ palette: null, colorMode: 'light' })}>清空品牌色板</Button>
           </div>
         </>
@@ -135,13 +135,13 @@ export function AssetsSection({ projectId, items, colors, onChanged }: { project
   };
 
   return (
-    <div className={`space-y-1.5 border-t pt-3 ${dropping ? 'border-accent outline-2 outline-dashed outline-accent outline-offset-2' : 'border-line'}`}
+    <div className={`space-y-1.5 border-t pt-3 ${dropping ? 'border-primary outline-2 outline-dashed outline-accent outline-offset-2' : 'border-border-subtle'}`}
       data-testid="assets-panel" data-dropping={dropping ? '' : undefined} onDrop={onDrop}
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropping(false); }}>
       <div className="flex items-center justify-between gap-2">
         {/* 拖入提示占用标题本来的位置：另起一行会把下面的列表整块推走 */}
-        <span className={`text-xs font-medium ${dropping ? 'text-accent-strong' : 'text-muted'}`}>{dropping ? '松手上传到这个项目' : <>素材（生成时可被 &lt;img&gt; 引用）</>}</span>
+        <span className={`type-label font-medium ${dropping ? 'text-primary' : 'text-text-secondary'}`}>{dropping ? '松手上传到这个项目' : <>素材（生成时可被 &lt;img&gt; 引用）</>}</span>
         <Button size="sm" pending={uploading} disabled={uploading} data-testid="asset-upload" onClick={() => fileRef.current?.click()}>
           <Upload size={14} aria-hidden="true" />上传
         </Button>
@@ -150,22 +150,22 @@ export function AssetsSection({ projectId, items, colors, onChanged }: { project
       <input ref={fileRef} type="file" multiple accept={ASSET_MEDIA_TYPES.join(',')} className="sr-only"
         onChange={(e) => { if (e.target.files) void upload(e.target.files); }} />
       {items.length === 0 ? (
-        <p className="text-xs text-muted">还没有素材。把 logo、插图、模板拖进这块区域或点「上传」，生成的屏就能直接用真图，而不是拿色块占位。</p>
+        <p className="type-label text-text-secondary">还没有素材。把 logo、插图、模板拖进这块区域或点「上传」，生成的屏就能直接用真图，而不是拿色块占位。</p>
       ) : (
         <ul className="flex flex-col gap-1" data-testid="asset-list">
           {items.map((a) => (
-            <li key={a.id} className="flex items-center gap-2 rounded-md border border-line p-1.5" data-testid="asset-item" data-name={a.name}>
+            <li key={a.id} className="flex items-center gap-2 rounded-md border border-border-subtle p-1.5" data-testid="asset-item" data-name={a.name}>
               {/* 素材长宽不可控：固定方槽 + contain，logo 不能被裁（VIS-006 / PERF-003） */}
               <AssetTile asset={a} colors={colors} className="size-10 shrink-0 rounded-sm p-0.5" />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs text-fg" title={a.name}>{a.name}</span>
-                <span className="block truncate text-[11px] text-muted">{a.mediaType.replace('image/', '').replace('+xml', '')} · {a.width && a.height ? `${a.width}×${a.height} · ` : ''}{Math.max(1, Math.round(a.bytes / 1024))} KB</span>
+                <span className="block truncate type-label text-text-primary" title={a.name}>{a.name}</span>
+                <span className="block truncate type-caption text-text-secondary">{a.mediaType.replace('image/', '').replace('+xml', '')} · {a.width && a.height ? `${a.width}×${a.height} · ` : ''}{Math.max(1, Math.round(a.bytes / 1024))} KB</span>
               </span>
               <button type="button" aria-label={`复制「${a.name}」的引用地址`} data-testid="asset-copy"
                 onClick={() => { void navigator.clipboard.writeText(a.url).then(() => toast('引用地址已复制'), () => toast('复制失败', 'error')); }}
-                className="shrink-0 rounded-md p-1 text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"><Copy size={14} aria-hidden="true" /></button>
+                className="shrink-0 rounded-md p-1 text-text-secondary state-layer focus-ring"><Copy size={14} aria-hidden="true" /></button>
               <button type="button" aria-label={`删除素材「${a.name}」`} data-testid="asset-delete" onClick={() => setPendingDelete(a)}
-                className="shrink-0 rounded-md p-1 text-muted hover:text-danger focus-visible:outline-2 focus-visible:outline-accent"><Trash2 size={14} aria-hidden="true" /></button>
+                className="shrink-0 rounded-md p-1 text-text-secondary state-layer focus-ring"><Trash2 size={14} aria-hidden="true" /></button>
             </li>
           ))}
         </ul>

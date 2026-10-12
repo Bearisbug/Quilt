@@ -7,10 +7,10 @@ import { page, step, shot } from './shared.ts';
 type Box = { x: number; y: number; width: number; height: number };
 const overlapArea = (a: Box, b: Box) => Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
 const blurActive = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-// 铺满视口、带背景模糊的 fixed 层有几层：弹层只该有一层遮罩
+// 铺满视口、有底色的 fixed 层（弹层遮罩）有几层：弹层只该有一层遮罩。v1.08 起遮罩是半透明墨色、不模糊（§13.1），按底色认
 const backdropLayers = () => page.evaluate(() => [...document.querySelectorAll('body *')].filter((el) => {
   const cs = getComputedStyle(el); const r = el.getBoundingClientRect();
-  return cs.position === 'fixed' && r.width >= innerWidth - 1 && r.height >= innerHeight - 1 && cs.backdropFilter !== 'none';
+  return cs.position === 'fixed' && r.width >= innerWidth - 1 && r.height >= innerHeight - 1 && cs.backgroundColor !== 'rgba(0, 0, 0, 0)';
 }).length);
 
 // TC-CORE-047 侧面板与弹层：修订参数不残留、⌘K 列全、工具栏提示在面板之上、关面板焦点归还、单层遮罩、改名不被指针抢焦点（v0.78）

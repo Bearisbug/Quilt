@@ -9,6 +9,7 @@ import { useViewport, WHEEL_PAN_SPEED } from '@/canvas/useViewport';
 import { useFocusedFrame } from '@/canvas/useFocusedFrame';
 import { ScreenCard, ComponentCard, keepPointerFocus, type CardActions, type CardKind } from '@/canvas/cards';
 import { keyAction, toSelection, type ElementSelection } from '@/canvas/frameMessages';
+import { markPalette, useResolvedMode } from '@/lib/theme';
 
 // 角标里提示的进入选择元素模式的键，要与 Canvas.tsx 的键位表一致（REQ-EDIT-004）
 const INSPECT_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘E' : 'Ctrl+E';
@@ -225,7 +226,7 @@ export function CanvasView(p: CanvasProps) {
       if (c.width !== Math.round(w * ratio) || c.height !== Math.round(h * ratio)) { c.width = Math.round(w * ratio); c.height = Math.round(h * ratio); }
       if (!d.colors) {
         const cs = getComputedStyle(c);
-        d.colors = { line: cs.getPropertyValue('--color-accent').trim(), badge: cs.getPropertyValue('--color-accent').trim(), badgeText: cs.getPropertyValue('--color-on-accent').trim(), font: cs.fontFamily };
+        d.colors = { line: cs.getPropertyValue('--semantic-color-mark-line').trim(), badge: cs.getPropertyValue('--semantic-color-mark-line').trim(), badgeText: cs.getPropertyValue('--semantic-color-mark-on-line').trim(), font: cs.fontFamily };
       }
       const g = c.getContext('2d');
       if (g) drawEdges(g, d.curves, vp.current, { w, h }, ratio, d.colors);
@@ -233,6 +234,9 @@ export function CanvasView(p: CanvasProps) {
   }, [viewportRef, vp]);
   const edgeCanvasRef = useCallback((el: HTMLCanvasElement | null) => { edgeCanvas.current = el; edgeDraw.current.colors = null; if (el) paintEdges(); }, [paintEdges]);
   useEffect(() => { edgeDraw.current.curves = edgeCurveList; paintEdges(); }, [edgeCurveList, paintEdges]);
+  // 连线颜色是 CSS 变量的快照：换外观后丢掉重读（VIS-010）
+  const themeMode = useResolvedMode();
+  useEffect(() => { edgeDraw.current.colors = null; paintEdges(); }, [themeMode, paintEdges]);
   useEffect(() => {
     const node = viewportRef.current;
     const d = edgeDraw.current;
@@ -339,7 +343,7 @@ export function CanvasView(p: CanvasProps) {
     const prev = prevCompFocus.current;
     prevCompFocus.current = now;
     const post = (id: string, mode: 'inspect' | 'interact') =>
-      compFrames.current.get(id)?.contentWindow?.postMessage({ type: 'quilt:mode', mode } as ParentToPreview, propsRef.current.previewOrigin);
+      compFrames.current.get(id)?.contentWindow?.postMessage({ type: 'quilt:mode', mode, marks: markPalette() } as ParentToPreview, propsRef.current.previewOrigin);
     if (prev && prev !== now) post(prev, 'interact');
     if (!now) return;
     const mode = p.inspectMode ? 'inspect' : 'interact';
@@ -347,7 +351,7 @@ export function CanvasView(p: CanvasProps) {
     // iframe 可能还没 ready（切模式与聚焦常在同一帧），补发一次
     const t = setTimeout(() => post(now, mode), 300);
     return () => clearTimeout(t);
-  }, [p.focusedComponentId, p.inspectMode]);
+  }, [p.focusedComponentId, p.inspectMode, themeMode]);
 
   // panTo：镜头中心平移到世界坐标（缩放不变）；reveal：把一张卡（屏或组件）摆到可用区中央，缩放取「装得下」与 1:1 的较小者（REQ-CORE-024）
   const panTo = useCallback((x: number, y: number) => moveTo(panToViewport(x, y, vp.current.zoom, safeArea()), { duration: 200 }), [safeArea, moveTo, vp]);
@@ -447,7 +451,7 @@ export function CanvasView(p: CanvasProps) {
       // 组件版本一升，previewUrl 的 ?v= 就变、iframe 重新导航，新文档里运行时是初始的 interact——
       // 而同步模式那个 effect 的依赖（focusedComponentId / inspectMode）都没变，不会重跑。
       // 所以这里接住新文档的 ready，把当前模式补发一次；不接的话「改完一个元素就得退出重进」。
-      if (m.type === 'quilt:ready') e.source?.postMessage({ type: 'quilt:mode', mode: p.inspectMode ? 'inspect' : 'interact' } as ParentToPreview, p.previewOrigin);
+      if (m.type === 'quilt:ready') e.source?.postMessage({ type: 'quilt:mode', mode: p.inspectMode ? 'inspect' : 'interact', marks: markPalette() } as ParentToPreview, p.previewOrigin);
       // ⌘E / ⌘/ 同屏一样转发给父页的键位表：不转发的话焦点一落进组件 iframe，按 ⌘E 就是死键——
       // 模式退不掉，选中框与「tag · qid」标签留在卡片上（组件卡的 iframe 常驻，不像屏那样退出即卸载）
       if (m.type === 'quilt:key') { const a = keyAction(m, false); if (a?.kind === 'exit') p.onFocusComponent?.(null); else if (a?.kind === 'shortcut') p.onShortcut?.(a.code, a.alt); }
@@ -661,7 +665,7 @@ export function CanvasView(p: CanvasProps) {
       {/* 连线（v1.02 ADR-029）：压在世界层下面，卡片盖住它；不进无障碍树，供测试读的数在 data-* 上 */}
       {p.showLinks && edges.length > 0 && <canvas ref={edgeCanvasRef} className="edges" aria-hidden="true" data-testid="link-edges" data-total={edges.length} data-drawn={edgeShown.length} data-max-count={Math.max(0, ...edgeShown.map((e) => e.count))} />}
       {p.showLinks && edges.length > EDGE_LIMIT && !p.focusedId && p.selectedIds.length === 0 && (
-        <p data-testid="links-hint" className="pointer-events-none absolute left-0 right-[var(--chrome-right)] top-16 z-20 mx-auto w-max max-w-[calc(100%-2rem)] truncate rounded-full border border-line bg-panel/95 px-3 py-1.5 text-xs text-muted shadow-lg backdrop-blur">共 {edges.length} 条连线，选中屏后只显示它进出的</p>
+        <p data-testid="links-hint" className="pointer-events-none absolute left-0 right-[var(--chrome-right)] top-16 z-20 mx-auto w-max max-w-[calc(100%-2rem)] truncate chrome rounded-md px-3 py-1.5 type-label text-text-secondary">共 {edges.length} 条连线，选中屏后只显示它进出的</p>
       )}
       <div ref={worldRef} className="world" style={view.initialWorldStyle}>
         {/* 按住空格时从风格指南卡上起手同样是平移（v0.80）：不带 nopan、不接住按下；获焦（只会来自键盘）时镜头把它摆进可用区 */}
@@ -701,13 +705,13 @@ export function CanvasView(p: CanvasProps) {
                   {iframeReady && family.length >= 2 && (
                     <div className="variant-chips nopan" role="group" aria-label="状态变体" data-testid="variant-chips">
                       {family.map((v) => (
-                        <button key={v.id} type="button" className="variant-chip" aria-pressed={shownId === v.id} data-testid="variant-chip" data-id={v.id}
+                        <button key={v.id} type="button" className="variant-chip state-layer focus-ring" aria-pressed={shownId === v.id} data-testid="variant-chip" data-id={v.id}
                           onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); void frame.swapVariant(v.id); }}>{v.variantOf ? v.variantName : '默认'}</button>
                       ))}
                     </div>
                   )}
                   {frameFailed && !iframeReady ? (
-                    <button type="button" className="badge failed nopan" data-testid="frame-retry" onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); frame.retryFrame(); }}>加载失败 · 重试</button>
+                    <button type="button" className="badge failed state-layer nopan" data-testid="frame-retry" onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); frame.retryFrame(); }}>加载失败 · 重试</button>
                   ) : <div className="badge">{!iframeReady ? '加载中' : p.annotateMode ? '批注中' : p.inspectMode ? '选择元素中' : '交互中'} · {p.navStack.length ? p.navStack[p.navStack.length - 1] : s.route}{iframeReady ? (p.inspectMode ? ' · 点屏里的元素' : ` · 选元素按 ${INSPECT_KEY}`) : ''}</div>}
                 </>
               )}
@@ -735,7 +739,7 @@ export function CanvasView(p: CanvasProps) {
       </div>
       {/* 待命提示压在卡片上也得读得出（v0.80）：chrome 材质——透明强调色底（15%）压在白卡上对比度只有约 1.1:1；组件卡在交互态时不显示 */}
       {p.armed && !p.focusedId && !p.focusedComponentId && (
-        <div className="chrome pointer-events-none absolute left-1/2 top-16 z-10 -translate-x-1/2 rounded-full px-3 py-1 text-xs text-fg" data-testid="armed-hint">
+        <div className="chrome pointer-events-none absolute left-1/2 top-16 z-10 -translate-x-1/2 rounded-md px-3 py-1 type-label text-text-primary" data-testid="armed-hint">
           {p.armed === 'annotate' ? '批注模式：点任意一屏开始' : '选择元素模式：点任意一屏开始'} · Esc 退出
         </div>
       )}

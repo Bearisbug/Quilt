@@ -213,7 +213,7 @@ await step('TC-EDIT-005', async () => {
   expect(rgb[0] > rgb[2], `primary 不是暖色: ${primary}`);
   // 保存成功即弹「回刷所有屏？」（v0.38）：面板那颗同名键此刻被 inert 挡着，要点弹层里的确认键
   await page.getByTestId('ds-apply-confirm').click();
-  await page.locator('.bg-panel-2', { hasText: '设计系统已回刷 10 屏' }).waitFor({ timeout: 120000 });
+  await page.locator('[data-testid="message"]:not([data-role="user"])', { hasText: '设计系统已回刷 10 屏' }).waitFor({ timeout: 120000 });
   const after = await detail(dsProject);
   for (const s of after.screens) {
     const prev = before.screens.find((x) => x.id === s.id)!;
@@ -404,7 +404,7 @@ await step('TC-EDIT-009', async () => {
     await page.keyboard.press('ControlOrMeta+a');
     await page.fill('#chat-input', '所有页面正文字再大一点');
     await page.keyboard.press('Enter');
-    await page.locator('.bg-panel-2', { hasText: '已更新 2 屏' }).waitFor({ timeout: 120000 });
+    await page.locator('[data-testid="message"]:not([data-role="user"])', { hasText: '已更新 2 屏' }).waitFor({ timeout: 120000 });
     expect((await detail(r.projectId)).designSystem.version === version0, '⌘A + 发送不该改设计系统');
     // 2 回执「记为约定」→ propose_design_system 作业（instruction = 原指令、screenId = 一张改后的屏）→ 预览对话框列出绝对规则
     const remember = page.getByTestId('remember-convention').last();

@@ -220,7 +220,7 @@ await step('TC-CORE-012', async () => {
   expect((await verbLine(page)).includes('改 1 屏'), `动词行应为「改 1 屏」：${await verbLine(page)}`);
   await page.fill('#chat-input', 'Turn this page into a grouped list with section headers');
   await page.keyboard.press('Enter');
-  await page.locator('.bg-panel-2', { hasText: '已更新 1 屏' }).waitFor({ timeout: 120000 });
+  await page.locator('[data-testid="message"]:not([data-role="user"])', { hasText: '已更新 1 屏' }).waitFor({ timeout: 120000 });
   const after = await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${projectId}`);
   const s3 = screens[2].id;
   expect(after.body.screens.find((s) => s.id === s3)!.currentRevisionId !== before.body.screens.find((s) => s.id === s3)!.currentRevisionId, '/s3 未产生新修订');

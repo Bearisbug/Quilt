@@ -2,6 +2,7 @@
 export const SETTINGS_SECTIONS = [
   { id: 'usage', label: '本月用量' },
   { id: 'runners', label: '生成通道' },
+  { id: 'appearance', label: '外观' },
 ] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['id'];
 export const isSettingsSection = (v: string | null): v is SettingsSection => SETTINGS_SECTIONS.some((s) => s.id === v);

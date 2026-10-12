@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import { useResolvedMode } from '@/lib/theme';
 
 // 小地图（REQ-CORE-024 v0.61）：按全部卡片的外接框等比缩放，画屏（实心）、组件（描边）、风格指南卡（虚线）与当前视口框。
 // 视图变换每帧都在变，所以不经父组件 props 走：自己订阅 CanvasView 的视图流、rAF 合帧后只重画这一块。
@@ -59,7 +60,7 @@ export function Minimap({ rects, onView, onPanTo, onMoveView }: {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     const css = getComputedStyle(el);
-    const fg = css.getPropertyValue('--color-fg').trim(); const accent = css.getPropertyValue('--color-accent').trim();
+    const fg = css.getPropertyValue('--semantic-color-text-primary').trim(); const accent = css.getPropertyValue('--semantic-color-action-primary').trim();
     const b = box();
     ctx.lineWidth = 1;
     for (const r of rectsRef.current) {
@@ -87,6 +88,9 @@ export function Minimap({ rects, onView, onPanTo, onMoveView }: {
   // 按卡片的几何判断「变了」：每次重取项目详情 rects 都是新数组，按引用判的话一次与卡片无关的重取（截图就绪、签名续取）也会让外接框重算、框跳一下
   const rectsKey = rects.map((r) => `${r.id}:${r.x},${r.y},${r.w},${r.h}`).join('|');
   useEffect(() => { if (!drag.current) frozen.current = null; draw(); }, [rectsKey, draw]);
+  // 颜色是画的那一刻读的 CSS 变量快照：换外观后按新模式重画一次（VIS-010）
+  const mode = useResolvedMode();
+  useEffect(() => { draw(); }, [mode, draw]);
 
   const at = (e: ReactPointerEvent<HTMLCanvasElement>) => { const r = ref.current!.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top] as const; };
   // 点空白处镜头平移到那一点（缩放不变）；按在视口框上是抓住它拖：从抓住的那一点起按位移 1:1 平移，框不跳到指针下（MOTION-017）。

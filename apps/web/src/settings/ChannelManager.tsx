@@ -87,20 +87,20 @@ export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOption
     <div data-testid="channel-manager" ref={rootRef} tabIndex={-1} className="outline-none">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold">生成通道</h2>
-          <p className="mt-1 text-xs text-muted">画布输入框的下拉只列<b className="font-medium text-fg">验证通过</b>的通道。在这里添加、验证、修改或删除；密钥加密保存，只回显末 4 位。</p>
+          <h2 className="type-body font-semibold">生成通道</h2>
+          <p className="mt-1 type-label text-text-secondary">画布输入框的下拉只列<b className="font-medium text-text-primary">验证通过</b>的通道。在这里添加、验证、修改或删除；密钥加密保存，只回显末 4 位。</p>
         </div>
         <Button size="sm" variant="primary" data-testid="add-channel" aria-label="添加通道" onClick={(e) => openDialog(e, { mode: 'add' })}>添加通道</Button>
       </div>
 
       {!secretsOk && (
-        <p data-testid="secrets-missing" className="mt-3 rounded-md border border-warn/60 bg-warn/10 px-3 py-2 text-xs leading-cn text-warn">
+        <p data-testid="secrets-missing" className="mt-3 rounded-md border border-warning/60 bg-warning/10 px-3 py-2 type-label leading-(--semantic-typography-body-line-height) text-warning">
           服务端没配 <code className="font-mono">QUILT_SECRETS_KEY</code>，需要 API Key 的通道（Anthropic / Gemini / OpenAI 兼容）存不了：在仓库根的 .env 里设置后重启服务端。本机订阅不存密钥，照常可加。
         </p>
       )}
 
       {loadError && (
-        <p role="alert" className="mt-3 flex items-center justify-between gap-2 rounded-md border border-danger/60 bg-danger/10 px-3 py-2 text-xs text-danger">
+        <p role="alert" className="mt-3 flex items-center justify-between gap-2 rounded-md border border-error/60 bg-error/10 px-3 py-2 type-label text-error">
           <span>{loadError}</span><Button size="sm" onClick={() => void load()}>重试</Button>
         </p>
       )}
@@ -131,23 +131,23 @@ export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOption
 function Group({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
     <section aria-label={title}>
-      <h3 className="text-[11px] font-semibold tracking-wide text-muted">{title}</h3>
-      {hint && <p className="mt-1 text-[11px] text-muted">{hint}</p>}
-      {Array.isArray(children) && children.length > 0 && <ul className="mt-1 divide-y divide-line">{children}</ul>}
+      <h3 className="type-overline font-medium text-text-secondary">{title}</h3>
+      {hint && <p className="mt-1 type-caption text-text-secondary">{hint}</p>}
+      {Array.isArray(children) && children.length > 0 && <ul className="mt-1 divide-y divide-border-subtle">{children}</ul>}
     </section>
   );
 }
 
 // 加载骨架按真实行结构占位：图标圆、两行文本、状态药丸（IA-006）；reduced-motion 下不闪
 function RowsSkeleton() {
-  const bar = 'rounded bg-panel-2 animate-pulse motion-reduce:animate-none';
+  const bar = 'rounded-sm bg-(--semantic-color-surface-sunken) animate-pulse motion-reduce:animate-none';
   return (
-    <ul aria-hidden="true" className="mt-4 divide-y divide-line">
+    <ul aria-hidden="true" className="mt-4 divide-y divide-border-subtle">
       {[0, 1, 2].map((i) => (
         <li key={i} className="flex items-center gap-3 py-3">
           <span className={cn('size-5 rounded-full', bar)} />
           <span className="flex-1 space-y-1.5"><span className={cn('block h-3 w-40', bar)} /><span className={cn('block h-2.5 w-56 max-w-full', bar)} /></span>
-          <span className={cn('h-5 w-12 rounded-full', bar)} />
+          <span className={cn('h-5 w-12 rounded-sm', bar)} />
         </li>
       ))}
     </ul>
@@ -175,21 +175,21 @@ function RunnerRow(p: {
   const { r, channel: c } = p;
   const st = statusOf(r, c);
   const sub = r.source === 'channel' && c ? [KIND_LABEL[c.kind], c.model, hostOf(c.endpoint)].filter(Boolean).join(' · ') : r.hint ?? '';
-  const pill = st.tone === 'success' ? 'border-success/60 text-success' : st.tone === 'danger' ? 'border-danger/60 text-danger' : 'border-line text-muted';
+  const pill = st.tone === 'success' ? 'border-success/60 text-success' : st.tone === 'danger' ? 'border-error/60 text-error' : 'border-border-subtle text-text-secondary';
   return (
     <li data-testid="runner-row" data-runner-id={r.id} className="py-3">
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <VendorIcon vendor={r.vendor} size={20} className="mt-0.5 shrink-0" />
         <div className="min-w-0 flex-1 basis-48">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="min-w-0 max-w-full truncate text-sm font-medium">{r.label}</span>
-            <span data-testid="runner-status" className={cn('shrink-0 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px]', pill)}>{st.text}</span>
+            <span className="min-w-0 max-w-full truncate type-body font-medium">{r.label}</span>
+            <span data-testid="runner-status" className={cn('shrink-0 whitespace-nowrap rounded-sm border px-2 py-0.5 type-caption', pill)}>{st.text}</span>
             {/* 原因写在药丸旁边而不是 tooltip 里——触屏没有 hover，且这是决定「为什么用不了」的关键信息 */}
-            {st.detail && <span className="text-[11px] text-danger [overflow-wrap:anywhere]">{st.detail}</span>}
+            {st.detail && <span className="type-caption text-error [overflow-wrap:anywhere]">{st.detail}</span>}
           </div>
-          {sub && <div className="mt-0.5 truncate text-[11px] text-muted">{sub}</div>}
+          {sub && <div className="mt-0.5 truncate type-caption text-text-secondary">{sub}</div>}
           {p.probeResult && (
-            <p role="status" className={cn('mt-1 text-[11px] [overflow-wrap:anywhere]', p.probeResult.ok ? 'text-success' : 'text-danger')}>
+            <p role="status" className={cn('mt-1 type-caption [overflow-wrap:anywhere]', p.probeResult.ok ? 'text-success' : 'text-error')}>
               {p.probeResult.ok
                 ? `验证通过${p.probeResult.latencyMs != null ? ` · ${p.probeResult.latencyMs} ms` : ''}${p.probeResult.detail ? ` · ${p.probeResult.detail}` : ''}`
                 /* 自建通道的失败即结论（状态已落库）；预置 / 本机通道只是「这一次没通」，可用性另有来源 */
@@ -197,7 +197,7 @@ function RunnerRow(p: {
             </p>
           )}
           {/* 收起时整块卸载，不留看不见的可聚焦内容（A11Y-011） */}
-          {p.hintOpen && r.setupHint && <div className="mt-2 whitespace-pre-wrap rounded-md border border-line bg-canvas p-3 text-xs leading-cn text-fg">{r.setupHint}</div>}
+          {p.hintOpen && r.setupHint && <div className="mt-2 whitespace-pre-wrap rounded-md border border-border-subtle bg-(--semantic-color-surface-sunken) p-3 type-label leading-(--semantic-typography-body-line-height) text-text-primary">{r.setupHint}</div>}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {r.setupHint && (
@@ -304,17 +304,17 @@ function ChannelDialog(p: { mode: 'add' | 'edit'; channel?: ChannelDto; secretsO
 
   const err = (id: string) => errors[id] ? { 'aria-invalid': true as const, 'aria-describedby': `${id}-error` } : {};
   // 普通函数而不是内嵌组件：内嵌组件每次渲染都是新类型，会整段重挂、role=alert 反复播报
-  const errorLine = (id: string) => (errors[id] ? <p id={`${id}-error`} role="alert" className="mt-1 text-xs text-danger">{errors[id]}</p> : null);
+  const errorLine = (id: string) => (errors[id] ? <p id={`${id}-error`} role="alert" className="mt-1 type-label text-error">{errors[id]}</p> : null);
   const endpointPlaceholder = kind === 'openai' ? (VENDOR_PRESETS[vendor].endpoint || 'https://…/v1') : `留空用官方端点 ${VENDOR_PRESETS[DEFAULT_VENDOR[kind]].endpoint}`;
 
   return (
     <Overlay onClose={dirty ? () => {} : p.onClose}>
       <form ref={ref} role="dialog" aria-modal="true" aria-labelledby="ch-title" data-testid="channel-dialog" tabIndex={-1} noValidate onSubmit={submit}
-        className="scroll max-h-[calc(100dvh-2rem)] w-full max-w-md rounded-lg border border-line bg-panel p-5 shadow-2xl fade-up outline-none">
-        <h2 id="ch-title" className="text-sm font-semibold">{editing ? `编辑「${saved!.label}」` : '添加通道'}</h2>
-        <p className="mt-1 text-xs text-muted">保存后会立刻发一次最小请求验证；验证通过的通道才会出现在画布输入框的下拉里。</p>
+        className="scroll max-h-[calc(100dvh-2rem)] w-full max-w-md rounded-lg border border-border-subtle bg-surface-overlay p-5 shadow-(--semantic-elevation-overlay) fade-up outline-none">
+        <h2 id="ch-title" className="type-heading3 font-medium">{editing ? `编辑「${saved!.label}」` : '添加通道'}</h2>
+        <p className="mt-1 type-label text-text-secondary">保存后会立刻发一次最小请求验证；验证通过的通道才会出现在画布输入框的下拉里。</p>
         {(serverError || (probe && !probe.ok)) && (
-          <p ref={alertRef} tabIndex={-1} role="alert" className="mt-3 rounded-md border border-danger/60 bg-danger/10 px-3 py-2 text-xs text-danger outline-none [overflow-wrap:anywhere]">
+          <p ref={alertRef} tabIndex={-1} role="alert" className="mt-3 rounded-md border border-error/60 bg-error/10 px-3 py-2 type-label text-error outline-none [overflow-wrap:anywhere]">
             {serverError ?? `已保存，但验证失败：${probe?.error ?? '未知原因'}。改好后再点「保存并验证」。`}
           </p>
         )}
@@ -352,17 +352,17 @@ function ChannelDialog(p: { mode: 'add' | 'edit'; channel?: ChannelDto; secretsO
           </Field>
           )}
           {kind === 'agent-sdk' && (
-            <p className="rounded-md border border-line bg-canvas p-3 text-xs leading-cn text-muted">
-              用运行 Quilt 服务端那台机器上的 <code className="font-mono text-fg">claude</code> 登录态，不需要 API Key。只要填一个这个订阅能用的模型名。
+            <p className="rounded-md border border-border-subtle bg-(--semantic-color-surface-sunken) p-3 type-label leading-(--semantic-typography-body-line-height) text-text-secondary">
+              用运行 Quilt 服务端那台机器上的 <code className="font-mono text-text-primary">claude</code> 登录态，不需要 API Key。只要填一个这个订阅能用的模型名。
             </p>
           )}
           {kind === 'codex' && (
-            <p className="rounded-md border border-line bg-canvas p-3 text-xs leading-cn text-muted">
-              用运行 Quilt 服务端那台机器上的 <code className="font-mono text-fg">codex</code> 登录态（ChatGPT 账号），不需要 API Key；模型名填 Codex 里可选的模型。每次生成拉起一次 <code className="font-mono text-fg">codex exec</code>（不读你的 Codex 配置、MCP 与技能，也不会在你的 Codex 历史里留会话）：验证约 20 秒，生成一屏约 2～4 分钟，比 API 通道慢得多；<code className="font-mono text-fg">gpt-reserve</code> 比 <code className="font-mono text-fg">gpt-6-astra</code> 快约三成。
+            <p className="rounded-md border border-border-subtle bg-(--semantic-color-surface-sunken) p-3 type-label leading-(--semantic-typography-body-line-height) text-text-secondary">
+              用运行 Quilt 服务端那台机器上的 <code className="font-mono text-text-primary">codex</code> 登录态（ChatGPT 账号），不需要 API Key；模型名填 Codex 里可选的模型。每次生成拉起一次 <code className="font-mono text-text-primary">codex exec</code>（不读你的 Codex 配置、MCP 与技能，也不会在你的 Codex 历史里留会话）：验证约 20 秒，生成一屏约 2～4 分钟，比 API 通道慢得多；<code className="font-mono text-text-primary">gpt-reserve</code> 比 <code className="font-mono text-text-primary">gpt-6-astra</code> 快约三成。
             </p>
           )}
         </div>
-        {keyBlocked && <p className="mt-4 text-xs leading-cn text-warn">服务端没配 <code className="font-mono">QUILT_SECRETS_KEY</code>，这个 API Key 存不了。设置后重启服务端再保存。</p>}
+        {keyBlocked && <p className="mt-4 type-label leading-(--semantic-typography-body-line-height) text-warning">服务端没配 <code className="font-mono">QUILT_SECRETS_KEY</code>，这个 API Key 存不了。设置后重启服务端再保存。</p>}
         <div className="mt-5 flex justify-end gap-2">
           <Button onClick={p.onClose}>取消</Button>
           <Button type="submit" variant="primary" data-testid="ch-save" pending={saving} disabled={keyBlocked}>保存并验证</Button>

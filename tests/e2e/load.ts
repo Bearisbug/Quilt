@@ -102,7 +102,7 @@ await step('TC-CORE-050', async () => {
     const tick = () => {
       const world = document.querySelector('.world') as HTMLElement | null;
       const cards = [...document.querySelectorAll('[data-testid="component-card"]')] as HTMLElement[];
-      if (world) w.__samples.push({ t: Math.round(performance.now() - t0), world: world.style.transform, cards: cards.map((c) => { const f = c.querySelector('iframe'); const sk = c.querySelector('.skeleton'); return { name: c.dataset.name, w: c.offsetWidth, h: c.offsetHeight, shown: !!f && getComputedStyle(f).opacity !== '0', skeleton: !!sk && !!sk.querySelector('.sk-sweep') && getComputedStyle(sk).visibility === 'visible' }; }) });
+      if (world) w.__samples.push({ t: Math.round(performance.now() - t0), world: world.style.transform, cards: cards.map((c) => { const f = c.querySelector('iframe'); const sk = c.querySelector('.skeleton'); return { name: c.dataset.name, w: c.offsetWidth, h: c.offsetHeight, shown: !!f && getComputedStyle(f).opacity !== '0', skeleton: !!sk && getComputedStyle(sk).visibility === 'visible' && getComputedStyle(sk, '::before').animationName === 'sk-breathe' }; }) });
       if (performance.now() - t0 < 9000) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -509,28 +509,37 @@ await step('TC-CORE-054', async () => {
   await page.unroute('**/v1/runners');
   await failed.click();
   await page.getByTestId('runner-select').waitFor({ timeout: 8000 });
-  // 8 样式表到达前的底色：从第一帧起就是画布底色 #0E1725，不是浏览器深色默认的 #121212（开发形态下样式表由脚本注入，约 0.5 s 后才生效；
-  // 打包形态下样式表在 head 里阻塞首帧，这一步恒过）。根元素透明时画布底取 body 的背景（CSS 背景传播），两者都透明就是浏览器默认底
-  const p8 = await newPage();
-  await p8.addInitScript(() => {
-    const w = window as unknown as { __bg: string[] };
-    w.__bg = [];
-    const t0 = performance.now();
-    const tick = () => {
-      const clear = 'rgba(0, 0, 0, 0)';
-      const h = getComputedStyle(document.documentElement).backgroundColor;
-      w.__bg.push(h !== clear ? h : document.body ? getComputedStyle(document.body).backgroundColor : clear);
-      if (performance.now() - t0 < 1500) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
-  await p8.goto(`${WEB}/p/${pid}`);
-  await p8.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 10000 });
-  await sleep(1600);
-  const bgs = await p8.evaluate(() => (window as unknown as { __bg: string[] }).__bg);
-  const off = [...new Set(bgs.filter((b) => b !== 'rgb(14, 23, 37)'))];
-  expect(bgs.length > 0 && off.length === 0, `${bgs.length} 帧里有 ${bgs.filter((b) => b !== 'rgb(14, 23, 37)').length} 帧不是画布底色：${off.join('，')}`);
-  return `404 / 502 / 配置 / 根路径列表各有原因与出口；加载期间外壳常驻；对话与通道失败可重试；${bgs.length} 帧底色都是 #0E1725`;
+  // 8 首帧就是所选外观的画布底色（v1.08，REQ-CORE-039）：样式表在 <head> 里阻塞首帧，选过的外观由内联脚本在它之前写到 data-theme。
+  // 系统偏好是浅色：没选过 → 浅色画布底；选过深色 → 从第一帧起就是深色画布底，不先闪一帧浅色。根元素透明时画布底取 body 的（CSS 背景传播）
+  const firstFrames = async (stored: 'dark' | null) => {
+    const pg = await newPage();
+    if (stored) await pg.context().addInitScript((v) => localStorage.setItem('quilt:theme', v), stored);
+    await pg.addInitScript(() => {
+      const w = window as unknown as { __bg: string[] };
+      w.__bg = [];
+      const t0 = performance.now();
+      const tick = () => {
+        const clear = 'rgba(0, 0, 0, 0)';
+        const h = getComputedStyle(document.documentElement).backgroundColor;
+        w.__bg.push(h !== clear ? h : document.body ? getComputedStyle(document.body).backgroundColor : clear);
+        if (performance.now() - t0 < 1500) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await pg.goto(`${WEB}/p/${pid}`);
+    await pg.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 10000 });
+    await sleep(1600);
+    return pg.evaluate(() => (window as unknown as { __bg: string[] }).__bg);
+  };
+  const want = { light: 'rgb(236, 234, 229)', dark: 'rgb(20, 19, 17)' };  // brand/ 的 surface.canvas：浅 #ECEAE5、深 #141311
+  const counts: string[] = [];
+  for (const [mode, stored] of [['light', null], ['dark', 'dark']] as const) {
+    const bgs = await firstFrames(stored);
+    const off = [...new Set(bgs.filter((b) => b !== want[mode]))];
+    expect(bgs.length > 0 && off.length === 0, `${mode}：${bgs.length} 帧里有 ${bgs.filter((b) => b !== want[mode]).length} 帧不是画布底色 ${want[mode]}：${off.join('，')}`);
+    counts.push(`${mode} ${bgs.length} 帧`);
+  }
+  return `404 / 502 / 配置 / 根路径列表各有原因与出口；加载期间外壳常驻；对话与通道失败可重试；首帧底色就是所选外观的画布底（${counts.join('、')}）`;
 });
 
 // ---------- TC-CORE-055 切项目不串状态（frontend-1 / composer-4 / cross-11 / load-9） ----------
@@ -754,7 +763,8 @@ await step('TC-CORE-076', async () => {
     const [tb, db, cb] = [await t1.boundingBox(), await box(page, '[data-testid="chat-dock"]'), await box(page, 'form.composer')];
     await S.check(() => expect(tb && tb.y + tb.height <= db.y + 1, `① 390 宽下失败 toast 压住了折叠横条：toast 底 ${tb && Math.round(tb.y + tb.height)}，横条顶 ${Math.round(db.y)}`));
     await S.check(() => expect(tb && tb.y + tb.height <= cb.y + 1, `① toast 压住了输入框：toast 底 ${tb && Math.round(tb.y + tb.height)}，输入框顶 ${Math.round(cb.y)}`));
-    // 错误提示 8 s 后消失（PAGE-CANVAS「提示条」）
+    // 错误提示 8 s 后消失（PAGE-CANVAS「提示条」）。悬停时不计时：选通道时指针停在下拉项上，390 宽下提示条正好出在那一块，先把指针挪开
+    await page.mouse.move(1, 1);
     await eventually(async () => expect((await page.getByText(/^造屏失败/).count()) === 0, 'toast 没自行消失'), 10000);
     // 1b 收起输入框（⌘/）：横条落到底部，toast 仍在它上方
     await page.keyboard.press('ControlOrMeta+Slash');

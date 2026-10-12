@@ -1,4 +1,5 @@
 // docs/TEST.md CORE 域 · 项目与生成（TC-CORE-003～009）。由 ../core.ts 按顺序引入，共用的浏览器、页面与脚手架在 ./shared.ts
+import { readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { seedJson, apiJson, EVIDENCE, WEB, API, eventually, pickOption } from '../lib.ts';
@@ -54,7 +55,7 @@ await step('TC-CORE-005', async () => {
   await page.keyboard.press('Enter');
   const t0 = Date.now();
   await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 40000 });
-  await page.locator('.bg-panel-2', { hasText: '已生成' }).waitFor({ timeout: 150000 });
+  await page.locator('[data-testid="message"]:not([data-role="user"])', { hasText: '已生成' }).waitFor({ timeout: 150000 });
   await page.waitForFunction(() => { const cards = document.querySelectorAll('[data-testid="screen-card"]'); return cards.length >= 5 && document.querySelectorAll('[data-testid="screen-card"] img').length === cards.length; }, null, { timeout: 60000 });
   const secs = Math.round((Date.now() - t0) / 1000);
   const { body } = await apiJson<{ screens: { id: string; route: string; name: string; lintPassed: boolean; screenshotUrl: string | null; currentRevisionId: string }[] }>(`/v1/projects/${petProjectId}`);
@@ -480,14 +481,14 @@ await step('TC-CORE-023', async () => {
     expect(!(a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height), `${an} 与 ${bn} 重叠`);
   }
 
-  // 2 顶栏是渐暗遮罩而非玻璃面板，且遮罩下半段不拦指针
+  // 2 顶栏是贴顶的实底横条（v1.08，§13.1）：底色是面板色、底边一道发丝线、不模糊，画布在它下面平移时被它盖住
   const hd = await page.locator('header').first().evaluate((el) => {
-    const cs = getComputedStyle(el); const bf = getComputedStyle(el, '::before');
-    return { bg: cs.backgroundColor, filter: cs.backdropFilter, border: cs.borderBottomWidth, scrim: bf.backgroundImage, scrimH: parseFloat(bf.height), rowH: el.getBoundingClientRect().height };
+    const cs = getComputedStyle(el);
+    const probe = document.createElement('div'); probe.style.color = 'var(--semantic-color-surface-background)'; document.body.appendChild(probe);
+    const panel = getComputedStyle(probe).color; probe.remove();
+    return { bg: cs.backgroundColor, panel, filter: cs.backdropFilter, border: cs.borderBottomWidth, image: cs.backgroundImage, before: getComputedStyle(el, '::before').content };
   });
-  expect(hd.filter === 'none' && hd.border === '0px' && /rgba\(0, 0, 0, 0\)|transparent/.test(hd.bg), `顶栏不是无底板遮罩：${JSON.stringify(hd)}`);
-  expect(hd.scrim.includes('linear-gradient') && hd.scrimH > hd.rowH, `遮罩渐变缺失或不高于内容行：${hd.scrimH}/${hd.rowH}`);
-  expect(await page.evaluate((y) => document.elementFromPoint(window.innerWidth / 2, y)?.closest('header') === null, hd.scrimH - 20), '遮罩下半段拦住了指针');
+  expect(hd.bg === hd.panel && hd.filter === 'none' && hd.border === '1px' && hd.image === 'none' && hd.before === 'none', `顶栏不是实底横条：${JSON.stringify(hd)}`);
 
   // 3 工具栏命中区与 roving tabindex
   const hits = await page.locator('[role="toolbar"] button').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { n: e.getAttribute('aria-label'), w: r.width, h: r.height, t: e.getAttribute('tabindex') }; }));
@@ -499,8 +500,8 @@ await step('TC-CORE-023', async () => {
   const f1 = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
   expect(f0 !== f1 && !!f1, `方向键未在组内移动焦点（${f0} → ${f1}）`);
 
-  // 3b 窗口矮到放不下全部工具（v0.70）：工具栏封顶在可用区内、列内滚动、滚动条不可见；底部渐隐提示还有；End 跳到最后一个工具，
-  //    它滚进可见区且四周留出焦点环的 4 px，渐隐换到顶部
+  // 3b 窗口矮到放不下全部工具（v0.70）：工具栏封顶在可用区内、列内滚动、滚动条不可见；底部那道细线提示还有（v1.08 前是渐隐）；End 跳到最后一个工具，
+  //    它滚进可见区且四周留出焦点环的 4 px，细线换到顶部
   await page.setViewportSize({ width: 1440, height: 600 });
   await page.waitForTimeout(400);
   const rail = () => page.evaluate(() => {
@@ -516,7 +517,7 @@ await step('TC-CORE-023', async () => {
   await page.keyboard.press('End');
   await page.waitForTimeout(300);
   const end = await rail();
-  expect(end.last && end.fade === 'top' && (end.room ?? -1) >= 3.5, `End 后最后一个工具应可见、焦点环不被裁、渐隐在顶部：${JSON.stringify(end)}`);
+  expect(end.last && end.fade === 'top' && (end.room ?? -1) >= 3.5, `End 后最后一个工具应可见、焦点环不被裁、细线在顶部：${JSON.stringify(end)}`);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.waitForTimeout(400);
 
@@ -874,34 +875,46 @@ await step('TC-CORE-026', async () => {
   await page.goto(`${WEB}/p/${projectId}`);
   await page.locator('[data-testid="screen-card"]').first().waitFor();
   await page.waitForTimeout(600);
-  const nav = page.locator('header.scrim-top');
+  const nav = page.locator('header.masthead');
   expect((await nav.locator('.wordmark').count()) === 0, '画布顶栏仍挂着品牌字标');
   const navFirst = await nav.evaluate((el) => el.firstElementChild?.getAttribute('data-testid') ?? el.firstElementChild?.tagName ?? '');
   expect(navFirst === 'project-switcher', `画布顶栏左上第一个元素不是项目切换器：${navFirst}`);
 
-  // 3 外壳配色取自品牌包，且深底正文对比度达标
+  // 3 外壳配色取自 brand/（v1.08，§13.1）：浅色、深色各读一遍根元素上的语义变量，等于 brand/tokens.resolved*.json；
+  // 正文、次级、弱文字对面板与画布，主按钮上的字对动作色都 ≥ 4.5:1，画布标记对画布 ≥ 3:1
   // token 值在页面里读、比值在 Node 里算——tsx 会往 evaluate 的闭包里注入 __name 导致页面侧报错
-  const sw = await page.evaluate(`(() => {
-    const cs = getComputedStyle(document.documentElement);
-    const probe = (n) => { const d = document.createElement('div'); d.style.color = cs.getPropertyValue(n).trim(); document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; };
-    return { canvas: probe('--color-canvas'), panel: probe('--color-panel'), fg: probe('--color-fg'), muted: probe('--color-muted'),
-             accent: probe('--color-accent'), accentStrong: probe('--color-accent-strong'), onAccent: probe('--color-on-accent') };
-  })()`) as Record<string, string>;
+  const ROLES = { canvas: 'surface.canvas', panel: 'surface.background', fg: 'text.primary', muted: 'text.secondary', subtle: 'text.tertiary', accent: 'action.primary', onAccent: 'text.onAction', mark: 'mark.line' } as const;
+  const varOf = (role: string) => `--semantic-color-${role.replace('.', '-').replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}`;
+  const rgbOf = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
   const lum = (rgb: string) => {
     const [r, g, b] = rgb.match(/\d+/g)!.map(Number);
     const f = (v: number) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
     return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
   };
   const ratio = (a: string, b: string) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return +((x + 0.05) / (y + 0.05)).toFixed(2); };
-  // 面板底 = 品牌 Ink #142033；动作色 = 界面蓝 #356FD6
-  expect(sw.panel === 'rgb(20, 32, 51)', `面板底不是品牌 Ink：${sw.panel}`);
-  expect(sw.accent === 'rgb(53, 111, 214)', `动作色不是品牌界面蓝：${sw.accent}`);
-  const pairs = {
-    'fg/panel': ratio(sw.fg, sw.panel), 'muted/panel': ratio(sw.muted, sw.panel),
-    'fg/canvas': ratio(sw.fg, sw.canvas), 'muted/canvas': ratio(sw.muted, sw.canvas),
-    'accentStrong/panel': ratio(sw.accentStrong, sw.panel), 'onAccent/accent': ratio(sw.onAccent, sw.accent),
-  };
-  for (const [k, v] of Object.entries(pairs)) expect(v >= 4.5, `${k} 对比度 ${v} 低于正文线 4.5`);
+  const brandDir = path.resolve(import.meta.dirname, '../../../brand');
+  const contrast: Record<string, Record<string, number>> = {};
+  for (const [mode, file] of [['light', 'tokens.resolved.json'], ['dark', 'tokens.resolved.dark.json']] as const) {
+    const want = JSON.parse(readFileSync(path.join(brandDir, file), 'utf8')).semantic.color;
+    await page.evaluate(`document.documentElement.setAttribute('data-theme', '${mode}')`);
+    const sw = await page.evaluate(`(() => {
+      const probe = (n) => { const d = document.createElement('div'); d.style.color = 'var(' + n + ')'; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; };
+      return Object.fromEntries(${JSON.stringify(Object.entries(ROLES).map(([k, r]) => [k, varOf(r)]))}.map(([k, n]) => [k, probe(n)]));
+    })()`) as Record<keyof typeof ROLES, string>;
+    for (const [k, role] of Object.entries(ROLES) as [keyof typeof ROLES, string][]) {
+      const hex = role.split('.').reduce((o: Record<string, unknown>, s) => o[s] as Record<string, unknown>, want).$value as string;
+      expect(sw[k] === rgbOf(hex), `${mode} ${role} 是 ${sw[k]}，brand/${file} 里是 ${hex}`);
+    }
+    const pairs = {
+      'fg/panel': ratio(sw.fg, sw.panel), 'muted/panel': ratio(sw.muted, sw.panel), 'subtle/panel': ratio(sw.subtle, sw.panel),
+      'fg/canvas': ratio(sw.fg, sw.canvas), 'muted/canvas': ratio(sw.muted, sw.canvas), 'subtle/canvas': ratio(sw.subtle, sw.canvas),
+      'onAccent/accent': ratio(sw.onAccent, sw.accent),
+    };
+    for (const [k, v] of Object.entries(pairs)) expect(v >= 4.5, `${mode} ${k} 对比度 ${v} 低于正文线 4.5`);
+    expect(ratio(sw.mark, sw.canvas) >= 3, `${mode} 画布标记对画布 ${ratio(sw.mark, sw.canvas)} 低于 3`);
+    contrast[mode] = { ...pairs, 'mark/canvas': ratio(sw.mark, sw.canvas) };
+  }
+  await page.evaluate(`document.documentElement.removeAttribute('data-theme')`);
 
   // 4 favicon 指向品牌资产且真的取得到
   const icon = await page.locator('link[rel="icon"]').getAttribute('href');
@@ -916,7 +929,7 @@ await step('TC-CORE-026', async () => {
   expect(projFont !== shellFont, `项目字体与工具外壳字体同为 ${shellFont}，这条断言失去区分力，请换一个字体建种子项目`);
   expect(!guide.includes(shellFont), `工具外壳字体 ${shellFont} 串进了用户项目的风格指南`);
   await shot(page, 'CORE-026');
-  return `${brandFirstRun} / -0.03em · 对比度 ${JSON.stringify(pairs)}`;
+  return `${brandFirstRun} / -0.03em · 浅深两套 token 与 brand/ 一致 · 对比度 ${JSON.stringify(contrast)}`;
 });
 
 await step('TC-CORE-027', async () => {
@@ -1058,8 +1071,9 @@ await step('TC-CORE-028', async () => {
     await page.goto(`${WEB}/p/${projectId}?settings=runners`);
     const modal = page.getByTestId('settings-modal');
     await modal.waitFor({ timeout: 10000 });
-    // 分栏：左栏两节 tab（本月用量 / 生成通道，v0.32 本地版），方向键换节、URL 跟着变
-    expect((await modal.getByRole('tab').count()) === 2, '设置弹层左栏应有 2 节');
+    // 分栏：左栏三节 tab（本月用量 / 生成通道 / 外观，v1.08 加外观），方向键换节、URL 跟着变
+    const tabs = await modal.getByRole('tab').allInnerTexts();
+    expect(tabs.join('/') === '本月用量/生成通道/外观', `设置弹层左栏应是 本月用量 / 生成通道 / 外观 三节：${tabs.join(' / ')}`);
     expect((await modal.getByRole('tab', { name: '生成通道' }).getAttribute('aria-selected')) === 'true', '?settings=runners 未选中「生成通道」');
     await modal.getByRole('tab', { name: '生成通道' }).focus();
     await page.keyboard.press('ArrowUp');
@@ -1341,7 +1355,7 @@ await step('TC-CORE-030', async () => {
     await page.keyboard.press('Enter');
     const sent = JSON.parse((await req).postData() ?? '{}') as { targetScreenIds?: string[]; versions?: number };
     expect(sent.targetScreenIds?.length === 3 && sent.versions === 2, `请求体不对：${JSON.stringify(sent)}`);
-    await page.locator('.bg-panel-2', { hasText: '已更新 3 屏' }).waitFor({ timeout: 120000 });
+    await page.locator('[data-testid="message"]:not([data-role="user"])', { hasText: '已更新 3 屏' }).waitFor({ timeout: 120000 });
     // 2 每屏各得 2 条候选、current 为第 0 版；任一屏的角标打开的都是同一个覆盖层：2 列 × 3 行
     type Detail = { screens: { id: string; route: string; currentRevisionId: string | null; pendingCandidates: { jobId: string; count: number } | null }[] };
     let d = (await apiJson<Detail>(`/v1/projects/${projectId}`)).body;

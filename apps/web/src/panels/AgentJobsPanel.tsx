@@ -10,11 +10,11 @@ import { jobLabel } from '@/canvas/jobs';
 // 本机 agent 面板（§13 v0.34 / REQ-AGENT-003）：runner=agent 的作业列表——投递到哪个会话、指令、目标屏、状态、
 // 会话收口时的摘要或失败原因；运行中的可取消（只标作业，会话那边的活由用户自己在终端叫停）。派活入口只有输入框的通道下拉与会话下拉。
 const STATUS: Record<JobDto['status'], { label: string; cls: string }> = {
-  queued: { label: '排队中', cls: 'border-line text-muted' },
-  running: { label: '运行中', cls: 'border-accent text-accent-strong' },
+  queued: { label: '排队中', cls: 'border-border-subtle text-text-secondary' },
+  running: { label: '运行中', cls: 'border-primary text-primary' },
   succeeded: { label: '完成', cls: 'border-success/60 text-success' },
-  failed: { label: '失败', cls: 'border-danger/60 text-danger' },
-  cancelled: { label: '已取消', cls: 'border-line text-muted' },
+  failed: { label: '失败', cls: 'border-error/60 text-error' },
+  cancelled: { label: '已取消', cls: 'border-border-subtle text-text-secondary' },
 };
 type Input = { prompt?: string; screenIds?: string[]; componentId?: string; runner?: { kind: string; tool?: string; sessionId?: string } };
 type Output = { screenIds?: string[]; component?: string; delivery?: { tool?: string; sessionId: string; name: string; deliveredAt: string; opened?: boolean; openError?: string }; summary?: string; message?: string; errorClass?: string } | null;
@@ -59,17 +59,17 @@ export function AgentJobsPanel({ projectId, screens, components, runners, onClos
         {agents.length > 0 && (
           <ul className="mb-3 space-y-1.5" data-testid="agent-availability">
             {agents.map((a) => (
-              <li key={a.id} className="flex items-start gap-2 text-xs">
+              <li key={a.id} className="flex items-start gap-2 type-label">
                 <VendorIcon vendor={a.vendor} size={14} className="mt-0.5 shrink-0" />
-                <span className="min-w-0"><span className="font-medium">{a.label.replace(/^交给本机 /, '')}</span> {a.available ? <span className="text-muted">已就绪{a.hint && a.hint !== '本机 CLI' ? ` · ${a.hint}` : ''} · 投给哪个会话在输入框旁选</span> : <span className="text-warn">未安装</span>}
-                  {!a.available && a.setupHint && <details className="mt-0.5 text-muted"><summary className="cursor-pointer select-none">如何安装</summary><p className="mt-1 whitespace-pre-wrap">{a.setupHint}</p></details>}
+                <span className="min-w-0"><span className="font-medium">{a.label.replace(/^交给本机 /, '')}</span> {a.available ? <span className="text-text-secondary">已就绪{a.hint && a.hint !== '本机 CLI' ? ` · ${a.hint}` : ''} · 投给哪个会话在输入框旁选</span> : <span className="text-warning">未安装</span>}
+                  {!a.available && a.setupHint && <details className="mt-0.5 text-text-secondary"><summary className="cursor-pointer select-none">如何安装</summary><p className="mt-1 whitespace-pre-wrap">{a.setupHint}</p></details>}
                 </span>
               </li>
             ))}
           </ul>
         )}
         {/* 重取失败时已列出的作业留在原地：它只是旧了一点，比清空成一条横幅有用 */}
-        {error && <p role="alert" className="mb-2 flex items-center justify-between gap-2 rounded-md border border-danger/60 bg-danger/10 px-3 py-2 text-xs text-danger"><span>作业列表加载失败</span><Button size="sm" onClick={() => void load()}>重试</Button></p>}
+        {error && <p role="alert" className="mb-2 flex items-center justify-between gap-2 rounded-md border border-error/60 bg-error/10 px-3 py-2 type-label text-error"><span>作业列表加载失败</span><Button size="sm" onClick={() => void load()}>重试</Button></p>}
         {items === null ? (!error && <div className="h-24"><Spinner /></div>)
         : items.length === 0 ? <EmptyState title="还没有交给本机 agent 的作业" hint="在输入框的通道下拉里选「交给本机 Claude Code」或「交给本机 Codex」，再在旁边选要投递的会话，发出的作业会在这里显示状态。" />
         : (
@@ -80,19 +80,19 @@ export function AgentJobsPanel({ projectId, screens, components, runners, onClos
               const session = output?.delivery?.name ?? input.runner?.sessionId ?? '—';
               const codex = input.runner?.tool === 'codex';
               return (
-                <li key={j.id} data-testid="agent-job" data-status={j.status} className="rounded-md border border-line p-2.5">
+                <li key={j.id} data-testid="agent-job" data-status={j.status} className="rounded-md border border-border-subtle p-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="flex min-w-0 items-center gap-1.5 text-xs"><VendorIcon vendor={codex ? 'codex-subscription' : 'anthropic'} size={14} /><span className="truncate font-medium">{codex ? 'Codex' : 'Claude Code'}</span><span className="text-muted">{new Date(j.createdAt).toLocaleTimeString()}</span></span>
-                    <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[11px] ${st.cls}`}>{st.label}</span>
+                    <span className="flex min-w-0 items-center gap-1.5 type-label"><VendorIcon vendor={codex ? 'codex-subscription' : 'anthropic'} size={14} /><span className="truncate font-medium">{codex ? 'Codex' : 'Claude Code'}</span><span className="text-text-secondary">{new Date(j.createdAt).toLocaleTimeString()}</span></span>
+                    <span className={`shrink-0 rounded-sm border px-1.5 py-0.5 type-caption ${st.cls}`}>{st.label}</span>
                   </div>
-                  <p className="mt-1.5 line-clamp-3 text-xs">{input.prompt}</p>
-                  <p className="mt-1 text-[11px] text-muted">{jobLabel(j, screens, components)} · 投递到「<span className={`break-all ${output?.delivery?.name && output.delivery.name !== output.delivery.sessionId ? '' : 'font-mono'}`} data-testid="agent-session">{session}</span>」</p>
+                  <p className="mt-1.5 line-clamp-3 type-label">{input.prompt}</p>
+                  <p className="mt-1 type-caption text-text-secondary">{jobLabel(j, screens, components)} · 投递到「<span className={`break-all ${output?.delivery?.name && output.delivery.name !== output.delivery.sessionId ? '' : 'font-mono'}`} data-testid="agent-session">{session}</span>」</p>
                   {/* 排进了队列但没能让桌面版打开线程（REQ-AGENT-003 v0.79）：消息不会自己执行，要用户去 Codex 里打开它 */}
                   {j.status === 'running' && (output?.delivery?.openError
-                    ? <p className="mt-1.5 text-[11px] text-warn" data-testid="agent-line" title={output.delivery.openError}>已排进线程的队列，但没能让 Codex 桌面版打开它：在 Codex 里打开这个线程后它就会执行，做完收口</p>
-                    : <p className="mt-1.5 text-[11px] text-muted" data-testid="agent-line" title={output?.delivery ? '会话做完后经 quilt.finish_job 收口' : undefined}>{output?.delivery ? (output.delivery.opened ? '已投递，已让 Codex 桌面版打开这个线程，等它做完回写' : '已投递，等会话做完回写') : '正在投递…'}</p>)}
-                  {j.status === 'failed' && output?.message && <p className="mt-1.5 break-words text-[11px] text-danger">{output.message}</p>}
-                  {j.status === 'succeeded' && <p className="mt-1.5 break-words text-[11px] text-muted">{input.componentId ? (output?.component ? `改了组件，同步 ${output.screenIds?.length ?? 0} 屏` : '没有改组件') : output?.screenIds?.length ? `回写了 ${output.screenIds.length} 屏` : '没有回写屏幕'}{output?.summary ? ` · ${output.summary}` : ''}</p>}
+                    ? <p className="mt-1.5 type-caption text-warning" data-testid="agent-line" title={output.delivery.openError}>已排进线程的队列，但没能让 Codex 桌面版打开它：在 Codex 里打开这个线程后它就会执行，做完收口</p>
+                    : <p className="mt-1.5 type-caption text-text-secondary" data-testid="agent-line" title={output?.delivery ? '会话做完后经 quilt.finish_job 收口' : undefined}>{output?.delivery ? (output.delivery.opened ? '已投递，已让 Codex 桌面版打开这个线程，等它做完回写' : '已投递，等会话做完回写') : '正在投递…'}</p>)}
+                  {j.status === 'failed' && output?.message && <p className="mt-1.5 break-words type-caption text-error">{output.message}</p>}
+                  {j.status === 'succeeded' && <p className="mt-1.5 break-words type-caption text-text-secondary">{input.componentId ? (output?.component ? `改了组件，同步 ${output.screenIds?.length ?? 0} 屏` : '没有改组件') : output?.screenIds?.length ? `回写了 ${output.screenIds.length} 屏` : '没有回写屏幕'}{output?.summary ? ` · ${output.summary}` : ''}</p>}
                   {(j.status === 'queued' || j.status === 'running') && (
                     <div className="mt-2 flex items-center gap-2">
                       <Button size="sm" variant="danger" data-testid="cancel-agent-job" onClick={() => cancel(j.id)}>取消</Button>

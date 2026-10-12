@@ -883,7 +883,7 @@ export function CanvasPage() {
   ]);
   // 设置（v0.97 从顶栏移来）：最末单独一组，排在上下文组之后
   tools.push([
-    { id: 'settings', label: '设置', desc: '本月用量与生成通道：添加 / 验证 Key 与本机订阅，复制 MCP 接入命令', icon: <Settings size={ICON} />, testId: 'open-settings', onSelect: () => setSettings('usage') },
+    { id: 'settings', label: '设置', desc: '本月用量、生成通道与外观：添加 / 验证 Key 与本机订阅，复制 MCP 接入命令，切换浅色 / 深色', icon: <Settings size={ICON} />, testId: 'open-settings', onSelect: () => setSettings('usage') },
   ]);
 
   const panelBody = !detail ? null
@@ -904,21 +904,21 @@ export function CanvasPage() {
       {/* 顶栏在 DOM 里排在画布之前（v0.80）：Tab 序从项目切换器开始。层级靠 z-index，不靠 DOM 顺序 */}
       <TopNav floating right={<>
         {feedShown && feed !== 'open' && !gone && (
-          <span role="status" data-testid="live-status" className="min-w-0 truncate whitespace-nowrap rounded-full border border-warn/60 px-2 py-0.5 text-[11px] text-warn">
+          <span role="status" data-testid="live-status" className="min-w-0 truncate whitespace-nowrap rounded-sm border border-warning/60 px-2 py-0.5 type-caption text-warning">
             实时更新已断开 · {feed === 'offline'
-              ? <button type="button" onClick={() => { setFeed('reconnecting'); setFeedEpoch((n) => n + 1); }} className="underline underline-offset-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">重连</button>
+              ? <button type="button" onClick={() => { setFeed('reconnecting'); setFeedEpoch((n) => n + 1); }} className="underline underline-offset-2 state-layer focus-ring">重连</button>
               : '重连中'}
           </span>
         )}
       </>}>
         <ProjectSwitcher current={detail?.project ?? null} placeholder={failure?.kind === 'not-found' ? '项目不存在' : failure ? '项目没加载出来' : '加载中…'} onRenamed={(id) => { if (id === projectId) refresh(); }} />
-        {detail && <span className="shrink-0 whitespace-nowrap rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">{detail.project.deviceType === 'mobile' ? '手机' : '桌面'}</span>}
+        {detail && <span className="shrink-0 whitespace-nowrap rounded-sm border border-border-subtle px-2 py-0.5 type-caption text-text-secondary">{detail.project.deviceType === 'mobile' ? '手机' : '桌面'}</span>}
         {(selectedScreens.length > 0 || selectedComponents.length > 0) && !focusedId && (
-          <span className="ml-1 min-w-0 truncate whitespace-nowrap text-xs text-muted" data-testid="selection-stat">
+          <span className="ml-1 min-w-0 truncate whitespace-nowrap type-label text-text-secondary" data-testid="selection-stat">
             已选 {selectedScreens.length === 0
-              ? (selectedComponents.length === 1 ? <>组件 <b className="text-fg">{selectedComponents[0].name}</b></> : <b className="text-fg">{selectedComponents.length} 个组件</b>)
-              : selectedComponents.length > 0 ? <b className="text-fg">{selectedScreens.length} 屏 · {selectedComponents.length} 个组件</b>
-              : selected ? <><b className="text-fg">{selected.name}</b> {selected.route}</> : <b className="text-fg">{selectedScreens.length} 屏</b>}
+              ? (selectedComponents.length === 1 ? <>组件 <b className="text-text-primary">{selectedComponents[0].name}</b></> : <b className="text-text-primary">{selectedComponents.length} 个组件</b>)
+              : selectedComponents.length > 0 ? <b className="text-text-primary">{selectedScreens.length} 屏 · {selectedComponents.length} 个组件</b>
+              : selected ? <><b className="text-text-primary">{selected.name}</b> {selected.route}</> : <b className="text-text-primary">{selectedScreens.length} 屏</b>}
           </span>
         )}
       </TopNav>
@@ -983,7 +983,7 @@ export function CanvasPage() {
       />
       {/* 项目没到手时只留三个本机开关与设置可用，其余写明为什么用不了 */}
       <CanvasToolbar groups={ready ? tools : tools.map((g) => g.map((t) => (['composer', 'minimap', 'links', 'settings'].includes(t.id) ? t : { ...t, unavailable: pendingReason })))} />
-      {panelBody && <div key={panel} ref={panelRef} className="chrome slide-in-right absolute bottom-4 right-[var(--rail-w)] top-16 z-20 flex w-[var(--panel-w)] flex-col overflow-hidden rounded-xl"><Suspense fallback={<PanelLoading />}>{panelBody}</Suspense></div>}
+      {panelBody && <div key={panel} ref={panelRef} className="chrome slide-in-right absolute bottom-4 right-[var(--rail-w)] top-16 z-20 flex w-[var(--panel-w)] flex-col overflow-hidden rounded-lg"><Suspense fallback={<PanelLoading />}>{panelBody}</Suspense></div>}
       {proposal && detail && <Suspense fallback={null}><ProposalDialog proposal={proposal} ds={detail.designSystem} busyReason={busyReason} screenCount={screens.length} batches={Math.ceil(screens.length / MAX_TARGETS)} onWrite={writeProposal} onFinish={finishProposal} onClose={() => setProposal(null)} /></Suspense>}
       {newComponentOpen && <NewComponentDialog onCreate={createComponent} onClose={() => setNewComponentOpen(false)} />}
       {finderOpen && detail && <ScreenFinder screens={screens} components={components} links={detail.links} busy={busyScreens} onPick={(pick) => { setFinderOpen(false); reveal(pick); }} onClose={() => setFinderOpen(false)} />}
@@ -1003,13 +1003,13 @@ function CanvasPending({ failure, onRetry }: { failure: LoadFailure; onRetry: ()
     <div className="viewport" data-testid="canvas-pending" data-state={failure?.kind ?? 'loading'}>
       <div className="pointer-events-none absolute bottom-[var(--chrome-bottom)] left-[var(--chrome-left)] right-[var(--chrome-right)] top-[var(--chrome-top)] z-[25] grid place-items-center p-4">
       {!failure ? (
-        <div role="status" className="pending-in chrome flex items-center gap-2 rounded-full px-3.5 py-2 text-xs text-muted">
-          <span className="size-3.5 animate-spin rounded-full border-2 border-muted border-r-transparent motion-reduce:animate-none" aria-hidden="true" />加载项目…
+        <div role="status" className="pending-in chrome flex items-center gap-2 rounded-md px-3.5 py-2 type-label text-text-secondary">
+          <span className="size-3.5 animate-spin rounded-full border-2 border-text-secondary border-r-transparent motion-reduce:animate-none" aria-hidden="true" />加载项目…
         </div>
       ) : (
-        <div role="alert" className="pointer-events-auto fade-up chrome w-[min(24rem,100%)] rounded-xl p-4">
-          <p className="text-sm font-semibold text-fg">{failure.kind === 'not-found' ? '这个项目不存在或已被删除' : '项目没加载出来'}</p>
-          <p className="mt-1 text-xs text-muted leading-cn">{failure.kind === 'not-found' ? '可能在别的标签页里删掉了，或者链接里的项目 id 不对。' : `${failure.reason}。确认 Quilt 还在运行，然后重试。`}</p>
+        <div role="alert" className="pointer-events-auto fade-up chrome w-[min(24rem,100%)] rounded-lg p-4">
+          <p className="type-body font-semibold text-text-primary">{failure.kind === 'not-found' ? '这个项目不存在或已被删除' : '项目没加载出来'}</p>
+          <p className="mt-1 type-label text-text-secondary leading-(--semantic-typography-body-line-height)">{failure.kind === 'not-found' ? '可能在别的标签页里删掉了，或者链接里的项目 id 不对。' : `${failure.reason}。确认 Quilt 还在运行，然后重试。`}</p>
           <div className="mt-3">
             {failure.kind === 'not-found'
               ? <Button variant="primary" size="sm" onClick={() => navigate('/')}>回到最近的项目</Button>

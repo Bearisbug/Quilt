@@ -39,12 +39,12 @@ function ElementPath({ sel, onPick, onPeek }: { sel: ElementSel; onPick?: (qid: 
   return (
     <div className="space-y-1">
       <nav aria-label="元素层级" data-testid="el-path">
-        <ol className="flex flex-wrap items-center gap-y-0.5 text-xs">
+        <ol className="flex flex-wrap items-center gap-y-0.5 type-label">
           {path.map((p, i) => (
             <li key={p.qid} className="flex items-center">
-              {i > 0 && <span aria-hidden className="px-0.5 text-muted">›</span>}
+              {i > 0 && <span aria-hidden className="px-0.5 text-text-secondary">›</span>}
               <button type="button" tabIndex={-1} data-qid={p.qid} aria-current={i === at ? 'location' : undefined} title={`${p.tag} · ${p.qid}`}
-                className={`inline-flex h-6 items-center rounded-md px-1.5 font-mono hover:bg-panel-2 ${i === at ? 'font-semibold text-fg' : i > at ? 'text-muted opacity-60' : 'text-muted'}`}
+                className={`inline-flex h-6 items-center rounded-md px-1.5 font-mono ${i === at ? 'font-semibold text-text-primary' : i > at ? 'text-text-secondary opacity-60' : 'text-text-secondary'} state-layer`}
                 onClick={() => onPick?.(p.qid)} onMouseEnter={() => onPeek?.(p.qid)} onMouseLeave={() => onPeek?.(null)}>
                 {p.tag}
               </button>
@@ -52,7 +52,7 @@ function ElementPath({ sel, onPick, onPeek }: { sel: ElementSel; onPick?: (qid: 
           ))}
         </ol>
       </nav>
-      <p className="text-xs text-muted">Shift+Enter 选父级 · Enter 回到子级</p>
+      <p className="type-label text-text-secondary">Shift+Enter 选父级 · Enter 回到子级</p>
     </div>
   );
 }
@@ -203,32 +203,32 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
         // 共享组件实例里的元素（REQ-EDIT-006）：直改会在下一次写入时被组件展开顶掉，所以不给字段，只给两个出口
         <div ref={bodyRef} tabIndex={-1} className="scroll flex-1 space-y-4 p-3 focus:outline-none">
           <ElementPath sel={sel} onPick={onPathPick} onPeek={onPathPeek} />
-          <div className="text-xs text-muted">&lt;{sel.tag}&gt; · {sel.qid}</div>
-          {busy && <p className="text-[11px] text-warn" data-testid="el-busy">{busyText}</p>}
-          <div className="space-y-2 rounded-md border border-line bg-panel-2 p-3 text-xs" data-testid="el-component-lock" data-component={sel.component}>
-            <p className="leading-cn">这是共享组件「<b className="text-fg">{sel.component}</b>」的一部分——改它会同步到所有用它的屏。</p>
+          <div className="type-label text-text-secondary">&lt;{sel.tag}&gt; · {sel.qid}</div>
+          {busy && <p className="type-caption text-warning" data-testid="el-busy">{busyText}</p>}
+          <div className="space-y-2 rounded-md border border-border-subtle bg-(--semantic-color-surface-sunken) p-3 type-label" data-testid="el-component-lock" data-component={sel.component}>
+            <p className="leading-(--semantic-typography-body-line-height)">这是共享组件「<b className="text-text-primary">{sel.component}</b>」的一部分——改它会同步到所有用它的屏。</p>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="primary" data-testid="el-edit-component" onClick={() => onEditComponent?.(sel.component!)}>改组件</Button>
               <Button size="sm" data-testid="el-detach" pending={saving} disabled={busy} onClick={() => apply([{ type: 'detach' }], '已脱离共享，这一屏的这份归屏自己管')}>脱离共享</Button>
             </div>
-            <p className="text-muted">脱离后这一屏里的这份不再跟着组件变，可以单独直改。</p>
+            <p className="text-text-secondary">脱离后这一屏里的这份不再跟着组件变，可以单独直改。</p>
           </div>
         </div>
       ) : (
         <div ref={bodyRef} tabIndex={-1} className="scroll flex-1 space-y-4 p-3 focus:outline-none" data-testid="inspector-body">
           <ElementPath sel={sel} onPick={onPathPick} onPeek={onPathPeek} />
-          <div className="text-xs text-muted">&lt;{sel.tag}&gt; · {sel.qid}</div>
-          {busy && <p className="text-[11px] text-warn" data-testid="el-busy">{busyText}</p>}
+          <div className="type-label text-text-secondary">&lt;{sel.tag}&gt; · {sel.qid}</div>
+          {busy && <p className="type-caption text-warning" data-testid="el-busy">{busyText}</p>}
           <div className="space-y-1.5">
-            <label htmlFor="el-text" className="block text-xs font-medium text-muted">文案</label>
-            <input id="el-text" value={text} onChange={(e) => edit({ text: e.target.value })} className="h-9 w-full rounded-md border border-line bg-canvas px-2 text-sm" placeholder="（无直接文本）" />
+            <label htmlFor="el-text" className="block type-label font-medium text-text-secondary">文案</label>
+            <input id="el-text" value={text} onChange={(e) => edit({ text: e.target.value })} className="h-9 w-full focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) px-2 type-body" placeholder="（无直接文本）" />
           </div>
           <div className="space-y-1.5">
-            <div id="el-classes-label" className="text-xs font-medium text-muted">类名（Tailwind，一行一个，只能用 token 色）</div>
+            <div id="el-classes-label" className="type-label font-medium text-text-secondary">类名（Tailwind，一行一个，只能用 token 色）</div>
             <ClassList rows={classRows} onChange={(rows) => edit({ classes: rows })} tokens={tokens} labelledBy="el-classes-label" />
           </div>
           <div className="space-y-1.5">
-            <label htmlFor="el-link" className="block text-xs font-medium text-muted">跳转到（{sel.tag === 'a' ? 'href' : sel.tag === 'form' ? '提交后 action' : 'data-href'}）</label>
+            <label htmlFor="el-link" className="block type-label font-medium text-text-secondary">跳转到（{sel.tag === 'a' ? 'href' : sel.tag === 'form' ? '提交后 action' : 'data-href'}）</label>
             <Select id="el-link" data-testid="el-link" value={link || NO_LINK} onChange={(v) => edit({ link: v === NO_LINK ? '' : v })} aria-label="跳转目标"
               options={[{ value: NO_LINK, label: '不跳转' }, ...linkOptions.map((r) => ({ value: r, label: r, hint: routes.includes(r) ? undefined : '断链' }))]} />
           </div>
@@ -238,23 +238,23 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
           </div>
           {/* 记为共享组件（REQ-EDIT-006）：把这个元素存成项目级组件，其他屏里对应的元素（同标签、同层级）可一并换成它。
               目标本身就是组件时不显示——组件里不能再套组件（validateComponentHtml 也会拒） */}
-          <div className={`space-y-1.5 border-t border-line pt-3${component ? ' hidden' : ''}`}>
-            <div className="text-xs font-medium text-muted">记为共享组件</div>
+          <div className={`space-y-1.5 border-t border-border-subtle pt-3${component ? ' hidden' : ''}`}>
+            <div className="type-label font-medium text-text-secondary">记为共享组件</div>
             {!making ? (
               <>
-                <p className="text-[11px] text-muted">存成项目级组件后，别的屏引用它、改一次全部同步。适合导航栏、页头这类每屏都一样的块。</p>
+                <p className="type-caption text-text-secondary">存成项目级组件后，别的屏引用它、改一次全部同步。适合导航栏、页头这类每屏都一样的块。</p>
                 <Button size="sm" data-testid="el-make-component" disabled={busy} onClick={() => { setMaking(true); setCompName(COMPONENT_NAME_BY_TAG[sel.tag] ?? 'Component'); setCompError(null); }}>记为共享组件…</Button>
               </>
             ) : (
               <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); void makeComponent(); }}>
-                <label htmlFor="comp-name" className="block text-xs text-muted">组件名</label>
+                <label htmlFor="comp-name" className="block type-label text-text-secondary">组件名</label>
                 <Input id="comp-name" data-testid="comp-name" value={compName} onChange={(e) => { setCompName(e.target.value); setCompError(null); }} placeholder="例如 TabBar" autoFocus autoComplete="off" spellCheck={false} maxLength={40}
                   aria-invalid={!!compError} aria-describedby={compError ? 'comp-name-error' : undefined} />
-                <label className="flex items-start gap-2 text-xs">
-                  <input type="checkbox" data-testid="comp-apply" checked={compApply} onChange={(e) => setCompApply(e.target.checked)} className="mt-0.5 size-3.5 accent-accent" />
-                  <span className="leading-cn">同时替换其他屏里对应的元素（同标签、同层级）</span>
+                <label className="flex items-start gap-2 type-label">
+                  <input type="checkbox" data-testid="comp-apply" checked={compApply} onChange={(e) => setCompApply(e.target.checked)} className="mt-0.5 size-3.5 accent-primary" />
+                  <span className="leading-(--semantic-typography-body-line-height)">同时替换其他屏里对应的元素（同标签、同层级）</span>
                 </label>
-                {compError && <p id="comp-name-error" role="alert" className="text-xs text-danger">{compError}</p>}
+                {compError && <p id="comp-name-error" role="alert" className="type-label text-error">{compError}</p>}
                 <div className="flex gap-2">
                   <Button size="sm" variant="primary" type="submit" data-testid="comp-create" pending={compBusy} disabled={!compName.trim() || busy}>记为组件</Button>
                   <Button size="sm" onClick={() => setMaking(false)}>取消</Button>
@@ -265,13 +265,13 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
           {component ? (
             /* 组件没有子树重生成：整块重写是「改组件」那条路（输入框里以这个组件为目标发一句话），
                它会重写整个组件并回刷所有用它的屏。这里只给指路，不另起一个入口。 */
-            <p className="border-t border-line pt-3 text-xs leading-cn text-muted" data-testid="el-component-hint">
+            <p className="border-t border-border-subtle pt-3 type-label leading-(--semantic-typography-body-line-height) text-text-secondary" data-testid="el-component-hint">
               要整块重写这个组件，把它设为输入框的目标说一句话（「改组件」）——那条路会重写整个组件并同步到用它的屏。
             </p>
           ) : (
-          <div className="space-y-1.5 border-t border-line pt-3">
-            <label htmlFor="el-prompt" className="block text-xs font-medium text-muted">用 AI 重生成这块</label>
-            <textarea id="el-prompt" value={prompt} onChange={(e) => edit({ prompt: e.target.value })} rows={3} className="w-full resize-none rounded-md border border-line bg-canvas p-2 text-sm" placeholder="例如：改成横向滑动的卡片列表" disabled={busy}
+          <div className="space-y-1.5 border-t border-border-subtle pt-3">
+            <label htmlFor="el-prompt" className="block type-label font-medium text-text-secondary">用 AI 重生成这块</label>
+            <textarea id="el-prompt" value={prompt} onChange={(e) => edit({ prompt: e.target.value })} rows={3} className="w-full resize-none focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) p-2 type-body" placeholder="例如：改成横向滑动的卡片列表" disabled={busy}
               onKeyDown={(e) => { if (e.key === 'Enter' && e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void regenerate(); } }} />
             {/* 通道单独选：与输入框同一套控件；本机 agent 时还要选投给哪个会话。面板 20rem 宽，两个下拉放不下时折行 */}
             <div className="flex flex-wrap items-center gap-1.5" data-testid="el-runner">
@@ -280,10 +280,10 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
             </div>
             <div className="flex items-center gap-2">
               <Button size="sm" disabled={!canRegenerate} pending={regenerating} onClick={() => void regenerate()}>重生成这块</Button>
-              <kbd className="rounded border border-line bg-panel-2 px-1 py-px font-sans text-[10px] text-muted">Shift+Enter</kbd>
+              <kbd className="kbd px-1 type-caption">Shift+Enter</kbd>
             </div>
-            {working && <p className="text-[11px] text-accent-strong" data-testid="el-working">这块正在修改中，回写后会标「已更新」</p>}
-            {agent && !sessionOk && !working && <p className="text-[11px] text-warn">先选要投递的会话</p>}
+            {working && <p className="type-caption text-primary" data-testid="el-working">这块正在修改中，回写后会标「已更新」</p>}
+            {agent && !sessionOk && !working && <p className="type-caption text-warning">先选要投递的会话</p>}
           </div>
           )}
         </div>

@@ -5,7 +5,6 @@ import { api } from '@/lib/api';
 import { ToastProvider } from '@/lib/toast';
 import { FirstProjectPage, NotFoundPage, RouteError } from '@/pages/Projects';
 import { CanvasRoute } from '@/pages/Canvas';
-import './styles.css';
 
 // 画布即主界面（§13 导航 v0.28 / v0.32 本地版无登录）：直接进最近更新的项目；一个项目都没有才落到 PAGE-FIRST
 async function latestProjectId(): Promise<string | null> {

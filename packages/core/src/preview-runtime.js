@@ -130,9 +130,15 @@
       send({ type: 'quilt:key', key: e.key, code: e.code, altKey: e.altKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey });
     }
   });
-  // 选择元素模式（REQ-EDIT-001）：两层框都画在预览文档内——hover 框细虚线跟着鼠标走；选中框常驻（实线、界面蓝、左上角挂
+  // 选择元素模式（REQ-EDIT-001）：两层框都画在预览文档内——hover 框细虚线跟着鼠标走；选中框常驻（实线、左上角挂
   // 「tag · qid」标签，和检查器标题对得上），随滚动 / 缩放重算，换 body 后由父页 quilt:reselect 接回。点击上报 qid 与几何，父页画检查器。
   var mode = 'interact';
+  // 画布标记的颜色（§13.1）：父页按当前外观经 quilt:mode 给（标记色、标记上的字、halo、成功色），运行时不写颜色；
+  // 外观切换时父页重发，已画出来的框与标记当场换色。收到之前沿用 currentColor
+  /** @type {{ line: string, onLine: string, halo: string, success: string } | null} */
+  var pal = null;
+  /** @param {'line' | 'onLine' | 'halo' | 'success'} k */
+  function color(k) { return pal ? pal[k] : 'currentColor'; }
   /** @type {HTMLElement | null} */
   var box = null;
   // 选择元素模式下让每个元素都可命中（v0.57）：设计里常给装饰层或被 <label> 包着的文字写 pointer-events:none，
@@ -157,10 +163,13 @@
     if (box) return box;
     box = document.createElement('div');
     box.setAttribute('data-quilt-ui', '');
-    box.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483646;border:1px dashed rgba(53,111,214,0.9);background:rgba(53,111,214,0.06);border-radius:4px;display:none';
+    box.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483646;border:1px dashed;border-radius:4px;display:none';
+    paintBox();
     document.body.appendChild(box);
     return box;
   }
+  // 压在设计稿上的标记外面套一圈 halo，橙红色的设计稿上也看得见
+  function paintBox() { if (box) { box.style.borderColor = color('line'); box.style.boxShadow = '0 0 0 1px ' + color('halo'); } }
   // instant：键盘引起的移动（逐级选、路径预览）不带过渡，跟手的只有指针
   /** @param {Element | null} el @param {boolean} [instant] */
   function highlight(el, instant) {
@@ -180,12 +189,18 @@
     if (selBox) return selBox;
     selBox = document.createElement('div');
     selBox.setAttribute('data-quilt-ui', ''); selBox.setAttribute('data-quilt-selection', '');
-    selBox.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;border:2px solid #356FD6;background:rgba(53,111,214,0.05);border-radius:4px;display:none;box-shadow:0 0 0 1px rgba(255,255,255,0.75)';
+    selBox.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;border:2px solid;border-radius:4px;display:none';
     selTag = document.createElement('span');
-    selTag.style.cssText = 'position:absolute;left:-2px;font:600 11px/16px system-ui,sans-serif;padding:1px 7px;border-radius:999px;background:#356FD6;color:#fff;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,0.25)';
+    selTag.style.cssText = 'position:absolute;left:-2px;font:600 11px/16px system-ui,sans-serif;padding:1px 7px;border-radius:999px;white-space:nowrap';
     selBox.appendChild(selTag);
+    paintSel();
     document.body.appendChild(selBox);
     return selBox;
+  }
+  function paintSel() {
+    if (!selBox || !selTag) return;
+    selBox.style.borderColor = color('line'); selBox.style.boxShadow = '0 0 0 1px ' + color('halo') + ',inset 0 0 0 1px ' + color('halo');
+    selTag.style.background = color('line'); selTag.style.color = color('onLine'); selTag.style.boxShadow = '0 0 0 1px ' + color('halo');
   }
   function placeSel() {
     if (!selEl || !selBox || !selTag) return;
@@ -227,14 +242,22 @@
     var working = kind === 'working';
     if (m.kind !== kind) {
       m.kind = kind;
-      el.style.outline = '2px ' + (working ? 'dashed #6d8cff' : 'solid #22c55e'); el.style.outlineOffset = '2px';
+      el.style.outlineOffset = '2px';
       m.badge.textContent = working ? '修改中…' : '已更新';
       m.badge.setAttribute('data-kind', kind);
-      m.badge.style.cssText = 'position:fixed;z-index:2147483645;pointer-events:none;font:600 11px/16px system-ui,sans-serif;padding:1px 7px;border-radius:999px;color:#fff;box-shadow:0 1px 4px rgba(0,0,0,.25);background:' + (working ? '#6d8cff' : '#22c55e');
+      m.badge.style.cssText = 'position:fixed;z-index:2147483645;pointer-events:none;font:600 11px/16px system-ui,sans-serif;padding:1px 7px;border-radius:999px';
+      paintMark(m);
       placeBadge(m);
     }
     // 「已更新」每次都重新计时：父页可能收口时打一次、换完 DOM 再补一次
     if (!working) m.timer = setTimeout(function () { unmark(qid); }, 4000);
+  }
+  // 修改中用标记色虚线，已更新用成功色实线；角标的字用标记上的字色（深浅两套里它与 halo 同值，压在两种底上都读得出）
+  /** @param {Mark} m */
+  function paintMark(m) {
+    var hue = m.kind === 'working' ? color('line') : color('success');
+    m.el.style.outline = '2px ' + (m.kind === 'working' ? 'dashed ' : 'solid ') + hue;
+    m.badge.style.background = hue; m.badge.style.color = color('onLine'); m.badge.style.boxShadow = '0 0 0 1px ' + color('halo');
   }
   /** @param {{ working: string[], done?: string[] }} msg */
   function applyMarks(msg) {
@@ -319,7 +342,7 @@
   /** @param {MessageEvent} e */
   function onMessage(e) {
     var msg = /** @type {Incoming} */ (e.data || {});
-    if (msg.type === 'quilt:mode') { mode = msg.mode === 'inspect' ? 'inspect' : 'interact'; if (mode !== 'inspect') { highlight(null); setSelection(null); hov = { anchor: null, cur: null }; anchorQid = null; } setPierce(mode === 'inspect'); document.body.style.cursor = mode === 'inspect' ? 'crosshair' : ''; return; }
+    if (msg.type === 'quilt:mode') { if (msg.marks) { pal = msg.marks; paintBox(); paintSel(); Object.keys(marks).forEach(function (q) { paintMark(marks[q]); }); } mode = msg.mode === 'inspect' ? 'inspect' : 'interact'; if (mode !== 'inspect') { highlight(null); setSelection(null); hov = { anchor: null, cur: null }; anchorQid = null; } setPierce(mode === 'inspect'); document.body.style.cursor = mode === 'inspect' ? 'crosshair' : ''; return; }
     // 父页的选中状态是事实源：选中 / 清空都同步到常驻框
     if (msg.type === 'quilt:highlight') { setSelection(msg.qid ? scope().querySelector('[data-qid="' + msg.qid + '"]') : null); return; }
     // 热更新后重选：同一 qid 还在就回一份新值（检查器字段跟着刷）并把常驻框接回去，不在了让父页清空

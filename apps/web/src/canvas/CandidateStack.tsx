@@ -66,7 +66,7 @@ export function CandidateStack({ jobId, screen, onClose, onAdopted }: { jobId: s
             {/* 截图垫底、活 iframe 盖上（与卡片同尺寸）；没产出时占位不跳版（VIS-006 / PERF-003） */}
             {/* 垫底图只在 iframe 就绪前露出，用缩略图就够（v1.03） */}
             {(r?.thumbUrl ?? r?.screenshotUrl) && <img src={(r!.thumbUrl ?? r!.screenshotUrl)!} alt="" width={w} height={h} decoding="async" draggable={false} />}
-            {r ? <iframe className="nowheel nopan" src={r.previewUrl} title={`${screen.name} 第 ${i + 1} 版`} sandbox="allow-scripts allow-same-origin allow-forms" /> : <div className="grid size-full place-items-center text-sm text-ink/60">这一版没有产出</div>}
+            {r ? <iframe className="nowheel nopan" src={r.previewUrl} title={`${screen.name} 第 ${i + 1} 版`} sandbox="allow-scripts allow-same-origin allow-forms" /> : <div className="grid size-full place-items-center type-body text-neutral-600">这一版没有产出</div>}
             <div className="cand-actions">
               <span className="cand-tag">第 {i + 1} 版{isCurrent && <> · {row.settled ? '已采用' : '当前'}</>}</span>
               {/* 图标成组：胶囊放不下时整组折到第二行，不会把最后一个图标单独甩下去 */}

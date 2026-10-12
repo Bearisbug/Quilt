@@ -652,6 +652,102 @@ await step('TC-CORE-079', '3', async () => {
   return `重取详情前后框都是 ${fmtFrame(after)}`;
 });
 
+// ---------- TC-CORE-097 外观三选一（v1.08，REQ-CORE-039）：切换即时生效、记在本机、跟随系统；画布标记与 canvas 颜色跟着换 ----------
+// 颜色取 brand/ 的值：画布底浅 #ECEAE5 / 深 #141311，标记色浅 #C64A0B / 深 #E05A24，动作色浅 #263C63 / 深 #B4C5E2
+const THEME = {
+  light: { canvas: 'rgb(236, 234, 229)', mark: 'rgb(198, 74, 11)', markRgb: [198, 74, 11], accentRgb: [38, 60, 99] },
+  dark: { canvas: 'rgb(20, 19, 17)', mark: 'rgb(224, 90, 36)', markRgb: [224, 90, 36], accentRgb: [180, 197, 226] },
+} as const;
+const themePid = seedProject('Theme', '--device', 'mobile', '--screens', '3').projectId;
+const shell = (page: Page) => page.evaluate(() => ({
+  theme: document.documentElement.getAttribute('data-theme'), stored: localStorage.getItem('quilt:theme'),
+  canvas: getComputedStyle(document.querySelector('.viewport')!).backgroundColor,
+  card: getComputedStyle(document.querySelector('[data-testid="screen-card"]')!).backgroundColor,
+}));
+// 画在 <canvas> 上的颜色：数离目标色很近的像素（连线与它的计数徽标、小地图的视口框）
+const inkOn = (page: Page, sel: string, rgb: readonly number[]) => page.evaluate(([s, c]) => {
+  const el = document.querySelector(s) as HTMLCanvasElement | null; if (!el) return -1;
+  const d = el.getContext('2d')!.getImageData(0, 0, el.width, el.height).data; let n = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200 && Math.abs(d[i] - c[0]) + Math.abs(d[i + 1] - c[1]) + Math.abs(d[i + 2] - c[2]) < 24) n++;
+  return n;
+}, [sel, rgb] as const);
+
+await step('TC-CORE-097', '1', async () => {
+  // 系统浅色、没选过：不写 data-theme，外壳是浅色；设置里选「深色」当场换，不刷新页面
+  const page = await open(themePid);
+  await page.emulateMedia({ colorScheme: 'light' });
+  const s0 = await shell(page);
+  expect(s0.theme === null && s0.stored === null && s0.canvas === THEME.light.canvas, `没选过外观时应跟随系统浅色：${JSON.stringify(s0)}`);
+  await page.evaluate(() => { (window as unknown as { __sameDoc: boolean }).__sameDoc = true; });
+  await page.getByTestId('open-settings').click();
+  await page.getByTestId('settings-tab-appearance').click();
+  await page.getByTestId('theme-options').waitFor({ timeout: 8000 });
+  await page.getByTestId('theme-dark').click();
+  await sleep(500);
+  const s1 = await shell(page);
+  expect(s1.theme === 'dark' && s1.stored === 'dark' && s1.canvas === THEME.dark.canvas, `选「深色」后外壳没换成深色或没记住：${JSON.stringify(s1)}`);
+  expect(await page.evaluate(() => (window as unknown as { __sameDoc?: boolean }).__sameDoc === true), '换外观时页面被刷新了');
+  expect(s0.card === 'rgb(255, 255, 255)' && s1.card === 'rgb(255, 255, 255)', `卡片白底应不随外观变：${s0.card} → ${s1.card}`);
+  await page.keyboard.press('Escape');
+  await sleep(300);
+  // 选中一屏：描边是深色的标记色；连线与小地图按深色重画
+  await card(page, '/s1').locator('.gesture').click();
+  await sleep(400);
+  const outline = await card(page, '/s1').evaluate((el) => getComputedStyle(el).outlineColor);
+  expect(outline === THEME.dark.mark, `深色下选中描边是 ${outline}，应是 ${THEME.dark.mark}`);
+  const edgesDark = await inkOn(page, '.viewport > .edges', THEME.dark.markRgb); const edgesLightGone = await inkOn(page, '.viewport > .edges', THEME.light.markRgb);
+  const miniDark = await inkOn(page, '[data-testid="minimap"]', THEME.dark.accentRgb);
+  expect(edgesDark > 0 && edgesLightGone === 0, `连线没按深色重画：深色标记色 ${edgesDark} 像素、浅色标记色 ${edgesLightGone} 像素`);
+  expect(miniDark > 0, '小地图的视口框没按深色重画');
+  return `跟随系统（浅）→ 选深色：data-theme=dark、记在本机、画布底 ${s1.canvas}、描边 ${outline}、连线 ${edgesDark} 像素、卡片白底不变`;
+});
+
+await step('TC-CORE-097', '2', async () => {
+  // 屏内的选中框用当前外观的标记色、外圈 halo；外观一换当场跟着换
+  const page = await open(themePid);
+  await page.evaluate(() => localStorage.setItem('quilt:theme', 'dark'));
+  await page.reload();
+  await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+  await page.keyboard.press('Meta+KeyE');
+  await sleep(300);
+  await card(page, '/s2').locator('.gesture').click();
+  const frame = page.frameLocator('[data-testid="screen-card"] iframe').first();
+  await frame.locator('[data-qid]').first().waitFor({ timeout: 15000 });
+  await sleep(1200);
+  await frame.locator('button, a').first().click();
+  const box = () => frame.locator('[data-quilt-selection]').evaluate((el) => ({ border: getComputedStyle(el).borderTopColor, halo: getComputedStyle(el).boxShadow }));
+  await eventually(async () => expect((await box()).border === THEME.dark.mark, '屏内选中框还没出现或颜色不对'), 8000);
+  const b1 = await box();
+  expect(/rgb\(14, 13, 11\) 0px 0px 0px 1px/.test(b1.halo), `深色下屏内选中框外圈应是深色 halo：${b1.halo}`);
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+  await eventually(async () => expect((await box()).border === THEME.light.mark, '换成浅色后屏内选中框没跟着换色'), 5000);
+  const b2 = await box();
+  expect(/rgb\(255, 255, 255\) 0px 0px 0px 1px/.test(b2.halo), `浅色下屏内选中框外圈应是白色 halo：${b2.halo}`);
+  return `屏内选中框 深 ${b1.border} → 浅 ${b2.border}，halo 跟着换`;
+});
+
+await step('TC-CORE-097', '3', async () => {
+  // 改回「跟随系统」：data-theme 与本机记录都清掉，外壳跟着系统偏好变
+  const page = await open(themePid);
+  await page.evaluate(() => localStorage.setItem('quilt:theme', 'light'));
+  await page.goto(`${WEB}/p/${themePid}?settings=appearance`);
+  await page.getByTestId('theme-options').waitFor({ timeout: 8000 });
+  await page.emulateMedia({ colorScheme: 'dark' });
+  const forced = await shell(page);
+  expect(forced.theme === 'light' && forced.canvas === THEME.light.canvas, `固定浅色时系统偏好深色不该影响外壳：${JSON.stringify(forced)}`);
+  await page.getByTestId('theme-system').click();
+  await sleep(400);
+  const s1 = await shell(page);
+  expect(s1.theme === null && s1.stored === null && s1.canvas === THEME.dark.canvas, `跟随系统（深）时应去掉 data-theme 与本机记录并变深：${JSON.stringify(s1)}`);
+  await page.emulateMedia({ colorScheme: 'light' });
+  await sleep(300);
+  const s2 = await shell(page);
+  expect(s2.canvas === THEME.light.canvas, `系统偏好换成浅色后外壳没跟着变：${s2.canvas}`);
+  const hint = await page.getByTestId('theme-system').innerText();
+  expect(hint.includes('现在是浅色'), `「跟随系统」一行没写当前是哪一套：${hint}`);
+  return '固定浅色压过系统深色；跟随系统时去掉 data-theme 与记录，系统偏好一变外壳跟着变';
+});
+
 await (ctx as BrowserContext | null)?.close().catch(() => {});
 const counts = summary();
 await browser.close();

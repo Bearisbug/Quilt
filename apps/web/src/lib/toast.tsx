@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { X } from 'lucide-react';
+import { TriangleAlert, X } from 'lucide-react';
 
 // 提示条（PAGE-CANVAS「提示条」，v1.04）：信息 3.2 s、错误 8 s 后消失；悬停时不计时，移开重新计时；
 // 错误与带动作的可手动关。动作只有一个（例如「撤销（⌘Z）」），点了就收起
@@ -41,16 +41,19 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: numb
   const closable = t.kind === 'error' || !!t.action;
   // 悬停开始用 onMouseOver，不能用 onMouseEnter：指针原先所在的元素被移除时（点了「删除元素」，按钮随检查器清空消失），Chrome 只补发
   // mouseover、不发 mouseout，React 的 onMouseEnter 是按 mouseout 合成的，于是一直不触发，提示条在指针下照常到点消失（TC-EDIT-034）
+  // 信息条是反色实底（§13.1）；错误条换成弹层底 + 错误色细框 + 警示图标——错误色压在反色底上对比度不够，也不能只靠颜色区分
+  const error = t.kind === 'error';
   return (
     <div data-testid="toast" data-kind={t.kind} onMouseOver={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      className={`fade-up ${closable ? 'pointer-events-auto' : ''} flex max-w-[28rem] items-start gap-2 rounded-md border bg-panel px-3.5 py-2 text-sm leading-relaxed text-fg [overflow-wrap:anywhere] shadow-lg ${t.kind === 'error' ? 'border-danger' : 'border-line'}`}>
+      className={`fade-up ${closable ? 'pointer-events-auto' : ''} flex max-w-[28rem] items-start gap-2 rounded-md px-3.5 py-2 type-body [overflow-wrap:anywhere] shadow-(--semantic-elevation-overlay) ${error ? 'border border-error bg-surface-overlay text-text-primary' : 'inverse'}`}>
+      {error && <TriangleAlert size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-error" />}
       <span className="min-w-0 flex-1">{t.text}</span>
       {t.action && (
         <button type="button" data-testid="toast-action" onClick={() => { t.action!.run(); onDismiss(t.id); }}
-          className="shrink-0 rounded px-1 font-medium text-accent-strong underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-accent">{t.action.label}</button>
+          className={`state-layer focus-ring shrink-0 rounded-sm px-1 font-medium underline underline-offset-2 ${error ? 'text-primary' : ''}`}>{t.action.label}</button>
       )}
       {closable && (
-        <button type="button" aria-label="关闭提示" onClick={() => onDismiss(t.id)} className="-mr-1 mt-0.5 shrink-0 rounded text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">
+        <button type="button" aria-label="关闭提示" onClick={() => onDismiss(t.id)} className={`state-layer focus-ring -mr-1 mt-0.5 shrink-0 rounded-sm ${error ? 'text-text-secondary' : ''}`}>
           <X size={14} aria-hidden="true" />
         </button>
       )}

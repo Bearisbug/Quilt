@@ -45,8 +45,8 @@ export function ScreenFinder({ screens, components, links, busy, onPick, onClose
   return (
     <Overlay onClose={onClose}>
       <div ref={ref} role="dialog" aria-modal="true" aria-label="跳到屏" tabIndex={-1} data-testid="screen-finder"
-        className="flex w-full max-w-md flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-2xl fade-up outline-none">
-        <div className="border-b border-line p-2">
+        className="flex w-full max-w-md flex-col overflow-hidden rounded-lg border border-border-subtle bg-surface-overlay shadow-(--semantic-elevation-overlay) fade-up outline-none">
+        <div className="border-b border-border-subtle p-2">
           <Input value={query} onChange={(e) => { setQuery(e.target.value); setCursor(0); }} placeholder="输入屏名、路由或用途…" aria-label="搜索屏与组件" autoComplete="off" spellCheck={false} data-testid="finder-input"
             role="combobox" aria-expanded aria-controls="finder-list" aria-activedescendant={rows[at] ? `finder-${rows[at].id}` : undefined}
             onKeyDown={(e) => {
@@ -57,17 +57,17 @@ export function ScreenFinder({ screens, components, links, busy, onPick, onClose
             }} />
         </div>
         <ul id="finder-list" role="listbox" aria-label="匹配结果" className="scroll max-h-[50dvh] p-1" data-testid="finder-list">
-          {rows.length === 0 && <li className="px-3 py-6 text-center text-xs text-muted">没有匹配的屏或组件</li>}
+          {rows.length === 0 && <li className="px-3 py-6 text-center type-label text-text-secondary">没有匹配的屏或组件</li>}
           {rows.map((r, i) => (
             <li key={`${r.kind}:${r.id}`} id={`finder-${r.id}`} role="option" aria-selected={i === at} data-testid="finder-row" data-id={r.id} data-kind={r.kind}
-              className={`flex cursor-pointer items-center justify-between gap-3 rounded-md px-3 py-2 text-sm ${i === at ? 'bg-accent/15' : 'hover:bg-panel-2'}`}
+              className={`flex cursor-pointer items-center justify-between gap-3 rounded-md px-3 py-2 type-body ${i === at ? 'bg-(--semantic-color-surface-selected)' : 'state-layer'}`}
               onMouseEnter={() => setCursor(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(r)}>
-              <span className="min-w-0 truncate"><b className="text-fg">{r.title}</b> <span className="text-muted">{r.sub}</span></span>
-              {r.badges.length > 0 && <span className="shrink-0 text-[11px] text-muted">{r.badges.join(' · ')}</span>}
+              <span className="min-w-0 truncate"><b className="text-text-primary">{r.title}</b> <span className="text-text-secondary">{r.sub}</span></span>
+              {r.badges.length > 0 && <span className="shrink-0 type-caption text-text-secondary">{r.badges.join(' · ')}</span>}
             </li>
           ))}
         </ul>
-        <div className="flex items-center gap-3 border-t border-line px-3 py-1.5 text-[11px] text-muted"><span>↑↓ 选择</span><span>Enter 跳过去</span><span>Esc 关闭</span><Button size="sm" className="ml-auto" data-testid="finder-close" onClick={onClose}>关闭</Button></div>
+        <div className="flex items-center gap-3 border-t border-border-subtle px-3 py-1.5 type-caption text-text-secondary"><span>↑↓ 选择</span><span>Enter 跳过去</span><span>Esc 关闭</span><Button size="sm" className="ml-auto" data-testid="finder-close" onClick={onClose}>关闭</Button></div>
       </div>
     </Overlay>
   );

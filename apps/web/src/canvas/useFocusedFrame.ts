@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ParentToPreview, ScreenDto } from '@quilt/core/browser';
 import type { CanvasProps } from '@/canvas/CanvasView';
+import { markPalette, useResolvedMode } from '@/lib/theme';
 
 // 卡片正显示的这张（原图或缩略图）是不是当前修订的：退出聚焦的交接按它判
 const shotIsCurrent = (s: ScreenDto, src: string | undefined) => !!src && (src === s.screenshotUrl || src === s.thumbUrl);
@@ -169,8 +170,9 @@ export function useFocusedFrame(p: CanvasProps, propsRef: { current: CanvasProps
     setFocusedSrc(s.previewUrl);
   }, []);
 
-  // 选择元素模式随 props 与 iframe 就绪同步到运行时
-  useEffect(() => { if (iframeReady) postToPreview({ type: 'quilt:mode', mode: p.inspectMode ? 'inspect' : 'interact' }); }, [p.inspectMode, iframeReady, postToPreview]);
+  // 选择元素模式随 props 与 iframe 就绪同步到运行时；换外观时重发一次，屏内的标记跟着换色（§13.1）
+  const themeMode = useResolvedMode();
+  useEffect(() => { if (iframeReady) postToPreview({ type: 'quilt:mode', mode: p.inspectMode ? 'inspect' : 'interact', marks: markPalette() }); }, [p.inspectMode, iframeReady, postToPreview, themeMode]);
 
   // 聚焦态热更新（REQ-CORE-005 v0.33）：src 钉住后新修订不会自己进来，由这里显式送——iframe 里正显示的那一屏
   //（导航栈顶，没跳转过就是卡片自己）换了 currentRevisionId，就取新 HTML swap 进同一个文档：不重挂、不丢导航栈，
@@ -216,7 +218,7 @@ export function useFocusedFrame(p: CanvasProps, propsRef: { current: CanvasProps
   useEffect(() => { if (linger && !lingerOn) setLinger(null); }, [linger, lingerOn]);
   useEffect(() => {
     if (!lingerOn) return;
-    postToPreview({ type: 'quilt:mode', mode: 'interact' });
+    postToPreview({ type: 'quilt:mode', mode: 'interact', marks: markPalette() });
     // inert 之后焦点若还停在 iframe 上，父页收不到键盘（Esc、快捷键成了死键）
     if (document.activeElement === iframeRef.current) iframeRef.current?.blur();
     const cur = propsRef.current.screens.find((x) => x.id === lingerOn.id);
@@ -280,7 +282,7 @@ export function useFocusedFrame(p: CanvasProps, propsRef: { current: CanvasProps
   const markReady = useCallback(() => {
     landed.current?.(); landed.current = null;
     readyRef.current = true; frameRetried.current = false; setFrameFailed(false); setIframeReady(true);
-    postToPreview({ type: 'quilt:mode', mode: propsRef.current.inspectMode ? 'inspect' : 'interact' }); reselectAfterSwap();
+    postToPreview({ type: 'quilt:mode', mode: propsRef.current.inspectMode ? 'inspect' : 'interact', marks: markPalette() }); reselectAfterSwap();
   }, [postToPreview, reselectAfterSwap, propsRef]);
   const markSwapped = useCallback(() => { landed.current?.(); landed.current = null; reselectAfterSwap(); }, [reselectAfterSwap]);
   // 屏里点了站内链接 / 提交了表单（REQ-PROTO-001）

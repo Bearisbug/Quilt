@@ -13,7 +13,7 @@ import { ConfirmDialog } from '@/ui/modal';
 // 列表在打开时才拉（项目多时不用每次进画布都请求），拉不到就只列当前项并 toast。
 // 删项目（v0.34）：每行 hover / 键盘高亮时露出垃圾桶，或在高亮行按 Delete；先关下拉再弹确认，确认后级联删除。
 const NEW_ID = '__new_project__';
-const ITEM_CLS = 'group relative flex cursor-pointer select-none items-center gap-2 rounded-md px-2.5 py-2 text-sm text-muted outline-none data-[highlighted]:bg-panel-2 data-[highlighted]:text-fg data-[state=checked]:text-fg data-[disabled]:pointer-events-none data-[disabled]:opacity-40';
+const ITEM_CLS = 'group relative flex cursor-pointer select-none items-center gap-2 rounded-md px-2.5 py-2 type-body text-text-secondary outline-none data-[highlighted]:bg-(--semantic-color-surface-selected) data-[highlighted]:text-text-primary data-[state=checked]:text-text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-40';
 
 // current = null（v0.76）：画布页的项目还在加载或取不到，切换器照常可用（它是加载失败时的出口之一），触发器写 placeholder
 export function ProjectSwitcher({ current, placeholder = '选择项目', onRenamed }: { current: ProjectDto | null; placeholder?: string; onRenamed?: (id: string, name: string) => void }) {
@@ -68,9 +68,9 @@ export function ProjectSwitcher({ current, placeholder = '选择项目', onRenam
     <>
       <Select.Root open={open} onOpenChange={(o) => { setOpen(o); if (o) void load(); }} value={current?.id ?? ''} onValueChange={(v) => { if (v === NEW_ID) setCreating(true); else if (v !== current?.id) navigate(`/p/${v}`); }}>
         <Select.Trigger ref={triggerRef} data-testid="project-switcher" aria-haspopup="listbox" aria-label={current ? `项目：${current.name}，切换项目` : `${placeholder}，切换项目`}
-          className="group flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-fg transition-colors duration-[var(--duration-fast)] hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-accent data-[state=open]:bg-panel-2">
-          <span className={current ? 'truncate' : 'truncate text-muted'}>{current?.name ?? placeholder}</span>
-          <Select.Icon className="flex shrink-0 text-muted transition-transform duration-[var(--duration-base)] ease-out group-data-[state=open]:rotate-180"><ChevronDown size={14} aria-hidden="true" /></Select.Icon>
+          className="group flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 type-body font-medium text-text-primary transition-colors duration-(--semantic-motion-duration-fast) data-[state=open]:bg-(--semantic-color-surface-selected) state-layer focus-ring">
+          <span className={current ? 'truncate' : 'truncate text-text-secondary'}>{current?.name ?? placeholder}</span>
+          <Select.Icon className="flex shrink-0 text-text-secondary transition-transform duration-(--semantic-motion-duration-base) ease-(--semantic-motion-easing-standard) group-data-[state=open]:rotate-180"><ChevronDown size={14} aria-hidden="true" /></Select.Icon>
         </Select.Trigger>
         <Select.Portal>
           <Select.Content position="popper" side="bottom" align="start" sideOffset={6} collisionPadding={12} data-testid="project-switcher-list"
@@ -88,7 +88,7 @@ export function ProjectSwitcher({ current, placeholder = '选择项目', onRenam
             className="menu z-50 max-h-[min(24rem,70vh)] w-[min(20rem,calc(100vw-1.5rem))] overflow-y-auto p-1.5">
             <Select.Viewport>
               <Select.Group>
-                <Select.Label className="flex justify-between gap-2 px-2.5 pb-1 pt-1.5 text-[11px] text-muted"><span>项目 · 按更新时间</span><span data-testid="project-keys-hint">F2 改名 · Delete 删除</span></Select.Label>
+                <Select.Label className="flex justify-between gap-2 px-2.5 pb-1 pt-1.5 type-caption text-text-secondary"><span>项目 · 按更新时间</span><span data-testid="project-keys-hint">F2 改名 · Delete 删除</span></Select.Label>
                 {list.map((p) => (
                   <Select.Item key={p.id} value={p.id} textValue={p.name} data-testid="project-option" data-project-id={p.id} className={ITEM_CLS}
                     // 改名期间指针移过哪一行都不抢焦点：Radix 在 pointermove 时把焦点交给指针下的那一行，改名框随之失焦，
@@ -107,20 +107,20 @@ export function ProjectSwitcher({ current, placeholder = '选择项目', onRenam
                             if (e.key === 'Enter') { e.preventDefault(); void commitRename(p, draft); }
                             if (e.key === 'Escape') { e.preventDefault(); setRenaming(null); }
                           }}
-                          className="min-w-0 flex-1 rounded-md border border-accent bg-canvas px-1.5 py-0.5 text-sm text-fg outline-none"
+                          className="min-w-0 flex-1 rounded-md border border-primary bg-(--semantic-color-surface-sunken) px-1.5 py-0.5 type-body text-text-primary outline-none"
                         />
                         {/* 改名只由这两个键收尾：鼠标在下拉里一动焦点就变，拿失焦当「确认」会把没想好的名字存进去 */}
                         <button
                           type="button" tabIndex={-1} aria-label={`保存新名字「${draft.trim()}」`} data-testid="rename-confirm" disabled={!draft.trim()}
                           onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); void commitRename(p, draft); }}
-                          className="grid size-6 shrink-0 place-items-center rounded-md text-success hover:bg-success/15 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-accent"
+                          className="grid size-6 shrink-0 place-items-center rounded-md text-success state-layer focus-ring"
                         ><Check size={14} aria-hidden="true" /></button>
                         <button
                           type="button" tabIndex={-1} aria-label="放弃改名" data-testid="rename-cancel"
                           onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); setRenaming(null); }}
-                          className="grid size-6 shrink-0 place-items-center rounded-md text-danger hover:bg-danger/15 focus-visible:outline-2 focus-visible:outline-accent"
+                          className="grid size-6 shrink-0 place-items-center rounded-md text-error state-layer focus-ring"
                         ><X size={14} aria-hidden="true" /></button>
                       </>
                     ) : (
@@ -131,22 +131,22 @@ export function ProjectSwitcher({ current, placeholder = '选择项目', onRenam
                           type="button" tabIndex={-1} aria-label={`重命名项目「${p.name}」`} data-testid="rename-project"
                           onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDraft(p.name); setRenaming(p.id); }}
-                          className="grid size-6 shrink-0 place-items-center rounded-md text-muted opacity-0 transition-opacity duration-[var(--duration-fast)] hover:bg-panel-2 hover:text-fg group-hover:opacity-100 group-data-[highlighted]:opacity-100 focus-visible:opacity-100"
+                          className="grid size-6 shrink-0 place-items-center rounded-md text-text-secondary opacity-0 transition-opacity duration-(--semantic-motion-duration-fast) group-hover:opacity-100 group-data-[highlighted]:opacity-100 focus-visible:opacity-100 state-layer"
                         ><Pencil size={14} aria-hidden="true" /></button>
                         <button
                           type="button" tabIndex={-1} aria-label={`删除项目「${p.name}」`} data-testid="delete-project"
                           onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); askDelete(p); }}
-                          className="grid size-6 shrink-0 place-items-center rounded-md text-muted opacity-0 transition-opacity duration-[var(--duration-fast)] hover:bg-danger/15 hover:text-danger group-hover:opacity-100 group-data-[highlighted]:opacity-100 focus-visible:opacity-100"
+                          className="grid size-6 shrink-0 place-items-center rounded-md text-text-secondary opacity-0 transition-opacity duration-(--semantic-motion-duration-fast) group-hover:opacity-100 group-data-[highlighted]:opacity-100 focus-visible:opacity-100 state-layer"
                         ><Trash2 size={14} aria-hidden="true" /></button>
                       </>
                     )}
-                    <span className="shrink-0 rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">{p.deviceType === 'mobile' ? '手机' : '桌面'}</span>
+                    <span className="shrink-0 rounded-sm border border-border-subtle px-2 py-0.5 type-caption text-text-secondary">{p.deviceType === 'mobile' ? '手机' : '桌面'}</span>
                   </Select.Item>
                 ))}
-                {loading && items === null && <p role="status" className="px-2.5 py-2 text-xs text-muted">正在加载项目列表…</p>}
+                {loading && items === null && <p role="status" className="px-2.5 py-2 type-label text-text-secondary">正在加载项目列表…</p>}
               </Select.Group>
-              <Select.Separator className="my-1.5 h-px bg-line" />
+              <Select.Separator className="my-1.5 h-px bg-border-subtle" />
               <Select.Item value={NEW_ID} textValue="新建项目" data-testid="new-project" className={ITEM_CLS}>
                 <span className="flex w-4 shrink-0 justify-center"><Plus size={14} aria-hidden="true" /></span>
                 <Select.ItemText>新建项目…</Select.ItemText>
