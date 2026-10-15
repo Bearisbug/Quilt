@@ -30,7 +30,7 @@ export function Select({ id, value, onChange, options, placeholder, disabled, cl
         id={id} aria-label={ariaLabel} data-testid={testId} data-value={value}
         className={cn(
           'state-layer focus-ring group flex h-9 w-full items-center justify-between gap-2 rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) px-2.5 type-body text-text-primary',
-          'data-[state=open]:border-text-primary disabled:cursor-not-allowed aria-invalid:border-error',
+          'disabled:cursor-not-allowed aria-invalid:border-error',
           className,
         )}
         {...rest}

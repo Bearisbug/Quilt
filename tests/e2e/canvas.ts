@@ -336,7 +336,6 @@ await step('TC-CORE-058', '9', async () => {
   const s = await page.locator('[data-testid="screen-card"].selected').count();
   const c = await page.locator('[data-testid="component-card"].selected').count();
   expect(s === 4 && c === 2, `⌘A 应选中 4 屏 + 2 个组件卡，实际 ${s} 屏 + ${c} 个组件`);
-  expect((await page.getByTestId('selection-stat').innerText()).includes('4 屏 · 2 个组件'), '顶栏选中计数不对');
   return '⌘A 选中 4 屏 + 2 个组件卡';
 });
 

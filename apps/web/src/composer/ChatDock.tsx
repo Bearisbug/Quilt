@@ -84,7 +84,7 @@ export function ChatDock(p: ChatDockProps) {
       </button>
       {!p.collapsed && (
         <>
-          <div ref={listRef} onScroll={onScroll} className="scroll fade-up min-h-0 max-h-[min(28rem,calc(100dvh-12rem))] flex-1 space-y-3 border-t border-text-primary p-3" role="log" aria-live="polite">
+          <div ref={listRef} onScroll={onScroll} className="scroll fade-up min-h-0 max-h-[min(28rem,calc(100dvh-12rem))] flex-1 space-y-3 border-t border-border-subtle p-3" role="log" aria-live="polite">
             {p.loadState === 'loading' && p.messages.length === 0 && (
               <div className="space-y-3" aria-busy="true" aria-label="正在加载对话">
                 <div className="ml-5 h-12 animate-pulse rounded-lg bg-(--semantic-color-surface-selected) motion-reduce:animate-none" />

@@ -15,8 +15,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
         'state-layer focus-ring inline-flex items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap disabled:cursor-not-allowed',
         size === 'sm' ? 'h-8 px-2.5 type-label' : 'h-9 px-3.5 type-body',
         variant === 'primary' && 'bg-primary text-on-primary',
-        // 次按钮：主文字色细线框（样例页 4.8 secondary）
-        variant === 'ghost' && 'border border-text-primary text-text-primary',
+        variant === 'ghost' && 'border border-border-strong text-text-primary',
         variant === 'danger' && 'bg-error text-on-primary',
         className,
       )}
@@ -104,7 +103,7 @@ export function Panel({ title, actions, children, className }: { title?: ReactNo
   return (
     <section className={cn('flex min-h-0 flex-col border-border-subtle', className)}>
       {(title || actions) && (
-        // 编辑式栏头：面板标题字阶，标题下一道主文字色细线（§13.1）
+        // 面板标题字阶，与内容之间一道发丝线（§13.1）
         <header className="panel-head flex h-12 shrink-0 items-center justify-between gap-2 px-4">
           <h2 className="type-heading2 font-medium truncate">{title}</h2>
           <div className="flex items-center gap-1">{actions}</div>

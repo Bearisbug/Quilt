@@ -904,7 +904,7 @@ export function CanvasPage() {
       {/* 顶栏在 DOM 里排在画布之前（v0.80）：Tab 序从项目切换器开始。层级靠 z-index，不靠 DOM 顺序 */}
       <TopNav floating right={<>
         {feedShown && feed !== 'open' && !gone && (
-          <span role="status" data-testid="live-status" className="min-w-0 truncate whitespace-nowrap rounded-sm border border-warning/60 px-2 py-0.5 type-caption text-warning">
+          <span role="status" data-testid="live-status" className="inline-flex h-8 min-w-0 items-center truncate whitespace-nowrap rounded-md border border-warning bg-surface-bg px-2.5 type-label text-warning shadow-(--semantic-elevation-raised)">
             实时更新已断开 · {feed === 'offline'
               ? <button type="button" onClick={() => { setFeed('reconnecting'); setFeedEpoch((n) => n + 1); }} className="underline underline-offset-2 state-layer focus-ring">重连</button>
               : '重连中'}
@@ -912,15 +912,6 @@ export function CanvasPage() {
         )}
       </>}>
         <ProjectSwitcher current={detail?.project ?? null} placeholder={failure?.kind === 'not-found' ? '项目不存在' : failure ? '项目没加载出来' : '加载中…'} onRenamed={(id) => { if (id === projectId) refresh(); }} />
-        {detail && <span className="shrink-0 whitespace-nowrap rounded-sm border border-border-subtle px-2 py-0.5 type-caption text-text-secondary">{detail.project.deviceType === 'mobile' ? '手机' : '桌面'}</span>}
-        {(selectedScreens.length > 0 || selectedComponents.length > 0) && !focusedId && (
-          <span className="ml-1 min-w-0 truncate whitespace-nowrap type-label text-text-secondary" data-testid="selection-stat">
-            已选 {selectedScreens.length === 0
-              ? (selectedComponents.length === 1 ? <>组件 <b className="text-text-primary">{selectedComponents[0].name}</b></> : <b className="text-text-primary">{selectedComponents.length} 个组件</b>)
-              : selectedComponents.length > 0 ? <b className="text-text-primary">{selectedScreens.length} 屏 · {selectedComponents.length} 个组件</b>
-              : selected ? <><b className="text-text-primary">{selected.name}</b> {selected.route}</> : <b className="text-text-primary">{selectedScreens.length} 屏</b>}
-          </span>
-        )}
       </TopNav>
       <div className="absolute inset-0">
         {ready && detail && tokens && previewOrigin ? (

@@ -481,14 +481,20 @@ await step('TC-CORE-023', async () => {
     expect(!(a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height), `${an} 与 ${bn} 重叠`);
   }
 
-  // 2 顶栏是贴顶的实底横条（v1.08，§13.1）：底色是面板色、底边一道发丝线、不模糊，画布在它下面平移时被它盖住
+  // 2 顶栏不铺底（v1.10，§13.1）：没有底色、边线与模糊，盒子只包住左上角的项目切换器 chip；chip 自带面板色实底，左缘与小地图对齐；
+  //   chip 右边同一高度的位置指针落到画布上，不被顶栏拦住
   const hd = await page.locator('header').first().evaluate((el) => {
-    const cs = getComputedStyle(el);
+    const cs = getComputedStyle(el); const r = el.getBoundingClientRect();
+    const chip = document.querySelector('[data-testid="project-switcher"]')!; const c = chip.getBoundingClientRect();
     const probe = document.createElement('div'); probe.style.color = 'var(--semantic-color-surface-background)'; document.body.appendChild(probe);
     const panel = getComputedStyle(probe).color; probe.remove();
-    return { bg: cs.backgroundColor, panel, filter: cs.backdropFilter, border: cs.borderBottomWidth, image: cs.backgroundImage, before: getComputedStyle(el, '::before').content };
+    const mini = document.querySelector('[data-testid="minimap"]')?.getBoundingClientRect();
+    const right = document.elementFromPoint(c.right + 120, c.top + c.height / 2);
+    return { bg: cs.backgroundColor, filter: cs.backdropFilter, border: cs.borderBottomWidth, width: r.width, chipBg: getComputedStyle(chip).backgroundColor, panel, chipLeft: c.left, miniLeft: mini?.left ?? null, rightIsHeader: !!right?.closest('header') };
   });
-  expect(hd.bg === hd.panel && hd.filter === 'none' && hd.border === '1px' && hd.image === 'none' && hd.before === 'none', `顶栏不是实底横条：${JSON.stringify(hd)}`);
+  expect(/rgba\(0, 0, 0, 0\)|transparent/.test(hd.bg) && hd.filter === 'none' && hd.border === '0px', `顶栏应不铺底、无边线、不模糊：${JSON.stringify(hd)}`);
+  expect(hd.chipBg === hd.panel && !hd.rightIsHeader && hd.width < 400, `项目切换器应是带面板色实底的 chip、顶栏只包住它：${JSON.stringify(hd)}`);
+  expect(hd.miniLeft === null || Math.abs(hd.miniLeft - hd.chipLeft) <= 0.5, `项目切换器 chip 与小地图左缘没对齐：${hd.chipLeft} vs ${hd.miniLeft}`);
 
   // 3 工具栏命中区与 roving tabindex
   const hits = await page.locator('[role="toolbar"] button').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { n: e.getAttribute('aria-label'), w: r.width, h: r.height, t: e.getAttribute('tabindex') }; }));
@@ -875,7 +881,7 @@ await step('TC-CORE-026', async () => {
   await page.goto(`${WEB}/p/${projectId}`);
   await page.locator('[data-testid="screen-card"]').first().waitFor();
   await page.waitForTimeout(600);
-  const nav = page.locator('header.masthead');
+  const nav = page.locator('header').first();
   expect((await nav.locator('.wordmark').count()) === 0, '画布顶栏仍挂着品牌字标');
   const navFirst = await nav.evaluate((el) => el.firstElementChild?.getAttribute('data-testid') ?? el.firstElementChild?.tagName ?? '');
   expect(navFirst === 'project-switcher', `画布顶栏左上第一个元素不是项目切换器：${navFirst}`);

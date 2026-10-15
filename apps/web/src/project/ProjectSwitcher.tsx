@@ -68,7 +68,8 @@ export function ProjectSwitcher({ current, placeholder = '选择项目', onRenam
     <>
       <Select.Root open={open} onOpenChange={(o) => { setOpen(o); if (o) void load(); }} value={current?.id ?? ''} onValueChange={(v) => { if (v === NEW_ID) setCreating(true); else if (v !== current?.id) navigate(`/p/${v}`); }}>
         <Select.Trigger ref={triggerRef} data-testid="project-switcher" aria-haspopup="listbox" aria-label={current ? `项目：${current.name}，切换项目` : `${placeholder}，切换项目`}
-          className="group flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 type-body font-medium text-text-primary transition-colors duration-(--semantic-motion-duration-fast) data-[state=open]:bg-(--semantic-color-surface-selected) state-layer focus-ring">
+          // 画布左上角的 chip（§13.1）：顶栏不铺底，chip 自己带实底、细线外框与浅投影，压在卡片上也读得出
+          className="state-layer focus-ring group flex h-8 min-w-0 max-w-[min(20rem,calc(100vw-7rem))] items-center gap-1.5 rounded-md border border-border-subtle bg-surface-bg px-2.5 type-body font-medium text-text-primary shadow-(--semantic-elevation-raised) data-[state=open]:border-border-strong">
           <span className={current ? 'truncate' : 'truncate text-text-secondary'}>{current?.name ?? placeholder}</span>
           <Select.Icon className="flex shrink-0 text-text-secondary transition-transform duration-(--semantic-motion-duration-base) ease-(--semantic-motion-easing-standard) group-data-[state=open]:rotate-180"><ChevronDown size={14} aria-hidden="true" /></Select.Icon>
         </Select.Trigger>

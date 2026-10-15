@@ -57,9 +57,9 @@ body { background: var(--semantic-color-surface-canvas); color: var(--semantic-c
 @media (prefers-contrast: more) {
   .chrome { border-color: var(--semantic-color-border-strong); }
 }
-/* 面板标题（编辑式栏头）：面板标题字阶，标题下一道主文字色的细线 */
-.panel-head { border-bottom: var(--semantic-layout-hairline) solid var(--semantic-color-text-primary); }
-/* 画布顶栏：贴顶的实底横条，画布在它下面平移，卡片经过时被它整齐盖住 */
+/* 面板标题：面板标题字阶，与内容之间一道分隔线色的发丝线 */
+.panel-head { border-bottom: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle); }
+/* 非画布页（PAGE-FIRST、错误页）的顶栏：实底横条；画布页的顶栏不铺底，见 TopNav */
 .masthead { background: var(--semantic-color-surface-background); border-bottom: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle); }
 /* 提示条与工具提示：反色实底（编辑部的反色标签） */
 .inverse { background: var(--semantic-color-surface-inverse); color: var(--semantic-color-text-on-inverse); }
@@ -393,5 +393,5 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
 .variant-chip { pointer-events: auto; border: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle); border-radius: var(--semantic-radius-sm); background: var(--semantic-color-surface-background); color: var(--semantic-color-text-secondary); font-size: var(--semantic-typography-caption-font-size); font-weight: var(--primitive-font-weight-semibold); padding: 3px 10px; cursor: pointer; box-shadow: var(--semantic-elevation-raised); }
 .variant-chip[aria-pressed="true"] { background: var(--semantic-color-action-primary); color: var(--semantic-color-text-on-action); border-color: transparent; }
 
-/* 小地图（REQ-CORE-024 v0.61）：顶栏下方左侧；canvas 绘制（Minimap.tsx），颜色取本元素上的 tokens 变量，切外观时重读 */
-.minimap { position: absolute; left: 1rem; top: 4rem; z-index: 20; border-radius: var(--semantic-radius-md); cursor: crosshair; touch-action: none; }
+/* 小地图（REQ-CORE-024 v0.61）：顶栏下方左侧，左缘与项目切换器 chip 对齐（12 px）；canvas 绘制（Minimap.tsx），颜色取本元素上的 tokens 变量，切外观时重读 */
+.minimap { position: absolute; left: 0.75rem; top: 4rem; z-index: 20; border-radius: var(--semantic-radius-md); cursor: crosshair; touch-action: none; }
