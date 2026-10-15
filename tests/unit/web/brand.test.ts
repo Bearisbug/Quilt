@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
-// 界面视觉接线（v1.08，DESIGN §13.1 / ui-constraints THEME-006）：只经 brand/ 的三份文件进来，组件里不写 hover 色、ring 焦点环、
+// 界面视觉接线（v1.08，DESIGN §13.1 / ui-constraints THEME-006）：只经 brand/ 的三份文件（在 apps/web/src/brand/ 的副本）进来，组件里不写 hover 色、ring 焦点环、
 // 禁用透明度与 hex，外壳样式表不用渐变、背景模糊、文字阴影（brand meta.notUsed）
 const WEB = path.resolve(import.meta.dirname, '../../../apps/web');
 const SRC = path.join(WEB, 'src');
@@ -15,13 +16,18 @@ const sources = (() => {
   return out.filter((p) => !/lib\/twClass\.ts$|ui\/vendorIcons\.ts$/.test(p));
 })();
 
-test('styles.css 只引 brand/ 的 token 适配文件、状态层与字体，没有自写的 token 映射', () => {
+test('styles.css 只引 brand/ 副本里的 token 适配文件、状态层与字体，没有自写的 token 映射', () => {
   const css = read(path.join(SRC, 'styles.css'));
   const imports = [...css.matchAll(/@import\s+"([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(imports, ['tailwindcss', '../../../brand/tokens.tailwind.css', '../../../brand/state-layer.css', '../../../brand/fonts/fonts.css']);
+  assert.deepEqual(imports, ['tailwindcss', './brand/tokens.tailwind.css', './brand/state-layer.css', './brand/fonts/fonts.css']);
   assert.doesNotMatch(css, /@theme\b/);
   // 旧的品牌变量层与映射层的变量名一个都不剩
   assert.doesNotMatch(css, /--brand-|var\(--color-/);
+});
+
+test('apps/web/src/brand/ 的副本与本机 brand/ 一致（本机没有 brand/ 时跳过比对）', () => {
+  const r = spawnSync('node', [path.resolve(import.meta.dirname, '../../../scripts/sync-brand.mjs'), '--check'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
 });
 
 test('外壳样式表不用渐变、背景模糊、文字阴影', () => {

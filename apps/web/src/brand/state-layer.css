@@ -1,0 +1,34 @@
+/* 状态层与焦点环（visual-system 样例页规格 v1.2 附录 A，规范性）。样例页与产品界面引用同一份。
+   这里只把附录里的 --state-* / --focus-ring-* / --motion-* 接到 brand/tokens.css 的变量上，规则正文逐字照抄。
+   hover / focus / pressed / dragged 是用 currentColor 叠的一层，禁用用元素自身透明度，选中走选中高亮色（不走叠加层）。 */
+:root {
+  --state-hover: var(--semantic-state-hover-opacity);
+  --state-focus: var(--semantic-state-focus-opacity);
+  --state-pressed: var(--semantic-state-pressed-opacity);
+  --state-dragged: var(--semantic-state-dragged-opacity);
+  --state-disabled: var(--semantic-state-disabled-opacity);
+  --focus-ring-width: var(--semantic-state-focus-ring-width);
+  --focus-ring-offset: var(--semantic-state-focus-ring-offset);
+  --focus-ring-color: var(--semantic-state-focus-ring);
+  --motion-duration-fast: var(--semantic-motion-duration-fast);
+  --motion-ease-standard: var(--semantic-motion-easing-standard);
+}
+
+:where(.state-layer) { position: relative; isolation: isolate; }
+.state-layer::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit;
+  background: currentColor; opacity: 0; pointer-events: none;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
+}
+@media (hover: hover) { .state-layer:hover::after { opacity: var(--state-hover); } }
+.state-layer.is-hover::after { opacity: var(--state-hover); }
+.state-layer:focus-visible::after, .state-layer.is-focus::after { opacity: var(--state-focus); }
+.state-layer:active::after, .state-layer.is-pressed::after { opacity: var(--state-pressed); }
+.state-layer.is-dragged::after { opacity: var(--state-dragged); }
+.state-layer.is-field:focus-within::after, .state-layer.is-field.is-focus::after { opacity: 0; }
+.state-layer:disabled, .state-layer[aria-disabled="true"], .state-layer.is-disabled, .state-layer.is-field:has(:disabled) { opacity: var(--state-disabled); }
+.state-layer:disabled::after, .state-layer[aria-disabled="true"]::after, .state-layer.is-disabled::after, .state-layer.is-field:has(:disabled)::after { opacity: 0; }
+.focus-ring:focus-visible, .focus-ring.is-focus, .focus-ring.is-field:has(:focus-visible) {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}

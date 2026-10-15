@@ -880,7 +880,7 @@ await step('TC-CORE-026', async () => {
   const navFirst = await nav.evaluate((el) => el.firstElementChild?.getAttribute('data-testid') ?? el.firstElementChild?.tagName ?? '');
   expect(navFirst === 'project-switcher', `画布顶栏左上第一个元素不是项目切换器：${navFirst}`);
 
-  // 3 外壳配色取自 brand/（v1.08，§13.1）：浅色、深色各读一遍根元素上的语义变量，等于 brand/tokens.resolved*.json；
+  // 3 外壳配色取自 brand/（v1.08，§13.1）：浅色、深色各读一遍根元素上的语义变量，等于产品带的 brand 副本 tokens.css 里 [data-theme] 那两块的值；
   // 正文、次级、弱文字对面板与画布，主按钮上的字对动作色都 ≥ 4.5:1，画布标记对画布 ≥ 3:1
   // token 值在页面里读、比值在 Node 里算——tsx 会往 evaluate 的闭包里注入 __name 导致页面侧报错
   const ROLES = { canvas: 'surface.canvas', panel: 'surface.background', fg: 'text.primary', muted: 'text.secondary', subtle: 'text.tertiary', accent: 'action.primary', onAccent: 'text.onAction', mark: 'mark.line' } as const;
@@ -892,18 +892,19 @@ await step('TC-CORE-026', async () => {
     return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
   };
   const ratio = (a: string, b: string) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return +((x + 0.05) / (y + 0.05)).toFixed(2); };
-  const brandDir = path.resolve(import.meta.dirname, '../../../brand');
+  const tokensCss = readFileSync(path.resolve(import.meta.dirname, '../../../apps/web/src/brand/tokens.css'), 'utf8');
   const contrast: Record<string, Record<string, number>> = {};
-  for (const [mode, file] of [['light', 'tokens.resolved.json'], ['dark', 'tokens.resolved.dark.json']] as const) {
-    const want = JSON.parse(readFileSync(path.join(brandDir, file), 'utf8')).semantic.color;
+  for (const mode of ['light', 'dark'] as const) {
+    const block = tokensCss.match(new RegExp(`\\[data-theme="${mode}"\\] \\{([^}]*)\\}`))?.[1] ?? '';
+    const want = (role: string) => block.match(new RegExp(`${varOf(role)}: (#[0-9A-Fa-f]{6})`))?.[1] ?? '';
     await page.evaluate(`document.documentElement.setAttribute('data-theme', '${mode}')`);
     const sw = await page.evaluate(`(() => {
       const probe = (n) => { const d = document.createElement('div'); d.style.color = 'var(' + n + ')'; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; };
       return Object.fromEntries(${JSON.stringify(Object.entries(ROLES).map(([k, r]) => [k, varOf(r)]))}.map(([k, n]) => [k, probe(n)]));
     })()`) as Record<keyof typeof ROLES, string>;
     for (const [k, role] of Object.entries(ROLES) as [keyof typeof ROLES, string][]) {
-      const hex = role.split('.').reduce((o: Record<string, unknown>, s) => o[s] as Record<string, unknown>, want).$value as string;
-      expect(sw[k] === rgbOf(hex), `${mode} ${role} 是 ${sw[k]}，brand/${file} 里是 ${hex}`);
+      const hex = want(role);
+      expect(!!hex && sw[k] === rgbOf(hex), `${mode} ${role} 是 ${sw[k]}，tokens.css 的 [data-theme="${mode}"] 里是 ${hex || '（没找到）'}`);
     }
     const pairs = {
       'fg/panel': ratio(sw.fg, sw.panel), 'muted/panel': ratio(sw.muted, sw.panel), 'subtle/panel': ratio(sw.subtle, sw.panel),

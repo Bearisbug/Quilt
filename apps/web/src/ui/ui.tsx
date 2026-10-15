@@ -32,7 +32,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 // 悬停态挂在几何恒定的外层 span 上，动的只有提示子元素，按钮盒子一帧不变（INT-018）。
 // 不可用时用 aria-disabled 而非原生 disabled：工具栏按钮要能被键盘发现、并在提示里说明为什么用不了（A11Y-007 / INT-013）。
 // 尺寸：2xs 24px（列表行内的小按钮，点击区下限 A11Y-009）、xs 32px（面板角落的收起 / 关闭）、sm 40px（输入框的发送 / 取消）、md 44px（工具栏）。
-// tone=invert 是反色实心钮，只给「此刻唯一的主动作」（发送 / 停止）用。active 是工具栏里开着的工具：左侧一道主文字色竖线（.rail-on），不填色块。
+// tone=invert 是反色实心钮，只给「此刻唯一的主动作」（发送 / 停止）用。active 是工具栏里开着的工具：一块淡灰底（.rail-on，状态层常驻按下那一档）、图标用主文字色。
 type IconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'disabled'> & {
   label: string; hint?: string; desc?: string; active?: boolean; tip?: 'left' | 'right' | 'top' | 'top-end' | 'bottom' | 'bottom-end' | 'none'; unavailable?: string | false; size?: '2xs' | 'xs' | 'sm' | 'md'; tone?: 'default' | 'danger' | 'invert';
 };

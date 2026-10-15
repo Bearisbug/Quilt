@@ -8,12 +8,8 @@ build/
 coverage/
 .data/
 docs/test-runs/
-# brand/ 根目录是当前生效的界面视觉交接（DESIGN.md、tokens、状态层、字体、图标、样例页、校验脚本），随产品仓提交；
-# 品牌包 release（28 MB，含 17.7 MB 中文字体）、宣传物料与过程稿只在本机
-/brand/releases/
-/brand/promo/
-/brand/working/
-/brand/qa/specimen-shots/
+# 品牌与界面视觉交接只在本机（188 MB，含品牌包 release、宣传物料与过程稿）；产品构建用的几份文件副本在 apps/web/src/brand/（scripts/sync-brand.mjs）
+/brand/
 spike-m0/
 .DS_Store
 .e2e/

@@ -1,10 +1,11 @@
 @import "tailwindcss";
-/* 界面视觉的唯一来源是仓库根的 brand/（§13.1，ui-constraints THEME-006）：token 只经 tokens.tailwind.css 进来（它带入 tokens.css），
-   交互态只经 state-layer.css，字体只经 fonts.css。这三份在项目侧只读，改值回 brand/tokens.json 重新生成；这里不再写 token 映射。
+/* 界面视觉的唯一来源是 brand/（§13.1，ui-constraints THEME-006）：token 只经 tokens.tailwind.css 进来（它带入 tokens.css），
+   交互态只经 state-layer.css，字体只经 fonts.css。brand/ 只在本机、不进仓库，./brand/ 是这几份文件的副本（scripts/sync-brand.mjs 同步），
+   只读，改值回 brand/tokens.json 重新生成再同步；这里不再写 token 映射。
    组件用适配文件生成的工具类（bg-surface-bg、text-text-secondary…），适配文件没映射的角色直接引变量（bg-(--semantic-color-surface-canvas)）。 */
-@import "../../../brand/tokens.tailwind.css";
-@import "../../../brand/state-layer.css";
-@import "../../../brand/fonts/fonts.css";
+@import "./brand/tokens.tailwind.css";
+@import "./brand/state-layer.css";
+@import "./brand/fonts/fonts.css";
 /* 类名说明表（lib/twClass.ts）里是用户屏会写的 Tailwind 词汇（bg-gradient-to-*、backdrop-blur-* 等），不是外壳的类名；
    不排除的话 Tailwind 会照着它把这些工具类生成进外壳样式表 */
 @source not "./lib/twClass.ts";
@@ -117,7 +118,7 @@ body { background: var(--semantic-color-surface-canvas); color: var(--semantic-c
 .msg:focus-within .msg-actions { opacity: 1; }
 @media (hover: hover) and (pointer: fine) { .msg:hover .msg-actions { opacity: 1; } }
 @media (hover: none) { .msg-actions { opacity: 1; } }
-/* 底部输入框：实底外壳，不走 .chrome 的外框——它是主输入控件，需要一块与画布截图分离的稳定底色；顶边一道主文字色的粗线（编辑式）。
+/* 底部输入框：实底外壳，不走 .chrome——它是主输入控件，需要一块与画布截图分离的稳定底色。
    聚焦只加深外框（透明 outline 留给强制配色模式顶上，A11Y-008），不套强调色描边。 */
 .composer {
   /* 横向落点：默认压在视口正中，只有当侧边浮层真会压住它时才让位，且只让到不重叠为止。
@@ -137,7 +138,6 @@ body { background: var(--semantic-color-surface-canvas); color: var(--semantic-c
   right: auto;
   background: var(--semantic-color-surface-background);
   border: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle);
-  border-top: 2px solid var(--semantic-color-text-primary);
   border-radius: var(--semantic-radius-lg);
   box-shadow: var(--semantic-elevation-panel);
   /* 宽度变化期间把溢出裁掉：工具条此时按终态的一行宽度摆着（见 .composer-bar 的 nowrap），比正在收缩的
@@ -154,7 +154,7 @@ body { background: var(--semantic-color-surface-canvas); color: var(--semantic-c
 .composer[hidden] { display: none; }
 /* 拖着图片经过输入框时给出可放置的提示（REQ-CORE-012） */
 .composer[data-dropping] { border-color: var(--semantic-color-action-primary); border-style: dashed; }
-.composer:focus-within { border-color: var(--semantic-color-border-strong); border-top-color: var(--semantic-color-text-primary); }
+.composer:focus-within { border-color: var(--semantic-color-border-strong); }
 .composer:has(textarea:focus-visible) { outline: 2px solid transparent; outline-offset: 2px; }
 .composer textarea { max-height: 224px; } /* 8 行 × 28px 行高，到顶后内部滚动 */
 /* 工具条空闲时略退后，聚焦、有内容或生成中回到全亮 */
@@ -193,8 +193,9 @@ body { background: var(--semantic-color-surface-canvas); color: var(--semantic-c
 .rail[data-fade="bottom"] { box-shadow: inset 0 calc(-1 * var(--semantic-layout-hairline)) 0 var(--semantic-color-border-strong); }
 .rail[data-fade="top bottom"] { box-shadow: inset 0 var(--semantic-layout-hairline) 0 var(--semantic-color-border-strong), inset 0 calc(-1 * var(--semantic-layout-hairline)) 0 var(--semantic-color-border-strong); }
 .rail::-webkit-scrollbar { display: none; }
-/* 开着的工具：左侧一道 2 px 主文字色竖线（编辑式，不填色块） */
-.rail-on { box-shadow: inset 2px 0 0 var(--semantic-color-text-primary); }
+/* 开着的工具（aria-pressed 的切换钮）：状态层常驻在按下那一档，按钮里铺一块淡灰底；悬停不再叠加，与没开的工具悬停（0.08）分得开。
+   要写在 state-layer.css 之后：同特异性下后写的压过它的 :hover / :focus-visible 档 */
+.rail-on.state-layer::after { opacity: var(--state-pressed); }
 
 @keyframes slide-in-right { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
 .slide-in-right { animation: slide-in-right var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard); }

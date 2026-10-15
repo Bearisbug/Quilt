@@ -1,0 +1,19 @@
+/* Quilt 界面字体（brand/DESIGN.md「字体」）。文件：SpaceGrotesk-VF.woff2（可变字重 300–700，735 个码位），许可 SIL OFL 1.1（SpaceGrotesk-OFL.txt）。
+   「Space Grotesk」是完整字体，排在基础字体栈最前；「Space Grotesk Latin」是同一个文件、只开放拉丁字母、数字与西文符号，
+   排在中文覆盖字体栈最前（tokens 的 primitive.fontFamily.cjk）——中文句里的西文仍是品牌字体，
+   中西共用的标点“”‘’…—·不在范围里，交给后面的中文字体，按中文字宽渲染。中文字形不加载网页字体，走系统中文字体。 */
+@font-face {
+  font-family: "Space Grotesk";
+  src: url("./SpaceGrotesk-VF.woff2") format("woff2-variations");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Space Grotesk Latin";
+  src: url("./SpaceGrotesk-VF.woff2") format("woff2-variations");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00B6, U+00B8-024F, U+0259, U+02B9-02DD, U+0300-0338, U+1E00-1EFF, U+2000-2013, U+2015-2017, U+201A-201B, U+201E-2025, U+2027-20CF, U+2100-22FF;
+}
