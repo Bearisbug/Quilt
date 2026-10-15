@@ -186,12 +186,11 @@ body { background: var(--semantic-color-surface-canvas); color: var(--semantic-c
 /* 非 Radix 的锚定浮框（新建屏幕）：同一套进场，原点由 inline transform-origin 指到锚点那一角 */
 .pop-in { animation: menu-in var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard); }
 
-/* 右侧竖排工具栏（RESP-016 / RESP-017）：高度有界、自身滚动、无可见滚动条；溢出时那一侧边缘显一道细线 */
+/* 右侧竖排工具栏（RESP-016 / RESP-017）：高度有界、自身滚动、无可见滚动条；溢出时那一侧边缘露出一个小箭头 */
 .rail { max-height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
-/* 只在那一侧还有被遮住的工具时出线（CanvasToolbar 按滚动位置写 data-fade）。内阴影画在滚动容器的边上、不随内容滚动 */
-.rail[data-fade="top"] { box-shadow: inset 0 var(--semantic-layout-hairline) 0 var(--semantic-color-border-strong); }
-.rail[data-fade="bottom"] { box-shadow: inset 0 calc(-1 * var(--semantic-layout-hairline)) 0 var(--semantic-color-border-strong); }
-.rail[data-fade="top bottom"] { box-shadow: inset 0 var(--semantic-layout-hairline) 0 var(--semantic-color-border-strong), inset 0 calc(-1 * var(--semantic-layout-hairline)) 0 var(--semantic-color-border-strong); }
+/* 只在那一侧还有被遮住的工具时出现（CanvasToolbar 按滚动位置写 data-fade）：贴着工具栏那一边的一条画布底色窄条，正中一个弱文字色的小箭头，
+   盖住正在滚出去的那颗按钮的边缘；不接指针，点击照样落到下面的按钮上。不用渐隐遮罩：界面不用渐变（brand meta.notUsed） */
+.rail-more { position: absolute; inset-inline: 0.125rem; z-index: 1; display: grid; place-items: center; height: 1rem; background: var(--semantic-color-surface-canvas); color: var(--semantic-color-text-tertiary); pointer-events: none; }
 .rail::-webkit-scrollbar { display: none; }
 /* 开着的工具（aria-pressed 的切换钮）：状态层常驻在按下那一档，按钮里铺一块淡灰底；悬停不再叠加，与没开的工具悬停（0.08）分得开。
    要写在 state-layer.css 之后：同特异性下后写的压过它的 :hover / :focus-visible 档 */

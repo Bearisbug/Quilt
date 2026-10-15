@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { IconButton } from '@/ui/ui';
 
 export type Tool = {
@@ -35,7 +36,7 @@ export function CanvasToolbar({ groups }: { groups: Tool[][] }) {
   // 上下文工具随选中/聚焦态增删，停靠点可能落到已消失的项上
   const idx = Math.min(active, items.length - 1);
   // 窗口矮到放不下全部工具时在列内滚动（滚动条隐藏，RESP-016）；哪一侧还有被遮住的工具，那一侧边缘渐隐提示——
-  // 常驻渐隐会把没溢出时的首尾按钮也淡掉一截，所以按滚动位置算
+  // 哪一侧还有被遮住的工具：按滚动位置算，那一侧边缘露出一个小箭头（RESP-016 的滚动指示）
   const railRef = useRef<HTMLDivElement>(null);
   const [fade, setFade] = useState('');
   useEffect(() => {
@@ -73,6 +74,7 @@ export function CanvasToolbar({ groups }: { groups: Tool[][] }) {
     // 顶端固定在顶栏下方（v0.80，与右侧滑出面板同一上沿）：上下文组只在末尾增减，垂直居中的话选中一屏全部按钮上移 61 px，用户正要点的按钮被挪走
     // 不装盒（§13.1 方向 A）：没有外框与投影，底色与画布同色——卡片平移经过时照样被它盖住，图标不会压在设计稿上
     <div ref={wrapRef} className="absolute right-3 top-16 z-30 flex max-h-[calc(100%-7rem)] flex-col rounded-md bg-(--semantic-color-surface-canvas) p-0.5">
+      {fade.includes('top') && <span aria-hidden="true" data-testid="rail-more" data-side="top" className="rail-more top-0.5"><ChevronUp size={14} /></span>}
       <div ref={railRef} data-fade={fade || undefined} className="rail flex min-h-0 scroll-py-1 flex-col items-center gap-0.5 p-1" role="toolbar" aria-orientation="vertical" aria-label="画布工具" onKeyDown={onKeyDown}>
         {groups.map((group, gi) => (
           <Fragment key={gi}>
@@ -106,6 +108,7 @@ export function CanvasToolbar({ groups }: { groups: Tool[][] }) {
           </Fragment>
         ))}
       </div>
+      {fade.includes('bottom') && <span aria-hidden="true" data-testid="rail-more" data-side="bottom" className="rail-more bottom-0.5"><ChevronDown size={14} /></span>}
       {tip && (
         <div
           aria-hidden="true" data-testid="tool-tip" style={{ top: tip.top }}

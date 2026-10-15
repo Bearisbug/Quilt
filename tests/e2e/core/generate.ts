@@ -506,24 +506,24 @@ await step('TC-CORE-023', async () => {
   const f1 = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
   expect(f0 !== f1 && !!f1, `方向键未在组内移动焦点（${f0} → ${f1}）`);
 
-  // 3b 窗口矮到放不下全部工具（v0.70）：工具栏封顶在可用区内、列内滚动、滚动条不可见；底部那道细线提示还有（v1.08 前是渐隐）；End 跳到最后一个工具，
-  //    它滚进可见区且四周留出焦点环的 4 px，细线换到顶部
+  // 3b 窗口矮到放不下全部工具（v0.70）：工具栏封顶在可用区内、列内滚动、滚动条不可见；底边露出向下的小箭头提示还有（v1.11）；End 跳到最后一个工具，
+  //    它滚进可见区且四周留出焦点环的 4 px，箭头换到顶边
   await page.setViewportSize({ width: 1440, height: 600 });
   await page.waitForTimeout(400);
   const rail = () => page.evaluate(() => {
     const r = document.querySelector('[role="toolbar"]') as HTMLElement; const pill = r.parentElement!.getBoundingClientRect(); const rr = r.getBoundingClientRect();
     const f = (document.activeElement as HTMLElement | null)?.closest('[role="toolbar"]') ? document.activeElement!.getBoundingClientRect() : null;
-    return { pillBottom: pill.bottom, vh: innerHeight, scrollable: r.scrollHeight > r.clientHeight, bar: r.offsetWidth - r.clientWidth, fade: r.dataset.fade ?? '',
+    return { pillBottom: pill.bottom, vh: innerHeight, scrollable: r.scrollHeight > r.clientHeight, bar: r.offsetWidth - r.clientWidth, fade: r.dataset.fade ?? '', more: [...document.querySelectorAll<HTMLElement>('[data-testid="rail-more"]')].map((e) => e.dataset.side).join(' '),
       room: f ? Math.min(f.top - rr.top, rr.bottom - f.bottom, f.left - rr.left, rr.right - f.right) : null, last: document.activeElement === [...r.querySelectorAll('button')].pop() };
   });
   await page.locator('[role="toolbar"] button[tabindex="0"]').focus();
   await page.keyboard.press('Home');
   const top = await rail();
-  expect(top.pillBottom < top.vh && top.scrollable && top.bar === 0 && top.fade === 'bottom', `矮窗口下工具栏没在列内滚动或提示不对：${JSON.stringify(top)}`);
+  expect(top.pillBottom < top.vh && top.scrollable && top.bar === 0 && top.fade === 'bottom' && top.more === 'bottom', `矮窗口下工具栏没在列内滚动或提示不对：${JSON.stringify(top)}`);
   await page.keyboard.press('End');
   await page.waitForTimeout(300);
   const end = await rail();
-  expect(end.last && end.fade === 'top' && (end.room ?? -1) >= 3.5, `End 后最后一个工具应可见、焦点环不被裁、细线在顶部：${JSON.stringify(end)}`);
+  expect(end.last && end.fade === 'top' && end.more === 'top' && (end.room ?? -1) >= 3.5, `End 后最后一个工具应可见、焦点环不被裁、箭头在顶边：${JSON.stringify(end)}`);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.waitForTimeout(400);
 
