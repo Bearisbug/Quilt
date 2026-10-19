@@ -1,4 +1,4 @@
-import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, LinkDto, ElementOp, AnnotationDto, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, RoundPresetKind } from '@quilt/core/browser';
+import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, ElementOp, AnnotationDto, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, RoundPresetKind } from '@quilt/core/browser';
 
 // API 客户端：同源 /v1（开发时 Vite 代理 → API；打包后 API 进程自己托管前端），错误统一为 ApiError（RFC 9457 信封）。
 // v0.32 本地版没有登录：所有请求都是默认用户。
@@ -30,7 +30,7 @@ async function call<T>(path: string, { timeoutMs = REQUEST_TIMEOUT_MS, ...init }
 }
 
 /** 组件建 / 改的返回：applied = 被同步（确定性回刷）的屏，skipped = 没找到对应元素或正忙而跳过的屏 */
-export type ComponentSyncResult = { component: ComponentDto; applied: string[]; skipped: { screenId: string; name: string; reason: string }[] };
+type ComponentSyncResult = { component: ComponentDto; applied: string[]; skipped: { screenId: string; name: string; reason: string }[] };
 
 // 运行时配置（API-CORE-028）：启动时取一次，预览域地址随打包 / 开发环境变。失败的那次不留着——否则画布页的「重试」拿到的永远是同一个失败
 let configPromise: Promise<ConfigDto> | null = null;
@@ -39,9 +39,8 @@ export const loadConfig = () => (configPromise ??= call<ConfigDto>('/v1/config')
 export const api = {
   projects: {
     list: () => call<{ items: ProjectDto[]; nextCursor: string | null }>('/v1/projects'),
-    create: (input: { name: string; deviceType: 'mobile' | 'desktop'; seedColor?: string; presetId?: string }) => call<{ project: ProjectDto; designSystem: DesignSystemDto }>('/v1/projects', { method: 'POST', body: JSON.stringify(input) }),
+    create: (input: { name: string; deviceType: 'mobile' | 'desktop'; presetId?: string }) => call<{ project: ProjectDto; designSystem: DesignSystemDto }>('/v1/projects', { method: 'POST', body: JSON.stringify(input) }),
     get: (id: string) => call<ProjectDetailDto>(`/v1/projects/${id}`),
-    appMap: (id: string) => call<{ nodes: { screenId: string; route: string }[]; edges: LinkDto[] }>(`/v1/projects/${id}/app-map`),
     messages: (id: string) => call<{ items: MessageDto[]; nextCursor: string | null }>(`/v1/projects/${id}/messages?limit=100`),
     // 动词由目标决定（API-CORE-010）：有 targetScreenIds 是改，没有是造；count / versions / anchor 是造改共用的档位。
     // mode="chat"（REQ-CORE-023）：交给助手定范围，targetScreenIds 只是上下文提示
@@ -66,7 +65,7 @@ export const api = {
     },
     createJob: (id: string, body: unknown) => call<{ job: JobDto }>(`/v1/projects/${id}/jobs`, { method: 'POST', body: JSON.stringify(body), idempotencyKey: crypto.randomUUID() }),
     // 作业列表（API-CORE-029）：本机 agent 面板
-    jobs: (id: string, runner?: JobRunner) => call<{ items: JobDto[] }>(`/v1/projects/${id}/jobs${runner ? `?runner=${runner}` : ''}`),
+    jobs: (id: string, runner: JobRunner) => call<{ items: JobDto[] }>(`/v1/projects/${id}/jobs?runner=${runner}`),
   },
   jobs: {
     get: (id: string) => call<{ job: JobDto }>(`/v1/jobs/${id}`),
@@ -76,7 +75,7 @@ export const api = {
     adoptGroup: (id: string, index: number) => call<{ adopted: string[]; skipped: string[] }>(`/v1/jobs/${id}/candidates/adopt`, { method: 'POST', body: JSON.stringify({ index }) }),
   },
   screens: {
-    patch: (id: string, patch: { x?: number; y?: number; name?: string; route?: string; variantName?: string; presentation?: Presentation }) => call<{ screen: ScreenDto }>(`/v1/screens/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    patch: (id: string, patch: { x?: number; y?: number; presentation?: Presentation }) => call<{ screen: ScreenDto }>(`/v1/screens/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     remove: (id: string) => call<void>(`/v1/screens/${id}`, { method: 'DELETE' }),
     revisions: (id: string) => call<{ items: RevisionDto[] }>(`/v1/screens/${id}/revisions`),
     restore: (id: string, revisionId: string, expectedRevisionId: string) => call<{ revision: RevisionDto }>(`/v1/screens/${id}/revisions/${revisionId}/restore`, { method: 'POST', body: JSON.stringify({ expectedRevisionId }) }),
@@ -86,7 +85,6 @@ export const api = {
   },
   // 项目素材（API-CORE-032）：multipart 直传，浏览器自己带 Content-Type
   assets: {
-    list: (projectId: string) => call<{ items: AssetDto[] }>(`/v1/projects/${projectId}/assets`),
     upload: (projectId: string, file: File) => {
       const form = new FormData();
       form.append('file', file);
@@ -117,16 +115,15 @@ export const api = {
     update: (projectId: string, patch: { seedColor?: string; fontFamily?: string; fontSource?: 'google' | 'system' | 'url'; fontUrl?: string | null; radiusScale?: 'sharp' | 'default' | 'round'; palette?: Palette | null; colorMode?: ColorMode; designMd?: string; conventions?: string[]; expectedVersion: number }) => call<{ designSystem: DesignSystemDto }>(`/v1/projects/${projectId}/design-system`, { method: 'PUT', body: JSON.stringify(patch) }),
   },
   annotations: {
-    listForScreen: (screenId: string) => call<{ items: AnnotationDto[] }>(`/v1/screens/${screenId}/annotations`),
     create: (screenId: string, input: { qid: string; note: string; anchorText: string; rect: AnnotationDto['rect'] }) =>
       call<{ annotation: AnnotationDto }>(`/v1/screens/${screenId}/annotations`, { method: 'POST', body: JSON.stringify(input) }),
-    update: (id: string, patch: { note?: string; status?: AnnotationDto['status'] }) => call<{ annotation: AnnotationDto }>(`/v1/annotations/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    update: (id: string, patch: { note?: string }) => call<{ annotation: AnnotationDto }>(`/v1/annotations/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     remove: (id: string) => call<void>(`/v1/annotations/${id}`, { method: 'DELETE' }),
     send: (projectId: string, annotationIds: string[]) => call<{ jobs: JobDto[] }>(`/v1/projects/${projectId}/annotations/send`, { method: 'POST', body: JSON.stringify({ annotationIds }) }),
   },
   runners: () => call<{ items: RunnerOptionDto[]; default: string }>('/v1/runners'),
   // 本机正在运行的 Claude Code 会话（API-AGENT-010）：会话下拉打开时取
-  agentSessions: (tool: AgentTool = 'claude-code') => call<{ items: AgentSessionDto[]; reason?: string }>(`/v1/agent/sessions?tool=${tool}`),
+  agentSessions: (tool: AgentTool) => call<{ items: AgentSessionDto[]; reason?: string }>(`/v1/agent/sessions?tool=${tool}`),
   // 生成通道可配置（REQ-CORE-013）
   probeRunner: (runnerId: string) => call<ProbeResultDto>(`/v1/runners/${encodeURIComponent(runnerId)}/probe`, { method: 'POST', timeoutMs: PROBE_TIMEOUT_MS }),
   channels: {

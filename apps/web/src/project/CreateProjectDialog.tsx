@@ -11,10 +11,10 @@ const noop = () => {};
 
 // 新建项目弹窗（REQ-CORE-002）：项目切换器底部与 PAGE-FIRST 共用。
 // 不传 onClose 就是 PAGE-FIRST 的形态——没有别处可去，所以没有「取消」、Esc 与点遮罩都不关。
-export function CreateProjectDialog({ onClose, returnTo, fallback }: { onClose?: () => void; returnTo?: React.RefObject<HTMLElement | null>; fallback?: React.RefObject<HTMLElement | null> }) {
+export function CreateProjectDialog({ onClose, returnTo }: { onClose?: () => void; returnTo?: React.RefObject<HTMLElement | null> }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const ref = useModal<HTMLFormElement>(onClose ?? noop, returnTo, fallback);
+  const ref = useModal<HTMLFormElement>(onClose ?? noop, returnTo);
   const [name, setName] = useState('');
   const [deviceType, setDeviceType] = useState<'mobile' | 'desktop'>('mobile');
   // 设计预设（REQ-CORE-021）：账号里存过才显示这一项，没存过不要给空下拉

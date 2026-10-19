@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { COLOR_CLASS_NAMES, type Tokens } from '@quilt/core/browser';
+import { TOKEN_COLOR_KEYS, kebab, type Tokens } from '@quilt/core/browser';
 import { Select } from '@/ui/Select';
 import { IconButton } from '@/ui/ui';
 import { explainClass, splitClasses, stepClass, withColorToken } from '@/lib/twClass';
@@ -9,8 +9,6 @@ import { explainClass, splitClasses, stepClass, withColorToken } from '@/lib/twC
 // 与颜色类的 token 色下拉；× 删一行，末尾一行回车加入。说明不要并排放在类名右边：检查器只有约 300px 宽，并排时类名一栏只剩约 90px，常见类名都会被截断。
 // 行用序号做 key：输入框都是受控的、没有自己的状态，按内容做 key 的话每敲一个字输入框就重挂、焦点丢掉。
 // ‹ › 的位置常驻（RESP-010）：边打字边在「能换档 / 不能换档」之间变，按钮一出一没右列就变宽变窄，正在打字的输入框跟着横跳
-const camel = (s: string) => s.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
-
 export function ClassList({ rows, onChange, tokens, labelledBy }: { rows: string[]; onChange: (rows: string[]) => void; tokens?: Tokens; labelledBy: string }) {
   const [adding, setAdding] = useState('');
   const ctx = { tokens, column: rows.includes('flex-col') };
@@ -21,9 +19,9 @@ export function ClassList({ rows, onChange, tokens, labelledBy }: { rows: string
     if (parts.length === 1 && parts[0] === rows[i]) return;
     onChange([...rows.slice(0, i), ...parts, ...rows.slice(i + 1)]);
   };
-  const colorOptions = COLOR_CLASS_NAMES.map((name) => {
-    const hex = tokens?.colors[camel(name) as keyof Tokens['colors']];
-    return { value: name, label: name, icon: <span className="size-3 shrink-0 rounded-sm border border-border-subtle" style={{ background: hex }} aria-hidden="true" /> };
+  const colorOptions = TOKEN_COLOR_KEYS.map((key) => {
+    const name = kebab(key);
+    return { value: name, label: name, icon: <span className="size-3 shrink-0 rounded-sm border border-border-subtle" style={{ background: tokens?.colors[key] }} aria-hidden="true" /> };
   });
   return (
     <div role="group" aria-labelledby={labelledBy} className="space-y-1" data-testid="class-list">

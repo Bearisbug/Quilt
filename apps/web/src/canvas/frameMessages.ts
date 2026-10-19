@@ -12,7 +12,7 @@ export const toSelection = (m: Extract<PreviewToParent, { type: 'quilt:select' }
  * 组件卡上的 ⌥← 照「⌥ + 键」交给键位表）；shortcut = 交给父页的键位表（Canvas.tsx）——⌘ / Ctrl 组合按物理键 code，
  * ⌥ + 字母带 alt（v0.80），选择元素态的 Delete / Backspace 按 key（v0.95，运行时只在焦点不在输入框里时转发）
  */
-export type KeyAction = { kind: 'exit' } | { kind: 'back' } | { kind: 'shortcut'; code: string; alt?: true } | null;
+type KeyAction = { kind: 'exit' } | { kind: 'back' } | { kind: 'shortcut'; code: string; alt?: true } | null;
 export function keyAction(m: Extract<PreviewToParent, { type: 'quilt:key' }>, canGoBack: boolean): KeyAction {
   if (m.key === 'Escape') return { kind: 'exit' };
   if (canGoBack && m.key === 'ArrowLeft' && m.altKey) return { kind: 'back' };

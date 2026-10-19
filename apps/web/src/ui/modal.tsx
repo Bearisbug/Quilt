@@ -5,7 +5,7 @@ import { Button } from '@/ui/ui';
 // ---- 弹层基建：焦点陷阱 + 背景 inert + Esc 关闭 + 关闭归还焦点（A11Y-004 / A11Y-005）----
 // 弹层可以叠（设置弹层里再开「添加通道」），所以背景隔离按层栈算：开一层就把 #root 与它下面所有层设成 inert，
 // 关一层只放开新的最上层；栈空了才摘掉 #root 的 inert。#root 上的 data-modal-depth 记当前层数，方便调试与断言。
-export const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
 const layers: HTMLElement[] = [];
 function pushLayer(layer: HTMLElement) {

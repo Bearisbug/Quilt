@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 // 素材瓦片的底色（REQ-CORE-019）：品牌包里白色版与深墨版是同一个标志的两份文件，
 // 固定一种底色必然有一半看不见。这里把图画进 16×16 离屏画布，取不透明像素的平均亮度：
 // 亮的标志衬深底、深的标志衬浅底（底色优先取项目色板，见 toneColor）；跨域读像素失败时回落到透明棋盘格（.asset-thumb）。
-export type AssetTone = 'light' | 'dark' | null;
+type AssetTone = 'light' | 'dark' | null;
 
 const cache = new Map<string, AssetTone>();
 

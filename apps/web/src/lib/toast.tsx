@@ -1,9 +1,9 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { TriangleAlert, X } from 'lucide-react';
 
 // 提示条（PAGE-CANVAS「提示条」，v1.04）：信息 3.2 s、错误 8 s 后消失；悬停时不计时，移开重新计时；
 // 错误与带动作的可手动关。动作只有一个（例如「撤销（⌘Z）」），点了就收起
-export type ToastAction = { label: string; run: () => void };
+type ToastAction = { label: string; run: () => void };
 type Toast = { id: number; text: string; kind: 'info' | 'error'; action?: ToastAction };
 type Push = (text: string, kind?: Toast['kind'], opts?: { action?: ToastAction }) => void;
 const Ctx = createContext<Push>(() => {});
@@ -17,9 +17,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const id = ++seq.current;
     setItems((xs) => [...xs, { id, text, kind, action: opts?.action }]);
   }, []);
-  const value = useMemo(() => push, [push]);
   return (
-    <Ctx.Provider value={value}>
+    <Ctx.Provider value={push}>
       {children}
       {/* 画布页的输入框在底部正中：底边让到它上方、落在这一列底下的对话记录折叠横条也让开（--toast-bottom 由画布页写在 <html> 上，见 useComposerChrome），单条限宽、长文案换行 */}
       <div className="pointer-events-none fixed inset-x-0 bottom-[var(--toast-bottom,1.5rem)] z-50 flex flex-col items-center gap-2 px-4" aria-live="polite">

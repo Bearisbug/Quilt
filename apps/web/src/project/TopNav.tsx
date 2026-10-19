@@ -5,8 +5,7 @@ import { Wordmark } from '@/ui/BrandMark';
 
 // floating：画布页用（§13.1）。顶栏不铺底、不画边线，只在左上角摆一枚项目切换器 chip（后面跟着偶尔出现的断线提示）；
 // 盒子只包住这几枚 chip，其余位置的指针照常落到画布上。其余页面（PAGE-FIRST）是常规文档流页，用实底横条（styles.css 的 .masthead）。
-// 「设置」在画布页由 Canvas 经 right 传入按钮（就地打开设置弹层）；非画布页保留链接，走 /settings 重定向回最近的项目。
-// 退出账号不在这里——它是低频且不可逆的操作，收在设置弹层的「账号」一节。
+// 「设置」：非画布页保留链接，走 /settings 重定向回最近的项目。
 export function TopNav({ children, right, floating }: { children?: ReactNode; right?: ReactNode; floating?: boolean }) {
   return (
     <header className={cn(

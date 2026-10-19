@@ -76,5 +76,5 @@ export function useRunnerPrefs() {
   const chatRunners = useMemo(() => runners.filter((r) => r.channelKind === 'agent-sdk'), [runners]);
   const chatRunnerId = chatRunners.some((r) => r.id === runnerId && r.available) ? runnerId : chatRunners.find((r) => r.available)?.id ?? '';
   const chatRunner = chatRunners.find((r) => r.id === chatRunnerId)?.runner;
-  return { runners, runnersFailed, loadRunners, runnerId, applyCatalog, onRunnerChange, runner, agentTool, sessionList, sessionId, loadSessions, lists, loadSessionsFor, onSessionChange, sendRunner, modelRunner, mode, onMode, chatRunners, chatRunnerId, chatRunner };
+  return { runners, runnersFailed, loadRunners, runnerId, applyCatalog, onRunnerChange, agentTool, sessionList, sessionId, loadSessions, lists, loadSessionsFor, onSessionChange, sendRunner, modelRunner, mode, onMode, chatRunners, chatRunnerId, chatRunner };
 }

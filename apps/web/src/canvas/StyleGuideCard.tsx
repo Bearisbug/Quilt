@@ -3,7 +3,7 @@ import { toneClass, toneColor, useAssetTone } from '@/lib/assetTone';
 
 export const STYLE_GUIDE_SIZE = { w: 420, h: 640 };
 // 有素材时卡片要长出一行来放它们；画布的适配视图按同一个函数算外接框，否则这一行会被框在视野外
-export const ASSET_ROW_H = 86;
+const ASSET_ROW_H = 86;
 export const styleGuideSize = (assetCount: number) => ({ w: STYLE_GUIDE_SIZE.w, h: STYLE_GUIDE_SIZE.h + (assetCount ? ASSET_ROW_H : 0) });
 
 // REQ-CORE-010：由 token 渲染的风格指南卡片（画布只读），颜色全部来自 tokens，永远同步。

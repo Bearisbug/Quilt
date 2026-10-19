@@ -9,10 +9,10 @@ import { VendorIcon } from '@/ui/VendorIcon';
 /** load（REQ-CORE-026「修改」）：把一轮的文字与参考图填回来、替换现有草稿；参考图已上传过，直接带 id */
 export type ComposerHandle = { focus: () => void; load: (draft: { text: string; images: { id: string; url: string }[] }) => void };
 /** 一行在跑作业（REQ-CORE-020）：label = 它在做什么，progress = 当前阶段 */
-export type RunningJob = { id: string; label: string; progress: string | null };
+type RunningJob = { id: string; label: string; progress: string };
 /** 输入框的动词模式（REQ-CORE-023）：design = 造 / 改（动词由目标决定）；chat = 交给助手定范围 */
 export type ComposerMode = 'design' | 'chat';
-export type ComposerProps = {
+type ComposerProps = {
   mode: ComposerMode;
   onMode: (m: ComposerMode) => void;
   /** 在跑的作业，按创建时间倒序（最新在最前）；只含非 agent 的，agent 作业在本机 agent 面板 */
@@ -92,7 +92,7 @@ const RUNNER_MIN_REM = 6;
 /** 待发的参考图：key 是本地身份，id 是上传完成后服务端给的；id 为 null 表示还在传 */
 type Shot = { key: string; url: string; name: string; id: string | null };
 
-// 底部输入框（REQ-CORE-003 / REQ-CORE-006）：动词由目标决定——有目标标签是改、没有是造；额度耗尽引导设置页。
+// 底部输入框（REQ-CORE-003 / REQ-CORE-006）：动词由目标决定——有目标标签是改、没有是造。
 // 有作业在跑不锁输入（REQ-CORE-020）：只有这一轮与在跑作业真冲突时才挡住发送键并就地写出理由。
 // 不自动聚焦——焦点默认留在画布上，单键快捷键（F/L…）才可用；放锚点时由父组件显式聚焦。
 // 结构：在跑作业行 → 目标区（标签 + 动词行 + 清空）→ 输入区 → 工具条（通道 ｜ 参考图 ｜ 屏数 · 版数 ｜ 发送）。外壳的材质与投影在 styles.css 的 .composer。
@@ -355,9 +355,7 @@ export function Composer(p: ComposerProps) {
               <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate">
                 <span className="font-medium text-text-primary">{j.label}</span>
-                {/* 进度必须有兜底：progress 只来自实时事件流，首次加载认领来的作业（本机会话 / 另一个标签页建的）
-                    在下一个事件到达前是空的，只写标签的行看起来是卡住的。口径与对话气泡的空回执一致 */}
-                <span className="text-text-secondary"> · {j.progress ?? '排队中…'}</span>
+                <span className="text-text-secondary"> · {j.progress}</span>
               </span>
               {/* 最新那行的取消键标出 Esc：优先级链里 Esc 取消的正是这一个 */}
               <IconButton
@@ -495,7 +493,7 @@ export function Composer(p: ComposerProps) {
   );
 }
 
-// 分段控件（屏数 / 版数）：radiogroup 语义，方向键换档；内外圆角同心（内层半径 = 外框 14px − 内边距 2px）
+// 分段控件（屏数 / 版数）：radiogroup 语义，方向键换档
 function Segmented<T extends string | number>({ label, testId, value, options, onChange, compact }: { label: string; testId: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; compact?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const idx = Math.max(0, options.findIndex((o) => o.value === value));
@@ -540,7 +538,7 @@ function Placeholder({ phrases, active }: { phrases: string[]; active: boolean }
 }
 
 // 通道下拉：Radix Select 承担键盘导航、焦点归还与定位；外观在 styles.css 的 .menu。
-// 云端模型与本机 agent 分两组；缺凭据的通道照样列出但不可选，并就地写明原因（INT-013 / A11Y-007）。
+// 云端模型与本机 agent 分两组。
 // maxWidth：输入框差一点放不下时截短触发器（px，由 Composer 量出来）
 export function RunnerSelect({ runners, value, onChange, disabled, testId = 'runner-select', maxWidth }: { runners: RunnerOptionDto[]; value: string; onChange: (id: string) => void; disabled?: boolean; testId?: string; maxWidth?: number | null }) {
   const navigate = useNavigate();
@@ -549,9 +547,8 @@ export function RunnerSelect({ runners, value, onChange, disabled, testId = 'run
   const cloud = usable.filter((r) => r.runner.kind !== 'agent');
   const agents = usable.filter((r) => r.runner.kind === 'agent');
   const cur = usable.find((r) => r.id === value);
-  const current = cur?.id;
   return (
-    <Select.Root value={current} onValueChange={(v) => { if (v === MANAGE_ID) navigate('?settings=runners'); else onChange(v); }} disabled={disabled}>
+    <Select.Root value={cur?.id} onValueChange={(v) => { if (v === MANAGE_ID) navigate('?settings=runners'); else onChange(v); }} disabled={disabled}>
       <Select.Trigger
         aria-label="生成通道" data-testid={testId} data-value={value} style={maxWidth ? { maxWidth } : undefined}
         className="group flex h-9 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2.5 type-label font-medium text-text-secondary transition-[color,background-color] duration-(--semantic-motion-duration-fast) data-[state=open]:bg-(--semantic-color-surface-selected) data-[state=open]:text-text-primary disabled:pointer-events-none sm:max-w-56 state-layer focus-ring"
@@ -599,7 +596,7 @@ const SESSION_COPY: Record<AgentTool, { group: string; empty: string }> = {
   'claude-code': { group: '本机正在运行的 Claude Code 会话', empty: '没有正在运行的 Claude Code 会话——在终端开着 claude 再来。' },
   codex: { group: '本机 Codex 线程（未打开的投递时由桌面版打开）', empty: '没有 Codex 线程——在 Codex 里开一个对话再来。' },
 };
-export function SessionSelect({ tool = 'claude-code', sessions, reason, value, onChange, onOpen, disabled, testId = 'session-select' }: { tool?: AgentTool; sessions: AgentSessionDto[] | null; reason?: string; value: string; onChange: (id: string) => void; onOpen: () => void; disabled?: boolean; testId?: string }) {
+export function SessionSelect({ tool, sessions, reason, value, onChange, onOpen, disabled, testId = 'session-select' }: { tool: AgentTool; sessions: AgentSessionDto[] | null; reason?: string; value: string; onChange: (id: string) => void; onOpen: () => void; disabled?: boolean; testId?: string }) {
   const items = sessions ?? [];
   const current = items.some((s) => s.sessionId === value) ? value : undefined;
   // Codex 线程没起过名时 name 是标题（首条消息），比 UUID 好认；Claude Code 的派生名只是目录 + 后缀，显示 UUID

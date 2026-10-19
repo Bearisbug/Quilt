@@ -16,7 +16,7 @@ const NEW_ID = '__new_project__';
 const ITEM_CLS = 'group relative flex cursor-pointer select-none items-center gap-2 rounded-md px-2.5 py-2 type-body text-text-secondary outline-none data-[highlighted]:bg-(--semantic-color-surface-selected) data-[highlighted]:text-text-primary data-[state=checked]:text-text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-40';
 
 // current = null（v0.76）：画布页的项目还在加载或取不到，切换器照常可用（它是加载失败时的出口之一），触发器写 placeholder
-export function ProjectSwitcher({ current, placeholder = '选择项目', onRenamed }: { current: ProjectDto | null; placeholder?: string; onRenamed?: (id: string, name: string) => void }) {
+export function ProjectSwitcher({ current, placeholder, onRenamed }: { current: ProjectDto | null; placeholder: string; onRenamed?: (id: string, name: string) => void }) {
   const navigate = useNavigate();
   const toast = useToast();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -37,7 +37,7 @@ export function ProjectSwitcher({ current, placeholder = '选择项目', onRenam
     finally { setLoading(false); }
   };
   // 列表未到手时至少有当前项：Radix 靠它渲染选中态，触发器也不会闪成占位符
-  const list = !current ? items ?? [] : items && items.some((p) => p.id === current.id) ? items : [current, ...(items ?? []).filter((p) => p.id !== current.id)];
+  const list = !current ? items ?? [] : items && items.some((p) => p.id === current.id) ? items : [current, ...(items ?? [])];
 
   useEffect(() => { if (!open) setRenaming(null); }, [open]);
   const askDelete = (p: ProjectDto) => { setOpen(false); setDeleting(p); };

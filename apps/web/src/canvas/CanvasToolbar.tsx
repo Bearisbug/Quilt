@@ -27,15 +27,15 @@ export function CanvasToolbar({ groups }: { groups: Tool[][] }) {
   // 提示必须渲染在滚动容器之外：.rail 的 overflow-y:auto 会把 overflow-x 一并变成 auto，
   // 贴左边展开的提示整块落在容器盒子外，会被无声裁掉（实测宽 208px 全部不可见）。
   const [tip, setTip] = useState<{ tool: Tool; top: number } | null>(null);
-  const showTip = (tool: Tool, el: HTMLElement | null) => {
+  const showTip = (tool: Tool, el: HTMLElement) => {
     const wrap = wrapRef.current;
-    if (!wrap || !el) return;
+    if (!wrap) return;
     const wr = wrap.getBoundingClientRect(); const br = el.getBoundingClientRect();
     setTip({ tool, top: br.top - wr.top + br.height / 2 });
   };
   // 上下文工具随选中/聚焦态增删，停靠点可能落到已消失的项上
   const idx = Math.min(active, items.length - 1);
-  // 窗口矮到放不下全部工具时在列内滚动（滚动条隐藏，RESP-016）；哪一侧还有被遮住的工具，那一侧边缘渐隐提示——
+  // 窗口矮到放不下全部工具时在列内滚动（滚动条隐藏，RESP-016）；
   // 哪一侧还有被遮住的工具：按滚动位置算，那一侧边缘露出一个小箭头（RESP-016 的滚动指示）
   const railRef = useRef<HTMLDivElement>(null);
   const [fade, setFade] = useState('');

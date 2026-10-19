@@ -3,7 +3,7 @@ import type { LinkDto } from '@quilt/core/browser';
 // 页面地图连线（REQ-PROTO-002，v1.02 ADR-029）：画在视口里一块等大的 canvas 上，每次镜头变化按当前镜头重画。
 // 几何与 SVG 时一致：从卡片侧边纵向居中处（高于 240 的卡取上 240 的中点）出发的三次贝塞尔，双向互链上下错开 36，
 // 线宽、箭头、徽标都按世界坐标随缩放变大变小
-export type Edge = { from: string; to: string; count: number };
+type Edge = { from: string; to: string; count: number };
 export type Box = { x: number; y: number; w: number; h: number };
 export type Curve = { x1: number; y1: number; c1x: number; c2x: number; x2: number; y2: number; mx: number; my: number; dir: 1 | -1; count: number; minX: number; minY: number; maxX: number; maxY: number };
 export type EdgeColors = { line: string; badge: string; badgeText: string; font: string };

@@ -57,13 +57,11 @@ body { background: var(--semantic-color-surface-canvas); color: var(--semantic-c
 @media (prefers-contrast: more) {
   .chrome { border-color: var(--semantic-color-border-strong); }
 }
-/* 面板标题：面板标题字阶，与内容之间一道分隔线色的发丝线 */
 .panel-head { border-bottom: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle); }
 /* 非画布页（PAGE-FIRST、错误页）的顶栏：实底横条；画布页的顶栏不铺底，见 TopNav */
 .masthead { background: var(--semantic-color-surface-background); border-bottom: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle); }
 /* 提示条与工具提示：反色实底（编辑部的反色标签） */
 .inverse { background: var(--semantic-color-surface-inverse); color: var(--semantic-color-text-on-inverse); }
-/* 键帽：等宽、凹下底、底边加厚 */
 .kbd { font-family: var(--semantic-typography-code-font-family); background: var(--semantic-color-surface-sunken); color: var(--semantic-color-text-secondary); border: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle); border-bottom-width: 2px; border-radius: var(--semantic-radius-sm); }
 /* 反色底上的键帽：底色跟着反色走，不能是浅色凹下底压在墨色提示上 */
 .inverse .kbd { background: transparent; color: inherit; border-color: currentColor; }
@@ -135,7 +133,6 @@ body { background: var(--semantic-color-surface-canvas); color: var(--semantic-c
     calc((100% - var(--composer-w)) / 2),
     calc(100% - var(--chrome-right) - var(--composer-w))
   );
-  right: auto;
   background: var(--semantic-color-surface-background);
   border: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle);
   border-radius: var(--semantic-radius-lg);
@@ -183,8 +180,6 @@ body { background: var(--semantic-color-surface-canvas); color: var(--semantic-c
 @keyframes menu-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(3px) scale(0.98); } }
 .menu[data-state="open"] { animation: menu-in var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard); }
 .menu[data-state="closed"] { animation: menu-out var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
-/* 非 Radix 的锚定浮框（新建屏幕）：同一套进场，原点由 inline transform-origin 指到锚点那一角 */
-.pop-in { animation: menu-in var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard); }
 
 /* 右侧竖排工具栏（RESP-016 / RESP-017）：高度有界、自身滚动、无可见滚动条；溢出时那一侧边缘露出一个小箭头 */
 .rail { max-height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
@@ -286,8 +281,8 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
 .card .gesture:focus-visible, .comp .gesture:focus-visible { outline: calc(var(--focus-ring-width) / var(--canvas-zoom, 1)) solid var(--focus-ring-color); outline-offset: calc(8px / var(--canvas-zoom, 1)); }
 .card.dragging .gesture { cursor: grabbing; }
 /* 卡片上的状态角标（交互中 / 选择元素中、局部修改中、候选 n）：反色标签 */
-.card .badge, .comp .badge, .card .working, .cand-badge { background: var(--semantic-color-surface-inverse); color: var(--semantic-color-text-on-inverse); font-size: var(--semantic-typography-caption-font-size); font-weight: var(--primitive-font-weight-medium); padding: 2px 8px; border-radius: var(--semantic-radius-sm); }
-.card .badge, .comp .badge { position: absolute; right: 8px; top: 8px; pointer-events: none; }
+.card .badge, .card .working, .cand-badge { background: var(--semantic-color-surface-inverse); color: var(--semantic-color-text-on-inverse); font-size: var(--semantic-typography-caption-font-size); font-weight: var(--primitive-font-weight-medium); padding: 2px 8px; border-radius: var(--semantic-radius-sm); }
+.card .badge { position: absolute; right: 8px; top: 8px; pointer-events: none; }
 /* 要用户留意的角标（加载失败、截图没取到、断链、批注发送中）：抬起面底 + 警告色字与边框，不靠颜色单独表意 */
 .card .badge.failed, .card .shot-retry, .card .warn { background: var(--semantic-color-surface-raised); color: var(--semantic-color-feedback-warning); border: var(--semantic-layout-hairline) solid currentColor; font-weight: var(--primitive-font-weight-semibold); box-shadow: var(--semantic-elevation-raised); }
 /* 聚焦的 iframe 重载后仍等不到就绪（v0.76）：角标换成可点的「加载失败 · 重试」 */
@@ -358,7 +353,6 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
 .comp.dragging .gesture { cursor: grabbing; }
 .viewport.pan-ready .comp .gesture { cursor: grab; }
 .viewport.dragging .comp .gesture { cursor: grabbing; }
-.dangling-edge { position: absolute; left: 0; top: 0; pointer-events: none; }
 /* 批注气泡（REQ-EDIT-004）：画在卡片层、坐标是批注时记下的屏文档坐标，随世界层一起缩放。标记色实心 + halo 描边。
    pointer-events 单独打开——卡片其余部分被 .gesture 覆盖着做拖拽。 */
 .card .anno-pin { position: absolute; z-index: 2; display: grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; transform: translate(-50%, -50%); border-radius: var(--semantic-radius-pill); border: 2px solid var(--semantic-color-mark-halo); background: var(--semantic-color-mark-line); color: var(--semantic-color-mark-on-line); font-size: var(--semantic-typography-caption-font-size); font-weight: var(--primitive-font-weight-semibold); line-height: 1; cursor: pointer; pointer-events: auto; box-shadow: var(--semantic-elevation-raised); }

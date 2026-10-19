@@ -7,7 +7,7 @@ import type { JobDto } from '@quilt/core/browser';
 // - trackedAt：本页自己建的作业开始跟踪时的详情请求序号；
 // - finished：已经宣告过终态的作业 id。早于终态发出、晚于终态返回的那次 GET 还会列着它，没有这道白名单会把死作业重新认领回来
 //   （行上带取消键的幽灵作业，新订阅从 seq 0 重放还会把 succeeded 再处理一次——导出作业等于二次下载）
-export type TrackerSets = { seen: ReadonlySet<string>; finished: ReadonlySet<string>; trackedAt: ReadonlyMap<string, number> };
+type TrackerSets = { seen: ReadonlySet<string>; finished: ReadonlySet<string>; trackedAt: ReadonlyMap<string, number> };
 
 /** 一次详情回包（发起序号 seq，列出的进行中作业 live）之后：撤掉哪些、认领哪些，三个集合变成什么 */
 export function reconcileJobs(active: JobDto[], sets: TrackerSets, live: JobDto[], seq: number) {

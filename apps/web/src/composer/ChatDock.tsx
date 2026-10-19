@@ -8,7 +8,7 @@ import { ImageViewer } from './ImageViewer';
 
 const RETRYABLE: JobKind[] = ['generate', 'edit_screens', 'edit_component', 'chat'];
 
-export type ChatDockProps = {
+type ChatDockProps = {
   /** 外壳量它的位置：折叠横条落在 toast 那一列底下时 toast 要让开（useComposerChrome，v0.83） */
   boxRef?: Ref<HTMLElement>;
   messages: MessageDto[];

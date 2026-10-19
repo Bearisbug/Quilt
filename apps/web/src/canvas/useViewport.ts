@@ -8,7 +8,7 @@ export const WHEEL_PAN_SPEED = 0.5;
 // 手势中往小缩到冻结栅格比例的这个倍数以下就重画一次（v0.86，见 applyTransform）
 const RERASTER_RATIO = 0.7;
 // 系统「减少动态效果」下镜头移动一律直接到位（v0.80，MOTION-004）：适配视图、自动适配、聚焦推镜头、找屏跳转、小地图点击
-export const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // 存下来的镜头要按当前数据校验再用（INT-019）：缩放超出 panzoom 的 [MIN_ZOOM, MAX_ZOOM] 或存进去的是 NaN / 旧格式，
 // 一律当没存过回默认，别把画布恢复成一片空白或卡在够不着的倍率上。
@@ -53,7 +53,7 @@ export function useViewport(o: { projectId: string; safeAreaRef?: { current: HTM
   // 落盘防抖 300 ms：平移缩放每帧都在变，逐帧写存储会把拖拽拖掉帧（INT-021）。无痕模式写不了就算了，
   // 退化成只本次会话有效，不能让存储异常打断渲染。
   const saveTimer = useRef<number | null>(null);
-  // 平移缩放进行中给世界层挂 will-change 让它独立合成：不挂的话每改一次 transform 整层（跨越大片区域的连线 SVG 尤其贵）都要重新光栅化，
+  // 平移缩放进行中给世界层挂 will-change 让它独立合成：不挂的话每改一次 transform 整层都要重新光栅化，
   // 100 屏时 GPU 每帧超预算。常驻又不行——独立合成层按挂上时的比例光栅化，放大后文字发虚；停下 200 ms 摘掉，按最终比例清晰重画一次
   const movingTimer = useRef<number | null>(null);
   // 挂着 moving 时栅格比例冻在挂上那一刻的缩放（zoom）。往小缩时新露出来的区域都要按这个比例现画：从 200% 一路缩到全景，

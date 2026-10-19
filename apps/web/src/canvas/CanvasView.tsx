@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { Viewport } from '@xyflow/system';
 import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type AnnotationDto, type ComponentDto } from '@quilt/core/browser';
 import { StyleGuideCard, STYLE_GUIDE_SIZE, styleGuideSize } from '@/canvas/StyleGuideCard';
-import { Minimap, type MiniRect, type ViewInfo } from '@/canvas/Minimap';
+import { Minimap, type MiniRect } from '@/canvas/Minimap';
 import { EDGE_LIMIT, mergeEdges, shownEdges, edgeCurves, drawEdges, type Curve, type EdgeColors } from '@/canvas/edges';
 import { toWorld, wantsThumb, fullShotIds, inMarquee, fitViewport, focusViewport, revealViewport, panToViewport, ensureVisibleViewport, zoomAround } from '@/canvas/geometry';
 import { useViewport, WHEEL_PAN_SPEED } from '@/canvas/useViewport';
@@ -93,8 +93,7 @@ export type CanvasProps = {
   onPreviewError?: (screen: ScreenDto) => void;
 };
 
-// 画布对外 API（Canvas.tsx 经 registerApi 取）：reveal 把一张卡摆到可用区中央（找屏 / 屏列表用），panTo 平移镜头中心到世界坐标（小地图用），
-// onView 订阅视图变换（每帧都在变，不经 props）
+// 画布对外 API（Canvas.tsx 经 registerApi 取）：reveal 把一张卡摆到可用区中央（找屏 / 屏列表用）
 export type CanvasApi = {
   /** false = 缩到下限 MIN_ZOOM 仍装不下全部 */
   fitView: () => boolean; goBack: () => void; highlight: (qid: string | null) => void; focus: (id: string) => void; resetToOwn: () => void; createAtCenter: () => void; markDone: (qids: string[]) => void;
@@ -102,7 +101,7 @@ export type CanvasApi = {
   enter: (id: string) => void;
   /** 逐级选（v1.00）：发给此刻处于选择元素态的那个 iframe——Shift+Enter / Enter、祖先路径的点选与悬停预览 */
   climb: (dir: 'up' | 'down') => void; pick: (qid: string) => void; peek: (qid: string | null) => void;
-  reveal: (id: string) => void; panTo: (x: number, y: number) => void; onView: (cb: (v: ViewInfo) => void) => () => void;
+  reveal: (id: string) => void;
 };
 
 
@@ -225,8 +224,8 @@ export function CanvasView(p: CanvasProps) {
       const ratio = dpr(); const w = node.clientWidth; const h = node.clientHeight;
       if (c.width !== Math.round(w * ratio) || c.height !== Math.round(h * ratio)) { c.width = Math.round(w * ratio); c.height = Math.round(h * ratio); }
       if (!d.colors) {
-        const cs = getComputedStyle(c);
-        d.colors = { line: cs.getPropertyValue('--semantic-color-mark-line').trim(), badge: cs.getPropertyValue('--semantic-color-mark-line').trim(), badgeText: cs.getPropertyValue('--semantic-color-mark-on-line').trim(), font: cs.fontFamily };
+        const cs = getComputedStyle(c); const line = cs.getPropertyValue('--semantic-color-mark-line').trim();
+        d.colors = { line, badge: line, badgeText: cs.getPropertyValue('--semantic-color-mark-on-line').trim(), font: cs.fontFamily };
       }
       const g = c.getContext('2d');
       if (g) drawEdges(g, d.curves, vp.current, { w, h }, ratio, d.colors);
@@ -395,7 +394,7 @@ export function CanvasView(p: CanvasProps) {
     requestAnimationFrame(() => gestures.current.get(id)?.focus({ preventScroll: true }));
   }, [p.focusedId, p.focusedComponentId, iframeRef]);
   const { highlight, resetToOwn, markDone } = frame;
-  useEffect(() => { propsRef.current.registerApi?.({ fitView, goBack, highlight, focus: focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView, enter: enterByKey, climb, pick, peek }); }, [fitView, goBack, highlight, focusCard, resetToOwn, createAtCenter, markDone, reveal, panTo, onView, enterByKey, climb, pick, peek]);
+  useEffect(() => { propsRef.current.registerApi?.({ fitView, goBack, highlight, focus: focusCard, resetToOwn, createAtCenter, markDone, reveal, enter: enterByKey, climb, pick, peek }); }, [fitView, goBack, highlight, focusCard, resetToOwn, createAtCenter, markDone, reveal, enterByKey, climb, pick, peek]);
   // 小地图的矩形：屏、组件、风格指南卡
   const miniRects = useMemo<MiniRect[]>(() => [
     ...p.screens.map((s) => ({ id: s.id, kind: 'screen' as const, ...pos(s), w: s.width, h: s.height })),
@@ -541,8 +540,8 @@ export function CanvasView(p: CanvasProps) {
     let moved = false;
     const hitsIn = (x1: number, y1: number) => {
       const box = { x0, y0, x1, y1 };
-      const screens = inMarquee(propsRef.current.screens.map((s) => ({ id: s.id, ...(dragPos[s.id] ?? { x: s.x, y: s.y }), w: s.width, h: s.height })), vp.current, box);
-      const comps = inMarquee(propsRef.current.components.map((c) => ({ id: c.id, ...(compDrag[c.id] ?? { x: c.x, y: c.y }), ...compBox(c) })), vp.current, box);
+      const screens = inMarquee(propsRef.current.screens.map((s) => ({ id: s.id, ...pos(s), w: s.width, h: s.height })), vp.current, box);
+      const comps = inMarquee(propsRef.current.components.map((c) => ({ id: c.id, ...compPos(c), ...compBox(c) })), vp.current, box);
       return { screens, comps };
     };
     const same = (x: string[], y: string[]) => x.length === y.length && x.every((id, i) => y[i] === id);

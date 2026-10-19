@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Bot, Component, Crosshair, Download, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MessageSquarePlus, MousePointerClick, Palette, Plus, Search, Settings, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
-import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, SCREEN_COUNT_OPTIONS, failureText, missingPagePrompt, type ProjectDetailDto, type MessageDto, type JobDto, type JobEventDto, type ScreenDto, type ComponentDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core/browser';
+import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, SCREEN_COUNT_OPTIONS, failureText, missingPagePrompt, type ProjectDetailDto, type MessageDto, type JobDto, type JobEventDto, type ScreenDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core/browser';
 import { api, ApiError, loadConfig, subscribeProjectEvents, type LiveState } from '@/lib/api';
 import { mergeMessages } from '@/lib/messages';
 import { useToast } from '@/lib/toast';
@@ -72,7 +72,7 @@ export function CanvasRoute() {
   return <CanvasPage key={projectId} />;
 }
 
-export function CanvasPage() {
+function CanvasPage() {
   const { projectId = '' } = useParams();
   const [params, setParams] = useSearchParams();
   const toast = useToast();
@@ -143,13 +143,12 @@ export function CanvasPage() {
     if (!el) return;
     const a = document.activeElement;
     const opener = a instanceof HTMLElement && a !== document.body && !el.contains(a) ? a : null;
-    const tool = panel;
     return () => {
       const f = document.activeElement;
       if (!(f instanceof HTMLElement) || !el.contains(f) || !f.matches(':focus-visible')) return;
       requestAnimationFrame(() => {
         if (document.activeElement && document.activeElement !== document.body) return;
-        (opener?.isConnected ? opener : document.querySelector<HTMLElement>(`[data-tool="${tool}"]`))?.focus();
+        (opener?.isConnected ? opener : document.querySelector<HTMLElement>(`[data-tool="${panel}"]`))?.focus();
       });
     };
   }, [panel]);
@@ -292,7 +291,7 @@ export function CanvasPage() {
   // 处理器放 ref：闭包每帧刷新，订阅不动
   const onJobEvent = useRef<(job: JobDto, e: JobEventDto) => void>(() => {});
   onJobEvent.current = (job, e) => {
-    const d = (e.data ?? {}) as Record<string, unknown>;
+    const d = e.data as Record<string, unknown>;
     const setP = (text: string) => setProgress((m) => ({ ...m, [job.id]: text }));
     // 聊天作业的进度是助手每次工具调用的一句话（REQ-CORE-023）
     // 改组件（REQ-EDIT-006）：模型回来后先确定性回刷用它的屏，再逐屏截图
@@ -467,7 +466,7 @@ export function CanvasPage() {
   const editRound = async (user: MessageDto) => {
     let job: JobDto;
     try { job = (await api.jobs.get(user.jobId!)).job; } catch { toast('读取这一轮失败', 'error'); return; }
-    const input = job.input as JobInput & { anchor?: { x: number; y: number } };
+    const input = job.input as JobInput;
     const screenIds = ((input.screenIds as string[] | undefined) ?? []).filter((id) => screens.some((s) => s.id === id));
     const compIds = (input.componentId ? [input.componentId] : input.componentIds ?? []).filter((id) => components.some((c) => c.id === id));
     const alive = (id: string | undefined) => !!id && screens.some((s) => s.id === id);
@@ -557,23 +556,20 @@ export function CanvasPage() {
       }
     } });
   const inspectorKeys = useRef<InspectorKeys | null>(null);
+  const targetOnlyComponent = (id: string) => { setSelectedIds([]); setTargetIds([]); setAnchor(null); setSelectedComponentIds([id]); setTargetComponentIds([id]); showComposer(); };
   // 新建组件（REQ-EDIT-006）：先起名建一个占位组件，选成唯一目标，接着在输入框里描述它——第一句「改组件」就把它写出来
   const createComponent = async (name: string) => {
     const { component } = await api.components.create(projectId, { name, html: NEW_COMPONENT_HTML });
     setNewComponentOpen(false);
     await refresh();
-    setSelectedIds([]); setTargetIds([]); setAnchor(null);
-    setSelectedComponentIds([component.id]); setTargetComponentIds([component.id]);
-    showComposer();
+    targetOnlyComponent(component.id);
     toast(`已新建组件「${name}」，在下方描述它`);
   };
   // 检查器「改组件」：把组件设为唯一目标（屏目标让位——这一句说的是组件，不是屏）
   const onEditComponent = (name: string) => {
     const c = components.find((x) => x.name === name);
     if (!c) { toast('这个组件已不存在', 'error'); return; }
-    setSelectedIds([]); setTargetIds([]); setAnchor(null);
-    setSelectedComponentIds([c.id]); setTargetComponentIds([c.id]);
-    showComposer();
+    targetOnlyComponent(c.id);
   };
   // 删选中的屏与组件（REQ-EDIT-006）：先屏后组件；组件删掉后屏里已展开的那份留着、只是不再跟着改
   const onDelete = async () => {
@@ -694,7 +690,7 @@ export function CanvasPage() {
   };
 
   // 对话记录折叠与输入框显隐（useComposerChrome）：输入框高度换算成画布底部占位 --chrome-bottom
-  const { chatCollapsed, toggleChat, composerVisible, showComposer, toggleComposer, composerH, setComposerH, shellStyle, dockRef } = useComposerChrome(focusedId, composerRef, !!panel);
+  const { chatCollapsed, toggleChat, composerVisible, showComposer, toggleComposer, setComposerH, shellStyle, dockRef } = useComposerChrome(focusedId, composerRef, !!panel);
   const openDesign = () => { if (panel === 'design') setPanel(null); else { setSelectedIds([]); setPanel('design'); } };
   // 批注（REQ-EDIT-004）：入口与选择元素同源——选中一屏或已聚焦都能进
   const toggleAnnotate = () => {

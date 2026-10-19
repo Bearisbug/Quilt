@@ -300,6 +300,6 @@ export function useFocusedFrame(p: CanvasProps, propsRef: { current: CanvasProps
   return {
     iframeRef, iframeReady, reloadKey, focusedSrc, frameFailed, lingerOn, shownId, family, focused,
     beginFocus, onFrameLoad, retryFrame, markReady, markSwapped, navigate, goBack, resetToOwn,
-    postToPreview, highlight, markDone, swapVariant, onShotShown,
+    highlight, markDone, swapVariant, onShotShown,
   };
 }

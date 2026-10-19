@@ -60,7 +60,7 @@ function ElementPath({ sel, onPick, onPeek }: { sel: ElementSel; onPick?: (qid: 
 // 目标是一张屏，或一个共享组件（v0.57 `REQ-EDIT-006`）——组件也能选元素直改，op 与屏同一套，
 // 只是落在组件自己的 HTML 上、乐观并发用版本号，改完由服务端回刷所有用它的屏。
 // 组件没有 AI 子树重生成（整块重写走输入框的「改组件」）、没有批注、也不能再「记为共享组件」。
-export function InspectorPanel({ screen, component, sel, routes = [], busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent, keysRef, onDirectEdit, onUndo, tokens, onPathPick, onPathPeek }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes?: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void; keysRef?: { current: InspectorKeys | null }; onDirectEdit?: (e: DirectEdit) => void; onUndo?: () => void; tokens?: Tokens; onPathPick?: (qid: string) => void; onPathPeek?: (qid: string | null) => void }) {
+export function InspectorPanel({ screen, component, sel, routes, busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent, keysRef, onDirectEdit, onUndo, tokens, onPathPick, onPathPeek }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void; keysRef?: { current: InspectorKeys | null }; onDirectEdit?: (e: DirectEdit) => void; onUndo?: () => void; tokens?: Tokens; onPathPick?: (qid: string) => void; onPathPeek?: (qid: string | null) => void }) {
   const toast = useToast();
   // 改了没存的文案 / 类名 / 跳转与重生成说明按元素暂存（v0.78）：点别的元素再点回来还在。
   // 直改三格记着起草时元素的原值：元素本身变了（保存后热更新重选、别处改了它）就作废、回到新值；说明不随元素内容作废
@@ -82,7 +82,7 @@ export function InspectorPanel({ screen, component, sel, routes = [], busy, runn
   const [compError, setCompError] = useState<string | null>(null);
   const [compBusy, setCompBusy] = useState(false);
   // 子树重生成的通道（REQ-EDIT-002）：与输入框同一套选择器，但记忆独立——局部改动常只要更快的模型；第一次沿用输入框当前通道（INT-007 / INT-021）
-  const [runnerPick, setRunnerPick] = useState(() => { try { return localStorage.getItem(SUBTREE_RUNNER_KEY) ?? ''; } catch { return ''; } });
+  const [runnerPick, setRunnerPick] = useState(() => readKey(SUBTREE_RUNNER_KEY));
   const [sessionIds, setSessionIds] = useState<Record<AgentTool, string>>(() => ({ 'claude-code': readKey(SUBTREE_SESSION_KEY['claude-code']), codex: readKey(SUBTREE_SESSION_KEY.codex) }));
   const runnerId = runners.some((r) => r.id === runnerPick && r.available) ? runnerPick : composerRunnerId;
   const runnerOpt = runners.find((r) => r.id === runnerId);

@@ -1,6 +1,6 @@
 // 多选排列的算位（REQ-CORE-018）。这个文件不依赖 React 与图标，单测直接跑（tests/unit/web/arrange.test.ts）；按钮表在 ArrangeBar.tsx
 export type ArrangeKind = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom' | 'hspace' | 'vspace' | 'hrow' | 'vcol';
-export type ArrangeLabel = '对齐' | '等距' | '排列';
+type ArrangeLabel = '对齐' | '等距' | '排列';
 // 排成一行 / 一列的固定间距：与造屏落位（worker 的 layoutNewScreens）同一个数，一键摆出来的和生成出来的一样宽松
 export const LAYOUT_GAP = 80;
 type Box = { id: string; x: number; y: number; width: number; height: number };

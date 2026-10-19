@@ -9,7 +9,7 @@ import { ConfirmDialog, Overlay, useModal } from '@/ui/modal';
 // 设计预设（REQ-CORE-021）：把当前项目的设计系统连同素材存成账号级预设，供别的项目开局或随时套用。
 // 预设存的是输入（种子色 / 字体 / 圆角 / 色板 / 模式 / DESIGN.md / 组件配方），tokens 由套用方现算。
 export function PresetsSection({ projectId, version, busy, onApplied }: {
-  projectId: string; version: number; busy: boolean; onApplied: (assetsCopied: number) => void;
+  projectId: string; version: number; busy: boolean; onApplied: () => void;
 }) {
   const toast = useToast();
   const [items, setItems] = useState<DesignPresetDto[] | null>(null);
@@ -28,7 +28,7 @@ export function PresetsSection({ projectId, version, busy, onApplied }: {
     try {
       const r = await api.presets.apply(projectId, { presetId: p.id, expectedVersion: version });
       toast(r.assetsCopied ? `已套用「${p.name}」，另复制了 ${r.assetsCopied} 个素材` : `已套用「${p.name}」`);
-      onApplied(r.assetsCopied);
+      onApplied();
     } catch (e) {
       toast(e instanceof ApiError && e.type === '/errors/version-conflict' ? '设计系统已被更新，刷新后再套用' : '套用失败', 'error');
     }

@@ -7,7 +7,7 @@ import { Select } from '@/ui/Select';
 import { VendorIcon } from '@/ui/VendorIcon';
 import { ConfirmDialog, Overlay, useModal } from '@/ui/modal';
 
-// 生成通道管理器（REQ-CORE-013 / PAGE-SETTINGS）。两组：我的通道（可增删改，云端通道只有这一种来源）、本机 agent（固定一行）。
+// 生成通道管理器（REQ-CORE-013 / PAGE-SETTINGS）。两组：我的通道（可增删改，云端通道只有这一种来源）、本机 agent（固定）。
 // 每行都能「验证」——真的发一次最小请求；只有验证通过的才会出现在画布输入框的下拉里。
 // 数据：/v1/runners 给统一目录（含不可用项与原因），/v1/channels 给自建通道的明细（端点、状态、密钥末位）。
 
@@ -30,7 +30,7 @@ const problemText = (e: unknown, fallback: string) => {
 
 // onCatalog：通道增删改与验证之后，把刚取到的通道清单交给上层——画布那份清单是挂载时取的，
 // 不回传的话新加的通道要刷新页面才出现在输入框下拉里
-export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOptionDto[], defaultId: string) => void } = {}) {
+export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOptionDto[], defaultId: string) => void }) {
   const toast = useToast();
   const [runners, setRunners] = useState<RunnerOptionDto[] | null>(null);
   const [channels, setChannels] = useState<ChannelDto[] | null>(null);
@@ -112,7 +112,7 @@ export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOption
         </div>
       )}
 
-      {dialog && <ChannelDialog mode={dialog.mode} channel={dialog.mode === 'edit' ? dialog.channel : undefined} secretsOk={secretsOk} onClose={closeDialog} onSaved={() => void load()} returnTo={returnFocus} fallback={rootRef} />}
+      {dialog && <ChannelDialog channel={dialog.mode === 'edit' ? dialog.channel : undefined} secretsOk={secretsOk} onClose={closeDialog} onSaved={() => void load()} returnTo={returnFocus} fallback={rootRef} />}
       {deleting && (
         <ConfirmDialog
           title={`删除「${deleting.label}」？`}
@@ -218,7 +218,7 @@ function RunnerRow(p: {
 // ---- 添加 / 编辑面板 ----
 // 出错字段按 DOM 顺序：提交失败时焦点落到第一个（INT-003）
 const FIELD_ORDER = ['ch-label', 'ch-endpoint', 'ch-model', 'ch-key'];
-function ChannelDialog(p: { mode: 'add' | 'edit'; channel?: ChannelDto; secretsOk: boolean; onClose: () => void; onSaved: () => void; returnTo?: React.RefObject<HTMLElement | null>; fallback?: React.RefObject<HTMLElement | null> }) {
+function ChannelDialog(p: { channel?: ChannelDto; secretsOk: boolean; onClose: () => void; onSaved: () => void; returnTo?: React.RefObject<HTMLElement | null>; fallback?: React.RefObject<HTMLElement | null> }) {
   const toast = useToast();
   const ref = useModal<HTMLFormElement>(p.onClose, p.returnTo, p.fallback);
   // 「添加」成功但验证失败时留在面板里：此后再提交走更新，不能再建第二条
@@ -295,11 +295,10 @@ function ChannelDialog(p: { mode: 'add' | 'edit'; channel?: ChannelDto; secretsO
       const r = await api.probeRunner(`channel:${ch.id}`);
       setProbe(r); p.onSaved();
       if (r.ok) { toast(`「${ch.label}」已验证${r.latencyMs != null ? `，${r.latencyMs} ms` : ''}`); p.onClose(); return; }
-      requestAnimationFrame(() => alertRef.current?.focus());
     } catch (e) {
       setServerError(problemText(e, '保存失败'));
-      requestAnimationFrame(() => alertRef.current?.focus());
     } finally { setSaving(false); }
+    requestAnimationFrame(() => alertRef.current?.focus());
   };
 
   const err = (id: string) => errors[id] ? { 'aria-invalid': true as const, 'aria-describedby': `${id}-error` } : {};
@@ -321,7 +320,7 @@ function ChannelDialog(p: { mode: 'add' | 'edit'; channel?: ChannelDto; secretsO
         <div className="mt-4 space-y-4">
           <Field label="类型" htmlFor="ch-kind">
             <Select id="ch-kind" value={kind} onChange={(v) => pickKind(v as ChannelKind)} disabled={editing} aria-label="通道类型"
-              options={(Object.keys(KIND_LABEL) as ChannelKind[]).map((k) => ({ value: k, label: KIND_LABEL[k], icon: <VendorIcon vendor={DEFAULT_VENDOR[k] === 'custom' ? 'openai' : DEFAULT_VENDOR[k]} size={14} /> }))} />
+              options={(Object.keys(KIND_LABEL) as ChannelKind[]).map((k) => ({ value: k, label: KIND_LABEL[k], icon: <VendorIcon vendor={DEFAULT_VENDOR[k]} size={14} /> }))} />
           </Field>
           {kind === 'openai' && !editing && (
             <Field label="厂商预设" htmlFor="ch-vendor" hint="只决定默认端点与图标，模型名仍要自己填">
@@ -333,7 +332,7 @@ function ChannelDialog(p: { mode: 'add' | 'edit'; channel?: ChannelDto; secretsO
             <Input id="ch-label" name="label" value={label} onChange={(e) => { setLabel(e.target.value); recheck({ label: e.target.value }); }} placeholder="例如 DeepSeek 主力" maxLength={60} autoComplete="off" data-1p-ignore data-lpignore="true" {...err('ch-label')} />
             {errorLine('ch-label')}
           </Field>
-          {!LOCAL_CHANNEL_KINDS.includes(kind) && (
+          {!local && (
           <Field label={kind === 'openai' ? '端点（Base URL）' : '端点（可选）'} htmlFor="ch-endpoint">
             <Input id="ch-endpoint" name="endpoint" type="url" inputMode="url" value={endpoint} onChange={(e) => { setEndpoint(e.target.value); setEndpointTouched(true); recheck({ endpoint: e.target.value }); }} placeholder={endpointPlaceholder} autoComplete="off" data-1p-ignore data-lpignore="true" spellCheck={false} className="font-mono" {...err('ch-endpoint')} />
             {errorLine('ch-endpoint')}
@@ -345,7 +344,7 @@ function ChannelDialog(p: { mode: 'add' | 'edit'; channel?: ChannelDto; secretsO
             <Input id="ch-model" name="model" value={model} onChange={(e) => { setModel(e.target.value); recheck({ model: e.target.value }); }} placeholder={`例如 ${MODEL_HINT[vendor]}`} maxLength={80} autoComplete="one-time-code" data-1p-ignore data-lpignore="true" spellCheck={false} className="font-mono" {...err('ch-model')} />
             {errorLine('ch-model')}
           </Field>
-          {!LOCAL_CHANNEL_KINDS.includes(kind) && (
+          {!local && (
           <Field label="API Key" htmlFor="ch-key" hint={editing ? '留空表示不改；密钥加密保存，不会再回显' : '加密保存，只回显末 4 位'}>
             <Input id="ch-key" name="apiKey" type="password" value={apiKey} onChange={(e) => { setApiKey(e.target.value); recheck({ apiKey: e.target.value }); }} placeholder={editing && saved?.apiKeyHint ? `••••${saved.apiKeyHint}` : 'sk-…'} autoComplete="new-password" data-1p-ignore data-lpignore="true" spellCheck={false} className="font-mono" {...err('ch-key')} />
             {errorLine('ch-key')}

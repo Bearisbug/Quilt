@@ -8,9 +8,9 @@ import { cn } from '@/ui/ui';
 // 这个组件让列表进我们自己的 .menu 材质，键盘导航 / 焦点归还 / 定位仍由 Radix 负责。
 // 触发器的外观与 Input 对齐（h-9、圆角、同一焦点环），放进 <Field> 里不用再调。
 
-export type SelectOption = { value: string; label: string; hint?: string; icon?: ReactNode; disabled?: boolean };
+type SelectOption = { value: string; label: string; hint?: string; icon?: ReactNode; disabled?: boolean };
 
-export function Select({ id, value, onChange, options, placeholder, disabled, className, 'aria-label': ariaLabel, 'data-testid': testId, ...rest }: {
+export function Select({ id, value, onChange, options, placeholder, disabled, className, 'aria-label': ariaLabel, 'data-testid': testId }: {
   id?: string;
   value: string;
   onChange: (v: string) => void;
@@ -20,8 +20,6 @@ export function Select({ id, value, onChange, options, placeholder, disabled, cl
   className?: string;
   'aria-label'?: string;
   'data-testid'?: string;
-  'aria-invalid'?: boolean;
-  'aria-describedby'?: string;
 }) {
   const current = options.find((o) => o.value === value);
   return (
@@ -33,7 +31,6 @@ export function Select({ id, value, onChange, options, placeholder, disabled, cl
           'disabled:cursor-not-allowed aria-invalid:border-error',
           className,
         )}
-        {...rest}
       >
         <span className="flex min-w-0 items-center gap-2 truncate">
           {current?.icon}

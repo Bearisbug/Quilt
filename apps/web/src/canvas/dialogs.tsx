@@ -4,11 +4,11 @@ import { ApiError } from '@/lib/api';
 import { Button, Input, Textarea } from '@/ui/ui';
 import { Overlay, useModal } from '@/ui/modal';
 
-// 画布上的三个弹层。焦点陷阱 / Esc / 背景 inert / 关闭归还焦点都由 useModal 管（A11Y-004 / A11Y-005），
+// 画布上的弹层。焦点陷阱 / Esc / 背景 inert / 关闭归还焦点都由 useModal 管（A11Y-004 / A11Y-005），
 // 与设置、通道、预设那几个弹层同一套——aria-modal 说了「背景已隐藏」，Tab 就不能再走进画布。
 
 // 删屏 / 删组件确认：危险动作，初始焦点落「取消」（useModal 落第一个可聚焦项，DOM 里「取消」在前）
-export function DeleteDialog({ screens, components, selected, variantCount = 0, onConfirm, onClose }: { screens: ScreenDto[]; components: ComponentDto[]; selected: ScreenDto | null; variantCount?: number; onConfirm: () => void; onClose: () => void }) {
+export function DeleteDialog({ screens, components, selected, variantCount, onConfirm, onClose }: { screens: ScreenDto[]; components: ComponentDto[]; selected: ScreenDto | null; variantCount: number; onConfirm: () => void; onClose: () => void }) {
   const ref = useModal<HTMLDivElement>(onClose);
   return (
     <Overlay onClose={onClose}>
@@ -45,7 +45,6 @@ export function MissingDialog({ missing, busyReason, onGenerate, onClose }: { mi
             </li>
           ))}
         </ul>
-        {/* 补屏建的也是 generate，与在跑的那个抢同一个项目级名额：说清为什么现在点不了（A11Y-007 / IA-009） */}
         {busyReason && <p className="mt-2 type-label text-warning">{busyReason}</p>}
         <div className="mt-4 flex justify-end"><Button onClick={() => onClose()}>关闭</Button></div>
       </div>
@@ -53,15 +52,14 @@ export function MissingDialog({ missing, busyReason, onGenerate, onClose }: { mi
   );
 }
 
-// 新建组件（REQ-EDIT-006）：只问名字。焦点陷阱 / Esc / 背景 inert 由 useModal 管（A11Y-004 / A11Y-005）；
-// 名字被占用时就地报错、不关框，让用户改一个字再试
+// 新建组件（REQ-EDIT-006）：只问名字；名字被占用时就地报错、不关框，让用户改一个字再试
 export function NewComponentDialog({ onCreate, onClose }: { onCreate: (name: string) => Promise<void>; onClose: () => void }) {
   const ref = useModal<HTMLFormElement>(onClose);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const submit = async (e?: FormEvent) => {
-    e?.preventDefault();
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
     const n = name.trim();
     if (!n) { setError('给组件起个名字'); return; }
     setPending(true);
@@ -99,8 +97,8 @@ export function VariantDialog({ base, onCreate, onClose }: { base: ScreenDto; on
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const submit = async (e?: FormEvent) => {
-    e?.preventDefault();
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
     const n = name.trim();
     if (!n) { setError('给这个状态起个名字'); return; }
     if (n.length > 20) { setError('状态名最多 20 个字符'); return; }

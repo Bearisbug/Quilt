@@ -3,7 +3,7 @@ import { COLOR_CLASS_NAMES, type Tokens } from '@quilt/core/browser';
 // 检查器「类名」一行一个时的说明与换档（v0.96 PAGE-CANVAS「类名编辑」）。纯函数。
 // 取值按 Tailwind v3 默认（屏用的是 Play CDN v3）；prelude 只改写了颜色、圆角四档与字体，这两样按本项目设计系统取
 
-export type ClassInfo = {
+type ClassInfo = {
   /** 一句中文说明：作用 + 实际取值 */
   text: string;
   /** 说明表收录了这个类 */
@@ -15,7 +15,7 @@ type Ctx = { tokens?: Pick<Tokens, 'colors' | 'radius'>; column?: boolean };
 type Parsed = { variants: string[]; important: boolean; negative: boolean; base: string };
 
 // 变体前缀：按 : 拆，任意值方括号里的 : 不算
-export function parseClass(cls: string): Parsed {
+function parseClass(cls: string): Parsed {
   const parts: string[] = [];
   let depth = 0; let cur = '';
   for (const ch of cls) {
@@ -59,7 +59,7 @@ const DURATION = ['0', '75', '100', '150', '200', '300', '500', '700', '1000'];
 const COUNT_12 = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const CLAMP = ['1', '2', '3', '4', '5', '6'];
 
-// 间距 / 尺寸类前缀（长的在前，min-w 先于 m）：名称、能不能取负值
+// 间距 / 尺寸类前缀（长的在前，min-w 先于 m）：名称
 const SIZED: [string, string][] = [
   ['space-x', '子元素横向间距'], ['space-y', '子元素纵向间距'], ['gap-x', '列间隙'], ['gap-y', '行间隙'], ['gap', '子元素间隙'],
   ['min-w', '最小宽度'], ['min-h', '最小高度'], ['max-h', '最大高度'], ['size', '宽高'], ['basis', '弹性基准尺寸'],
@@ -118,12 +118,12 @@ const opt = <T,>(list: [string, T][], key: string) => list.find(([k]) => k === k
 const rem = (v: string) => (/^\[.+\]$/.test(v) ? v.slice(1, -1) : null);
 
 // 圆角各档的实际取值：sm / md / lg / full 来自设计系统（prelude 改写了），其余是 Tailwind 默认
-function radii(ctx: Ctx): [string, number, string][] {
+function radii(ctx: Ctx): [string, number][] {
   const r = ctx.tokens?.radius;
   const n = (v: string | undefined, d: number) => (v ? (v.endsWith('px') ? parseFloat(v) : v.endsWith('rem') ? parseFloat(v) * 16 : d) : d);
   return [
-    ['none', 0, '无圆角'], ['sm', n(r?.sm, 2), ''], ['', 4, ''], ['md', n(r?.md, 6), ''], ['lg', n(r?.lg, 8), ''],
-    ['xl', 12, ''], ['2xl', 16, ''], ['3xl', 24, ''], ['full', n(r?.full, 9999), '全圆'],
+    ['none', 0], ['sm', n(r?.sm, 2)], ['', 4], ['md', n(r?.md, 6)], ['lg', n(r?.lg, 8)],
+    ['xl', 12], ['2xl', 16], ['3xl', 24], ['full', n(r?.full, 9999)],
   ];
 }
 const radiusLabel = (key: string, px: number, ctx: Ctx) =>
@@ -196,7 +196,7 @@ function explainBase({ base, negative }: Parsed, ctx: Ctx): ClassInfo {
     const key = parts.join('-');
     const hit = radii(ctx).find(([k]) => k === key);
     const raw = rem(key);
-    if (hit) return ok(`${side ? `${side}` : ''}圆角 ${radiusLabel(key, hit[1], ctx)}`.replace('圆角 无圆角', '无圆角').replace('圆角 全圆', '圆角：全圆'));
+    if (hit) return ok(`${side}圆角 ${radiusLabel(key, hit[1], ctx)}`.replace('圆角 无圆角', '无圆角').replace('圆角 全圆', '圆角：全圆'));
     if (raw) return ok(`${side}圆角 ${raw}`);
   }
   // 阴影 / 透明度 / 层级 / 时长

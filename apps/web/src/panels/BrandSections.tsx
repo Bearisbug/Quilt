@@ -94,9 +94,9 @@ export function PaletteSection({ tokens, palette, colorMode, savedColorMode, onC
 // 展示用 <img> 不加 crossOrigin：那会把普通图片请求升级成 CORS 请求，而 /a/ 的 ACAO 是常量 webOrigin，
 // 页面 origin 不等于它（127.0.0.1、局域网地址）时整张图加载失败——标志本身不显示，比棋盘格更糟。
 // 取像素判亮度的那个离屏 Image 自带 crossOrigin，读不出来本就回落棋盘格（assetTone.ts）
-export function AssetTile({ asset, colors, className }: { asset: AssetDto; colors: Tokens['colors']; className?: string }) {
+function AssetTile({ asset, colors, className }: { asset: AssetDto; colors: Tokens['colors']; className: string }) {
   const tone = useAssetTone(asset.url);
-  return <img src={asset.url} alt="" width={40} height={40} loading="lazy" className={`${toneClass(tone)} object-contain ${className ?? ''}`} style={{ backgroundColor: toneColor(tone, colors) }} />;
+  return <img src={asset.url} alt="" width={40} height={40} loading="lazy" className={`${toneClass(tone)} object-contain ${className}`} style={{ backgroundColor: toneColor(tone, colors) }} />;
 }
 
 // 项目素材（REQ-CORE-019）：上传 / 复制引用地址 / 删除；清单随每次生成进 prompt。

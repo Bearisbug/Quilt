@@ -41,5 +41,5 @@ export function useComposerChrome(focusedId: string | null, composerRef: RefObje
     window.addEventListener('resize', place);
     return () => { window.removeEventListener('resize', place); root.removeProperty('--toast-bottom'); };
   }, [composerVisible, composerH, chatCollapsed, panelOpen]);
-  return { chatCollapsed, toggleChat, composerVisible, showComposer, toggleComposer, composerH, setComposerH, shellStyle, dockRef };
+  return { chatCollapsed, toggleChat, composerVisible, showComposer, toggleComposer, setComposerH, shellStyle, dockRef };
 }

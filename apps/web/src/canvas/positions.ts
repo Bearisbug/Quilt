@@ -6,7 +6,7 @@ import { computeArrangement, type ArrangeKind } from './arrange';
 import type { UndoStep } from './undo';
 
 // 画布上一张卡（屏或组件）的位置，位置写回与撤销栈都用它
-export type PosEntry = { id: string; x: number; y: number };
+type PosEntry = { id: string; x: number; y: number };
 
 // 刚写出去、服务端还没回声的坐标（拖动与排列，REQ-CORE-018）：项目级事件流每来一条事件就刷新，
 // 那次 GET 可能早于排列发出、晚于它落地才回来，这份旧快照整份写进 detail 就把排好的位置顶回去，
@@ -27,7 +27,7 @@ export function usePositionDrafts() {
   }, []);
   return useMemo(() => ({ dirtyPos, dirtyCompPos, reconcile }), [reconcile]);
 }
-export type PositionDrafts = ReturnType<typeof usePositionDrafts>;
+type PositionDrafts = ReturnType<typeof usePositionDrafts>;
 
 export function usePositionUndo(args: {
   drafts: PositionDrafts; screensRef: { current: ScreenDto[] }; components: ComponentDto[];
@@ -88,5 +88,5 @@ export function usePositionUndo(args: {
     toast(`位置保存失败：${failed.map((s) => s.name).join('、')} 没排上，再点一次对齐`, 'error');
     refresh();
   };
-  return { pushUndo, writePositions, onMove, arrange };
+  return { onMove, arrange };
 }

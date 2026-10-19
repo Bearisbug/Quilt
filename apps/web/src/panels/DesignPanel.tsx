@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { fontFamilySchema, fontUrlSchema, parseConventions, type FontSource, type AssetDto, type ScreenDto, type DesignSystemDto, type Tokens, type ProjectDto } from '@quilt/core/browser';
+import { fontFamilySchema, fontUrlSchema, parseConventions, type AssetDto, type ScreenDto, type DesignSystemDto, type Tokens, type ProjectDto } from '@quilt/core/browser';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button, Input, Panel, Textarea } from '@/ui/ui';
@@ -19,13 +19,6 @@ export function DesignPanel({ ds, project, screens, assets, busyReason, onClose,
   const [form, setForm] = useState<Fields>(() => { const d = drafts.get(ds.projectId); return d ? rebase(d.form, d.base, saved, []) : saved; });
   const set = (patch: Partial<Fields>) => setForm((f) => ({ ...f, ...patch }));
   const { seed, font, fontSource, fontUrl, radius, md, palette, colorMode, brief } = form;
-  const setSeed = (v: string) => set({ seed: v });
-  const setFont = (v: string) => set({ font: v });
-  const setFontSource = (v: FontSource) => set({ fontSource: v });
-  const setFontUrl = (v: string) => set({ fontUrl: v });
-  const setRadius = (v: Fields['radius']) => set({ radius: v });
-  const setMd = (v: string) => set({ md: v });
-  const setBrief = (v: string) => set({ brief: v });
   const [fontError, setFontError] = useState<string | null>(null);
   const [fontUrlError, setFontUrlError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -112,7 +105,7 @@ export function DesignPanel({ ds, project, screens, assets, busyReason, onClose,
         {/* 持久记忆（REQ-CORE-016）：应用简介每次生成都带；样板屏在画布上选中后用工具栏更换 */}
         <div className="space-y-1.5">
           <label htmlFor="ds-brief" className="block type-label font-medium text-text-secondary">应用简介（每次生成都会带上）</label>
-          <Textarea id="ds-brief" data-testid="ds-brief" rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="首轮生成后会自动写一段：这是什么 APP、给谁用、调性。可以改。" className="resize-y font-normal" />
+          <Textarea id="ds-brief" data-testid="ds-brief" rows={3} value={brief} onChange={(e) => set({ brief: e.target.value })} placeholder="首轮生成后会自动写一段：这是什么 APP、给谁用、调性。可以改。" className="resize-y font-normal" />
           <div className="flex justify-end"><Button size="sm" pending={savingBrief} disabled={brief.trim() === project.brief.trim()} onClick={saveBrief}>保存简介</Button></div>
         </div>
         <div className="rounded-md border border-border-subtle px-3 py-2 type-label" data-testid="ds-exemplar">
@@ -127,13 +120,13 @@ export function DesignPanel({ ds, project, screens, assets, busyReason, onClose,
           <div className="space-y-1.5">
             <label htmlFor="ds-seed" className="block type-label font-medium text-text-secondary">种子色</label>
             <div className="flex items-center gap-2">
-              <input id="ds-seed" type="color" value={/^#[0-9A-Fa-f]{6}$/.test(seed) ? seed : '#000000'} onChange={(e) => setSeed(e.target.value.toUpperCase())} className="h-9 w-10 cursor-pointer focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) p-1" aria-label="选择种子色" />
-              <input aria-label="种子色十六进制" value={seed} onChange={(e) => setSeed(e.target.value)} className="h-9 w-full focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) px-2 font-mono type-body" />
+              <input id="ds-seed" type="color" value={/^#[0-9A-Fa-f]{6}$/.test(seed) ? seed : '#000000'} onChange={(e) => set({ seed: e.target.value.toUpperCase() })} className="h-9 w-10 cursor-pointer focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) p-1" aria-label="选择种子色" />
+              <input aria-label="种子色十六进制" value={seed} onChange={(e) => set({ seed: e.target.value })} className="h-9 w-full focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) px-2 font-mono type-body" />
             </div>
           </div>
           <div className="space-y-1.5">
             <label htmlFor="ds-font" className="block type-label font-medium text-text-secondary">字体</label>
-            <Input id="ds-font" data-testid="ds-font" list="ds-font-options" value={font} onChange={(e) => { setFont(e.target.value); setFontError(null); }}
+            <Input id="ds-font" data-testid="ds-font" list="ds-font-options" value={font} onChange={(e) => { set({ font: e.target.value }); setFontError(null); }}
               placeholder={fontSource === 'system' ? '例如 PingFang SC' : '例如 Plus Jakarta Sans'} autoComplete="off" spellCheck={false}
               aria-invalid={!!fontError} aria-describedby={fontError ? 'ds-font-error' : undefined} />
             <datalist id="ds-font-options">{(fontSource === 'system' ? SYSTEM_FONTS : FONTS).map((f) => <option key={f} value={f} />)}</datalist>
@@ -145,7 +138,7 @@ export function DesignPanel({ ds, project, screens, assets, busyReason, onClose,
           <div className="grid grid-cols-3 gap-2" data-testid="ds-font-source" data-value={fontSource}>
             {FONT_SOURCE_OPTIONS.map((s) => (
               <label key={s.key} className={`flex h-9 cursor-pointer items-center justify-center whitespace-nowrap rounded-md border px-1 type-body ${fontSource === s.key ? 'border-primary bg-(--semantic-color-surface-selected)' : 'border-border-subtle text-text-secondary state-layer'}`}>
-                <input type="radio" name="font-source" value={s.key} className="sr-only" checked={fontSource === s.key} onChange={() => { setFontSource(s.key); setFontError(null); setFontUrlError(null); }} />{s.label}
+                <input type="radio" name="font-source" value={s.key} className="sr-only" checked={fontSource === s.key} onChange={() => { set({ fontSource: s.key }); setFontError(null); setFontUrlError(null); }} />{s.label}
               </label>
             ))}
           </div>
@@ -154,7 +147,7 @@ export function DesignPanel({ ds, project, screens, assets, busyReason, onClose,
         {fontSource === 'url' && (
           <div className="space-y-1.5">
             <label htmlFor="ds-font-url" className="block type-label font-medium text-text-secondary">字体样式表地址（https，含 @font-face）</label>
-            <Input id="ds-font-url" data-testid="ds-font-url" value={fontUrl} onChange={(e) => { setFontUrl(e.target.value); setFontUrlError(null); }}
+            <Input id="ds-font-url" data-testid="ds-font-url" value={fontUrl} onChange={(e) => { set({ fontUrl: e.target.value }); setFontUrlError(null); }}
               placeholder="https://fonts.bunny.net/css?family=manrope:400,600" inputMode="url" autoComplete="off" spellCheck={false} className="font-mono"
               aria-invalid={!!fontUrlError} aria-describedby={fontUrlError ? 'ds-font-url-error' : undefined} />
             {fontUrlError && <p id="ds-font-url-error" className="type-label text-error" role="alert">{fontUrlError}</p>}
@@ -165,7 +158,7 @@ export function DesignPanel({ ds, project, screens, assets, busyReason, onClose,
           <div className="grid grid-cols-3 gap-2">
             {RADIUS.map((r) => (
               <label key={r.key} className={`flex h-9 cursor-pointer items-center justify-center rounded-md border type-body ${radius === r.key ? 'border-primary bg-(--semantic-color-surface-selected)' : 'border-border-subtle text-text-secondary state-layer'}`}>
-                <input type="radio" name="radius" value={r.key} className="sr-only" checked={radius === r.key} onChange={() => setRadius(r.key)} />{r.label}
+                <input type="radio" name="radius" value={r.key} className="sr-only" checked={radius === r.key} onChange={() => set({ radius: r.key })} />{r.label}
               </label>
             ))}
           </div>
@@ -195,7 +188,7 @@ export function DesignPanel({ ds, project, screens, assets, busyReason, onClose,
         </div>
         <div className="space-y-1.5">
           <label htmlFor="ds-md" className="block type-label font-medium text-text-secondary">DESIGN.md（进入每次生成的上下文）</label>
-          <textarea id="ds-md" value={md} onChange={(e) => setMd(e.target.value)} rows={18} className="w-full resize-y focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) p-2 font-mono type-label leading-relaxed [overflow-wrap:anywhere]" />
+          <textarea id="ds-md" value={md} onChange={(e) => set({ md: e.target.value })} rows={18} className="w-full resize-y focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) p-2 font-mono type-label leading-relaxed [overflow-wrap:anywhere]" />
         </div>
         <PresetsSection projectId={ds.projectId} version={ds.version} busy={dirty}
           onApplied={() => { onSaved(); setAskApply(screens.length > 0); }} />

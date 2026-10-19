@@ -3,7 +3,7 @@ import { getViewportForBounds, type Viewport } from '@xyflow/system';
 // 画布的几何（v1.07 从 CanvasView.tsx 抽出）：镜头怎么摆、哪些卡用原图、框选圈住了谁，都是纯算式，由 tests/unit/web/geometry.test.ts 锁住。
 // 坐标系两套：世界坐标（卡片的 x / y，世界层 transform 之前）与视口坐标（相对画布视口左上角的屏幕像素）；镜头 v 把前者映到后者：
 // 视口 = 世界 × v.zoom + (v.x, v.y)。可用区（area）是视口坐标里没被浮层遮住的那块
-export type Rect = { x: number; y: number; w: number; h: number };
+type Rect = { x: number; y: number; w: number; h: number };
 
 // 缩放下限（v0.76）：25 张桌面屏横排约 34000 px，下限取 0.1 的话适配视图有 6 屏整张在视口外。
 // 适配视图、画布与屏内捏合、存储镜头校验都用它
