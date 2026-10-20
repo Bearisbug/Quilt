@@ -618,6 +618,11 @@ await step('TC-CORE-023', async () => {
 
   await eventually(async () => expect((await page.locator('.card.focused').count()) === 0, 'Esc 未退出聚焦'));
   expect(await composerShown(), '退出聚焦后输入框没回来');
+  // 第 7 步量的是造态（带屏数 / 版数档位、最宽）的输入框：6d 退出聚焦后那一屏仍是选中的，输入框处在改态、窄到碰不着面板，
+  // 再按一次 Esc 清掉选中，等宽度过渡走完
+  await page.keyboard.press('Escape');
+  await eventually(async () => expect((await page.locator('[data-testid="screen-card"].selected').count()) === 0, 'Esc 未清掉选中'));
+  await page.waitForTimeout(600);
 
   // 7 输入框的横向落点不得被侧边浮层的开合搬走：右侧面板滑出时允许让位，但只让到刚好不被压住为止，不多挪一像素
   const composerBox = async () => (await page.locator('form.composer').boundingBox())!;
@@ -1063,9 +1068,9 @@ await step('TC-CORE-028', async () => {
     await page.goto(`${WEB}/p/${projectId}?settings=runners`);
     const modal = page.getByTestId('settings-modal');
     await modal.waitFor({ timeout: 10000 });
-    // 分栏：左栏三节 tab（本月用量 / 生成通道 / 外观，v1.08 加外观），方向键换节、URL 跟着变
+    // 分栏：左栏四节 tab（本月用量 / 生成通道 / 外观 / 语言，v1.08 加外观、v1.20 加语言），方向键换节、URL 跟着变
     const tabs = await modal.getByRole('tab').allInnerTexts();
-    expect(tabs.join('/') === '本月用量/生成通道/外观', `设置弹层左栏应是 本月用量 / 生成通道 / 外观 三节：${tabs.join(' / ')}`);
+    expect(tabs.join('/') === '本月用量/生成通道/外观/语言', `设置弹层左栏应是 本月用量 / 生成通道 / 外观 / 语言 四节：${tabs.join(' / ')}`);
     expect((await modal.getByRole('tab', { name: '生成通道' }).getAttribute('aria-selected')) === 'true', '?settings=runners 未选中「生成通道」');
     await modal.getByRole('tab', { name: '生成通道' }).focus();
     await page.keyboard.press('ArrowUp');

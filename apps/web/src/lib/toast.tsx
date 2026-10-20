@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { TriangleAlert, X } from 'lucide-react';
+import { useT } from '@/i18n';
+import libMessages from '@/i18n/locales/shellLib';
 
 // 提示条（PAGE-CANVAS「提示条」，v1.04）：信息 3.2 s、错误 8 s 后消失；悬停时不计时，移开重新计时；
 // 错误与带动作的可手动关。动作只有一个（例如「撤销（⌘Z）」），点了就收起
@@ -29,6 +31,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
+  const tl = useT(libMessages);
   const [hover, setHover] = useState(false);
   // 计时挂在悬停状态上：悬停时清掉，移开后按整段寿命重新算
   useEffect(() => {
@@ -52,7 +55,7 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: numb
           className={`state-layer focus-ring shrink-0 rounded-sm px-1 font-medium underline underline-offset-2 ${error ? 'text-primary' : ''}`}>{t.action.label}</button>
       )}
       {closable && (
-        <button type="button" aria-label="关闭提示" onClick={() => onDismiss(t.id)} className={`state-layer focus-ring -mr-1 mt-0.5 shrink-0 rounded-sm ${error ? 'text-text-secondary' : ''}`}>
+        <button type="button" aria-label={tl('toast.dismiss')} onClick={() => onDismiss(t.id)} className={`state-layer focus-ring -mr-1 mt-0.5 shrink-0 rounded-sm ${error ? 'text-text-secondary' : ''}`}>
           <X size={14} aria-hidden="true" />
         </button>
       )}

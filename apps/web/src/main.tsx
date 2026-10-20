@@ -1,3 +1,5 @@
+// 界面语言（REQ-CORE-046）：最先导入——i18next 同步初始化并注册全部命名空间，首帧就是选定的语言
+import '@/i18n/load';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider, redirect } from 'react-router';
@@ -14,7 +16,7 @@ async function latestProjectId(): Promise<string | null> {
   return latest?.id ?? null;
 }
 
-// 全部路由挂在一个无路径的父路由下，共用一个中文错误页（v0.83）：loader 取不到、页面渲染时抛异常都落到它，不落到路由库的英文默认错误页；
+// 全部路由挂在一个无路径的父路由下，共用一个错误页（v0.83，按界面语言写）：loader 取不到、页面渲染时抛异常都落到它，不落到路由库的英文默认错误页；
 // 没有匹配的地址是「没有这个页面」
 const router = createBrowserRouter([{ errorElement: <RouteError />, children: [
   { path: '/', loader: async () => { const id = await latestProjectId(); return id ? redirect(`/p/${id}`) : null; }, element: <FirstProjectPage /> },

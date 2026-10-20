@@ -4,10 +4,11 @@ import type { z } from 'zod';
 import { db, schema } from '../db/client.ts';
 import { problems, isUniqueViolation } from '../lib/errors.ts';
 import { notifyCanvas } from '../lib/events.ts';
+import { tr } from '../lib/locale.ts';
 import { config } from '../config.ts';
 import {
-  assembleDocument, buildPrelude, lintScreenBody, frameFromBody, expandComponents, forkBody, forkDraftName, overwriteBody, componentNameSchema, RESTYLE_PROMPT, DEVICE_SIZE, DRAFT_FRAMES,
-  type createMessageSchema, type CreateJobInput, type CopyDraftInput, type CopyDraftResultDto, type CreateDraftInput, type ScreenDto, type DeviceType, type DraftFrame, type LintReport, type Tokens,
+  assembleDocument, buildPrelude, lintScreenBody, frameFromBody, expandComponents, forkBody, forkDraftName, overwriteBody, componentNameSchema, RESTYLE_PROMPT, DEVICE_SIZE, DRAFT_FRAMES, L,
+  type createMessageSchema, type CreateJobInput, type CopyDraftInput, type CopyDraftResultDto, type CreateDraftInput, type ScreenDto, type DeviceType, type DraftFrame, type LintReport, type Tokens, type Localized,
 } from '@quilt/core';
 import { createProject, ownedProject, screenDtos, jobDto, type ProjectRow, type JobRow } from './projects.ts';
 import { ownedScreen, currentBody, createRevision, deriveLinks, deleteScreen, hasActiveJob } from './screens.ts';
@@ -30,7 +31,7 @@ export async function ensureSketchbook(ownerId: string): Promise<ProjectRow> {
   const found = await sketchbookOf(ownerId);
   if (found) return found;
   try {
-    return (await createProject(ownerId, { name: '草稿本', deviceType: 'mobile' }, 'sketchbook')).project;
+    return (await createProject(ownerId, { name: tr('草稿本', 'Sketchbook'), deviceType: 'mobile' }, 'sketchbook')).project;
   } catch (e) {
     const again = isUniqueViolation(e) ? await sketchbookOf(ownerId) : undefined;
     if (!again) throw e;
@@ -40,53 +41,53 @@ export async function ensureSketchbook(ownerId: string): Promise<ProjectRow> {
 
 // 草稿本规则（API-CORE-010 草稿本子条目，INV-CORE-003）：草稿本里只受理造一张新草稿与改一张草稿，各只出一版；
 // 画框只给草稿本。不合规的字段一次全点出来
-function reject(rules: [unknown, string, string][]): void {
+function reject(rules: [unknown, string, Localized][]): void {
   const errors = rules.filter(([hit]) => hit).map(([, path, message]) => ({ path, message }));
   if (errors.length) throw problems.validation(errors);
 }
 
 // 发消息（API-CORE-010）按请求字段点名：接上跳转 / 按新约定重生成在作业层只是一段提示词，只有这一层认得出来
 export function assertSketchbookMessage(project: { kind: string }, body: z.infer<typeof createMessageSchema>): void {
-  if (!isSketchbook(project)) return reject([[body.frame, 'frame', '画框只对草稿本的新草稿有效'], [body.refProjectId, 'refProjectId', '参照项目只对草稿本的新草稿有效']]);
+  if (!isSketchbook(project)) return reject([[body.frame, 'frame', L('画框只对草稿本的新草稿有效', 'Frames only apply to new drafts in the Sketchbook')], [body.refProjectId, 'refProjectId', L('参照项目只对草稿本的新草稿有效', 'Reference projects only apply to new drafts in the Sketchbook')]]);
   reject([
-    [body.mode, 'mode', '草稿本没有聊天'],
-    [body.targetComponentIds?.length, 'targetComponentIds', '草稿本没有共享组件'],
-    [body.anchor, 'anchor', '草稿不摆在画布上'],
-    [body.count !== undefined && body.count !== 1, 'count', '一次只出一张草稿'],
-    [(body.versions ?? 1) > 1, 'versions', '草稿每轮只出一版'],
-    [body.variantOf, 'variantOf', '草稿本不出变体'],
-    [body.route, 'route', '草稿的路由由服务端定'],
-    [body.preset, 'preset', '草稿本没有接上跳转与按新约定重生成'],
-    [(body.targetScreenIds?.length ?? 0) > 1, 'targetScreenIds', '一次只能改一张草稿'],
-    [body.refProjectId && body.targetScreenIds?.length, 'refProjectId', '改稿的参照在草稿上设'],
+    [body.mode, 'mode', L('草稿本没有聊天', 'The Sketchbook has no chat')],
+    [body.targetComponentIds?.length, 'targetComponentIds', L('草稿本没有共享组件', 'The Sketchbook has no shared components')],
+    [body.anchor, 'anchor', L('草稿不摆在画布上', 'Drafts are not placed on a canvas')],
+    [body.count !== undefined && body.count !== 1, 'count', L('一次只出一张草稿', 'Only one draft at a time')],
+    [(body.versions ?? 1) > 1, 'versions', L('草稿每轮只出一版', 'A draft gets only one version per round')],
+    [body.variantOf, 'variantOf', L('草稿本不出变体', 'The Sketchbook does not make state variants')],
+    [body.route, 'route', L('草稿的路由由服务端定', 'Draft routes are assigned by the server')],
+    [body.preset, 'preset', L('草稿本没有接上跳转与按新约定重生成', 'The Sketchbook does not support Connect links or Regenerate with new conventions')],
+    [(body.targetScreenIds?.length ?? 0) > 1, 'targetScreenIds', L('一次只能改一张草稿', 'You can edit only one draft at a time')],
+    [body.refProjectId && body.targetScreenIds?.length, 'refProjectId', L('改稿的参照在草稿上设', 'Set the reference for an edit on the draft itself')],
   ]);
 }
 
 // 作业层（createJob 的入口校验，API-CORE-006 / 010 / 034 与 MCP 建作业工具共用）：路径按作业输入点名
 export function assertSketchbookJob(project: { kind: string }, input: CreateJobInput): void {
-  if (!isSketchbook(project)) return reject([[input.kind === 'generate' && input.input.frame, 'input.frame', '画框只对草稿本的新草稿有效'], [input.kind === 'generate' && input.input.refProjectId, 'input.refProjectId', '参照项目只对草稿本的新草稿有效']]);
+  if (!isSketchbook(project)) return reject([[input.kind === 'generate' && input.input.frame, 'input.frame', L('画框只对草稿本的新草稿有效', 'Frames only apply to new drafts in the Sketchbook')], [input.kind === 'generate' && input.input.refProjectId, 'input.refProjectId', L('参照项目只对草稿本的新草稿有效', 'Reference projects only apply to new drafts in the Sketchbook')]]);
   if (input.kind === 'generate') {
     const i = input.input;
     return reject([
-      [i.count !== 1, 'input.count', '一次只出一张草稿'],
-      [i.versions > 1, 'input.versions', '草稿每轮只出一版'],
-      [i.anchor, 'input.anchor', '草稿不摆在画布上'],
-      [i.variantOf, 'input.variantOf', '草稿本不出变体'],
-      [i.route, 'input.route', '草稿的路由由服务端定'],
-      [i.componentIds?.length, 'input.componentIds', '草稿本没有共享组件'],
+      [i.count !== 1, 'input.count', L('一次只出一张草稿', 'Only one draft at a time')],
+      [i.versions > 1, 'input.versions', L('草稿每轮只出一版', 'A draft gets only one version per round')],
+      [i.anchor, 'input.anchor', L('草稿不摆在画布上', 'Drafts are not placed on a canvas')],
+      [i.variantOf, 'input.variantOf', L('草稿本不出变体', 'The Sketchbook does not make state variants')],
+      [i.route, 'input.route', L('草稿的路由由服务端定', 'Draft routes are assigned by the server')],
+      [i.componentIds?.length, 'input.componentIds', L('草稿本没有共享组件', 'The Sketchbook has no shared components')],
     ]);
   }
   if (input.kind === 'edit_screens') {
     const i = input.input;
     return reject([
-      [i.screenIds.length !== 1, 'input.screenIds', '一次只能改一张草稿'],
-      [i.versions > 1, 'input.versions', '草稿每轮只出一版'],
-      [i.componentIds?.length, 'input.componentIds', '草稿本没有共享组件'],
+      [i.screenIds.length !== 1, 'input.screenIds', L('一次只能改一张草稿', 'You can edit only one draft at a time')],
+      [i.versions > 1, 'input.versions', L('草稿每轮只出一版', 'A draft gets only one version per round')],
+      [i.componentIds?.length, 'input.componentIds', L('草稿本没有共享组件', 'The Sketchbook has no shared components')],
     ]);
   }
   // 草稿里只改一块（REQ-CORE-045）：本来就是单屏单版；目标屏得是这个草稿本里的草稿，由 createJob 的 assertSubtreeTarget 按项目查
   if (input.kind === 'regenerate_subtree') return;
-  reject([[true, 'kind', '草稿本只受理新草稿（generate）、改草稿（edit_screens）与只改一块（regenerate_subtree）']]);
+  reject([[true, 'kind', L('草稿本只受理新草稿（generate）、改草稿（edit_screens）与只改一块（regenerate_subtree）', 'The Sketchbook only accepts new drafts (generate), draft edits (edit_screens) and single-block edits (regenerate_subtree)')]]);
 }
 
 // 参照项目（REQ-CORE-042 / ADR-033）：草稿有它时出稿、改稿的提示词带它的设计契约，落库按它的 prelude 拼装。
@@ -155,7 +156,7 @@ async function forkOnce(user: UserRow, input: CreateDraftInput): Promise<{ scree
   const { screen: source, project } = await ownedScreen(user.id, input.fromScreenId);
   if (project.kind !== 'app') throw problems.notFound();
   const body = await currentBody(source.id);
-  if (!body?.trim()) throw problems.validation([{ path: 'fromScreenId', message: '来源屏还没有内容' }]);
+  if (!body?.trim()) throw problems.validation([{ path: 'fromScreenId', message: L('来源屏还没有内容', 'The source screen has no content yet') }]);
   const block = forkBody(body, input.qid);
   if (!block) throw problems.elementNotFound();
   const book = await ensureSketchbook(user.id);
@@ -198,7 +199,7 @@ async function copyOnce(user: UserRow, draftId: string, input: CopyDraftInput, r
   if (target.kind !== 'app') throw problems.notFound();
   // 读请求到达这一刻的当前版：草稿正在改也不等、不挡，改完的新版不进项目（§16）
   const body = (await currentBody(draft.id))?.trim();
-  if (!body) throw problems.validation([{ path: 'screenId', message: '草稿还没有内容' }]);
+  if (!body) throw problems.validation([{ path: 'screenId', message: L('草稿还没有内容', 'The draft has no content yet') }]);
   const name = input.name ?? draft.name;
   // restyle 缺省（API-CORE-047）：草稿本来就按目标项目的设计系统写（参照项目就是它，ADR-033）时不必再改写，否则改写；覆盖一律原样写入（restyle:true 由 schema 拒掉）
   const restyle = input.as !== 'overwrite' && (input.restyle ?? draft.refProjectId !== target.id);
@@ -221,7 +222,7 @@ async function copyOnce(user: UserRow, draftId: string, input: CopyDraftInput, r
     if (!named.success) throw problems.validation([{ path: 'name', message: named.error.issues[0].message }]);
     // 组件会被复制进每一屏，脚本与样式表放不进去（API-EDIT-004）；单独先查，消息直接告诉用户该怎么放
     if (parseHTML(`<!doctype html><html><body>${body}</body></html>`).document.body.querySelector('script, style')) {
-      throw problems.validation([{ path: 'as', message: '草稿里有脚本或样式表，组件放不下，放成屏' }]);
+      throw problems.validation([{ path: 'as', message: L('草稿里有脚本或样式表，组件放不下，放成屏', 'The draft has scripts or style sheets, which a component cannot hold; copy it as a screen') }]);
     }
     const { component } = await createComponent(user.id, target.id, { name: named.data, html: body });
     const job = restyle ? await startRestyle({ kind: 'edit_component', input: { componentId: component.id, prompt: RESTYLE_PROMPT, runner: input.runner } }, () => deleteComponent(user.id, component.id)) : undefined;
@@ -276,7 +277,7 @@ async function overwriteScreen(target: ProjectRow, input: CopyDraftInput, draftB
   const routes = (await db.select({ route: schema.screens.route }).from(schema.screens).where(eq(schema.screens.projectId, target.id))).map((r) => r.route);
   const [ds] = await db.select().from(schema.designSystems).where(eq(schema.designSystems.projectId, target.id));
   const html = assembleDocument(expanded, buildPrelude(ds.tokens as Tokens), `${target.name} · ${screen.name}`);
-  if (Buffer.byteLength(html) > config.maxScreenHtmlBytes) throw problems.validation([{ path: 'html', message: `写回后这一屏超过 ${config.maxScreenHtmlBytes / 1024} KB` }]);
+  if (Buffer.byteLength(html) > config.maxScreenHtmlBytes) throw problems.validation([{ path: 'html', message: L(`写回后这一屏超过 ${config.maxScreenHtmlBytes / 1024} KB`, `After copying, this screen would exceed ${config.maxScreenHtmlBytes / 1024} KB`) }]);
   const rev = await db.transaction(async (tx) => {
     if (await hasActiveJob(tx, target.id, screen.id)) throw problems.screenBusy();
     const r = await createRevision(tx, { projectId: target.id, screenId: screen.id, html, sourceKind: 'sketch', lintReport: lintScreenBody(expanded, routes, true), expectedRevisionId: input.expectedRevisionId });

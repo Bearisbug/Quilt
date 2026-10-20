@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { eq } from 'drizzle-orm';
-import { adoptGroupSchema } from '@quilt/core';
+import { adoptGroupSchema, L } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
 import { parseBody, requireUser, type Env } from '../app.ts';
 import { ownedJob, cancelJob } from '../../services/jobs.ts';
@@ -60,7 +60,7 @@ jobRoutes.get('/v1/jobs/:jobId/export', async (c) => {
   if (c.req.query('inline') === '1') return c.redirect(await storage.signedUrl(key), 302);
   const project = await ownedProject(user.id, job.projectId);
   // 导出产物超过 24 小时由 storage.gc 清掉（§17 v1.03）
-  const body = await storage.get(key).catch(() => { throw new Problem(404, '/errors/not-found', '资源不存在', { detail: '导出文件已清理（超过 24 小时），重新导出一次' }); });
+  const body = await storage.get(key).catch(() => { throw new Problem(404, '/errors/not-found', L('资源不存在', 'Not found'), { detail: L('导出文件已清理（超过 24 小时），重新导出一次', 'The export file was cleaned up (older than 24 hours); export again') }); });
   c.header('Content-Type', 'text/html; charset=utf-8');
   c.header('Content-Disposition', exportDisposition(project.name));
   c.header('Cache-Control', 'private, no-store');

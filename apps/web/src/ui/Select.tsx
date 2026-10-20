@@ -2,6 +2,8 @@ import { Select as RxSelect } from 'radix-ui';
 import { Check, ChevronDown } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cn } from '@/ui/ui';
+import { useT } from '@/i18n';
+import uiMessages from '@/i18n/locales/shellUi';
 
 // 表单下拉（shadcn 的 Select 同一底座：Radix Select）。
 // 原生 <select> 的选项列表由操作系统渲染，暗色主题下在部分平台会画成系统亮色面板、也接不了图标与分组说明；
@@ -21,6 +23,7 @@ export function Select({ id, value, onChange, options, placeholder, disabled, cl
   'aria-label'?: string;
   'data-testid'?: string;
 }) {
+  const t = useT(uiMessages);
   const current = options.find((o) => o.value === value);
   return (
     <RxSelect.Root value={value || undefined} onValueChange={onChange} disabled={disabled}>
@@ -34,7 +37,7 @@ export function Select({ id, value, onChange, options, placeholder, disabled, cl
       >
         <span className="flex min-w-0 items-center gap-2 truncate">
           {current?.icon}
-          <RxSelect.Value placeholder={<span className="text-(--semantic-color-text-tertiary)">{placeholder ?? '请选择'}</span>} />
+          <RxSelect.Value placeholder={<span className="text-(--semantic-color-text-tertiary)">{placeholder ?? t('selectPlaceholder')}</span>} />
         </span>
         <RxSelect.Icon className="flex shrink-0 text-text-secondary transition-transform duration-(--semantic-motion-duration-base) ease-(--semantic-motion-easing-standard) group-data-[state=open]:rotate-180">
           <ChevronDown size={14} aria-hidden="true" />

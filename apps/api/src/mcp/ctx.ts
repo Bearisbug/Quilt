@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { runnerSchema, MAX_ATTACHMENTS_PER_MESSAGE, MAX_COMPONENT_TARGETS, type Runner, type CreateJobInput } from '@quilt/core';
 import { Problem } from '../lib/errors.ts';
+import { requestLocale } from '../lib/locale.ts';
 import { resolveForMessage } from '../services/attachments.ts';
 import { createJob } from '../services/jobs.ts';
 import { jobDto } from '../services/projects.ts';
@@ -11,13 +12,14 @@ import type { UserRow } from '../services/user.ts';
 // v0.32 本地版免鉴权：调用方就是本机用户，没有 scope 区分——read() / write() 只留作将来 SaaS 加权限的插点。
 export function makeCtx(server: McpServer, user: UserRow) {
   const ok = (data: unknown) => ({ content: [{ type: 'text' as const, text: typeof data === 'string' ? data : JSON.stringify(data) }] });
-  // Problem 按 RFC 7807 的字段原样给 agent（type / title / status + extra），其它异常一律 500；测试与 agent 都按 type 字符串判
+  // Problem 按 RFC 7807 的字段原样给 agent（type / title / status + extra，文案按请求的界面语言，MCP 客户端通常不带语言头即中文），
+  // 其它异常一律 500；测试与 agent 都按 type 字符串判
   const wrap = <A extends Record<string, unknown>>(fn: (args: A) => Promise<unknown>) => async (args: A) => {
     try {
       const r = await fn(args);
       return typeof r === 'object' && r !== null && 'content' in (r as object) ? (r as ReturnType<typeof ok>) : ok(r);
     } catch (e) {
-      const p = e instanceof Problem ? { type: e.type, title: e.title, status: e.status, ...e.extra } : { type: '/errors/internal', title: (e as Error).message, status: 500 };
+      const p = e instanceof Problem ? e.body(requestLocale()) : { type: '/errors/internal', title: (e as Error).message, status: 500 };
       return { isError: true, content: [{ type: 'text' as const, text: JSON.stringify(p) }] };
     }
   };

@@ -4,6 +4,8 @@ import { Check, ChevronDown, Palette } from 'lucide-react';
 import type { ProjectDto } from '@quilt/core/browser';
 import { api } from '@/lib/api';
 import { cn } from '@/ui/ui';
+import { useT } from '@/i18n';
+import sketchMessages from '@/i18n/locales/sketch';
 
 export type RefProjects = { projects: ProjectDto[] | null; failed: boolean; reload: () => void };
 
@@ -32,19 +34,21 @@ const ITEM_CLS = 'state-layer relative flex cursor-pointer select-none items-cen
 export function RefSelect({ refs, value, onChange, testId, side, className }: {
   refs: RefProjects; value: string | null; onChange: (projectId: string | null) => void; testId: string; side: 'top' | 'bottom'; className?: string;
 }) {
-  const base = 'group inline-flex h-8 max-w-48 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 type-label font-medium state-layer focus-ring';
+  const t = useT(sketchMessages);
+  // 只给下拉限宽（项目名在里面截断）；「没取到 · 重试」不截，英文比中文长也整句露出
+  const base = 'group inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 type-label font-medium state-layer focus-ring';
   if (refs.failed) {
-    return <button type="button" data-testid={testId} onClick={refs.reload} className={cn(base, 'text-warning')}>参照项目没取到 · 重试</button>;
+    return <button type="button" data-testid={testId} onClick={refs.reload} className={cn(base, 'text-warning')}>{t('ref.failed')}</button>;
   }
   const items = refs.projects ?? [];
   const cur = value ? items.find((p) => p.id === value) : undefined;
   // 列表还没回来时参照项目的名字未知：先写省略号，不闪一下「自由风格」
-  const shown = cur?.name ?? (value ? '…' : '自由风格');
+  const shown = cur?.name ?? (value ? '…' : t('ref.free'));
   return (
     <Select.Root value={value ?? FREE} onValueChange={(v) => { if (!v) return; const next = v === FREE ? null : v; if (next !== value) onChange(next); }}>
-      <Select.Trigger aria-label={`参照项目：${shown}`} data-testid={testId} data-value={value ?? ''} className={cn(base, className)}>
+      <Select.Trigger aria-label={t('ref.trigger', { name: shown })} data-testid={testId} data-value={value ?? ''} className={cn(base, 'max-w-48', className)}>
         <Palette size={14} aria-hidden="true" className="shrink-0" />
-        <span className="min-w-0 truncate"><Select.Value>参照 · {shown}</Select.Value></span>
+        <span className="min-w-0 truncate"><Select.Value>{t('ref.value', { name: shown })}</Select.Value></span>
         <Select.Icon className="flex shrink-0 opacity-60 transition-transform duration-(--semantic-motion-duration-base) ease-(--semantic-motion-easing-standard) group-data-[state=open]:rotate-180">
           <ChevronDown size={14} aria-hidden="true" />
         </Select.Icon>
@@ -57,23 +61,23 @@ export function RefSelect({ refs, value, onChange, testId, side, className }: {
           className="menu z-50 flex max-h-[min(22rem,var(--radix-select-content-available-height))] min-w-60 max-w-[min(22rem,calc(100vw-1.5rem))] flex-col p-1.5"
         >
           <Select.Viewport className="min-h-0 flex-1">
-            <Select.Item value={FREE} textValue="自由风格" data-testid={`${testId}-free`} className={ITEM_CLS}>
+            <Select.Item value={FREE} textValue={t('ref.free')} data-testid={`${testId}-free`} className={ITEM_CLS}>
               <span className="min-w-0 flex-1">
-                <Select.ItemText>自由风格</Select.ItemText>
-                <span className="mt-0.5 block type-caption text-text-secondary">只听你写的这句话</span>
+                <Select.ItemText>{t('ref.free')}</Select.ItemText>
+                <span className="mt-0.5 block type-caption text-text-secondary">{t('ref.freeHint')}</span>
               </span>
               <Select.ItemIndicator className="flex shrink-0"><Check size={14} aria-hidden="true" /></Select.ItemIndicator>
             </Select.Item>
             <Select.Separator className="my-1.5 h-px bg-border-subtle" />
             <Select.Group>
-              <Select.Label className="px-2.5 pb-1 pt-1.5 type-overline font-semibold text-text-secondary">按项目的设计系统</Select.Label>
-              {refs.projects === null && <p role="status" className="px-2.5 py-2 type-label text-text-secondary">正在加载项目…</p>}
-              {refs.projects?.length === 0 && <p className="px-2.5 py-2 type-label text-text-secondary">还没有项目。在左上角的切换器里新建一个再来选。</p>}
+              <Select.Label className="px-2.5 pb-1 pt-1.5 type-overline font-semibold text-text-secondary">{t('ref.group')}</Select.Label>
+              {refs.projects === null && <p role="status" className="px-2.5 py-2 type-label text-text-secondary">{t('ref.loading')}</p>}
+              {refs.projects?.length === 0 && <p className="px-2.5 py-2 type-label text-text-secondary">{t('ref.empty')}</p>}
               {items.map((p) => (
                 <Select.Item key={p.id} value={p.id} textValue={p.name} data-testid={`${testId}-option`} className={ITEM_CLS}>
                   <span className="min-w-0 flex-1">
                     <Select.ItemText><span className="block truncate">{p.name}</span></Select.ItemText>
-                    <span className="mt-0.5 block type-caption text-text-secondary">{p.deviceType === 'mobile' ? '手机' : '桌面'}</span>
+                    <span className="mt-0.5 block type-caption text-text-secondary">{p.deviceType === 'mobile' ? t('device.mobile') : t('device.desktop')}</span>
                   </span>
                   <Select.ItemIndicator className="flex shrink-0"><Check size={14} aria-hidden="true" /></Select.ItemIndicator>
                 </Select.Item>

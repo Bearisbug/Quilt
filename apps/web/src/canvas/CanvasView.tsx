@@ -11,6 +11,8 @@ import { useFocusedFrame } from '@/canvas/useFocusedFrame';
 import { ScreenCard, ComponentCard, keepPointerFocus, type CardActions, type CardKind } from '@/canvas/cards';
 import { keyAction, toSelection, type ElementSelection } from '@/canvas/frameMessages';
 import { markPalette, useResolvedMode } from '@/lib/theme';
+import { useLocale, useT } from '@/i18n';
+import canvasMessages from '@/i18n/locales/canvas-parts';
 
 // 角标里提示的进入选择元素模式的键，要与 Canvas.tsx 的键位表一致（REQ-EDIT-004）
 const INSPECT_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘E' : 'Ctrl+E';
@@ -143,6 +145,7 @@ function useStableActions<T extends Record<string, (...args: any[]) => any>>(imp
 // 无限画布（ADR-002 / ADR-006）：截图卡片 + 单聚焦活 iframe；世界层 transform 由 @xyflow/system 驱动（镜头见 useViewport，
 // 聚焦屏的 iframe 见 useFocusedFrame，卡片见 cards.tsx，几何见 geometry.ts）
 export function CanvasView(p: CanvasProps) {
+  const tr = useT(canvasMessages);
   // 父组件每次渲染都会传入新的回调；XYPanZoom 实例与 transform 回调必须稳定，否则实例被反复重建、transition 被打断
   const propsRef = useRef(p);
   propsRef.current = p;
@@ -248,9 +251,10 @@ export function CanvasView(p: CanvasProps) {
   }, [viewportRef, vp]);
   const edgeCanvasRef = useCallback((el: HTMLCanvasElement | null) => { edgeCanvas.current = el; edgeDraw.current.colors = null; if (el) paintEdges(); }, [paintEdges]);
   useEffect(() => { edgeDraw.current.curves = edgeCurveList; paintEdges(); }, [edgeCurveList, paintEdges]);
-  // 连线颜色是 CSS 变量的快照：换外观后丢掉重读（VIS-010）
+  // 连线颜色是 CSS 变量的快照：换外观后丢掉重读（VIS-010）；徽标字体随 <html lang> 的字阶覆盖变，换界面语言同样重读
   const themeMode = useResolvedMode();
-  useEffect(() => { edgeDraw.current.colors = null; paintEdges(); }, [themeMode, paintEdges]);
+  const locale = useLocale();
+  useEffect(() => { edgeDraw.current.colors = null; paintEdges(); }, [themeMode, locale, paintEdges]);
   useEffect(() => {
     const node = viewportRef.current;
     const d = edgeDraw.current;
@@ -365,7 +369,7 @@ export function CanvasView(p: CanvasProps) {
     // iframe 可能还没 ready（切模式与聚焦常在同一帧），补发一次
     const t = setTimeout(() => post(now, mode), 300);
     return () => clearTimeout(t);
-  }, [p.focusedComponentId, p.inspectMode, themeMode]);
+  }, [p.focusedComponentId, p.inspectMode, themeMode, locale]);
 
   // panTo：镜头中心平移到世界坐标（缩放不变）；reveal：把一张卡（屏或组件）摆到可用区中央，缩放取「装得下」与 1:1 的较小者（REQ-CORE-024）
   const panTo = useCallback((x: number, y: number) => moveTo(panToViewport(x, y, vp.current.zoom, safeArea()), { duration: 200 }), [safeArea, moveTo, vp]);
@@ -679,20 +683,20 @@ export function CanvasView(p: CanvasProps) {
       {/* 连线（v1.02 ADR-029）：压在世界层下面，卡片盖住它；不进无障碍树，供测试读的数在 data-* 上 */}
       {p.showLinks && edges.length > 0 && <canvas ref={edgeCanvasRef} className="edges" aria-hidden="true" data-testid="link-edges" data-total={edges.length} data-drawn={edgeShown.length} data-max-count={Math.max(0, ...edgeShown.map((e) => e.count))} />}
       {p.showLinks && edges.length > EDGE_LIMIT && !p.focusedId && p.selectedIds.length === 0 && (
-        <p data-testid="links-hint" className="pointer-events-none absolute left-0 right-[var(--chrome-right)] top-16 z-20 mx-auto w-max max-w-[calc(100%-2rem)] truncate chrome rounded-md px-3 py-1.5 type-label text-text-secondary">共 {edges.length} 条连线，选中屏后只显示它进出的</p>
+        <p data-testid="links-hint" className="pointer-events-none absolute left-0 right-[var(--chrome-right)] top-16 z-20 mx-auto w-max max-w-[calc(100%-2rem)] truncate chrome rounded-md px-3 py-1.5 type-label text-text-secondary">{tr('view.linksHint', { n: edges.length })}</p>
       )}
       <div ref={worldRef} className="world" style={view.initialWorldStyle}>
         {/* 按住空格时从风格指南卡上起手同样是平移（v0.80）：不带 nopan、不接住按下；获焦（只会来自键盘）时镜头把它摆进可用区 */}
         <div className={`styleguide${panReady ? '' : ' nopan'}${p.styleGuideSelected ? ' selected' : ''}`} style={{ transform: `translate(${STYLE_GUIDE_POS.x}px, ${STYLE_GUIDE_POS.y}px)` }}
           onPointerDown={(e) => { if (spaceDown.current) return; e.stopPropagation(); p.onSelectStyleGuide(); }} onMouseDown={keepPointerFocus}
           onFocus={() => ensureVisible({ ...STYLE_GUIDE_POS, ...styleGuideSize(p.assets?.length ?? 0) })}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); p.onSelectStyleGuide(); } }} role="button" tabIndex={0} aria-label="风格指南">
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); p.onSelectStyleGuide(); } }} role="button" tabIndex={0} aria-label={tr('view.styleGuide')}>
           <StyleGuideCard tokens={p.tokens} name={p.projectName} palette={p.palette} colorMode={p.colorMode} assets={p.assets} />
         </div>
         {/* 锚点（REQ-CORE-014）：新屏落点的幽灵框，尺寸 = 设备形态；只是标记，不可拖不可点 */}
         {p.anchor && (
           <div className={`anchor${p.screenSize.w > 600 ? ' desktop' : ''}`} data-testid="anchor" aria-hidden="true" style={{ width: p.screenSize.w, height: p.screenSize.h, transform: `translate(${p.anchor.x - p.screenSize.w / 2}px, ${p.anchor.y - p.screenSize.h / 2}px)` }}>
-            <span className="anchor-label">新屏落点 · 在下方输入框描述它</span>
+            <span className="anchor-label">{tr('view.anchor')}</span>
           </div>
         )}
         {p.screens.map((s, idx) => {
@@ -717,16 +721,16 @@ export function CanvasView(p: CanvasProps) {
                   {/* 状态变体（REQ-CORE-025 v0.62）：聚焦的屏所在家族 ≥ 2 时卡内顶部中央出一排胶囊，点即同 iframe 换成那一份。
                       放卡内而不是卡上方：聚焦把卡顶贴到可用区上沿，卡上方那 32 px 正压在顶栏底下（RUN-112 实测点不到） */}
                   {iframeReady && family.length >= 2 && (
-                    <div className="variant-chips chrome nopan" role="group" aria-label="状态变体" data-testid="variant-chips">
+                    <div className="variant-chips chrome nopan" role="group" aria-label={tr('view.variants')} data-testid="variant-chips">
                       {family.map((v) => (
                         <button key={v.id} type="button" className="variant-chip state-layer focus-ring" aria-pressed={shownId === v.id} data-testid="variant-chip" data-id={v.id}
-                          onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); void frame.swapVariant(v.id); }}>{v.variantOf ? v.variantName : '默认'}</button>
+                          onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); void frame.swapVariant(v.id); }}>{v.variantOf ? v.variantName : tr('view.defaultVariant')}</button>
                       ))}
                     </div>
                   )}
                   {frameFailed && !iframeReady ? (
-                    <button type="button" className="badge failed state-layer nopan" data-testid="frame-retry" onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); frame.retryFrame(); }}>加载失败 · 重试</button>
-                  ) : <div className="badge">{!iframeReady ? '加载中' : p.annotateMode ? '批注中' : p.inspectMode ? '选择元素中' : '交互中'} · {p.navStack.length ? p.navStack[p.navStack.length - 1] : s.route}{iframeReady ? (p.inspectMode ? ' · 点屏里的元素' : ` · 选元素按 ${INSPECT_KEY}`) : ''}</div>}
+                    <button type="button" className="badge failed state-layer nopan" data-testid="frame-retry" onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); frame.retryFrame(); }}>{tr('view.frameRetry')}</button>
+                  ) : <div className="badge">{!iframeReady ? tr('view.badge.loading') : p.annotateMode ? tr('view.badge.annotating') : p.inspectMode ? tr('view.badge.inspecting') : tr('interacting')} · {p.navStack.length ? p.navStack[p.navStack.length - 1] : s.route}{iframeReady ? ` · ${p.inspectMode ? tr('view.badge.clickElement') : tr('view.badge.inspectKey', { shortcut: INSPECT_KEY })}` : ''}</div>}
                 </>
               )}
               act={act}
@@ -754,7 +758,7 @@ export function CanvasView(p: CanvasProps) {
       {/* 待命提示压在卡片上也得读得出（v0.80）：chrome 材质——透明强调色底（15%）压在白卡上对比度只有约 1.1:1；组件卡在交互态时不显示 */}
       {p.armed && !p.focusedId && !p.focusedComponentId && (
         <div className="chrome pointer-events-none absolute left-1/2 top-16 z-10 -translate-x-1/2 rounded-md px-3 py-1 type-label text-text-primary" data-testid="armed-hint">
-          {p.armed === 'annotate' ? '批注模式：点任意一屏开始' : '选择元素模式：点任意一屏开始'} · Esc 退出
+          {p.armed === 'annotate' ? tr('view.armed.annotate') : tr('view.armed.inspect')}
         </div>
       )}
       {marquee && (

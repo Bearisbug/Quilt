@@ -75,9 +75,21 @@ export async function eventually(check: () => unknown, timeoutMs = 5000, interva
   }
 }
 
+// 页面语言固定 zh-CN（REQ-CORE-046）：界面缺省跟浏览器语言，套件里的断言都是中文。macOS 上的无头 Edge 不认 --lang
+// （navigator.language 跟着系统，本机实测是 en-CN），只有 context 的 locale 生效——这里给 newContext / newPage 补上缺省的 locale，
+// 套件里直接 browser.newContext / newPage 的也是中文；显式传了 locale 的照传。自己 chromium.launch 的地方同样包一层
+export const E2E_LOCALE = 'zh-CN';
+export function zhCN(browser: Browser): Browser {
+  const newContext = browser.newContext.bind(browser);
+  const newPage = browser.newPage.bind(browser);
+  browser.newContext = (options = {}) => newContext({ locale: E2E_LOCALE, ...options });
+  browser.newPage = (options = {}) => newPage({ locale: E2E_LOCALE, ...options });
+  return browser;
+}
+
 export async function launch(): Promise<Browser> {
   await assertTestApi();
-  return chromium.launch({ channel: 'msedge', headless: true });
+  return zhCN(await chromium.launch({ channel: 'msedge', headless: true }));
 }
 
 // 打开应用（v0.32 本地版无登录）：`/` 直接落到最近更新的项目画布 /p/<id>；一个项目都没有时停在 /（PAGE-FIRST）

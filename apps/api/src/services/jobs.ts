@@ -11,7 +11,8 @@ import { findCodexThread } from '../lib/codexSessions.ts';
 import { runnerCatalog, listChannels } from './channels.ts';
 import { driverSupportsVision } from '../lib/llm.ts';
 import { hasActiveJob } from './screens.ts';
-import { estimateJob, createJobSchema, type CreateJobInput, type JobRunner, type Runner } from '@quilt/core';
+import { estimateJob, createJobSchema, L, type CreateJobInput, type JobRunner, type Locale, type Runner } from '@quilt/core';
+import { requestUiLocale, tr } from '../lib/locale.ts';
 import type { UserRow } from './user.ts';
 import type { JobRow } from './projects.ts';
 
@@ -82,11 +83,11 @@ async function assertTargets(projectId: string, input: CreateJobInput) {
   if (input.kind === 'edit_screens') {
     const ids = Array.from(new Set(input.input.screenIds));
     const found = await db.select({ id: schema.screens.id }).from(schema.screens).where(and(eq(schema.screens.projectId, projectId), inArray(schema.screens.id, ids)));
-    if (found.length !== ids.length) throw new Problem(404, '/errors/not-found', '目标屏不存在或已被删除');
+    if (found.length !== ids.length) throw new Problem(404, '/errors/not-found', L('目标屏不存在或已被删除', 'Some target screens do not exist or were deleted'));
   }
   if (input.kind === 'generate' && input.input.variantOf) {
     const [base] = await db.select({ variantOf: schema.screens.variantOf }).from(schema.screens).where(and(eq(schema.screens.id, input.input.variantOf), eq(schema.screens.projectId, projectId)));
-    if (!base || base.variantOf) throw problems.unprocessable([{ path: 'variantOf', message: '变体只能从本项目的默认屏出' }]);
+    if (!base || base.variantOf) throw problems.unprocessable([{ path: 'variantOf', message: L('变体只能从本项目的默认屏出', 'State variants can only be made from a default screen in this project') }]);
   }
 }
 
@@ -107,7 +108,7 @@ async function assertInput(user: UserRow, projectId: string, input: CreateJobInp
   const { runner, imageKeys } = input.input as { runner?: Runner; imageKeys?: string[] };
   if (runner?.kind === 'channel' && !(await listChannels(user.id)).some((c) => c.id === runner.channelId)) throw problems.notFound();
   if (imageKeys?.length && runner?.kind === 'model' && !driverSupportsVision(runner.driver)) {
-    throw problems.validation([{ path: 'runner', message: `「${runner.driver}」通道不支持参考图，换一个支持视觉的通道再发` }]);
+    throw problems.validation([{ path: 'runner', message: L(`「${runner.driver}」通道不支持参考图，换一个支持视觉的通道再发`, `The “${runner.driver}” channel does not support reference images; switch to a channel with vision and send again`) }]);
   }
 }
 
@@ -120,6 +121,13 @@ export async function createJob(args: { user: UserRow; projectId: string; input:
   }
   await assertInput(user, projectId, input);
   await assertTargets(projectId, input);
+  // 界面语言（REQ-CORE-046）：网页端带 X-Quilt-Locale 建的作业都把它记进 input.locale（重试以这次请求的头为准）：
+  // worker 的回执、进度与失败文案按它写，写屏上文字的那几种（LOCALE_JOB_KINDS）还据此给提示词补一句语言要求；MCP、脚本不带这个头，不记。
+  // 没带头时要删掉输入里已有的 locale：请求体里自带的不认，重试拼回来的旧输入也不沿用旧作业的值
+  const uiLocale = requestUiLocale();
+  const withLocale = input.input as { locale?: Locale };
+  if (uiLocale) withLocale.locale = uiLocale;
+  else delete withLocale.locale;
   const releaseRate = assertRate(user.id);
   // 没带通道的 LLM 作业（MCP 建的、辅助作业）用用户自己配的默认通道；一条都没有才回落到 .env 的驱动
   if (runner === 'model' && ['generate', 'edit_screens', 'regenerate_subtree', 'propose_design_system', 'edit_component'].includes(input.kind)) {
@@ -137,9 +145,9 @@ export async function createJob(args: { user: UserRow; projectId: string; input:
     const a = toolAvailable(r?.tool);
     if (!a.ok) throw problems.validation([{ path: 'runner', message: a.hint }]);
     const exists = !!r?.sessionId && !!(r.tool === 'codex' ? await findCodexThread(r.sessionId) : await findSession(r.sessionId));
-    if (!exists) throw problems.validation([{ path: 'runner.sessionId', message: '会话已关闭或不存在，重新选一个' }]);
+    if (!exists) throw problems.validation([{ path: 'runner.sessionId', message: L('会话已关闭或不存在，重新选一个', 'The session is closed or gone; pick another') }]);
     // 本机会话拿到的是一段文字指令，钉死路由的懒生成、造变体、叠层屏这三种它没有对应的写法，与其静默当普通造屏做，不如当场拒
-    if (input.kind === 'generate' && (input.input.route || input.input.variantOf || input.input.presentation)) throw problems.validation([{ path: 'runner', message: '懒生成、出变体、叠层屏请换一个模型通道，本机会话不接这类作业' }]);
+    if (input.kind === 'generate' && (input.input.route || input.input.variantOf || input.input.presentation)) throw problems.validation([{ path: 'runner', message: L('懒生成、出变体、叠层屏请换一个模型通道，本机会话不接这类作业', 'Local sessions do not take missing pages, state variants or overlay screens; switch to a model channel') }]);
   }
   if (input.kind === 'regenerate_subtree') await assertSubtreeTarget(projectId, input.input);
   const targetScreenId = targetScreenOf(input);
@@ -210,7 +218,7 @@ export async function cancelJob(job: JobRow): Promise<JobRow> {
   // 先中止在跑的调用：worker 落库前看的是这个信号，库里已取消、信号还没发的那几步里它照样会写
   if (job.runner === 'agent') agentHooks?.cancel(job.id);
   else modelAborts.get(job.id)?.abort(new Error('cancelled'));
-  await db.update(schema.messages).set({ content: '已取消' }).where(and(eq(schema.messages.jobId, job.id), eq(schema.messages.role, 'assistant'), eq(schema.messages.content, '')));
+  await db.update(schema.messages).set({ content: tr('已取消', 'Cancelled') }).where(and(eq(schema.messages.jobId, job.id), eq(schema.messages.role, 'assistant'), eq(schema.messages.content, '')));
   // 批注发出去的作业被取消：批注回到「未处理」，不然图钉永远闪「发送中」
   const { settleByJob } = await import('./annotations.ts');
   await settleByJob(job.id, false);

@@ -20,12 +20,14 @@ import { SketchComposer, type DraftPick } from '@/sketch/SketchComposer';
 import { useRefProjects } from '@/sketch/RefSelect';
 import { CopyDialog } from '@/sketch/CopyDialog';
 import { isSettingsSection, type SettingsSection } from '@/settings/sections';
+import { getLocale, tOf, useLocale, useT, type Locale } from '@/i18n';
+import sketchMessages from '@/i18n/locales/sketch';
+import commonMessages from '@/i18n/locales/common';
 
 const RAIL_KEY = 'quilt:sketch-rail';
 // 窄视口断点，与 styles.css 里 .sketch-shell 的同一条
 const narrow = () => matchMedia('(max-width: 48rem)').matches;
-// 草稿本占着项目级的造屏名额（ADR-030）：一次只出一张新草稿
-const NEW_BUSY = '上一张草稿还在生成，等它落地再开下一张';
+const tm = tOf(sketchMessages);
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled']);
 // 输入框里的文字 / 改名框是可编辑区：那里的 Esc 归它自己（清字、放弃改名），不收起看板
 const EDITABLE = 'input, textarea, select, [contenteditable]';
@@ -35,11 +37,15 @@ const problemText = (e: unknown, fallback: string) => (e instanceof ApiError ? (
 // 作业 chip 的文案：草稿本里只有这几种——出一张新草稿、改某一张、改某一张里的一块
 function draftJobLabel(j: JobDto, screens: ScreenDto[]): string {
   const i = j.input as { prompt?: string; screenIds?: string[] } | null;
-  if (j.kind === 'generate') return `新草稿「${draftNameFromPrompt(i?.prompt ?? '')}」`;
-  if (j.kind === 'edit_screens') return `改「${screens.find((s) => s.id === i?.screenIds?.[0])?.name ?? '已删除的草稿'}」`;
-  if (j.kind === 'regenerate_subtree') return `改「${screens.find((s) => s.id === (j.input as { screenId?: string } | null)?.screenId)?.name ?? '已删除的草稿'}」里的一块`;
+  if (j.kind === 'generate') return tm('page.job.newDraft', { name: draftNameFromPrompt(i?.prompt ?? '') });
+  if (j.kind === 'edit_screens') return tm('page.job.edit', { name: screens.find((s) => s.id === i?.screenIds?.[0])?.name ?? tm('page.job.deletedDraft') });
+  if (j.kind === 'regenerate_subtree') return tm('page.job.editBlock', { name: screens.find((s) => s.id === (j.input as { screenId?: string } | null)?.screenId)?.name ?? tm('page.job.deletedDraft') });
   return jobLabel(j, screens, []);
 }
+
+// 结束了的作业 chip 的文案按当时的界面语言现算（失败的一直留着，切语言要跟着换）：记下作业、结束那一刻的草稿表与失败原因的原始字段
+type EndedFrom = { job: JobDto; screens: ScreenDto[]; errorClass?: string; message?: string; blockGone: boolean };
+const endedReason = (f: EndedFrom, locale: Locale) => (f.blockGone ? tm('page.blockChanged') : failureText(f.job.kind, f.errorClass, f.message, 0, locale));
 
 // PAGE-SKETCH（REQ-CORE-040，路由 /sketch，?d=<草稿 id> 是看板上正打开的那张）：沉浸式的一整页——顶部那一行是切换器 chip 与草稿工具条，其下看板，
 // 右侧记录栏，输入框缺省停在底边（可停左右边、可收起）；没有画布、工具栏与小地图。草稿就是草稿本这个项目的屏，读写全走项目与屏的接口（ADR-030）
@@ -47,6 +53,11 @@ const SettingsModal = lazy(() => import('@/settings/SettingsModal').then((m) => 
 
 export function SketchRoute() {
   const toast = useToast();
+  const t = useT(sketchMessages);
+  const tc = useT(commonMessages);
+  const locale = useLocale();
+  // 草稿本占着项目级的造屏名额（ADR-030）：一次只出一张新草稿
+  const newBusy = t('page.newBusy');
   const [params, setParams] = useSearchParams();
   const d = params.get('d');
   const dRef = useRef(d);
@@ -83,6 +94,7 @@ export function SketchRoute() {
   const screensRef = useRef<ScreenDto[]>([]);
   // 作业 chip（PAGE-CANVAS「作业 chip」v1.17，草稿本同一套）：结束了还要留一会儿的那些——失败的留到关掉或重试，成功的淡出后撤
   const { ended, end: endJob, dismiss: dismissJob } = useEndedJobs();
+  const endedFrom = useRef(new Map<string, EndedFrom>());
   const claim = (screenId: string) => {
     const cur = dRef.current;
     // d 指着一张已不在详情里的草稿（浏览器后退回到被删的那张）时当作看板空着，不让它挡住新草稿上看板
@@ -107,9 +119,11 @@ export function SketchRoute() {
     const blockGone = e.type === 'failed' && e.job?.kind === 'regenerate_subtree' && /^element not found$/.test(String(e.data.message ?? ''));
     // 作业 chip：失败的留一枚警告色 chip（写原因、可重试），成功的写「完成」后淡出，取消的直接消失
     if (e.job && e.type !== 'cancelled') {
-      const chip = { id: e.job.id, createdAt: e.job.createdAt, label: draftJobLabel(e.job, screensRef.current), kind: e.job.kind };
+      const from: EndedFrom = { job: e.job, screens: screensRef.current, errorClass: e.data.errorClass as string | undefined, message: e.data.message as string | undefined, blockGone };
+      endedFrom.current.set(e.job.id, from);
+      const chip = { id: e.job.id, createdAt: e.job.createdAt, label: draftJobLabel(e.job, from.screens), kind: e.job.kind };
       if (e.type === 'succeeded') endJob({ ...chip, state: 'succeeded' });
-      else endJob({ ...chip, state: 'failed', reason: blockGone ? '这一块已经变了，重新点一下要改的那一块' : failureText(e.job.kind, e.data.errorClass as string | undefined, e.data.message as string | undefined) });
+      else endJob({ ...chip, state: 'failed', reason: endedReason(from, getLocale()) });
     }
     if (e.type === 'succeeded') {
       if (pend?.jobId === e.jobId) { const id = (e.data.screenIds as string[] | undefined)?.[0] ?? sid; if (id) claim(id); else setPendingNew(null); }
@@ -140,7 +154,7 @@ export function SketchRoute() {
     if (!detail || !d || detail.screens.some((s) => s.id === d) || book.appliedSeq.current <= dSince.current.seq) return;
     openDraft(null, 'replace');
     setPendingNew((p) => (p?.screenId === d ? null : p));
-    toast('这张草稿已被删除', 'error');
+    toast(t('page.send.deleted'), 'error');
   }, [detail, d]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 记录栏按创建时间倒序：详情里的屏按创建时间升序返回（API-CORE-004），反过来即可
@@ -151,19 +165,26 @@ export function SketchRoute() {
   const newJob = jobs.find((j) => j.kind === 'generate');
   // 生成中 = 被改着的，或还没有第一版而有新草稿作业在跑的
   const generating = useMemo(() => new Set([...busyIds, ...(newJob ? (screens ?? []).filter((s) => !s.currentRevisionId).map((s) => s.id) : [])]), [busyIds, newJob, screens]);
-  const openBusy = !open ? null : busyIds.has(open.id) ? '这张草稿正在改' : !open.currentRevisionId && newJob ? '这张草稿还在生成' : null;
+  const openBusy = !open ? null : busyIds.has(open.id) ? t('page.busy.editing') : !open.currentRevisionId && newJob ? t('page.busy.generating') : null;
   // 挡发送的规则同 REQ-CORE-020：新草稿撞在跑的新草稿，改撞这张草稿上一轮
-  const blockedReason = !detail ? (book.failure ? '草稿本没加载出来' : '草稿本还在加载')
-    : open ? (!open.currentRevisionId ? `「${open.name}」还在生成，等它落地再改` : busyIds.has(open.id) ? `「${open.name}」正在改，等这一轮完事` : null)
-    : newJob || pendingNew ? NEW_BUSY : null;
+  const blockedReason = !detail ? (book.failure ? t('page.blocked.failed') : t('page.blocked.loading'))
+    : open ? (!open.currentRevisionId ? t('page.blocked.generating', { name: open.name }) : busyIds.has(open.id) ? t('page.blocked.editing', { name: open.name }) : null)
+    : newJob || pendingNew ? newBusy : null;
   const stageState: StageState = open ? (open.currentRevisionId ? 'draft' : 'generating') : pendingNew ? 'generating' : 'empty';
   // 看板那张草稿（或本页刚发的新草稿）此刻在跑的作业
   const stageJob = open
     ? jobs.find((j) => coveredScreens(j, ids).includes(open.id)) ?? (!open.currentRevisionId ? newJob : undefined)
     : pendingNew ? jobs.find((j) => j.id === pendingNew.jobId) : undefined;
-  const stageProgress = stageJob ? progress[stageJob.id] ?? '排队中…' : null;
+  const stageProgress = stageJob ? progress[stageJob.id] ?? t('queued') : null;
   // 作业 chip：最新的贴着输入框，每枚可取消（GAI-002）；交给本机会话的也在这里，草稿本页没有 agent 面板
-  const chips = useMemo(() => jobChips([...jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((j) => ({ id: j.id, createdAt: j.createdAt, label: draftJobLabel(j, screens ?? []), progress: progress[j.id] ?? '排队中…' })), ended), [jobs, screens, progress, ended]);
+  const chips = useMemo(() => {
+    // 已撤掉的 chip 不再留它的原始字段
+    for (const id of endedFrom.current.keys()) if (!ended.some((x) => x.id === id)) endedFrom.current.delete(id);
+    return jobChips(
+      [...jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((j) => ({ id: j.id, createdAt: j.createdAt, label: draftJobLabel(j, screens ?? []), progress: progress[j.id] ?? tm('queued') })),
+      ended.map((x) => { const f = endedFrom.current.get(x.id); if (!f) return x; const label = draftJobLabel(f.job, f.screens); return x.state === 'failed' ? { ...x, label, reason: endedReason(f, locale) } : { ...x, label }; }),
+    );
+  }, [jobs, screens, progress, ended, locale]);
 
   // 参照项目的候选（REQ-CORE-042）：工具条与新草稿的输入框共用
   const refs = useRefProjects();
@@ -184,15 +205,15 @@ export function SketchRoute() {
 
   // 发送没发出去：原因按 problem 的类型说（REQ-CORE-020 的挡法之外真撞上的），输入框留着字与参考图
   const sendFailed = (e: unknown, target: ScreenDto | null, withRef: boolean) => {
-    if (e instanceof ApiError && e.type === '/errors/validation' && JSON.stringify(e.problem).includes('sessionId')) { toast('会话已关闭或不存在，重新选一个', 'error'); prefs.loadSessions(); }
-    else if (e instanceof ApiError && e.type === '/errors/screen-busy') { toast(target ? `「${target.name}」正在改，等这一轮完事` : NEW_BUSY, 'error'); void refresh(); }
+    if (e instanceof ApiError && e.type === '/errors/validation' && JSON.stringify(e.problem).includes('sessionId')) { toast(t('page.send.sessionGone'), 'error'); prefs.loadSessions(); }
+    else if (e instanceof ApiError && e.type === '/errors/screen-busy') { toast(target ? t('page.blocked.editing', { name: target.name }) : newBusy, 'error'); void refresh(); }
     // 点选之后这张草稿已出了新一版（FLOW-SKETCH-REFINE S4）：胶囊作废，重新点
-    else if (e instanceof ApiError && e.type === '/errors/revision-conflict') { setPick(null); toast('这张草稿刚出了新一版，重新点一下要改的那一块', 'error'); void refresh(); }
-    else if (e instanceof ApiError && e.type === '/errors/not-found' && target) { openDraft(null, 'replace'); toast('这张草稿已被删除', 'error'); void refresh(); }
+    else if (e instanceof ApiError && e.type === '/errors/revision-conflict') { setPick(null); toast(t('page.send.conflict'), 'error'); void refresh(); }
+    else if (e instanceof ApiError && e.type === '/errors/not-found' && target) { openDraft(null, 'replace'); toast(t('page.send.deleted'), 'error'); void refresh(); }
     // 新草稿参照的项目刚被删了：候选跟着重取，换一个再发
-    else if (e instanceof ApiError && e.type === '/errors/not-found' && withRef) { toast('参照的项目已经不在了，换一个再发', 'error'); refs.reload(); }
-    else if (e instanceof ApiError && e.type === '/errors/rate-limited') toast('操作太频繁，稍后再试', 'error');
-    else toast(problemText(e, '发送失败，连不上 Quilt 服务'), 'error');
+    else if (e instanceof ApiError && e.type === '/errors/not-found' && withRef) { toast(t('page.send.refGone'), 'error'); refs.reload(); }
+    else if (e instanceof ApiError && e.type === '/errors/rate-limited') toast(t('page.send.rateLimited'), 'error');
+    else toast(problemText(e, t('page.send.offline')), 'error');
   };
   // 发送（API-CORE-010 草稿本）：看板空着 = 新草稿（带画框与参照），有草稿 = 改它；选元素点中了一块 = 只改这一块（API-CORE-006 regenerate_subtree，
   // 目标是这张草稿与点中的元素，expectedRevisionId 取点选时的那一版）。没发出去时输入框留着字与参考图（REQ-CORE-020）
@@ -200,11 +221,11 @@ export function SketchRoute() {
     if (!projectId) return false;
     const target = open;
     const block = target ? activePick : null;
-    const agentNote = `已投递到本机 ${prefs.agentTool === 'codex' ? 'Codex 线程' : 'Claude Code 会话'}，它写回后草稿出现在这里`;
+    const agentNote = prefs.agentTool === 'codex' ? t('page.send.toCodex') : t('page.send.toClaude');
     try {
       if (target && block) {
         // 子树重生成不收参考图：带着图就挡下，不静默丢掉
-        if (attachmentIds.length) { toast('只改一块时不带参考图：先移除参考图，或去掉胶囊改整张', 'error'); return false; }
+        if (attachmentIds.length) { toast(t('page.send.blockWithImages'), 'error'); return false; }
         const { job } = await api.projects.createJob(projectId, { kind: 'regenerate_subtree', input: { screenId: target.id, qid: block.qid, prompt: content, expectedRevisionId: block.revisionId, runner: prefs.sendRunner } });
         book.track(job);
         if (job.runner === 'agent') toast(agentNote);
@@ -227,16 +248,16 @@ export function SketchRoute() {
     if (!failed || !projectId) return;
     try {
       const user = (await api.projects.messages(projectId)).items.find((m) => m.role === 'user' && m.jobId === id);
-      if (!user) { toast('这一轮的记录找不到了，重新发一次', 'error'); return; }
+      if (!user) { toast(t('page.retry.lost'), 'error'); return; }
       const { job } = await api.projects.retry(projectId, user.id, failed.kind === 'chat' ? undefined : prefs.sendRunner);
       book.track(job);
       if (job.kind === 'generate' && !dRef.current) setPendingNew({ jobId: job.id, frame: (job.input as { frame?: DraftFrameChoice }).frame ?? 'auto' });
       dismissJob(id);
     } catch (e) {
-      if (e instanceof ApiError && e.type === '/errors/job-not-finished') toast('这一轮还在跑，等它结束再重试', 'error');
-      else if (e instanceof ApiError && e.type === '/errors/screen-busy') { toast(failed.kind === 'generate' ? NEW_BUSY : '这张草稿正在改，等这一轮完事再重试', 'error'); void refresh(); }
-      else if (e instanceof ApiError && e.type === '/errors/rate-limited') toast('操作太频繁，稍后再试', 'error');
-      else toast(problemText(e, '重试失败，连不上 Quilt 服务'), 'error');
+      if (e instanceof ApiError && e.type === '/errors/job-not-finished') toast(t('page.retry.running'), 'error');
+      else if (e instanceof ApiError && e.type === '/errors/screen-busy') { toast(failed.kind === 'generate' ? newBusy : t('page.retry.busy'), 'error'); void refresh(); }
+      else if (e instanceof ApiError && e.type === '/errors/rate-limited') toast(t('page.send.rateLimited'), 'error');
+      else toast(problemText(e, t('page.retry.offline')), 'error');
     }
   };
   // 改名、换画框（API-CORE-012）：元数据，不建修订；换画框后服务端按新画框重拍截图
@@ -250,7 +271,7 @@ export function SketchRoute() {
     if (!open) return;
     try { applyScreen((await api.screens.patch(open.id, { refProjectId })).screen); }
     catch (e) {
-      toast(problemText(e, '换参照失败'), 'error');
+      toast(problemText(e, t('page.refFailed')), 'error');
       if (e instanceof ApiError && e.type === '/errors/not-found') { refs.reload(); void refresh(); }
     }
   };
@@ -261,18 +282,18 @@ export function SketchRoute() {
   const openAnnos = draftAnnos.filter((a) => a.status === 'open');
   // 批注落在共享组件实例里（S4，409 component-locked）：服务端的原话叫人去改组件，草稿本里没有组件可改，这里换个说法
   const annoFailed = (e: unknown, fallback: string) => {
-    if (e instanceof ApiError && e.type === '/errors/component-locked') toast(`这个元素属于共享组件「${(e.problem as { component?: string }).component ?? ''}」，草稿里不能给它批注`, 'error');
-    else if (e instanceof ApiError && e.type === '/errors/not-found') { toast('这条批注或这张草稿已经不在了', 'error'); void refresh({ quiet: true }); }
+    if (e instanceof ApiError && e.type === '/errors/component-locked') toast(t('page.anno.locked', { name: (e.problem as { component?: string }).component ?? '' }), 'error');
+    else if (e instanceof ApiError && e.type === '/errors/not-found') { toast(t('page.anno.gone'), 'error'); void refresh({ quiet: true }); }
     else toast(problemText(e, fallback), 'error');
   };
   const createAnnotation = async (sel: ElementSelection, note: string): Promise<boolean> => {
     if (!open) return false;
     try { await api.annotations.create(open.id, { qid: sel.qid, note, anchorText: sel.text.slice(0, 200), rect: sel.rect }); await refresh({ quiet: true }); return true; }
-    catch (e) { annoFailed(e, '批注没存上，连不上 Quilt 服务'); return false; }
+    catch (e) { annoFailed(e, t('page.anno.createFailed')); return false; }
   };
   const updateAnnotation = async (id: string, note: string): Promise<boolean> => {
     try { await api.annotations.update(id, { note }); await refresh({ quiet: true }); return true; }
-    catch (e) { annoFailed(e, '批注没改成，连不上 Quilt 服务'); return false; }
+    catch (e) { annoFailed(e, t('page.anno.updateFailed')); return false; }
   };
   // 删批注撤销不了（同画布 v1.03）：先确认
   const [removingAnno, setRemovingAnno] = useState<AnnotationDto | null>(null);
@@ -280,7 +301,7 @@ export function SketchRoute() {
     const a = removingAnno;
     if (!a) return;
     try { await api.annotations.remove(a.id); setRemovingAnno(null); void refresh({ quiet: true }); }
-    catch (e) { setRemovingAnno(null); annoFailed(e, '批注没删掉，连不上 Quilt 服务'); }
+    catch (e) { setRemovingAnno(null); annoFailed(e, t('page.anno.removeFailed')); }
   };
   // 「N 条批注 · 发送」：这张草稿没发的批注合成一轮改稿（服务端按屏合成一条 edit_screens）；在途锁挡住同一帧里的连点
   const [sendingAnnos, setSendingAnnos] = useState(false);
@@ -292,7 +313,7 @@ export function SketchRoute() {
     try {
       const { jobs: sent } = await api.annotations.send(projectId, ids);
       for (const j of sent) book.track(j);
-      toast(`已发送 ${ids.length} 条批注`);
+      toast(t('page.anno.sent', { count: ids.length }));
       void refresh();
     } catch (e) { sendFailed(e, open, false); }
     finally { sendingAnnosRef.current = false; setSendingAnnos(false); }
@@ -323,11 +344,11 @@ export function SketchRoute() {
         // 确认框关掉时焦点先回到删除键，删除键随看板清空一起卸载：等这两次提交都过去，同收起一样交给输入框（A11Y-013）
         requestAnimationFrame(() => composerRef.current?.focus());
       }
-      toast(`已删除「${s.name}」`);
+      toast(t('page.removed', { name: s.name }));
       void refresh();
     } catch (e) {
       setDeleting(null);
-      toast(e instanceof ApiError && e.type === '/errors/screen-busy' ? '这张草稿正在生成或修改，先在输入框上方取消它' : '删除失败', 'error');
+      toast(e instanceof ApiError && e.type === '/errors/screen-busy' ? t('page.removeBusy') : t('page.removeFailed'), 'error');
     }
   };
 
@@ -364,7 +385,7 @@ export function SketchRoute() {
   const shotRetryAt = useRef(0);
   const onShotError = useCallback(() => { if (Date.now() - shotRetryAt.current < 10_000) return; shotRetryAt.current = Date.now(); void refresh({ quiet: true }); }, [refresh]);
 
-  useEffect(() => { document.title = '草稿本 · Quilt'; return () => { document.title = 'Quilt'; }; }, []);
+  useEffect(() => { document.title = t('page.title'); return () => { document.title = 'Quilt'; }; }, [t]);
   // 输入框停的边与实际大小 → 看板让出的空间与提示条的落点（输入框随内容增高、窄视口下工具条折行）；草稿工具条的实际底边 → 看板的上沿（折行时看板下移）
   const [topRow, setTopRow] = useState<number | null>(null);
   const shellStyle = { ...composerDock.shellStyle, ...(topRow ? { '--top-row': `${topRow}px` } : null) } as CSSProperties;
@@ -381,20 +402,20 @@ export function SketchRoute() {
       <div ref={laneRef} aria-hidden="true" className="pointer-events-none absolute bottom-0 left-[var(--lane-left)] right-[var(--side-right)] h-0" />
       <TopNav floating right={book.feedShown && book.feed !== 'open' && (
         <span role="status" data-testid="live-status" className="chrome inline-flex h-8 min-w-0 items-center gap-0.5 truncate whitespace-nowrap rounded-md px-3 type-label font-medium text-text-primary">
-          <span aria-hidden="true" className="mr-1.5 size-1.5 shrink-0 rounded-pill bg-warning" />实时更新已断开 · {book.feed === 'offline'
-            ? <button type="button" onClick={book.reconnect} className="inline-flex h-6 items-center rounded-sm px-1.5 text-(--semantic-color-action-link) state-layer focus-ring">重连</button>
-            : '重连中'}
+          <span aria-hidden="true" className="mr-1.5 size-1.5 shrink-0 rounded-pill bg-warning" />{t('page.feed.lost')} · {book.feed === 'offline'
+            ? <button type="button" onClick={book.reconnect} className="inline-flex h-6 items-center rounded-sm px-1.5 text-(--semantic-color-action-link) state-layer focus-ring">{t('page.feed.reconnect')}</button>
+            : t('page.feed.reconnecting')}
         </span>
       )}>
-        <ProjectSwitcher current={null} placeholder="草稿本" sketchbook />
+        <ProjectSwitcher current={null} placeholder={t('page.switcher')} sketchbook />
       </TopNav>
       {detail && book.previewOrigin ? (
         <DraftStage
           state={stageState} draft={open} pendingFrame={pendingNew?.frame ?? null} progress={stageProgress} busy={openBusy} previewOrigin={book.previewOrigin}
-          onExample={(t) => { composerRef.current?.fill(t); showComposer(); }}
+          onExample={(text) => { composerRef.current?.fill(text); showComposer(); }}
           onTopRow={setTopRow}
-          onRename={(name) => void patchDraft({ name }, '改名失败')}
-          onFrame={(frame) => void patchDraft({ frame }, '换画框失败')}
+          onRename={(name) => void patchDraft({ name }, t('page.renameFailed'))}
+          onFrame={(frame) => void patchDraft({ frame }, t('page.frameFailed'))}
           onRestored={() => void refresh()}
           onCopy={() => { if (open) setCopyFor(open); }}
           onDelete={() => { if (open) setDeleting(open); }}
@@ -412,7 +433,7 @@ export function SketchRoute() {
         refs={refs} tool={tool} pick={activePick} onClearPick={() => { setPick(null); composerRef.current?.focus(); }}
         openAnnotations={openAnnos.length} sendingAnnotations={sendingAnnos} onSendAnnotations={() => void sendAnnotations()}
         onSend={onSend} onCancelJob={(id) => void book.cancel(id)} onRetryJob={retryJob} onDismissJob={dismissJob}
-        onUploadImage={(file) => (projectId ? api.projects.uploadImage(projectId, file) : Promise.reject(new Error('草稿本还在加载')))}
+        onUploadImage={(file) => (projectId ? api.projects.uploadImage(projectId, file) : Promise.reject(new Error(t('page.blocked.loading'))))}
         onError={(m) => toast(m, 'error')} onEscape={escape}
         hidden={composerDock.prefs.collapsed}
         dock={{ edge: composerDock.edge, at: composerDock.at, narrow: composerDock.narrow, onMove: composerDock.move, onToggle: toggleComposer, onMeasure: composerDock.onMeasure }}
@@ -420,25 +441,27 @@ export function SketchRoute() {
       {settingsSection && <Suspense fallback={null}><SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} onCatalog={prefs.applyCatalog} /></Suspense>}
       {/* 传当前的那份：弹层开着时这一版的截图、写回目标可能刚到 */}
       {copyFor && <CopyDialog draft={detail?.screens.find((x) => x.id === copyFor.id) ?? copyFor} runner={prefs.sendRunner} onClose={() => setCopyFor(null)} onCopied={() => void refresh({ quiet: true })} />}
-      {deleting && <ConfirmDialog title={`删除「${deleting.name}」？`} body="这张草稿和它的全部版本都会删除，不可恢复。" confirmLabel="删除" fallback={composerInput} onCancel={() => setDeleting(null)} onConfirm={remove} />}
-      {removingAnno && <ConfirmDialog title="删除这条批注？" body={`「${removingAnno.note.length > 40 ? `${removingAnno.note.slice(0, 40)}…` : removingAnno.note}」删了撤销不了。`} confirmLabel="删除" fallback={composerInput} onCancel={() => setRemovingAnno(null)} onConfirm={removeAnnotation} />}
+      {deleting && <ConfirmDialog title={t('page.removeTitle', { name: deleting.name })} body={t('page.removeBody')} confirmLabel={tc('delete')} fallback={composerInput} onCancel={() => setDeleting(null)} onConfirm={remove} />}
+      {removingAnno && <ConfirmDialog title={t('page.anno.removeTitle')} body={t('page.anno.removeBody', { note: removingAnno.note.length > 40 ? `${removingAnno.note.slice(0, 40)}…` : removingAnno.note })} confirmLabel={tc('delete')} fallback={composerInput} onCancel={() => setRemovingAnno(null)} onConfirm={removeAnnotation} />}
     </div>
   );
 }
 
 // 草稿本还没取到时看板的位置：加载中是一枚状态胶囊（300 ms 后才显形，快的时候不闪）；失败写明发生了什么与下一步（IA-009）
 function StagePending({ failure, onRetry }: { failure: string | null; onRetry: () => void }) {
+  const t = useT(sketchMessages);
+  const tc = useT(commonMessages);
   return (
     <div data-testid="sketch-pending" data-state={failure ? 'failed' : 'loading'} className="absolute bottom-[var(--stage-bottom)] left-[var(--stage-left)] right-[var(--stage-right)] top-[var(--chrome-top)] grid place-items-center p-4">
       {!failure ? (
         <div role="status" className="pending-in chrome flex items-center gap-2 rounded-pill px-3.5 py-2 type-label text-text-secondary">
-          <span className="size-3.5 animate-spin rounded-full border-2 border-text-secondary border-r-transparent motion-reduce:animate-none" aria-hidden="true" />加载草稿本…
+          <span className="size-3.5 animate-spin rounded-full border-2 border-text-secondary border-r-transparent motion-reduce:animate-none" aria-hidden="true" />{t('page.pending.loading')}
         </div>
       ) : (
         <div role="alert" className="fade-up chrome w-[min(24rem,100%)] rounded-lg p-4">
-          <p className="type-body font-semibold text-text-primary">草稿本没加载出来</p>
-          <p className="mt-1 type-label text-text-secondary">{failure}。确认 Quilt 还在运行，然后重试。</p>
-          <div className="mt-3"><Button variant="primary" size="sm" onClick={onRetry}>重试</Button></div>
+          <p className="type-body font-semibold text-text-primary">{t('page.pending.failedTitle')}</p>
+          <p className="mt-1 type-label text-text-secondary">{t('page.pending.failedBody', { reason: failure })}</p>
+          <div className="mt-3"><Button variant="primary" size="sm" onClick={onRetry}>{tc('retry')}</Button></div>
         </div>
       )}
     </div>

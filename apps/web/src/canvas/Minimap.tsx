@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import { useResolvedMode } from '@/lib/theme';
+import { useT } from '@/i18n';
+import canvasMessages from '@/i18n/locales/canvas-parts';
 
 // 小地图（REQ-CORE-024 v0.61）：按全部卡片的外接框等比缩放，画屏（实心）、组件（描边）、风格指南卡（虚线）与当前视口框。
 // 视图变换每帧都在变，所以不经父组件 props 走：自己订阅 CanvasView 的视图流、rAF 合帧后只重画这一块。
@@ -39,6 +41,7 @@ export function Minimap({ rects, onView, onPanTo, onMoveView }: {
   rects: MiniRect[]; onView: (cb: (v: ViewInfo) => void) => () => void;
   onPanTo: (x: number, y: number) => void; onMoveView: (x: number, y: number) => void;
 }) {
+  const t = useT(canvasMessages);
   const ref = useRef<HTMLCanvasElement>(null);
   const view = useRef<ViewInfo | null>(null);
   const rectsRef = useRef(rects);
@@ -128,7 +131,7 @@ export function Minimap({ rects, onView, onPanTo, onMoveView }: {
   };
   const screens = rects.filter((r) => r.kind === 'screen').length;
   return (
-    <canvas ref={ref} className="minimap chrome nopan nowheel" style={{ width: W, height: H }} role="img" aria-label={`小地图：${screens} 屏，点击平移画布、拖视口框移动视图`} data-testid="minimap" data-screens={screens}
+    <canvas ref={ref} className="minimap chrome nopan nowheel" style={{ width: W, height: H }} role="img" aria-label={t('minimap.label', { count: screens })} data-testid="minimap" data-screens={screens}
       onPointerDown={onDown} onPointerMove={onMove}
       onPointerUp={(e) => { if (ref.current?.hasPointerCapture(e.pointerId)) ref.current.releasePointerCapture(e.pointerId); endDrag(); }}
       onPointerCancel={endDrag}

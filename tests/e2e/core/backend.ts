@@ -4,7 +4,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { seedJson, apiJson, ROOT, WEB, API, eventually, localFetch } from '../lib.ts';
+import { seedJson, apiJson, ROOT, WEB, API, eventually, localFetch, zhCN } from '../lib.ts';
 import { connectMcp, callTool } from '../mcp-client.ts';
 import { expect, softly, waitJob } from '../harness.ts';
 import { page, step, shot, blankSpot, STUB_RUNNER, uploadPng, idemKey, sleep079 } from './shared.ts';
@@ -78,7 +78,7 @@ await step('TC-CORE-071', async () => {
   expect(old.length > 0, '前置不成立：API 名下没有截图浏览器');
   // 2 种子脚本自己拍截图（同一数据目录里它也记一份，不能把 API 的记录冲掉）；测试进程自己开一个无头 Edge（代表用户自己的浏览器），下面的重启不该动它
   seedJson('seed:project', '--name', 'ShotSeed', '--device', 'mobile', '--screens', '1');
-  const mine = await chromium.launch({ channel: 'msedge', headless: true });
+  const mine = zhCN(await chromium.launch({ channel: 'msedge', headless: true }));
   try {
     // 3 SIGKILL 重启：旧进程的截图浏览器成了孤儿；新进程启动时按记录结束它们、删掉临时目录
     await restart();

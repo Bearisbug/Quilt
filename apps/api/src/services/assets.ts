@@ -1,9 +1,10 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
-import { ASSET_MEDIA_TYPES, MAX_ASSET_BYTES, MAX_ASSETS_PER_PROJECT, type AssetDto } from '@quilt/core';
+import { ASSET_MEDIA_TYPES, MAX_ASSET_BYTES, MAX_ASSETS_PER_PROJECT, L, type AssetDto, type Localized } from '@quilt/core';
 import { db, schema } from '../db/client.ts';
 import { problems } from '../lib/errors.ts';
 import { storage } from '../lib/storage.ts';
 import { notifyCanvas } from '../lib/events.ts';
+import { tr } from '../lib/locale.ts';
 import { config } from '../config.ts';
 import { ownedProject } from './projects.ts';
 
@@ -13,7 +14,7 @@ const EXT: Record<string, string> = { 'image/svg+xml': 'svg', 'image/png': 'png'
 
 // 素材校验按 422 回（API-CORE-032）：multipart 本身是合法请求，被拒的是内容语义（格式 / 大小 / 数量），
 // 与 /errors/lint-failed 同档。problems.validation 是全局 400，借它会把所有端点一起改掉。
-const invalid = (path: string, message: string) => problems.unprocessable([{ path, message }]);
+const invalid = (path: string, message: Localized) => problems.unprocessable([{ path, message }]);
 
 export const assetKey = (projectId: string, id: string, mediaType: string) =>
   `projects/${projectId}/assets/${id}.${EXT[mediaType] ?? 'bin'}`;
@@ -38,20 +39,20 @@ export async function listAssets(ownerId: string, projectId: string): Promise<As
 
 export async function createAsset(ownerId: string, projectId: string, input: { name: string; body: Buffer }): Promise<AssetDto> {
   const project = await ownedProject(ownerId, projectId);
-  if (!input.body.byteLength) throw invalid('file', '空文件');
-  if (input.body.byteLength > MAX_ASSET_BYTES) throw invalid('file', `单个素材最大 ${MAX_ASSET_BYTES / 1024 / 1024} MB`);
+  if (!input.body.byteLength) throw invalid('file', L('空文件', 'The file is empty'));
+  if (input.body.byteLength > MAX_ASSET_BYTES) throw invalid('file', L(`单个素材最大 ${MAX_ASSET_BYTES / 1024 / 1024} MB`, `Each asset can be at most ${MAX_ASSET_BYTES / 1024 / 1024} MB`));
   const mediaType = sniff(input.body);
-  if (!mediaType) throw invalid('mediaType', `只支持 ${ASSET_MEDIA_TYPES.join(' / ')}`);
+  if (!mediaType) throw invalid('mediaType', L(`只支持 ${ASSET_MEDIA_TYPES.join(' / ')}`, `Only ${ASSET_MEDIA_TYPES.join(' / ')} are supported`));
 
   const size = measure(input.body, mediaType);
   const row = await db.transaction(async (tx) => {
     // 数量上限（≤ 50）必须在锁里数：并发上传时两次 await 之间谁也看不见别人的行，60 个并发就落 60 条
     await tx.execute(sql`select 1 from ${schema.projects} where ${schema.projects.id} = ${project.id} for update`);
     const existing = await tx.$count(schema.assets, eq(schema.assets.projectId, project.id));
-    if (existing >= MAX_ASSETS_PER_PROJECT) throw invalid('assets', `每个项目最多 ${MAX_ASSETS_PER_PROJECT} 个素材，先删掉些`);
+    if (existing >= MAX_ASSETS_PER_PROJECT) throw invalid('assets', L(`每个项目最多 ${MAX_ASSETS_PER_PROJECT} 个素材，先删掉些`, `A project can have at most ${MAX_ASSETS_PER_PROJECT} assets; delete some first`));
     const [inserted] = await tx.insert(schema.assets).values({
       projectId: project.id,
-      name: input.name.trim().slice(0, 80) || '素材',
+      name: input.name.trim().slice(0, 80) || tr('素材', 'Asset'),
       mediaType,
       bytes: input.body.byteLength,
       width: size.w, height: size.h,

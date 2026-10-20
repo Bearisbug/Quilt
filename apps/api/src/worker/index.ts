@@ -96,7 +96,7 @@ async function backfillThumbs() {
 async function recoverJobs() {
   const stale = await db.update(schema.generationJobs)
     .set({ status: 'failed', finishedAt: new Date(), output: sql`coalesce(${schema.generationJobs.output}, '{}'::jsonb) || '{"errorClass":"system","message":"Quilt 重启时作业未完成"}'::jsonb` })
-    .where(and(eq(schema.generationJobs.status, 'running'), eq(schema.generationJobs.runner, 'model'))).returning({ id: schema.generationJobs.id, kind: schema.generationJobs.kind, projectId: schema.generationJobs.projectId });
+    .where(and(eq(schema.generationJobs.status, 'running'), eq(schema.generationJobs.runner, 'model'))).returning({ id: schema.generationJobs.id, kind: schema.generationJobs.kind, projectId: schema.generationJobs.projectId, input: schema.generationJobs.input });
   for (const r of stale) await finishFailed(r, 'system', 'Quilt 重启时作业未完成');
   const queued = await db.select({ id: schema.generationJobs.id, runner: schema.generationJobs.runner }).from(schema.generationJobs).where(inArray(schema.generationJobs.status, ['queued']));
   for (const j of queued) {
@@ -144,7 +144,7 @@ export async function startWorker() {
       const limit = new Date(Date.now() - config.jobTimeoutMs.max - 60_000);
       const rows = await db.update(schema.generationJobs)
         .set({ status: 'failed', finishedAt: new Date(), output: sql`coalesce(${schema.generationJobs.output}, '{}'::jsonb) || '{"errorClass":"timeout","message":"swept by job.timeout"}'::jsonb` })
-        .where(and(eq(schema.generationJobs.status, 'running'), eq(schema.generationJobs.runner, 'model'), lt(schema.generationJobs.startedAt, limit))).returning({ id: schema.generationJobs.id, kind: schema.generationJobs.kind, projectId: schema.generationJobs.projectId });
+        .where(and(eq(schema.generationJobs.status, 'running'), eq(schema.generationJobs.runner, 'model'), lt(schema.generationJobs.startedAt, limit))).returning({ id: schema.generationJobs.id, kind: schema.generationJobs.kind, projectId: schema.generationJobs.projectId, input: schema.generationJobs.input });
       for (const r of rows) await finishFailed(r, 'timeout', 'swept by job.timeout');
       // 排队超过 1 分钟的 model 作业重新入队（v1.03）：建作业时入队那一步之前出过错就不会自己再来；领取是条件更新，重复入队无害
       const waiting = await db.select({ id: schema.generationJobs.id }).from(schema.generationJobs)

@@ -3,12 +3,13 @@ import { db, schema } from '../db/client.ts';
 import { problems, isUniqueViolation } from '../lib/errors.ts';
 import { config } from '../config.ts';
 import { storage } from '../lib/storage.ts';
-import { assembleDocument, buildPrelude, extractBody, injectQids, reconcileQids, overwrittenInstances, lintScreenBody, expandComponents, OVERLAY_SCREEN_NOTE, PICSUM_PHOTO_NOTE, craftRules, COLOR_CLASS_NAMES, DEVICE_SIZE, type DeviceType, type Tokens, type LintReport, type Presentation } from '@quilt/core';
+import { assembleDocument, buildPrelude, extractBody, injectQids, reconcileQids, overwrittenInstances, lintScreenBody, expandComponents, OVERLAY_SCREEN_NOTE, PICSUM_PHOTO_NOTE, craftRules, COLOR_CLASS_NAMES, DEVICE_SIZE, L, type DeviceType, type Tokens, type LintReport, type Presentation } from '@quilt/core';
 import { assetsForPrompt } from './assets.ts';
 import { ownedProject } from './projects.ts';
 import { createRevision, deriveLinks, hasActiveJob, setFamilyPresentation } from './screens.ts';
 import { enqueueScreenshot } from './jobs.ts';
 import { emitProjectEvent } from '../lib/events.ts';
+import { requestLocale } from '../lib/locale.ts';
 import { sharedComponentsOf, contractComponents } from './components.ts';
 import { isSketchbook, nextDraftRoute, draftFrame, draftReference, DRAFT_LINT_REPORT } from './sketchbook.ts';
 
@@ -25,11 +26,11 @@ export async function ingestScreen(ownerId: string, projectId: string, input: { 
     if (!job) throw problems.notFound();
     // 已结束的作业不再收产出：取消之后屏锁已释放，用户可能已在这屏上继续改了（§11 cancelled 是终态）
     if (job.status !== 'running') throw problems.jobFinished();
-    if (input.screenId && !input.expectedRevisionId) throw problems.validation([{ path: 'expectedRevisionId', message: '带 jobId 更新既有屏时必须传 expectedRevisionId（取任务载荷 screens[].revisionId）' }]);
+    if (input.screenId && !input.expectedRevisionId) throw problems.validation([{ path: 'expectedRevisionId', message: L('带 jobId 更新既有屏时必须传 expectedRevisionId（取任务载荷 screens[].revisionId）', 'Updating an existing screen with jobId requires expectedRevisionId (take it from screens[].revisionId in the job payload)') }]);
     // 草稿本里一个作业只出一张草稿（INV-CORE-003）：这个作业已写出过一张，再建就拒——改那一张走 update / patch
     if (sketch && !input.screenId) {
       const [made] = await db.select({ screenId: schema.screenRevisions.screenId }).from(schema.screenRevisions).where(eq(schema.screenRevisions.jobId, job.id)).limit(1);
-      if (made) throw problems.validation([{ path: 'jobId', message: `这个作业已写出草稿 ${made.screenId}，草稿本里一个作业只出一张；要改它用 quilt.update_screen 或 quilt.patch_screen` }]);
+      if (made) throw problems.validation([{ path: 'jobId', message: L(`这个作业已写出草稿 ${made.screenId}，草稿本里一个作业只出一张；要改它用 quilt.update_screen 或 quilt.patch_screen`, `This job already wrote draft ${made.screenId}; a job in the Sketchbook makes only one draft. To change it, use quilt.update_screen or quilt.patch_screen`) }]);
     }
     jobFrame = (job.input as { frame?: string }).frame;
   }
@@ -67,8 +68,8 @@ export async function ingestScreen(ownerId: string, projectId: string, input: { 
         if (!input.jobId || holder?.id !== input.jobId) throw problems.screenBusy();
       }
       // 变体的路由与呈现方式属于默认屏（v0.62 / v0.63）：经这条路改一律拒；默认屏改呈现方式，整个家族跟着改
-      if (s.variantOf && route !== s.route) throw problems.unprocessable([{ path: 'route', message: '变体与默认屏同路由，改路由请改默认屏' }]);
-      if (s.variantOf && input.presentation && input.presentation !== s.presentation) throw problems.unprocessable([{ path: 'presentation', message: '变体随默认屏的呈现方式，改呈现方式请改默认屏' }]);
+      if (s.variantOf && route !== s.route) throw problems.unprocessable([{ path: 'route', message: L('变体与默认屏同路由，改路由请改默认屏', 'A variant shares the route of its default screen; change the route on the default screen') }]);
+      if (s.variantOf && input.presentation && input.presentation !== s.presentation) throw problems.unprocessable([{ path: 'presentation', message: L('变体随默认屏的呈现方式，改呈现方式请改默认屏', 'A variant follows the presentation of its default screen; change it on the default screen') }]);
       if (route !== s.route || input.name !== s.name) await tx.update(schema.screens).set({ route, name: input.name }).where(eq(schema.screens.id, screenId));
       if (input.presentation && input.presentation !== s.presentation) reshoot = await setFamilyPresentation(tx, screenId, input.presentation);
       // 默认屏改路由，它的变体跟着改（v0.62 变体与默认屏同路由）
@@ -101,7 +102,8 @@ export async function validateScreenHtml(ownerId: string, projectId: string, htm
   const project = await ownedProject(ownerId, projectId);
   const body = injectQids((html.includes('<body') ? extractBody(html) : html).replace(/\sdata-qid="q\d+"/g, ''));
   const routes = (await db.select({ route: schema.screens.route }).from(schema.screens).where(eq(schema.screens.projectId, project.id))).map((r) => r.route);
-  return lintScreenBody(body, routes, true);
+  // 当场返回给调用方，按请求的语言写偏离说明（REQ-CORE-046）；落进修订的 lintReport 保持中文
+  return lintScreenBody(body, routes, true, requestLocale());
 }
 
 // 设计契约的机器可判定投影（quilt.get_design_contract / resources）

@@ -82,3 +82,13 @@ test('overwrittenInstances：只放占位 / 只填槽位 / 原样抄回展开结
   assert.deepEqual(overwrittenInstances(expanded.replace('>Me<', '>Profile<'), [comp], '/home'), ['TabBar'], '改了副本里的文案');
   assert.deepEqual(overwrittenInstances('<main><nav data-component="Gone"><a>x</a></nav></main>', [comp], '/home'), [], '不认识的组件不算');
 });
+
+test('validateComponentHtml：error 缺省中文，locale 为 en 时英文（REQ-CORE-046）', () => {
+  const two = '<a>1</a><a>2</a>';
+  assert.deepEqual(validateComponentHtml(two), { ok: false, error: '组件必须恰好一个根元素，现在有 2 个' });
+  assert.deepEqual(validateComponentHtml(two, 'en'), { ok: false, error: 'A component must have exactly one root element; this one has 2' });
+  assert.deepEqual(validateComponentHtml('<div><style>a{}</style></div>', 'en'), { ok: false, error: 'A component cannot contain <script> or <style>: it is copied into every screen' });
+  assert.deepEqual(validateComponentHtml('<div><nav data-component="X"></nav></div>', 'en'), { ok: false, error: 'A component cannot contain another shared component' });
+  assert.deepEqual(validateComponentHtml(`<div>${'x'.repeat(64 * 1024)}</div>`, 'en'), { ok: false, error: 'The component HTML is over 64 KB' });
+  assert.deepEqual(validateComponentHtml(TAB_BAR, 'en'), { ok: true, tag: 'nav' });
+});

@@ -1,4 +1,4 @@
-import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENT_BYTES, type AttachmentDto } from '@quilt/core';
+import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENT_BYTES, L, type AttachmentDto } from '@quilt/core';
 import { storage } from '../lib/storage.ts';
 import { problems } from '../lib/errors.ts';
 
@@ -31,12 +31,12 @@ export async function createUpload(projectId: string, input: { mediaType: string
 /** 直传落库。类型与大小在这里复核一次——签发时报的 bytes 只是声明，真正到货的才算数（不合规 422，API-CORE-019） */
 export async function storeUpload(key: string, mediaType: string, body: Buffer): Promise<void> {
   if (!(IMAGE_MEDIA_TYPES as readonly string[]).includes(mediaType)) {
-    throw problems.unprocessable([{ path: 'mediaType', message: `只支持 ${IMAGE_MEDIA_TYPES.join(' / ')}` }]);
+    throw problems.unprocessable([{ path: 'mediaType', message: L(`只支持 ${IMAGE_MEDIA_TYPES.join(' / ')}`, `Only ${IMAGE_MEDIA_TYPES.join(' / ')} are supported`) }]);
   }
   if (body.byteLength > MAX_ATTACHMENT_BYTES) {
-    throw problems.unprocessable([{ path: 'body', message: `单张最大 ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB` }]);
+    throw problems.unprocessable([{ path: 'body', message: L(`单张最大 ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`, `Each image can be at most ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`) }]);
   }
-  if (!body.byteLength) throw problems.unprocessable([{ path: 'body', message: '空文件' }]);
+  if (!body.byteLength) throw problems.unprocessable([{ path: 'body', message: L('空文件', 'The file is empty') }]);
   await storage.put(key, body, mediaType);
 }
 
@@ -56,7 +56,7 @@ export async function resolveForMessage(projectId: string, ids: string[] | undef
   const out: StoredAttachment[] = [];
   for (const id of ids) {
     const found = await locateAttachment(projectId, id);
-    if (!found) throw problems.validation([{ path: 'attachmentIds', message: `附件 ${id} 未上传完成或已过期` }]);
+    if (!found) throw problems.validation([{ path: 'attachmentIds', message: L(`附件 ${id} 未上传完成或已过期`, `Attachment ${id} has not finished uploading or has expired`) }]);
     out.push({ id: found.id, key: found.key, mediaType: found.mediaType, bytes: found.bytes });
   }
   return out;

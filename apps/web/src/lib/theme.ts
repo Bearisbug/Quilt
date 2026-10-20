@@ -1,5 +1,7 @@
 import type { MarkPalette } from '@quilt/core/browser';
 import { useSyncExternalStore } from 'react';
+import { tOf } from '@/i18n';
+import previewMessages from '@/i18n/locales/preview';
 
 // 外观（REQ-CORE-039，§13.1）：<html data-theme> 是唯一权威源，只取 light / dark 或不设——不设 = 跟随系统，
 // 由 brand/tokens.css 的 prefers-color-scheme 层接管（THEME-003）。选择记在 localStorage 的 quilt:theme，
@@ -34,9 +36,12 @@ function subscribe(onChange: () => void) {
 /** 当前实际生效的模式。画在 <canvas> 上、发进预览 iframe 的颜色读的是 CSS 变量的快照，要以它为依赖在外观变化时重读（VIS-010） */
 export const useResolvedMode = () => useSyncExternalStore(subscribe, resolvedMode);
 
-/** 发进预览 iframe 的画布标记色（quilt:mode 的 marks，§13.1）：取当前外观的 tokens 变量，iframe 里没有外壳的样式表 */
+const tp = tOf(previewMessages);
+
+/** 发进预览 iframe 的画布标记色（quilt:mode 的 marks，§13.1）：取当前外观的 tokens 变量，iframe 里没有外壳的样式表；
+ * labels 是修改标记角标的文字，按当时的界面语言取 */
 export function markPalette(): MarkPalette {
   const cs = getComputedStyle(document.documentElement);
   const v = (name: string) => cs.getPropertyValue(name).trim();
-  return { line: v('--semantic-color-mark-line'), onLine: v('--semantic-color-mark-on-line'), halo: v('--semantic-color-mark-halo'), success: v('--semantic-color-feedback-success') };
+  return { line: v('--semantic-color-mark-line'), onLine: v('--semantic-color-mark-on-line'), halo: v('--semantic-color-mark-halo'), success: v('--semantic-color-feedback-success'), labels: { working: tp('marks.working'), done: tp('marks.done') } };
 }

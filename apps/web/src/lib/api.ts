@@ -1,7 +1,9 @@
 import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, ElementOp, AnnotationDto, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, DraftFrame, DraftFrameChoice, SketchbookDto, CopyDraftInput, CreateDraftInput, CopyDraftResultDto } from '@quilt/core/browser';
 
+import { getLocale } from '@/i18n';
+
 // API 客户端：同源 /v1（开发时 Vite 代理 → API；打包后 API 进程自己托管前端），错误统一为 ApiError（RFC 9457 信封）。
-// v0.32 本地版没有登录：所有请求都是默认用户。
+// v0.32 本地版没有登录：所有请求都是默认用户。每个请求带 X-Quilt-Locale（REQ-CORE-046）：服务端按它出错误文案，建的写屏作业按它定生成内容的语言
 export class ApiError extends Error {
   constructor(public status: number, public problem: ProblemDto) { super(problem.title); }
   get type() { return this.problem.type; }
@@ -13,7 +15,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const PROBE_TIMEOUT_MS = 100_000;
 
 async function call<T>(path: string, { timeoutMs = REQUEST_TIMEOUT_MS, ...init }: RequestInit & { idempotencyKey?: string; timeoutMs?: number } = {}): Promise<T> {
-  const headers: Record<string, string> = { Accept: 'application/json', ...(init.headers as Record<string, string>) };
+  const headers: Record<string, string> = { Accept: 'application/json', 'X-Quilt-Locale': getLocale(), ...(init.headers as Record<string, string>) };
   // FormData 的 Content-Type 必须由浏览器带 boundary 生成，手写会让服务端解不出分段（素材直传走这条）
   if (init.body && !(init.body instanceof FormData)) headers['Content-Type'] = 'application/json';
   if (init.idempotencyKey) headers['Idempotency-Key'] = init.idempotencyKey;

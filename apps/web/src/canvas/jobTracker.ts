@@ -1,4 +1,6 @@
 import type { JobDto } from '@quilt/core/browser';
+import { tOf } from '@/i18n';
+import canvasMessages from '@/i18n/locales/canvas-parts';
 
 // 画布的作业对账（REQ-CORE-020，v1.06 从 Canvas.tsx 抽出成纯函数）：组件拿结果去改状态、发后续请求，时序的取舍都在这里，由
 // tests/unit/web/jobTracker.test.ts 锁住。几种状态的含义：
@@ -34,16 +36,19 @@ export function settleJob(sets: TrackerSets, jobId: string) {
   return { seen, trackedAt, finished: new Set([...sets.finished, jobId]) };
 }
 
-const RUNNING_TEXT: Partial<Record<JobDto['kind'], string>> = {
-  chat: '助手在想…', edit_component: '正在改组件…', export_prototype: '正在打包原型…', apply_design_system: '正在回刷屏幕…',
-  propose_design_system: '正在提炼约定…', edit_screens: '正在改屏…', regenerate_subtree: '正在改屏…',
+// 表里只存键，取用时再按界面语言翻译
+type RunningKey = keyof typeof canvasMessages.zh.progress.running;
+const RUNNING_KEY: Partial<Record<JobDto['kind'], RunningKey>> = {
+  chat: 'chat', edit_component: 'editComponent', export_prototype: 'exportPrototype', apply_design_system: 'applyDesignSystem',
+  propose_design_system: 'proposeDesignSystem', edit_screens: 'editScreens', regenerate_subtree: 'editScreens',
 };
+const t = tOf(canvasMessages);
 /** progress 事件对应的作业 chip 进度文案：聊天是助手每次工具调用的一句话（REQ-CORE-023），改组件先回刷再逐屏截图（REQ-EDIT-006） */
 export function progressText(kind: JobDto['kind'], data: Record<string, unknown>): string {
   if (data.stage === 'chat' && typeof data.step === 'string') return data.step;
-  if (data.stage === 'retry') return `供应商波动，正在重试（第 ${data.attempt} 次）…`;
-  if (data.stage === 'component_synced') return `已同步 ${data.screens ?? 0} 屏，正在截图…`;
-  if (data.stage === 'running') return RUNNING_TEXT[kind] ?? '正在规划屏幕…';
-  if (data.stage === 'exported') return '打包完成';
-  return '排队中…';
+  if (data.stage === 'retry') return t('progress.retry', { attempt: data.attempt });
+  if (data.stage === 'component_synced') return t('progress.componentSynced', { count: Number(data.screens ?? 0) });
+  if (data.stage === 'running') return t(`progress.running.${RUNNING_KEY[kind] ?? 'planning'}`);
+  if (data.stage === 'exported') return t('progress.exported');
+  return t('progress.queued');
 }

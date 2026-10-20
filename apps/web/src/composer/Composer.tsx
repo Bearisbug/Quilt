@@ -5,6 +5,8 @@ import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Grip
 import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MAX_VERSIONS, SCREEN_COUNT_OPTIONS, estimateJob, type ScreenDto, type ComponentDto, type RunnerOptionDto, type AgentSessionDto, type AgentTool, type ScreenCount } from '@quilt/core/browser';
 import { cn, IconButton } from '@/ui/ui';
 import { VendorIcon } from '@/ui/VendorIcon';
+import { useT } from '@/i18n';
+import composerMessages from '@/i18n/locales/composer';
 import type { ComposerDock, DockEdge } from './useComposerDock';
 import { JobChips, type JobChip } from './JobChips';
 
@@ -70,19 +72,13 @@ type ComposerProps = {
   sketch?: { verb: string; phrases: string[]; extra?: ReactNode; onEmptyEscape?: () => void; chip?: { label: string; onRemove: () => void }; top?: ReactNode };
 };
 
-// 空闲且没有目标时轮播的示例：让第一次进来的人知道能说什么
-const IDLE_PHRASES = [
-  '描述要造的屏，或选中一屏后说怎么改',
-  '例如：一个记账 APP，首页、记一笔、统计三屏',
-  '例如：结账流程：购物车、填地址、支付、完成',
-  '例如：给列表页加下拉刷新和空态',
-];
+// 空闲且没有目标时轮播的示例：让第一次进来的人知道能说什么（文案在 composer 命名空间的 idle.*）
+const IDLE_PHRASES = ['describe', 'ledger', 'checkout', 'pullRefresh'] as const;
 const ROTATE_MS = 3200;
 /** 可用宽度差一点时通道触发器最多截到多窄（rem）：再窄连通道名的头几个字都看不出（v0.78） */
 const RUNNER_MIN_REM = 6;
 /** 拖输入框：按下后移动超过这么远才算拖（MOTION-017），之前仍是普通点按 */
 const DRAG_SLOP = 10;
-const EDGE_NAME: Record<DockEdge, string> = { bottom: '底边', left: '左边', right: '右边' };
 const CMD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl+';
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
@@ -94,6 +90,7 @@ type Shot = { key: string; url: string; name: string; id: string | null };
 // 不自动聚焦——焦点默认留在画布上，单键快捷键（F/L…）才可用；放锚点时由父组件显式聚焦。
 // 结构：目标区（标签 + 动词行 + 清空）→ 输入区 → 工具条（通道 ｜ 参考图 ｜ 屏数 · 版数 ｜ 发送）；作业 chip 叠在它上方。外壳的材质与投影在 styles.css 的 .composer。
 export function Composer(p: ComposerProps) {
+  const t = useT(composerMessages);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -187,7 +184,7 @@ export function Composer(p: ComposerProps) {
     const el = dockRef.current;
     const shell = el?.offsetParent?.getBoundingClientRect();
     if (!el || !shell) return;
-    if (narrow && to !== 'bottom') { setSaid('窄屏只能停在底边'); return; }
+    if (narrow && to !== 'bottom') { setSaid(t('dock.narrowOnly')); return; }
     let next = to;
     let pos = 0.5;
     if (next !== 'bottom') {
@@ -205,7 +202,7 @@ export function Composer(p: ComposerProps) {
     }
     flipFrom.current = from ?? el.getBoundingClientRect();
     p.dock.onMove(next, pos);
-    setSaid(next === to ? `输入框停到${EDGE_NAME[next]}` : `${EDGE_NAME[to]}放不下，输入框停在${EDGE_NAME[next]}`);
+    setSaid(next === to ? t('dock.moved', { edge: t(`dock.edgeIn.${next}`) }) : t('dock.noRoom', { from: t(`dock.edgeIn.${to}`), edge: t(`dock.edgeIn.${next}`) }));
   };
   // 拖动输入框 / 胶囊：按下时还不算拖，越过 DRAG_SLOP 才开始 1:1 跟手（从抓住的那一点算位移）并抓住指针（MOTION-017 / MOTION-028），
   // 之前的点按照常是点按（胶囊照样展开、把手照样开菜单）。跟手只写这个元素的 transform（PERF-005），拖动中不吸附；
@@ -275,9 +272,9 @@ export function Composer(p: ComposerProps) {
   const all = !creating && p.totalScreens > 0 && p.targets.length >= p.totalScreens;
   // 共享组件目标（REQ-EDIT-006）：只有组件、没有屏也没有锚点 = 改组件（一次一个，多选由父组件的 blockedReason 挡）；否则只是上下文
   const comps = p.componentTargets;
-  const compNames = comps.map((c) => c.name).join('、');
+  const compNames = comps.map((c) => c.name).join(t('verb.nameSep'));
   const compOnly = comps.length > 0 && creating && !p.anchor;
-  const compSuffix = comps.length && !compOnly ? ` · ${creating ? '用' : '带'}组件 ${compNames}` : '';
+  const compSuffix = comps.length && !compOnly ? ` · ${t(creating ? 'verb.withComponents' : 'verb.alongComponents', { count: comps.length, names: compNames })}` : '';
 
   // 宽度跟着工具条走：这一行是输入框里最宽的东西，其余（动词行、占位、草稿）都比它短。
   // 量法是把工具条临时设成 max-content 读一次——那是它排成一行的真实宽度，与外壳当前多宽无关，
@@ -362,15 +359,15 @@ export function Composer(p: ComposerProps) {
     if (!files.length) return;
     // 通道不支持视觉时在这里就拦住。护栏必须落在贴图这一刻——贴图、拖入、点按钮三条路都经过这里；
     // 只在发送时拦的话，用户已经传完了才被告知白传（服务端那道校验仍在，防绕过）
-    if (!visionOk) { p.onError('当前通道不支持参考图，先在左下角换一个支持的通道'); return; }
+    if (!visionOk) { p.onError(t('shots.noVision')); return; }
     const imgs = files.filter((f) => (IMAGE_MEDIA_TYPES as readonly string[]).includes(f.type));
     const rejected = files.length - imgs.length;
-    if (rejected) p.onError(`有 ${rejected} 个文件不是 PNG / JPEG / WebP，已跳过`);
+    if (rejected) p.onError(t('shots.notImage', { count: rejected }));
     const room = MAX_ATTACHMENTS_PER_MESSAGE - shotsRef.current.length;
-    if (imgs.length > room) p.onError(`一条消息最多 ${MAX_ATTACHMENTS_PER_MESSAGE} 张参考图`);
+    if (imgs.length > room) p.onError(t('shots.tooMany', { max: MAX_ATTACHMENTS_PER_MESSAGE }));
     const batch = imgs.slice(0, Math.max(0, room)).filter((file) => {
       if (file.size <= MAX_ATTACHMENT_BYTES) return true;
-      p.onError(`「${file.name}」超过 ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`);
+      p.onError(t('shots.tooLarge', { name: file.name, mb: MAX_ATTACHMENT_BYTES / 1024 / 1024 }));
       return false;
     }).map((file) => ({ file, shot: { key: crypto.randomUUID(), url: URL.createObjectURL(file), name: file.name, id: null } as Shot }));
     if (!batch.length) return;
@@ -379,7 +376,7 @@ export function Composer(p: ComposerProps) {
     for (const { file, shot } of batch) {
       p.onUploadImage(file).then(
         (id) => setShots((prev) => prev.map((s) => (s.key === shot.key ? { ...s, id } : s))),
-        () => { setShots((prev) => prev.filter((s) => s.key !== shot.key)); p.onError(`「${file.name}」上传失败`); },
+        () => { setShots((prev) => prev.filter((s) => s.key !== shot.key)); p.onError(t('shots.failed', { name: file.name })); },
       );
     }
   };
@@ -387,7 +384,7 @@ export function Composer(p: ComposerProps) {
 
   const uploading = shots.some((s) => !s.id);
   // 冲突之外挡住发送的本地原因：按 Enter 被它们挡住时写在冲突理由同一行，原因消失即撤（REQ-CORE-020 v0.74）
-  const localReason = uploading ? '参考图还在上传' : !sessionOk ? '先选要投递的会话' : null;
+  const localReason = uploading ? t('blocked.uploading') : !sessionOk ? t('blocked.pickSession') : null;
   const [nudged, setNudged] = useState(false);
   useEffect(() => { if (!localReason) setNudged(false); }, [localReason]);
   const shownReason = p.blockedReason ?? (nudged ? localReason : null);
@@ -439,23 +436,26 @@ export function Composer(p: ComposerProps) {
     : estimateJob({ kind: 'edit_screens', input: { prompt: 'x', screenIds: p.targets.slice(0, p.maxTargets).map((t) => t.id), versions: p.versions } }, p.totalScreens);
   const many = p.versions > 1 || (creating && (p.count === 'auto' || p.count > 1));
   // 本机 agent 通道固定 1 版、屏数由会话自定：动词行只说去向，档位控件也不显示
+  const editWhat = t(all ? 'verb.editAll' : 'verb.edit', { count: n });
+  const versionsPart = p.versions > 1 ? ` ${t('verb.versions', { count: p.versions })}` : '';
+  const callsPart = many ? ` ${t('verb.calls', { count: estimate.calls })}` : '';
   const verb = p.sketch
     ? p.sketch.verb
     : compOnly
-    ? (comps.length === 1 ? `改组件「${comps[0].name}」 · 同步 ${comps[0].usedBy.length} 屏` : `改组件 · ${comps.length} 个`)
+    ? (comps.length === 1 ? t('verb.componentOne', { name: comps[0].name, count: comps[0].usedBy.length }) : t('verb.componentMany', { count: comps.length }))
     : agentRunner
-    ? `${creating ? `造屏 · 交给本机会话${p.anchor ? ' · 此处' : ''}` : `改${all ? '全部' : ''} ${n} 屏 · 交给本机会话`}${compSuffix}`
+    ? `${creating ? `${t('verb.createAgent')} · ${t('verb.toSession')}${p.anchor ? ` · ${t('verb.here')}` : ''}` : `${editWhat} · ${t('verb.toSession')}`}${compSuffix}`
     : creating
-      ? `造${p.count === 'auto' ? '一组屏' : ` ${n} 屏`}${p.versions > 1 ? ` × ${p.versions} 版` : ''} · ${p.anchor ? '此处' : '自动摆放'}${many ? ` = ${estimate.calls} 次调用` : ''}${compSuffix}`
-      : `改${all ? '全部' : ''} ${n} 屏${p.versions > 1 ? ` × ${p.versions} 版` : ''}${many ? ` = ${estimate.calls} 次调用` : ''}${compSuffix}`;
+      ? `${p.count === 'auto' ? t('verb.createSet') : t('verb.createN', { count: n })}${versionsPart} · ${t(p.anchor ? 'verb.here' : 'verb.autoPlace')}${callsPart}${compSuffix}`
+      : `${editWhat}${versionsPart}${callsPart}${compSuffix}`;
 
   const phrases = p.sketch
     ? p.sketch.phrases
-    : compOnly && comps.length === 1 ? [`修改组件「${comps[0].name}」：例如 tab 改成 3 个、图标换成描边`]
-    : one ? [`修改「${one.name}」：例如 改成分组列表`]
-    : p.targets.length ? [`修改选中的 ${p.targets.length} 屏：例如 统一把顶部导航改成标签栏`]
-    : p.anchor ? ['描述要在这里造的屏：例如 订单详情页，顶部是状态时间线，下面是商品清单']
-    : IDLE_PHRASES;
+    : compOnly && comps.length === 1 ? [t('phrase.component', { name: comps[0].name })]
+    : one ? [t('phrase.one', { name: one.name })]
+    : p.targets.length ? [t('phrase.many', { count: p.targets.length })]
+    : p.anchor ? [t('phrase.anchor')]
+    : IDLE_PHRASES.map((k) => t(`idle.${k}`));
 
   // 随内容增高；上限只有一个来源——styles.css 里 .composer textarea 的 max-height，到顶后内部滚动（INT-010）
   // 收起期间 display:none 量不到高度，叫回时要重量一次；空着时高度由原生 placeholder 撑开，占位文案换了（草稿本里「改」换回「新草稿」）也要重量
@@ -468,7 +468,7 @@ export function Composer(p: ComposerProps) {
   }, [text, p.hidden, placeholder]);
 
   const CollapseIcon = edge === 'left' ? ChevronLeft : edge === 'right' ? ChevronRight : ChevronDown;
-  const pillText = text.trim() ? '继续写' : '写一句';
+  const pillText = text.trim() ? t('pill.continue') : t('pill.write');
   // 收起时 chip 叠比胶囊宽：朝画面里面展开——停在右边或底边右半段时右缘对齐胶囊，否则左缘对齐
   const stackEnd = edge === 'right' || (edge === 'bottom' && at > 0.5);
   return (
@@ -492,23 +492,23 @@ export function Composer(p: ComposerProps) {
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropping(false); }}
     >
-      <label htmlFor="chat-input" className="sr-only">对话输入</label>
+      <label htmlFor="chat-input" className="sr-only">{t('inputLabel')}</label>
       {p.sketch?.top}
       {/* 目标区始终存在：挪位置的把手 + 标签（屏 / 锚点，可逐个移除）+ 动词行 + 清空 + 收起。标签只被点屏 / × / 清空改变，点画布空白不动它。
           这一行的空白处是拖动输入框的抓手（v1.16） */}
       <div className="composer-grab mb-2.5 flex touch-none select-none items-center gap-2 px-0.5" onPointerDown={onRowPointerDown}>
         <DockGrip edge={edge} narrow={narrow} onPointerDown={startDrag} dragged={dragged} onPlace={(to) => place(to, null)} />
-        <ul className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" aria-label="本次的目标">
+        <ul className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" aria-label={t('targetsLabel')}>
           {p.anchor && (
             <li className="tint-link inline-flex items-center gap-1 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="anchor-chip">
-              <MapPin size={12} aria-hidden="true" /><span>新屏 · 此处</span>
-              <button type="button" aria-label="取消锚点" onClick={p.onRemoveAnchor} className="grid size-5 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring"><X size={12} /></button>
+              <MapPin size={12} aria-hidden="true" /><span>{t('chip.anchor')}</span>
+              <button type="button" aria-label={t('chip.removeAnchor')} onClick={p.onRemoveAnchor} className="grid size-5 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring"><X size={12} /></button>
             </li>
           )}
-          {!p.sketch && p.targets.map((t, i) => (
-            <li key={t.id} className={`inline-flex items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium ${i < p.maxTargets ? 'tint-link' : 'tint-warning'}`} data-testid="target-chip">
-              <span className="max-w-32 truncate">{t.name}</span>
-              <button type="button" aria-label={`不再以「${t.name}」为目标`} onClick={() => p.onRemoveTarget(t.id)} className="grid size-5 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
+          {!p.sketch && p.targets.map((s, i) => (
+            <li key={s.id} className={`inline-flex items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium ${i < p.maxTargets ? 'tint-link' : 'tint-warning'}`} data-testid="target-chip">
+              <span className="max-w-32 truncate">{s.name}</span>
+              <button type="button" aria-label={t('chip.removeTarget', { name: s.name })} onClick={() => p.onRemoveTarget(s.id)} className="grid size-5 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
                 <X size={12} />
               </button>
             </li>
@@ -516,7 +516,7 @@ export function Composer(p: ComposerProps) {
           {p.sketch?.chip && (
             <li className="tint-link inline-flex min-w-0 items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="draft-pick-chip">
               <span className="min-w-0 max-w-64 truncate">{p.sketch.chip.label}</span>
-              <button type="button" aria-label={`去掉${p.sketch.chip.label}，改回整张`} onClick={p.sketch.chip.onRemove} className="grid size-5 shrink-0 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
+              <button type="button" aria-label={t('chip.removePick', { label: p.sketch.chip.label })} onClick={p.sketch.chip.onRemove} className="grid size-5 shrink-0 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
                 <X size={12} />
               </button>
             </li>
@@ -524,33 +524,33 @@ export function Composer(p: ComposerProps) {
           {/* 共享组件目标（REQ-EDIT-006）：与屏标签同一排、同一形状，前缀「组件 ·」区分 */}
           {p.componentTargets.map((c) => (
             <li key={c.id} className="tint-link inline-flex items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="component-chip" data-name={c.name}>
-              <span className="max-w-40 truncate">组件 · {c.name}</span>
-              <button type="button" aria-label={`不再以组件「${c.name}」为目标`} onClick={() => p.onRemoveComponentTarget(c.id)} className="grid size-5 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
+              <span className="max-w-40 truncate">{t('chip.component', { name: c.name })}</span>
+              <button type="button" aria-label={t('chip.removeComponent', { name: c.name })} onClick={() => p.onRemoveComponentTarget(c.id)} className="grid size-5 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
                 <X size={12} />
               </button>
             </li>
           ))}
           {/* 动词行是变长文本：放在可截断的 flex 项里，改字不挤动旁边的按钮（RESP-010） */}
           <li className={`min-w-0 truncate type-label ${over ? 'text-warning' : 'text-text-secondary'}`} data-testid="verb-line" aria-live="polite">
-            {over ? `已选 ${p.targets.length} 屏，一次最多改 ${p.maxTargets} 屏，只会发送前 ${p.maxTargets} 屏` : verb}
+            {over ? t('verb.over', { count: p.targets.length, max: p.maxTargets }) : verb}
           </li>
         </ul>
         {!p.sketch && (p.targets.length > 0 || p.anchor || p.componentTargets.length > 0) && (
-          <button type="button" data-testid="clear-targets" onClick={p.onClearTargets} className="shrink-0 rounded-md px-1.5 py-0.5 type-label text-(--semantic-color-action-link) transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">清空</button>
+          <button type="button" data-testid="clear-targets" onClick={p.onClearTargets} className="shrink-0 rounded-md px-1.5 py-0.5 type-label text-(--semantic-color-action-link) transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">{t('clear')}</button>
         )}
         {/* 收起：与 ⌘/、画布工具栏的「输入框」是同一开关；箭头朝着胶囊要贴的那条边 */}
-        <IconButton size="2xs" tip="bottom-end" label="收起输入框" hint={`${CMD}/`} desc="收成边上的一枚胶囊，草稿与参考图都留着；点胶囊再展开" data-testid="composer-collapse" onClick={p.dock.onToggle}>
+        <IconButton size="2xs" tip="bottom-end" label={t('collapse.label')} hint={`${CMD}/`} desc={t('collapse.desc')} data-testid="composer-collapse" onClick={p.dock.onToggle}>
           <CollapseIcon size={14} aria-hidden="true" />
         </IconButton>
       </div>
       {shots.length > 0 && (
-        <ul className="mb-2.5 flex flex-wrap gap-2 px-0.5" aria-label="本次参考图">
+        <ul className="mb-2.5 flex flex-wrap gap-2 px-0.5" aria-label={t('shots.label')}>
           {shots.map((sh) => (
             <li key={sh.key} className="group relative">
               <img src={sh.url} alt={sh.name} className="size-16 rounded-md border border-border-subtle object-cover" />
-              {!sh.id && <span className="absolute inset-0 grid place-items-center"><span className="inverse rounded-sm px-1.5 type-caption">上传中…</span></span>}
+              {!sh.id && <span className="absolute inset-0 grid place-items-center"><span className="inverse rounded-sm px-1.5 type-caption">{t('shots.uploading')}</span></span>}
               <button
-                type="button" aria-label={`移除参考图「${sh.name}」`} onClick={() => removeShot(sh.key)}
+                type="button" aria-label={t('shots.remove', { name: sh.name })} onClick={() => removeShot(sh.key)}
                 className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-pill bg-surface-raised text-text-secondary shadow-(--semantic-elevation-raised) transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring"
               ><X size={11} /></button>
             </li>
@@ -578,7 +578,7 @@ export function Composer(p: ComposerProps) {
           {/* 通道选择（REQ-CORE-011）。清单来自服务端，只含标识与显示名 */}
           {p.runnersFailed ? (
             <button type="button" data-testid="runners-failed" onClick={p.onReloadRunners} className="min-w-0 truncate rounded-md px-1.5 py-1 type-label text-warning transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
-              通道清单没加载出来 · 重试
+              {t('runnersFailed')}
             </button>
           ) : p.runners.length > 0 && <RunnerSelect runners={p.runners} value={p.runnerId} onChange={p.onRunnerChange} maxWidth={bar.runnerMax} />}
           {/* 投递会话（REQ-AGENT-003 v0.34）：只在通道是本机 agent 时出现，与通道选择一样跨会话记忆 */}
@@ -589,9 +589,9 @@ export function Composer(p: ComposerProps) {
             onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = ''; }}
           />
           <IconButton
-            size="sm" label="加参考图" desc="贴图、拖进来或点这里选；至多 4 张，发给模型作为风格参照" tip="top"
+            size="sm" label={t('addImage.label')} desc={t('addImage.desc')} tip="top"
             data-testid="add-image" onClick={() => fileRef.current?.click()}
-            unavailable={!visionOk && '当前通道不支持参考图，先换一个通道'}
+            unavailable={!visionOk && t('addImage.noVision')}
           ><ImagePlus size={16} /></IconButton>
         </div>
         {/* 档位（REQ-CORE-003 / REQ-CORE-006）：屏数只在造时出现（几张不同的屏）；版数造改都有（同一屏的几种画法）；两者以分隔线隔开，不做同形并排 */}
@@ -600,15 +600,15 @@ export function Composer(p: ComposerProps) {
           {/* 本机 agent 通道没有档位（固定 1 版、屏数由会话自定），腾出的位置给会话下拉；改组件一次一个也没有档位 */}
           {p.sketch?.extra}
           {!p.sketch && creating && !agentRunner && !compOnly && (
-            <Segmented label="屏数（几张不同的屏）" testId="count" value={p.count} options={SCREEN_COUNT_OPTIONS.map((o) => ({ value: o, label: o === 'auto' ? '自动' : String(o) }))} onChange={p.onCount} />
+            <Segmented label={t('count.label')} testId="count" value={p.count} options={SCREEN_COUNT_OPTIONS.map((o) => ({ value: o, label: o === 'auto' ? t('count.auto') : String(o) }))} onChange={p.onCount} />
           )}
           {!p.sketch && creating && !agentRunner && !compOnly && <span className="h-5 w-px bg-border-subtle" aria-hidden="true" />}
-          {!p.sketch && !agentRunner && !compOnly && <Segmented label="版数（同一屏的几种画法）" testId="versions" value={p.versions} options={Array.from({ length: MAX_VERSIONS }, (_, i) => ({ value: i + 1, label: `${i + 1} 版` }))} onChange={p.onVersions} compact />}
+          {!p.sketch && !agentRunner && !compOnly && <Segmented label={t('versions.label')} testId="versions" value={p.versions} options={Array.from({ length: MAX_VERSIONS }, (_, i) => ({ value: i + 1, label: t('versions.option', { count: i + 1 }) }))} onChange={p.onVersions} compact />}
           {/* 这个 40px 插槽永远是发送键（停止归作业 chip 上的 ×）；反色实心只给此刻唯一的主动作 */}
           <IconButton
-            type="submit" size="sm" tone={text.trim() ? 'invert' : 'default'} label={compOnly ? '发送（改组件）' : creating ? (p.sketch ? '发送（新草稿）' : '发送（造）') : '发送（改）'} hint="Enter" tip="top-end"
+            type="submit" size="sm" tone={text.trim() ? 'invert' : 'default'} label={compOnly ? t('send.component') : creating ? (p.sketch ? t('send.draft') : t('send.create')) : t('send.edit')} hint="Enter" tip="top-end"
             className={text.trim() ? 'rounded-pill' : 'fill rounded-pill'} data-testid="composer-send"
-            unavailable={p.blockedReason ?? localReason ?? (!text.trim() && (compOnly ? '先说要怎么改组件' : creating ? (p.sketch ? '先写一句要出什么' : '先描述要造的屏') : '先说要怎么改'))}
+            unavailable={p.blockedReason ?? localReason ?? (!text.trim() && (compOnly ? t('send.emptyComponent') : creating ? (p.sketch ? t('send.emptyDraft') : t('send.emptyCreate')) : t('send.emptyEdit')))}
           >
             {sending ? <span className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" /> : <ArrowUp size={16} />}
           </IconButton>
@@ -619,7 +619,7 @@ export function Composer(p: ComposerProps) {
     {p.hidden && (
       <button
         ref={pillRef} type="button" data-testid="composer-pill" data-dock={edge}
-        aria-label={`${pillText}：展开输入框（${CMD}/）`} onPointerDown={startDrag}
+        aria-label={t(text.trim() ? 'pill.ariaContinue' : 'pill.ariaWrite', { shortcut: `${CMD}/` })} onPointerDown={startDrag}
         onClick={(e) => { const skip = dragged.current && e.detail > 0; dragged.current = false; if (!skip) p.dock.onToggle(); }}
         className="composer-pill chrome state-layer focus-ring inline-flex h-9 cursor-grab touch-none select-none items-center gap-1.5 whitespace-nowrap rounded-pill px-3.5 type-label font-medium text-text-primary [@media(pointer:coarse)]:h-11"
       ><PenLine size={14} aria-hidden="true" />{pillText}</button>
@@ -634,6 +634,7 @@ export function Composer(p: ComposerProps) {
 // 点一下（或 Enter / 空格）开菜单选边——这是拖动的单指针替代（WCAG 2.5.7）。方向键先于菜单触发器处理：↓ 在那里本是「打开菜单」。
 // 窄视口只停底边：左右两项置灰并写明原因，← / → 只播报原因（在 place 里）
 function DockGrip({ edge, narrow, onPointerDown, dragged, onPlace }: { edge: DockEdge; narrow: boolean; onPointerDown: (e: ReactPointerEvent<HTMLElement>) => void; dragged: { current: boolean }; onPlace: (to: DockEdge) => void }) {
+  const t = useT(composerMessages);
   const [open, setOpen] = useState(false);
   // 按下那一刻菜单开没开：开着时点把手是关菜单（菜单自己也可能在按下时因「点到外面」先关了，不能再按 click 把它翻回来）
   const openAtDown = useRef(false);
@@ -648,14 +649,14 @@ function DockGrip({ edge, narrow, onPointerDown, dragged, onPlace }: { edge: Doc
     <DropdownMenu.Root open={open} onOpenChange={setOpen} modal={false}>
       <DropdownMenu.Trigger asChild>
         <IconButton
-          size="2xs" tip="bottom-start" label="挪输入框位置" desc={narrow ? '窄屏只停底边：按住拖可沿底边左右挪' : '按住拖到左、右或下边；或按 ← → ↓，或点一下选'}
+          size="2xs" tip="bottom-start" label={t('dock.gripLabel')} desc={narrow ? t('dock.gripDescNarrow') : t('dock.gripDesc')}
           data-testid="composer-grip" aria-describedby={descId} className="cursor-grab touch-none"
           onPointerDown={(e) => { openAtDown.current = open; onPointerDown(e); }} onKeyDown={onKey}
           // 指针点按才在这里开关菜单（按下时已被拖动接管）；键盘的 Enter / 空格由菜单触发器自己处理，click 的 detail 为 0
           onClick={(e) => { const skip = dragged.current; dragged.current = false; if (!skip && e.detail > 0) setOpen(!openAtDown.current); }}
         ><GripVertical size={14} aria-hidden="true" /></IconButton>
       </DropdownMenu.Trigger>
-      <span id={descId} className="sr-only">现在停在{EDGE_NAME[edge]}。{narrow ? '窄屏只停底边。' : '按左右方向键停到左边或右边，按下方向键回到底边，按回车选位置。'}</span>
+      <span id={descId} className="sr-only">{t(narrow ? 'dock.nowNarrow' : 'dock.nowKeys', { edge: t(`dock.edgeIn.${edge}`) })}</span>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
           side="top" align="start" sideOffset={8} collisionPadding={12} data-testid="composer-dock-menu"
@@ -664,16 +665,16 @@ function DockGrip({ edge, narrow, onPointerDown, dragged, onPlace }: { edge: Doc
           style={{ transformOrigin: 'var(--radix-dropdown-menu-content-transform-origin)' }}
           className="menu z-50 min-w-44 p-1.5"
         >
-          <DropdownMenu.Label className="px-2.5 pb-1 pt-1.5 type-overline font-semibold text-text-secondary">输入框停在</DropdownMenu.Label>
+          <DropdownMenu.Label className="px-2.5 pb-1 pt-1.5 type-overline font-semibold text-text-secondary">{t('dock.menuLabel')}</DropdownMenu.Label>
           <DropdownMenu.RadioGroup value={edge} onValueChange={(v) => onPlace(v as DockEdge)}>
             {(['left', 'right', 'bottom'] as const).map((d) => (
               <DropdownMenu.RadioItem key={d} value={d} disabled={narrow && d !== 'bottom'} data-testid={`composer-dock-${d}`} className={`${ITEM_CLS} data-[disabled]:pointer-events-none data-[disabled]:opacity-(--semantic-state-disabled-opacity)`}>
-                <span className="min-w-0 flex-1">{EDGE_NAME[d]}</span>
+                <span className="min-w-0 flex-1">{t(`dock.edge.${d}`)}</span>
                 <DropdownMenu.ItemIndicator className="flex shrink-0"><Check size={14} aria-hidden="true" /></DropdownMenu.ItemIndicator>
               </DropdownMenu.RadioItem>
             ))}
           </DropdownMenu.RadioGroup>
-          {narrow && <p className="px-2.5 pb-1 pt-1.5 type-caption text-text-secondary">窄屏放不下侧停的输入框，只停底边</p>}
+          {narrow && <p className="px-2.5 pb-1 pt-1.5 type-caption text-text-secondary">{t('dock.menuNarrow')}</p>}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -729,6 +730,7 @@ function Placeholder({ phrases, active }: { phrases: string[]; active: boolean }
 // maxWidth：输入框差一点放不下时截短触发器（px，由 Composer 量出来）
 export function RunnerSelect({ runners, value, onChange, disabled, testId = 'runner-select', maxWidth }: { runners: RunnerOptionDto[]; value: string; onChange: (id: string) => void; disabled?: boolean; testId?: string; maxWidth?: number | null }) {
   // 「管理通道…」只加 ?settings=runners、不动地址里别的参数：草稿本页的 ?d=<草稿> 是看板上开着的那张，整体换掉会把它收起（PAGE-SKETCH）
+  const t = useT(composerMessages);
   const [, setParams] = useSearchParams();
   // 只列可用项（REQ-CORE-013）：不可用的去设置页看原因，这里不灰化陈列
   const usable = runners.filter((r) => r.available);
@@ -738,11 +740,11 @@ export function RunnerSelect({ runners, value, onChange, disabled, testId = 'run
   return (
     <Select.Root value={cur?.id} onValueChange={(v) => { if (v === MANAGE_ID) setParams((q) => { q.set('settings', 'runners'); return q; }); else onChange(v); }} disabled={disabled}>
       <Select.Trigger
-        aria-label="生成通道" data-testid={testId} data-value={value} style={maxWidth ? { maxWidth } : undefined}
+        aria-label={t('runner.label')} data-testid={testId} data-value={value} style={maxWidth ? { maxWidth } : undefined}
         className="fill group flex h-9 max-w-44 shrink-0 items-center gap-1.5 rounded-md px-2.5 type-label font-medium text-text-primary disabled:pointer-events-none sm:max-w-56 state-layer focus-ring"
       >
         {/* 当前通道名直接渲染（v0.78）：Radix 默认要等选项挂上后才把名字填进来，输入框首次量宽时触发器还是空的，宽度量小了 */}
-        <span className="min-w-0 truncate"><Select.Value placeholder={usable.length ? '选择通道' : '没有可用通道'}>{cur ? <span className="flex min-w-0 items-center gap-2"><VendorIcon vendor={cur.vendor} size={14} className="shrink-0" /><span className="truncate">{cur.label}</span></span> : undefined}</Select.Value></span>
+        <span className="min-w-0 truncate"><Select.Value placeholder={usable.length ? t('runner.choose') : t('runner.none')}>{cur ? <span className="flex min-w-0 items-center gap-2"><VendorIcon vendor={cur.vendor} size={14} className="shrink-0" /><span className="truncate">{cur.label}</span></span> : undefined}</Select.Value></span>
         <Select.Icon className="flex shrink-0 opacity-60 transition-transform duration-(--semantic-motion-duration-base) ease-(--semantic-motion-easing-standard) group-data-[state=open]:rotate-180">
           <ChevronDown size={14} aria-hidden="true" />
         </Select.Icon>
@@ -755,15 +757,15 @@ export function RunnerSelect({ runners, value, onChange, disabled, testId = 'run
           className="menu z-50 min-w-64 max-w-[min(22rem,calc(100vw-1.5rem))] p-1.5"
         >
           <Select.Viewport>
-            <RunnerGroup label="云端模型" items={cloud} />
+            <RunnerGroup label={t('runner.cloud')} items={cloud} />
             {cloud.length > 0 && agents.length > 0 && <Select.Separator className="my-1.5 h-px bg-border-subtle" />}
-            <RunnerGroup label="本机 agent" items={agents} />
-            {usable.length === 0 && <p className="px-2.5 py-2 type-label text-text-secondary">没有验证通过的通道，先去设置页添加一个。</p>}
+            <RunnerGroup label={t('runner.agents')} items={agents} />
+            {usable.length === 0 && <p className="px-2.5 py-2 type-label text-text-secondary">{t('runner.noneVerified')}</p>}
             <Select.Separator className="my-1.5 h-px bg-border-subtle" />
             {/* 做成选项而不是普通按钮：Radix Select 的内容区只让方向键在选项间走，普通按钮键盘够不着；
                 选中它不改通道、只跳设置页 */}
-            <Select.Item value={MANAGE_ID} textValue="管理通道" data-testid="manage-channels" className={ITEM_CLS}>
-              <Select.ItemText><span className="inline-flex items-center gap-2"><Settings2 size={14} aria-hidden="true" />管理通道…</span></Select.ItemText>
+            <Select.Item value={MANAGE_ID} textValue={t('runner.manage')} data-testid="manage-channels" className={ITEM_CLS}>
+              <Select.ItemText><span className="inline-flex items-center gap-2"><Settings2 size={14} aria-hidden="true" />{t('runner.manageItem')}</span></Select.ItemText>
             </Select.Item>
           </Select.Viewport>
         </Select.Content>
@@ -779,12 +781,10 @@ const ITEM_CLS = 'relative flex cursor-pointer select-none items-center gap-2 ro
 // 每项带目录名与 idle / busy。Codex：线程库里的用户线程，显示名字（没起过名就是标题），每项带目录名、开在哪个应用、已打开 / 未打开——
 // 未打开的投递时由 Codex 桌面版打开。打开即让父组件重取列表；当前值不在列表里时显示占位「选择会话」（记住的会话已关闭）。
 const basename = (p: string) => p.split('/').filter(Boolean).pop() ?? p;
-const APP_LABEL: Record<NonNullable<AgentSessionDto['app']>, string> = { desktop: '桌面版', vscode: 'VS Code', cli: '终端' };
-const SESSION_COPY: Record<AgentTool, { group: string; empty: string }> = {
-  'claude-code': { group: '本机正在运行的 Claude Code 会话', empty: '没有正在运行的 Claude Code 会话——在终端开着 claude 再来。' },
-  codex: { group: '本机 Codex 线程（未打开的投递时由桌面版打开）', empty: '没有 Codex 线程——在 Codex 里开一个对话再来。' },
-};
+// 各工具的分组名与空列表文案在 composer 命名空间的 session.<键>.group / empty，应用名在 session.app.*
+const TOOL_KEY = { 'claude-code': 'claudeCode', codex: 'codex' } as const satisfies Record<AgentTool, string>;
 export function SessionSelect({ tool, sessions, reason, value, onChange, onOpen, disabled, testId = 'session-select' }: { tool: AgentTool; sessions: AgentSessionDto[] | null; reason?: string; value: string; onChange: (id: string) => void; onOpen: () => void; disabled?: boolean; testId?: string }) {
+  const t = useT(composerMessages);
   const items = sessions ?? [];
   const current = items.some((s) => s.sessionId === value) ? value : undefined;
   // Codex 线程没起过名时 name 是标题（首条消息），比 UUID 好认；Claude Code 的派生名只是目录 + 后缀，显示 UUID
@@ -792,10 +792,10 @@ export function SessionSelect({ tool, sessions, reason, value, onChange, onOpen,
   return (
     <Select.Root value={current} onValueChange={onChange} disabled={disabled} onOpenChange={(open) => { if (open) onOpen(); }}>
       <Select.Trigger
-        aria-label="投递到哪个会话" data-testid={testId} data-value={current ?? ''}
+        aria-label={t('session.label')} data-testid={testId} data-value={current ?? ''}
         className="fill group flex h-9 min-w-0 max-w-44 items-center gap-1.5 rounded-md px-2.5 type-label font-medium text-text-primary disabled:pointer-events-none sm:max-w-56 state-layer focus-ring"
       >
-        <span className="min-w-0 truncate"><Select.Value placeholder="选择会话" /></span>
+        <span className="min-w-0 truncate"><Select.Value placeholder={t('session.choose')} /></span>
         <Select.Icon className="flex shrink-0 opacity-60 transition-transform duration-(--semantic-motion-duration-base) ease-(--semantic-motion-easing-standard) group-data-[state=open]:rotate-180">
           <ChevronDown size={14} aria-hidden="true" />
         </Select.Icon>
@@ -806,20 +806,20 @@ export function SessionSelect({ tool, sessions, reason, value, onChange, onOpen,
           <Select.ScrollUpButton className="flex h-6 shrink-0 items-center justify-center text-text-secondary"><ChevronUp size={14} aria-hidden="true" /></Select.ScrollUpButton>
           <Select.Viewport className="min-h-0 flex-1">
             <Select.Group>
-              <Select.Label className="px-2.5 pb-1 pt-1.5 type-overline font-semibold text-text-secondary">{SESSION_COPY[tool].group}</Select.Label>
-              {sessions === null && <p className="px-2.5 py-2 type-label text-text-secondary">正在找会话…</p>}
-              {sessions?.length === 0 && <p className="px-2.5 py-2 type-label text-text-secondary" data-testid="session-empty">{reason ?? SESSION_COPY[tool].empty}</p>}
+              <Select.Label className="px-2.5 pb-1 pt-1.5 type-overline font-semibold text-text-secondary">{t(`session.${TOOL_KEY[tool]}.group`)}</Select.Label>
+              {sessions === null && <p className="px-2.5 py-2 type-label text-text-secondary">{t('session.searching')}</p>}
+              {sessions?.length === 0 && <p className="px-2.5 py-2 type-label text-text-secondary" data-testid="session-empty">{reason ?? t(`session.${TOOL_KEY[tool]}.empty`)}</p>}
               {items.map((s) => (
                 <Select.Item key={s.sessionId} value={s.sessionId} textValue={label(s)} data-testid="session-option" data-named={s.named ? '' : undefined} data-open={s.open ? '' : undefined} className={ITEM_CLS}>
                   <span className="min-w-0 flex-1">
                     <Select.ItemText><span className={s.named || s.tool === 'codex' ? '' : 'font-mono type-label'}>{label(s)}</span></Select.ItemText>
                     <span className="mt-0.5 flex items-center gap-1.5 type-caption text-text-secondary">
                       <span className="truncate">{basename(s.cwd)}</span>
-                      {s.app && <span className="shrink-0">{APP_LABEL[s.app]}</span>}
+                      {s.app && <span className="shrink-0">{t(`session.app.${s.app}`)}</span>}
                       {s.tool === 'codex'
-                        ? <span className="fill shrink-0 rounded-sm px-1.5">{s.open ? '已打开' : '未打开'}</span>
-                        : <span className={`shrink-0 rounded-sm px-1.5 ${s.status === 'busy' ? 'tint-warning' : 'fill'}`}>{s.status === 'busy' ? '忙' : s.status === 'idle' ? '空闲' : '未知'}</span>}
-                      {s.unverifiedVersion !== undefined && <span className="tint-warning shrink-0 rounded-sm px-1.5" data-testid="session-unverified">此版本未验证{s.unverifiedVersion && ` · ${s.unverifiedVersion}`}</span>}
+                        ? <span className="fill shrink-0 rounded-sm px-1.5">{s.open ? t('session.open') : t('session.notOpen')}</span>
+                        : <span className={`shrink-0 rounded-sm px-1.5 ${s.status === 'busy' ? 'tint-warning' : 'fill'}`}>{s.status === 'busy' ? t('session.busy') : s.status === 'idle' ? t('session.idle') : t('session.unknown')}</span>}
+                      {s.unverifiedVersion !== undefined && <span className="tint-warning shrink-0 rounded-sm px-1.5" data-testid="session-unverified">{s.unverifiedVersion ? t('session.unverifiedVersion', { version: s.unverifiedVersion }) : t('session.unverified')}</span>}
                     </span>
                   </span>
                   <Select.ItemIndicator className="flex shrink-0"><Check size={14} aria-hidden="true" /></Select.ItemIndicator>

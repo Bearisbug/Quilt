@@ -5,6 +5,7 @@ import path from 'node:path';
 import { config } from '../config.ts';
 import { sha256 } from './signing.ts';
 import { codexBin } from './agentCli.ts';
+import { tr } from './locale.ts';
 import { EDIT_BLOCK, SKETCH_GENERATOR_MARK, type DraftFrame } from '@quilt/core';
 
 // LLM 适配层（§17 Claude API）。驱动：anthropic（生产，API key）| agent-sdk（本机 Claude 订阅，仅开发）| codex（本机 Codex 订阅，v0.68）
@@ -174,7 +175,7 @@ class CodexLlm implements Llm {
   readonly vision = true;
   async complete({ system, prompt, images, model, signal }: LlmArgs) {
     const bin = codexBin();
-    if (!bin) throw new ProviderError('本机没有找到 codex 命令：安装 Codex 并运行 codex 用 ChatGPT 账号登录', false);
+    if (!bin) throw new ProviderError(tr('本机没有找到 codex 命令：安装 Codex 并运行 codex 用 ChatGPT 账号登录', 'The codex command was not found on this machine: install Codex and run codex to log in with your ChatGPT account'), false);
     const t0 = Date.now();
     const dir = await mkdtemp(path.join(os.tmpdir(), 'quilt-codex-'));
     try {
@@ -195,7 +196,7 @@ class CodexLlm implements Llm {
         signal?.addEventListener('abort', onAbort, { once: true });
         child.stdout.setEncoding('utf8').on('data', (d: string) => { buf += d; const parts = buf.split('\n'); buf = parts.pop() ?? ''; out.push(...parts.filter(Boolean)); });
         child.stderr.setEncoding('utf8').on('data', (d: string) => { err = (err + d).slice(-4000); });
-        child.once('error', (e) => { signal?.removeEventListener('abort', onAbort); reject(new ProviderError(`codex 启动失败：${e.message}`, false)); });
+        child.once('error', (e) => { signal?.removeEventListener('abort', onAbort); reject(new ProviderError(tr(`codex 启动失败：${e.message}`, `codex failed to start: ${e.message}`), false)); });
         child.once('close', (c) => { signal?.removeEventListener('abort', onAbort); if (buf) out.push(buf); resolve({ code: c, lines: out, stderr: err }); });
         child.stdin.end(`${CODEX_PREAMBLE}\n\n${system}\n\n---\n\n${prompt}`);
       });

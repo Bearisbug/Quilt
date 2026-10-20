@@ -9,6 +9,8 @@ import { ChoiceGroup } from '@/sketch/ChoiceGroup';
 import { DraftVersions } from '@/sketch/DraftVersions';
 import { DraftAnnotations, type PinPlace } from '@/sketch/DraftAnnotations';
 import { RefSelect, type RefProjects } from '@/sketch/RefSelect';
+import { useLocale, useT } from '@/i18n';
+import sketchMessages from '@/i18n/locales/sketch';
 
 export type StageState = 'empty' | 'generating' | 'draft';
 /** 草稿工具条上的两个开关（REQ-CORE-045）：选元素 / 批注，互斥；null = 都关着，草稿照常可点可滚 */
@@ -16,9 +18,10 @@ export type SketchTool = 'pick' | 'annotate' | null;
 type Size = { w: number; h: number };
 
 // 画框只在页面之间换（API-CORE-012 v1.17）：组件按自身大小、页面按视口排，两者不能互换，组件草稿不显示这一项
-const PAGE_FRAMES = [{ value: 'mobile', label: '手机页' }, { value: 'desktop', label: '桌面页' }] as const;
-// 空看板的三条示例：组件、手机页、桌面页各一条，点了填进输入框
-const EXAMPLES = ['一个音乐播放器的迷你控制条，深色毛玻璃', '一个记账 App 的首页，顶部是本月结余', 'SaaS 定价页，三档价格卡片，中间那档高亮'];
+// 显示名在 sketch 命名空间的 frames.<取值>
+const PAGE_FRAMES = ['mobile', 'desktop'] as const;
+// 空看板的三条示例：组件、手机页、桌面页各一条，点了填进输入框（文案在 stage.examples.<键>）
+const EXAMPLES = ['player', 'ledger', 'pricing'] as const;
 // 顶部那一行里工具条与两头（切换器 chip、记录栏开关）的间距，也是工具条底边到看板上沿的间隙
 const TOP_GAP = 12;
 // 组件画框（API-CORE-016 草稿）：第一次上报前 iframe 按桌面视口渲染，与截图同一个视口（shotSpecFor）；之后视口就是量到的根元素框
@@ -84,6 +87,7 @@ type StageProps = {
 // 空着时正中一句提示与三条示例；新草稿生成中是骨架（只呼吸）与一句进度；有内容时是预览域的活 iframe（可点可滚，链接惰性），
 // 在看板里居中，按画框放到能放下的最大、最大 1:1，放不下等比缩小、不裁切。草稿工具条在顶部那一行，不占看板的高度
 export function DraftStage(p: StageProps) {
+  const t = useT(sketchMessages);
   const ref = useRef<HTMLElement>(null);
   const annotateBtn = useRef<HTMLButtonElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
@@ -135,9 +139,9 @@ export function DraftStage(p: StageProps) {
   return (
     <>
     {p.draft && <DraftToolbar key={p.draft.id} {...p} draft={p.draft} barRef={barRef} annotateRef={annotateBtn} />}
-    <main ref={ref} data-testid="sketch-stage" data-state={p.state} aria-label="看板" className="absolute bottom-[var(--stage-bottom)] left-[var(--stage-left)] right-[var(--stage-right)] top-[var(--chrome-top)] grid place-items-center">
+    <main ref={ref} data-testid="sketch-stage" data-state={p.state} aria-label={t('stage.label')} className="absolute bottom-[var(--stage-bottom)] left-[var(--stage-left)] right-[var(--stage-right)] top-[var(--chrome-top)] grid place-items-center">
       {p.draft ? (
-        <section data-testid="draft-view" data-draft-id={p.draft.id} data-frame={p.draft.frame ?? ''} aria-label={`草稿「${p.draft.name}」`}>
+        <section data-testid="draft-view" data-draft-id={p.draft.id} data-frame={p.draft.frame ?? ''} aria-label={t('stage.draft', { name: p.draft.name })}>
           {/* 换一张草稿、新草稿第一版落地才整个重挂（之前没有地址可载）；之后出新版、换画框都在 DraftFrameView 里原地换（PAGE-SKETCH「看板」） */}
           <DraftFrameView
             key={`${p.draft.id}|${p.draft.currentRevisionId ? 'live' : 'pending'}`} draft={p.draft} avail={room} progress={p.progress} previewOrigin={p.previewOrigin} onEscape={p.onEscape} onShortcut={p.onShortcut} onStale={p.onStale}
@@ -146,15 +150,15 @@ export function DraftStage(p: StageProps) {
           />
         </section>
       ) : p.state === 'generating' ? (
-        <Skeleton nat={frameSize(p.pendingFrame)} scale={fit(frameSize(p.pendingFrame), room)} label={p.progress ?? '排队中…'} />
+        <Skeleton nat={frameSize(p.pendingFrame)} scale={fit(frameSize(p.pendingFrame), room)} label={p.progress ?? t('queued')} />
       ) : (
         <div data-testid="sketch-empty" className="fade-up flex max-w-lg flex-col items-center gap-2 px-4 text-center">
-          <h1 className="type-heading2 font-semibold text-text-primary [text-wrap:balance]">写一句话，出一张组件或页面</h1>
-          <p className="type-label text-text-secondary [text-wrap:pretty]">风格只听这句话；在输入框里选了参照项目，就按它的设计系统出。改到满意就写回项目，收起再出下一张。</p>
-          <ul className="mt-3 flex flex-col items-center gap-2" aria-label="示例">
-            {EXAMPLES.map((t) => (
-              <li key={t}><button type="button" data-testid="sketch-example" onClick={() => p.onExample(t)} className="state-layer focus-ring fill rounded-pill px-3.5 py-1.5 type-label text-text-secondary">{t}</button></li>
-            ))}
+          <h1 className="type-heading2 font-semibold text-text-primary [text-wrap:balance]">{t('stage.emptyTitle')}</h1>
+          <p className="type-label text-text-secondary [text-wrap:pretty]">{t('stage.emptyBody')}</p>
+          <ul className="mt-3 flex flex-col items-center gap-2" aria-label={t('stage.examplesLabel')}>
+            {EXAMPLES.map((id) => { const text = t(`stage.examples.${id}`); return (
+              <li key={id}><button type="button" data-testid="sketch-example" onClick={() => p.onExample(text)} className="state-layer focus-ring fill rounded-pill px-3.5 py-1.5 type-label text-text-secondary">{text}</button></li>
+            ); })}
           </ul>
         </div>
       )}
@@ -166,6 +170,7 @@ export function DraftStage(p: StageProps) {
 // 草稿工具条（顶部那一行的 chrome）：名字（点了就地改名）与「来自」、画框（页面草稿在手机页 / 桌面页之间二选一）、参照、选元素与批注两个开关、版本、
 // 写回项目（这条里唯一铺填充底的按钮）、删除、收起
 function DraftToolbar({ draft, busy, progress, onRename, onFrame, onRestored, onCopy, onDelete, onCollapse, refs, onRef, tool, onTool, barRef, annotateRef }: StageProps & { draft: ScreenDto; barRef: RefObject<HTMLDivElement | null>; annotateRef: RefObject<HTMLButtonElement | null> }) {
+  const t = useT(sketchMessages);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const landed = !!draft.currentRevisionId;
@@ -187,42 +192,42 @@ function DraftToolbar({ draft, busy, progress, onRename, onFrame, onRestored, on
     <div ref={barRef} data-testid="draft-toolbar" className="draft-toolbar chrome absolute top-3 z-30 flex min-h-10 w-max flex-wrap items-center justify-center gap-1 rounded-lg px-1 py-0.5">
       <span data-testid="draft-name" className="flex min-w-0 max-w-72 flex-col items-start">
         {editing ? (
-          <input autoFocus aria-label={`草稿名，原名「${draft.name}」`} value={name} maxLength={80} onChange={(e) => setName(e.target.value)} onBlur={() => finish(true, false)}
+          <input autoFocus aria-label={t('toolbar.renameLabel', { name: draft.name })} value={name} maxLength={80} onChange={(e) => setName(e.target.value)} onBlur={() => finish(true, false)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); finish(true, true); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false, true); } }}
             className="focus-ring fill h-8 w-48 min-w-0 rounded-md px-2.5 type-label font-medium text-text-primary" />
         ) : (
-          <button ref={nameBtn} type="button" aria-label={`草稿「${draft.name}」，点一下改名`} onClick={() => { setName(draft.name); active.current = true; setEditing(true); }}
+          <button ref={nameBtn} type="button" aria-label={t('toolbar.nameLabel', { name: draft.name })} onClick={() => { setName(draft.name); active.current = true; setEditing(true); }}
             className="state-layer focus-ring h-7 max-w-full truncate rounded-md px-2 type-body font-medium text-text-primary">{draft.name}</button>
         )}
         {/* 写回目标（REQ-CORE-044）：从屏拿来的、覆盖写回过的草稿记着它；那一屏已被删时服务端给 null，不写 */}
         {draft.target && (
           <span data-testid="draft-origin" className="max-w-full truncate px-2 pb-0.5 type-caption text-text-secondary">
-            来自「{draft.target.projectName} · {draft.target.screenName}」{draft.targetQid ? '里的一块' : ''}
+            {t(draft.targetQid ? 'toolbar.originBlock' : 'toolbar.origin', { project: draft.target.projectName, screen: draft.target.screenName })}
           </span>
         )}
       </span>
       <Divider />
-      {landed && (draft.frame === 'mobile' || draft.frame === 'desktop') && <><ChoiceGroup label="画框" testId="draft-frame" value={draft.frame} options={PAGE_FRAMES} onChange={(f) => { if (f !== draft.frame) onFrame(f); }} /><Divider /></>}
+      {landed && (draft.frame === 'mobile' || draft.frame === 'desktop') && <><ChoiceGroup label={t('toolbar.frame')} testId="draft-frame" value={draft.frame} options={PAGE_FRAMES.map((value) => ({ value, label: t(`frames.${value}`) }))} onChange={(f) => { if (f !== draft.frame) onFrame(f); }} /><Divider /></>}
       {landed && (
         <>
           <RefSelect refs={refs} value={draft.refProjectId} onChange={onRef} testId="draft-ref" side="bottom" className="text-text-secondary data-[state=open]:bg-(--semantic-color-surface-selected) data-[state=open]:text-text-primary" />
           <Divider />
           {/* 两个开关互斥（PAGE-SKETCH）：开一个关另一个；开着时草稿进选择元素态，链接与表单不响应 */}
-          <IconButton size="xs" tip="bottom" label="选元素" desc="点草稿里的一块，输入框就只改它" active={tool === 'pick'} aria-pressed={tool === 'pick'} data-testid="draft-pick" onClick={() => onTool(tool === 'pick' ? null : 'pick')}><Crosshair size={14} aria-hidden="true" /></IconButton>
-          <IconButton ref={annotateRef} size="xs" tip="bottom" label="批注" desc="点草稿里的一块钉一条说明，攒几条一起发" active={tool === 'annotate'} aria-pressed={tool === 'annotate'} data-testid="draft-annotate" onClick={() => onTool(tool === 'annotate' ? null : 'annotate')}><MessageSquarePlus size={14} aria-hidden="true" /></IconButton>
+          <IconButton size="xs" tip="bottom" label={t('toolbar.pick.label')} desc={t('toolbar.pick.desc')} active={tool === 'pick'} aria-pressed={tool === 'pick'} data-testid="draft-pick" onClick={() => onTool(tool === 'pick' ? null : 'pick')}><Crosshair size={14} aria-hidden="true" /></IconButton>
+          <IconButton ref={annotateRef} size="xs" tip="bottom" label={t('toolbar.annotate.label')} desc={t('toolbar.annotate.desc')} active={tool === 'annotate'} aria-pressed={tool === 'annotate'} data-testid="draft-annotate" onClick={() => onTool(tool === 'annotate' ? null : 'annotate')}><MessageSquarePlus size={14} aria-hidden="true" /></IconButton>
         </>
       )}
       {landed && <Divider />}
       {/* 作业在跑时的一句进度：放在工具条里，草稿本身照常可点可滚 */}
-      {busy && landed && <span role="status" className="flex min-w-0 items-center gap-1.5 truncate px-1.5 type-label text-text-secondary"><span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" aria-hidden="true" />{progress ?? '正在改…'}</span>}
+      {busy && landed && <span role="status" className="flex min-w-0 items-center gap-1.5 truncate px-1.5 type-label text-text-secondary"><span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" aria-hidden="true" />{progress ?? t('toolbar.editing')}</span>}
       {landed && <DraftVersions draft={draft} busy={busy} onRestored={onRestored} />}
       <button type="button" data-testid="draft-copy" aria-disabled={!landed || undefined} onClick={() => { if (landed) onCopy(); }}
         className="state-layer focus-ring fill inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 type-label font-medium text-text-primary aria-disabled:cursor-not-allowed">
         {/* 窄屏只留图标（文字留给读屏），工具条折成两行而不是三行 */}
-        <FolderInput size={14} aria-hidden="true" /><span className="max-sm:sr-only">写回项目…</span>
+        <FolderInput size={14} aria-hidden="true" /><span className="max-sm:sr-only">{t('toolbar.copy')}</span>
       </button>
-      <IconButton size="xs" tip="bottom" label="删除草稿" desc="删掉这张草稿和它的全部版本，不可恢复" data-testid="draft-delete" unavailable={busy ? `${busy}，先在输入框上方取消它` : false} onClick={onDelete}><Trash2 size={14} aria-hidden="true" /></IconButton>
-      <IconButton size="xs" tip="bottom-end" label="收起" hint="Esc" desc="看板清空，草稿留在记录栏里；在生成的照常生成" data-testid="draft-collapse" onClick={onCollapse}><Minimize2 size={14} aria-hidden="true" /></IconButton>
+      <IconButton size="xs" tip="bottom" label={t('toolbar.remove.label')} desc={t('toolbar.remove.desc')} data-testid="draft-delete" unavailable={busy ? t('toolbar.remove.busy', { reason: busy }) : false} onClick={onDelete}><Trash2 size={14} aria-hidden="true" /></IconButton>
+      <IconButton size="xs" tip="bottom-end" label={t('toolbar.collapse.label')} hint="Esc" desc={t('toolbar.collapse.desc')} data-testid="draft-collapse" onClick={onCollapse}><Minimize2 size={14} aria-hidden="true" /></IconButton>
     </div>
   );
 }
@@ -232,8 +237,9 @@ const Divider = () => <span className="mx-0.5 h-4 w-px shrink-0 bg-border-subtle
 
 // 生成中的占位：与画布骨架同一个呼吸（styles.css 的 .draft-skeleton，只动 opacity），正中一枚反色标签写进度
 function Skeleton({ nat, scale, label }: { nat: Size; scale: number; label: string }) {
+  const t = useT(sketchMessages);
   return (
-    <div className="draft-frame draft-skeleton" style={{ width: nat.w * scale, height: nat.h * scale }} role="img" aria-label="草稿生成中">
+    <div className="draft-frame draft-skeleton" style={{ width: nat.w * scale, height: nat.h * scale }} role="img" aria-label={t('stage.skeletonLabel')}>
       <span className="absolute left-1/2 top-1/2 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 -translate-y-1/2 items-center gap-2 truncate rounded-sm px-3 py-1.5 type-label inverse">
         <span className="sk-dot shrink-0" aria-hidden="true" /><span className="truncate" role="status">{label}</span>
       </span>
@@ -250,6 +256,7 @@ type FrameProps = Pick<StageProps, 'previewOrigin' | 'onEscape' | 'onShortcut' |
   draft: ScreenDto; avail: Size | null; progress: string | null; returnFocus: () => void;
 };
 function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onShortcut, onStale, tool, pickQid, onPick, annotations, onCreateAnnotation, onUpdateAnnotation, onRemoveAnnotation, returnFocus }: FrameProps) {
+  const t = useT(sketchMessages);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   // 地址钉住：签名每 30 分钟换一个窗口，换了也不重载正在看的草稿；新的一版经 quilt:swap 送进去（见下），换画框只改视口
   const [src, setSrc] = useState(draft.previewUrl);
@@ -291,9 +298,10 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
 
   const post = (msg: ParentToPreview) => { if (previewOrigin) iframeRef.current?.contentWindow?.postMessage(msg, previewOrigin); };
   const themeMode = useResolvedMode();
+  const locale = useLocale();
   const inspect = tool !== null;
-  // 换外观时重发一次：屏内的标记跟着换色（§13.1）
-  useEffect(() => { if (ready) post({ type: 'quilt:mode', mode: inspect ? 'inspect' : 'interact', marks: markPalette() }); }, [ready, readySeq, themeMode, inspect]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 换外观、换界面语言时重发一次：屏内的标记跟着换色、换字（§13.1）
+  useEffect(() => { if (ready) post({ type: 'quilt:mode', mode: inspect ? 'inspect' : 'interact', marks: markPalette() }); }, [ready, readySeq, themeMode, locale, inspect]); // eslint-disable-line react-hooks/exhaustive-deps
   // 批注开着时点中、还没写说明的元素（FLOW-SKETCH-REFINE S3）；换了开关就作废
   const [composing, setComposing] = useState<ElementSelection | null>(null);
   useEffect(() => { if (tool !== 'annotate') setComposing(null); }, [tool]);
@@ -407,12 +415,12 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
       </div>
       {!shown && !failed && (
         <span className="absolute left-1/2 top-1/2 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-sm px-3 py-1.5 type-label inverse">
-          <span className="sk-dot shrink-0" aria-hidden="true" /><span className="truncate" role="status">{!draft.currentRevisionId ? progress ?? '生成中…' : '加载中…'}</span>
+          <span className="sk-dot shrink-0" aria-hidden="true" /><span className="truncate" role="status">{!draft.currentRevisionId ? progress ?? t('stage.generating') : t('stage.loading')}</span>
         </span>
       )}
       {failed && (
         <button type="button" data-testid="draft-retry" onClick={() => { setFailed(false); void reloadFresh(); }}
-          className="state-layer focus-ring absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-sm border border-warning bg-surface-raised px-3 py-1.5 type-label font-semibold text-warning shadow-(--semantic-elevation-raised)">草稿没加载出来 · 重试</button>
+          className="state-layer focus-ring absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-sm border border-warning bg-surface-raised px-3 py-1.5 type-label font-semibold text-warning shadow-(--semantic-elevation-raised)">{t('stage.retry')}</button>
       )}
       {shown && (
         <DraftAnnotations

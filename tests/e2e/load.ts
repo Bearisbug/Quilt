@@ -334,7 +334,8 @@ await step('TC-CORE-085', async () => {
   await page.keyboard.press('Escape');
   await page.locator('.card.focused').waitFor({ state: 'detached', timeout: 5000 });
   const active = await page.evaluate(() => document.activeElement?.tagName ?? '');
-  await eventually(async () => expect(await shotIs(rev1), '新截图没接班'), 20000);
+  // 等到采样窗口（30 s）的尽头：截图本身不到 1 s，并行几套栈时截图队列能拖到 20 s 上下（RUN-278 实测 20.5 s）
+  await eventually(async () => expect(await shotIs(rev1), '新截图没接班'), 30000);
   const f1 = (await frames()).filter((f) => !f.focused);
   const kept = f1.filter((f) => f.frame);
   const blank1 = f1.filter((f) => !f.frame && !f.shot).length;

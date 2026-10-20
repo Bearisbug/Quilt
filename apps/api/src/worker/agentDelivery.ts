@@ -2,13 +2,14 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
 import { emitJobEvent } from '../lib/events.ts';
+import { countEn, listJoin, tr } from '../lib/locale.ts';
 import { findSession, injectMessage } from '../lib/claudeSessions.ts';
 import { findCodexThread, openCodexThread, queueCodexMessage } from '../lib/codexSessions.ts';
 import { registerAgentHooks } from '../services/jobs.ts';
 import { deriveLinks, priorInstructions } from '../services/screens.ts';
 import { componentInstructions } from '../services/components.ts';
 import type { JobRow } from '../services/projects.ts';
-import { priorInstructionsBlock, sketchRules, sketchFrameRule, type AgentTool, type DraftFrame, type DraftFrameChoice } from '@quilt/core';
+import { priorInstructionsBlock, sketchRules, sketchFrameRule, withUiLanguage, jobLocale, failureText, type AgentTool, type JobKind, type DraftFrame, type DraftFrameChoice } from '@quilt/core';
 
 // 本机 agent 投递（REQ-AGENT-003 / ADR-015 v0.34）：runner=agent 的作业由这里投递到用户选定的本机 Claude Code 会话——
 // 往它的 inbox socket 写一行用户消息；会话在自己的窗口里做、经 MCP 回写，最后调 quilt.finish_job 收口。
@@ -16,6 +17,7 @@ import { priorInstructionsBlock, sketchRules, sketchFrameRule, type AgentTool, t
 // 这里只管三件事：组提示词并投递、计时（30 分钟没收口算失败）、收口时把作业收成终态。
 // 回写守卫（带 jobId 的 update_screen 必须传 expectedRevisionId）在 ingestScreen 里，这里只负责把 id 写进提示词。
 const timers = new Map<string, NodeJS.Timeout>();
+const CJK = /[\u3400-\u9fff]/;
 const mcpUrl = () => `http://127.0.0.1:${config.apiPort}/mcp`;
 
 // 没接 quilt MCP 时怎么接：Claude Code 接上后 /mcp 重连即可；Codex 线程在打开时加载 MCP 配置，接入后得新开或重开线程
@@ -138,13 +140,24 @@ export async function finishAgentJob(job: JobRow, status: 'succeeded' | 'failed'
     const [updated] = await tx.update(schema.generationJobs).set({ status, finishedAt: new Date(), output })
       .where(and(eq(schema.generationJobs.id, job.id), eq(schema.generationJobs.status, 'running'))).returning();
     if (!updated) return false;
-    const names = screenIds.length ? (await tx.select({ name: schema.screens.name }).from(schema.screens).where(inArray(schema.screens.id, screenIds))).map((s) => s.name).join('、') : '';
-    const summary = typeof extra.summary === 'string' && extra.summary ? `：${extra.summary}` : '';
+    // 回执按作业的语言（REQ-CORE-046）：收口可能来自会话的 MCP 调用（那个请求的语言不算数）或超时计时器
+    const locale = jobLocale(job) ?? 'zh';
+    const names = screenIds.length ? listJoin((await tx.select({ name: schema.screens.name }).from(schema.screens).where(inArray(schema.screens.id, screenIds))).map((s) => s.name), locale) : '';
+    const summary = typeof extra.summary === 'string' && extra.summary ? tr(`：${extra.summary}`, `: ${extra.summary}`, locale) : '';
     // 改组件（v0.99）：组件名由带 jobId 的 update_component 记进 output；没记上就是会话没写组件
     const component = job.kind === 'edit_component' ? (output as { component?: string }).component : undefined;
-    const content = status !== 'succeeded' ? `本机 agent 未完成（${String(extra.message ?? extra.errorClass ?? '')}）`
-      : job.kind === 'edit_component' ? (component ? `本机 agent 已更新组件「${component}」，同步 ${screenIds.length} 屏${names ? `（${names}）` : ''}${summary}` : `本机 agent 已完成（没有改组件）${summary}`)
-      : screenIds.length ? `本机 agent 已完成：更新了 ${screenIds.length} 屏（${names}）${summary}` : `本机 agent 已完成（没有回写屏幕）${summary}`;
+    const reason = String(extra.message ?? extra.errorClass ?? '');
+    // 失败原因是原始原因，Quilt 自己写的一律中文：英文回执里的中文原因交给 failureText 译，不夹进英文句子；会话自己写的原因照登
+    const failed = locale === 'en' && CJK.test(reason)
+      ? failureText(job.kind as JobKind, String(extra.errorClass ?? 'agent'), reason, 0, 'en')
+      : tr(`本机 agent 未完成（${reason}）`, `The local agent did not finish (${reason})`, locale);
+    const n = screenIds.length;
+    const content = status !== 'succeeded' ? failed
+      : job.kind === 'edit_component' ? (component
+        ? tr(`本机 agent 已更新组件「${component}」，同步 ${n} 屏${names ? `（${names}）` : ''}${summary}`, `The local agent updated component “${component}” and synced ${countEn(n, 'screen')}${names ? ` (${names})` : ''}${summary}`, locale)
+        : tr(`本机 agent 已完成（没有改组件）${summary}`, `The local agent finished without changing the component${summary}`, locale))
+      : n ? tr(`本机 agent 已完成：更新了 ${n} 屏（${names}）${summary}`, `The local agent finished: updated ${countEn(n, 'screen')} (${names})${summary}`, locale)
+      : tr(`本机 agent 已完成（没有回写屏幕）${summary}`, `The local agent finished without writing back any screens${summary}`, locale);
     await tx.update(schema.messages).set({ content, affectedScreenIds: screenIds }).where(and(eq(schema.messages.jobId, job.id), eq(schema.messages.role, 'assistant')));
     if (screenIds.length) { await deriveLinks(tx, job.projectId); await tx.update(schema.projects).set({ updatedAt: new Date() }).where(eq(schema.projects.id, job.projectId)); }
     return true;
@@ -168,7 +181,8 @@ export async function deliverAgentJob(jobId: string): Promise<void> {
   const session = claude ?? codex;
   if (!session) { await finishAgentJob(claimed, 'failed', { errorClass: 'agent', message: '会话已关闭或不存在，没有投递出去' }); return; }
   try {
-    const prompt = await buildPrompt(claimed);
+    // 网页端建的作业带界面语言（REQ-CORE-046）：指令末尾补同一句语言要求
+    const prompt = withUiLanguage(await buildPrompt(claimed), claimed);
     if (claude) await injectMessage(claude.socketPath, prompt);
     else if (codex) await queueCodexMessage(codex.sessionId, prompt);
   } catch (e) { await finishAgentJob(claimed, 'failed', { errorClass: 'agent', message: `投递失败：${(e as Error).message}` }); return; }
@@ -184,7 +198,7 @@ export async function deliverAgentJob(jobId: string): Promise<void> {
   const delivery = { tool, sessionId: session.sessionId, name: session.named || tool === 'codex' ? session.name : session.sessionId, deliveredAt: new Date().toISOString(), ...(tool === 'codex' ? { opened, ...(openError ? { openError } : {}) } : {}) };
   await db.update(schema.generationJobs).set({ output: { delivery } }).where(eq(schema.generationJobs.id, jobId));
   if (openError) {
-    await db.update(schema.messages).set({ content: `已排进本机 Codex 线程「${delivery.name}」的队列，但没能让 Codex 桌面版打开它：在 Codex 里打开这个线程后它就会执行，做完经 MCP 收口（原因：${openError}）` })
+    await db.update(schema.messages).set({ content: tr(`已排进本机 Codex 线程「${delivery.name}」的队列，但没能让 Codex 桌面版打开它：在 Codex 里打开这个线程后它就会执行，做完经 MCP 收口（原因：${openError}）`, `Queued in the local Codex thread “${delivery.name}”, but Quilt could not get the Codex desktop app to open it: open this thread in Codex and it will run, then report back through MCP (reason: ${openError})`, jobLocale(claimed) ?? 'zh') })
       .where(and(eq(schema.messages.jobId, jobId), eq(schema.messages.role, 'assistant')));
   }
   await emitJobEvent(jobId, 'progress', { stage: 'delivered', session: delivery.name });

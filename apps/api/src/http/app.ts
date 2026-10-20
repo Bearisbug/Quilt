@@ -3,8 +3,11 @@ import { z, type ZodType } from 'zod';
 import { Problem, problems, problemResponse } from '../lib/errors.ts';
 import { localUser, type UserRow } from '../services/user.ts';
 import { requestSource } from '../lib/origin.ts';
+import { localeMiddleware } from '../lib/locale.ts';
+import { L, type Locale } from '@quilt/core';
 
-export type Env = { Variables: { requestId: string; user: UserRow | null } };
+// locale：这个请求的界面语言（REQ-CORE-046）；uiLocale：请求带的 X-Quilt-Locale，没带为 null（见 lib/locale.ts）
+export type Env = { Variables: { requestId: string; user: UserRow | null; locale: Locale; uiLocale: Locale | null } };
 export type AppContext = Context<Env>;
 
 export function createApp() {
@@ -18,17 +21,19 @@ export function createApp() {
     await next();
     c.header('X-Request-Id', rid);
   });
+  // 界面语言（REQ-CORE-046）：先于来源校验定下来，被拒的请求也按它出文案
+  app.use('*', localeMiddleware);
 
   app.onError((err, c) => {
     if (err instanceof Problem) return problemResponse(c, err);
     console.error(`[${c.get('requestId')}]`, err);
-    return problemResponse(c, new Problem(500, '/errors/internal', '服务器内部错误'));
+    return problemResponse(c, new Problem(500, '/errors/internal', L('服务器内部错误', 'Internal server error')));
   });
   app.notFound((c) => problemResponse(c, problems.notFound()));
 
   // 来源校验（§15 v0.75，ADR-016 修订）：无鉴权的前提是请求确实来自本机画布或本机客户端，Host / Origin 不在名单里一律 403
   const fromLocal = async (c: AppContext, next: () => Promise<void>) => {
-    if (!requestSource.allows(c.req.header('host'), c.req.header('origin'))) throw new Problem(403, '/errors/forbidden', '请求来源不在本机名单（Host / Origin）');
+    if (!requestSource.allows(c.req.header('host'), c.req.header('origin'))) throw new Problem(403, '/errors/forbidden', L('请求来源不在本机名单（Host / Origin）', 'Request origin is not on the local allowlist (Host / Origin)'));
     await next();
   };
   app.use('/v1/*', fromLocal);
@@ -59,7 +64,7 @@ export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 
 export const requireUser = (c: AppContext): UserRow => {
   const u = c.get('user');
-  if (!u) throw new Problem(500, '/errors/internal', '默认用户未解析');
+  if (!u) throw new Problem(500, '/errors/internal', L('默认用户未解析', 'Default user not resolved'));
   return u;
 };
 

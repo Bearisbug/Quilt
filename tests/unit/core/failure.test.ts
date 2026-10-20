@@ -54,3 +54,58 @@ test('failureText：没有「重试」的作业写各自再发一次的入口（
   }
   assert.ok(failureText('edit_screens', 'system', 'boom').includes('点「重试」'), '能重试的作业照旧写「点「重试」」');
 });
+
+// 英文版（REQ-CORE-046）：逐句对应中文版，英文界面里不夹中文
+test('failureText 英文版：开头按作业种类，原因与下一步逐句对应中文版', () => {
+  const gemini = 'gemini 503 {"error":{"code":503,"message":"This model is currently experiencing high demand","status":"UNAVAILABLE"}}';
+  const t = failureText('generate', 'provider', gemini, 0, 'en');
+  assert.ok(t.startsWith('Generation failed: the model service is temporarily unavailable (HTTP 503). '), t);
+  assert.ok(!/[{}]|gemini|UNAVAILABLE/.test(t), t);
+  assert.ok(t.includes('“Retry”') && t.includes('another channel'), t);
+  assert.equal(failureText('edit_screens', 'provider', 'openai-compatible 401 x', 0, 'en'),
+    'Edit failed: the channel’s key was rejected (HTTP 401). Check this channel’s key in Settings → Channels, or send again with another channel');
+  assert.ok(failureText('chat', 'provider', 'agent-sdk: API Error: 429 rate limited', 0, 'en').startsWith('Reply failed: the channel is rate limited (HTTP 429)'));
+  assert.ok(failureText('generate', 'provider', 'API Error: 400 nope', 0, 'en').startsWith('Generation failed: the channel rejected this request (HTTP 400)'));
+  assert.ok(failureText('generate', 'provider', 'fetch failed: ECONNREFUSED', 0, 'en').startsWith('Generation failed: could not reach the model channel, or it did not respond'));
+  assert.ok(failureText('edit_screens', 'provider', 'gemini output hit the token limit (finishReason=MAX_TOKENS)', 0, 'en').endsWith('. Split this request into several smaller ones'));
+  assert.ok(failureText('generate', 'timeout', 'job exceeded 480s', 0, 'en').startsWith('Generation failed: it did not finish within the time limit. Click “Retry”'));
+  assert.equal(failureText('edit_screens', 'validation', 'revision conflict', 0, 'en').split('. ')[0], 'Edit failed: this screen was changed while the job was running');
+  assert.ok(!failureText('generate', 'validation', 'something odd happened', 0, 'en').includes('something odd'));
+  assert.ok(failureText('regenerate_subtree', undefined, undefined, 0, 'en').startsWith('Regenerating this block failed. '));
+  assert.ok(failureText(null, 'system', 'x', 0, 'en').startsWith('Job failed: Quilt hit an internal error'));
+});
+
+test('failureText 英文版：已保留的屏分单复数', () => {
+  assert.ok(failureText('generate', 'provider', 'gemini 503 x', 1, 'en').includes('(HTTP 503); 1 screen kept. '));
+  assert.ok(failureText('generate', 'provider', 'gemini 503 x', 2, 'en').includes('(HTTP 503); 2 screens kept. '));
+});
+
+test('failureText 英文版：中文原因换成英文，认不得的退回按类别的通用原因', () => {
+  assert.ok(failureText('edit_component', 'validation', '组件必须恰好一个根元素，现在有 0 个', 0, 'en').startsWith('Component edit failed: a component must have exactly one root element; this one has 0. '));
+  assert.ok(failureText('generate', 'system', 'Quilt 重启时作业未完成', 0, 'en').startsWith('Generation failed: the job had not finished when Quilt restarted. '));
+  assert.ok(failureText('generate', 'provider', '本机没有找到 codex 命令：安装 Codex 并运行 codex 用 ChatGPT 账号登录', 0, 'en').startsWith('Generation failed: the codex command was not found on this machine; install Codex'));
+  // 「通道不可用：…」「投递失败：…」：后半句认得就接上，认不得只说前半句
+  assert.ok(failureText('generate', 'validation', '通道不可用：通道没有密钥', 0, 'en').startsWith('Generation failed: the channel is unavailable: the channel has no key. '));
+  assert.ok(failureText('generate', 'validation', '通道不可用：boom', 0, 'en').startsWith('Generation failed: the channel is unavailable. '));
+  assert.ok(failureText('generate', 'agent', '投递失败：写入会话 inbox 超时', 0, 'en').startsWith('Generation failed: delivery failed: timed out writing to the session inbox. '));
+  assert.ok(failureText('generate', 'agent', '一句表里没有的中文', 0, 'en').startsWith('Generation failed: the local session did not finish. '));
+  assert.ok(failureText('generate', 'validation', '一句表里没有的中文', 0, 'en').startsWith('Generation failed: the model output did not pass the checks. '));
+  // 同样的输入中文版照旧原样写中文原因
+  assert.ok(failureText('generate', 'agent', '一句表里没有的中文').startsWith('造屏失败：一句表里没有的中文。'));
+});
+
+test('failureText 英文版：没有「重试」的作业写各自再发一次的入口，下一步首字母大写、整句不夹中文', () => {
+  for (const [kind, want] of [['export_prototype', '“Export prototype”'], ['regenerate_subtree', '“Regenerate block”'], ['apply_design_system', 'design system panel'], ['propose_design_system', 'design system panel']] as const) {
+    for (const cls of [undefined, 'system', 'quality', 'provider', 'agent'] as const) {
+      const t = failureText(kind, cls, 'HTTP 500 upstream', 0, 'en');
+      assert.ok(t.includes(want) && !t.includes('“Retry”'), `${kind}/${cls ?? '无类别'}：${t}`);
+    }
+  }
+  const kinds = ['generate', 'edit_screens', 'edit_component', 'regenerate_subtree', 'apply_design_system', 'propose_design_system', 'export_prototype', 'ingest_screen', 'chat', null] as const;
+  const msgs = ['HTTP 401 x', 'HTTP 400 x', 'HTTP 502 x', 'output token maximum', 'revision conflict', 'odd', '组件里不能再放别的共享组件', '通道不可用：通道已删除或不属于该账号', '表里没有的中文', ''];
+  for (const kind of kinds) for (const cls of [undefined, 'provider', 'timeout', 'agent', 'system', 'validation', 'quality'] as const) for (const msg of msgs) {
+    const t = failureText(kind, cls, msg, 2, 'en');
+    assert.ok(!/[\u3400-\u9fff「」，。；：]/.test(t), `${kind}/${cls}/${msg}：${t}`);
+    assert.match(t, /\. [A-Z]/, t);
+  }
+});

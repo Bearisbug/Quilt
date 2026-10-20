@@ -1,9 +1,10 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
-import { annotationsPrompt, type AnnotationDto } from '@quilt/core';
+import { annotationsPrompt, L, type AnnotationDto } from '@quilt/core';
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
 import { problems } from '../lib/errors.ts';
 import { notifyCanvas } from '../lib/events.ts';
+import { countEn } from '../lib/locale.ts';
 import { ownedScreen, currentBody, hasActiveJob } from './screens.ts';
 import { ownedProject, type JobRow } from './projects.ts';
 import type { UserRow } from './user.ts';
@@ -71,7 +72,7 @@ export async function send(user: UserRow, projectId: string, annotationIds: stri
     .innerJoin(schema.screens, eq(schema.annotations.screenId, schema.screens.id))
     .where(inArray(schema.annotations.id, annotationIds))
     .orderBy(asc(schema.annotations.createdAt));
-  if (rows.length !== annotationIds.length || rows.some((r) => r.projectId !== projectId)) throw problems.validation([{ path: 'annotationIds', message: '批注不存在或不属于该项目' }]);
+  if (rows.length !== annotationIds.length || rows.some((r) => r.projectId !== projectId)) throw problems.validation([{ path: 'annotationIds', message: L('批注不存在或不属于该项目', 'Some annotations do not exist or are not in this project') }]);
 
   const byScreen = new Map<string, Row[]>();
   for (const { a } of rows) byScreen.set(a.screenId, [...(byScreen.get(a.screenId) ?? []), a]);
@@ -79,7 +80,7 @@ export async function send(user: UserRow, projectId: string, annotationIds: stri
   // 全有或全无（v0.77）：先对全部目标屏查屏锁与限流余量，任何一屏不满足就整批拒、一个作业也不建——
   // 否则前几屏的作业已入队、响应却是 409 / 429，调用方按失败重发会把那几屏改两次
   const limit = config.rateLimitJobsPerMinute;
-  if (byScreen.size > limit) throw problems.unprocessable([{ path: 'annotationIds', message: `一次最多发 ${limit} 屏的批注（每分钟最多建 ${limit} 个作业），分批发` }]);
+  if (byScreen.size > limit) throw problems.unprocessable([{ path: 'annotationIds', message: L(`一次最多发 ${limit} 屏的批注（每分钟最多建 ${limit} 个作业），分批发`, `You can send annotations for at most ${countEn(limit, 'screen')} at a time (at most ${countEn(limit, 'job')} per minute); send them in batches`) }]);
   for (const screenId of byScreen.keys()) if (await hasActiveJob(db, projectId, screenId)) throw problems.screenBusy();
   assertRateRoom(user.id, byScreen.size);
   const jobs: JobRow[] = [];

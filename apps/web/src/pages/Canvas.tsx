@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Bot, Component, Crosshair, Download, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MessageSquarePlus, MousePointerClick, NotebookPen, Palette, Plus, Search, Settings, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
-import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, failureText, missingPagePrompt, type ProjectDetailDto, type JobDto, type JobEventDto, type ScreenDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core/browser';
+import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, failureText, missingPagePrompt, type ComponentDto, type ProjectDetailDto, type JobDto, type JobEventDto, type ScreenDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core/browser';
 import { api, ApiError, loadConfig, subscribeProjectEvents, type LiveState } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { rememberLastProject } from '@/lib/lastProject';
@@ -28,6 +28,10 @@ import { RevisionPanel } from '@/panels/RevisionPanel';
 import type { ElementSel, DirectEdit, InspectorKeys } from '@/panels/InspectorPanel';
 import { AnnotationPanel } from '@/panels/AnnotationPanel';
 import { AgentJobsPanel } from '@/panels/AgentJobsPanel';
+import { getLocale, tOf, useLocale, useT, type Locale } from '@/i18n';
+import canvasPageMessages from '@/i18n/locales/canvas-page';
+import commonMessages from '@/i18n/locales/common';
+import inspectMessages from '@/i18n/locales/panels-inspect';
 
 // 低频的面板与弹层按需加载（PERF-3 v1.06）：首屏不解析它们。画布空闲两秒后预取，真用到时多半已在缓存里；
 // 面板槽位在载入期间占位成同一个框、居中转圈，载入后原地出现，不跳
@@ -47,8 +51,11 @@ const ICON = 18;
 const MAX_TARGETS = 20; // API-CORE-010 契约上限
 // 详情还没到时的屏、组件、批注：同一个空数组，依赖它们的 memo 不必每次渲染都重算
 const NONE: never[] = [];
-// 造屏名额是项目级的（REQ-CORE-020）：锚点造屏、工具栏「新建屏幕」、断链补屏建的都是 generate，互相排队但不挡改屏
-const GENERATE_BUSY = '上一批屏还在造，等它落地再造下一批';
+// 稳定回调（refresh）里取文案用它：按调用时的界面语言取，不进依赖——换语言不该重取项目、重连事件流
+const tNow = tOf(canvasPageMessages);
+const tInspect = tOf(inspectMessages);
+// 检查器直改的种类 → 撤销提示里的动作名（与检查器按钮同名）
+const DIRECT_EDIT_LABEL = { remove: 'inspector.deleteElement', detach: 'inspector.lock.detach', edit: 'inspector.editElement' } as const;
 const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 const ALT = MAC ? '⌥' : 'Alt+';
 const CMD = MAC ? '⌘' : 'Ctrl+';
@@ -58,8 +65,13 @@ const NEW_COMPONENT_HTML = '<div class="p-4 text-sm text-on-surface-variant">New
 // 签名续取（v0.76）：截图签名至少有效 5 分钟、预览签名至少 10 分钟（API 的 stableExpiry），页面可见时距上次取到详情满 4 分钟就静默重取
 const RENEW_MS = 4 * 60_000;
 
-// 画布区取不到项目时的两种失败（v0.76）；null = 没失败（加载中或已就绪）
-type LoadFailure = { kind: 'not-found' } | { kind: 'failed'; reason: string } | null;
+// 画布区取不到项目时的两种失败（v0.76）；null = 没失败（加载中或已就绪）。reason 为 null = 连不上服务，渲染时按当时的界面语言写
+type LoadFailure = { kind: 'not-found' } | { kind: 'failed'; reason: string | null } | null;
+// 作业进度存原始事件、渲染时再成句：换界面语言后 chip 上的进度跟着换
+type JobProgress = { type: 'progress' | 'screen_planned' | 'screen_html_ready'; data: Record<string, unknown> };
+// 结束了的作业 chip 的原始字段：作业、结束那一刻的屏与组件表（作业名按它们写）、失败原因（failureText 按界面语言成句）
+type EndedFrom = { job: JobDto; screens: ScreenDto[]; components: ComponentDto[]; errorClass?: string; message?: string };
+const endedReason = (f: EndedFrom, locale: Locale) => failureText(f.job.kind, f.errorClass, f.message, 0, locale);
 
 // PAGE-CANVAS：画布 + 输入框 + 修订/设计系统/检查器面板（面板状态进 URL，INT-020）
 
@@ -74,12 +86,19 @@ function CanvasPage() {
   const { projectId = '' } = useParams();
   const [params, setParams] = useSearchParams();
   const toast = useToast();
+  const t = useT(canvasPageMessages);
+  const tc = useT(commonMessages);
+  const locale = useLocale();
+  // 造屏名额是项目级的（REQ-CORE-020）：锚点造屏、工具栏「新建屏幕」、断链补屏建的都是 generate，互相排队但不挡改屏
+  const generateBusy = t('generateBusy');
   const [detail, setDetail] = useState<ProjectDetailDto | null>(null);
   // 在跑作业是一组（REQ-CORE-020）：后端允许并行，前端跟踪全部非 agent 作业，进度按 jobId 分别记
   const [activeJobs, setActiveJobs] = useState<JobDto[]>([]);
-  const [progress, setProgress] = useState<Record<string, string>>({});
+  const [progress, setProgress] = useState<Record<string, JobProgress>>({});
   // 作业 chip（v1.17）：结束了还要留一会儿的那些——失败的留到关掉或重试，成功的淡出后撤
   const { ended, end: endJob, dismiss: dismissJob } = useEndedJobs();
+  // 结束了的作业 chip 的文案按当时的界面语言现算（失败的一直留着，切语言要跟着换）：记下作业、结束那一刻的屏与组件表、失败原因的原始字段
+  const endedFrom = useRef(new Map<string, EndedFrom>());
   // 预览域地址来自运行时配置（API-CORE-028）：打包后是 127.0.0.1:3101，开发是 preview.localhost:3101
   const [previewOrigin, setPreviewOrigin] = useState<string | null>(null);
   const [configFailed, setConfigFailed] = useState(false);
@@ -200,8 +219,8 @@ function CanvasPage() {
       if (seq !== detailSeq.current) return null;
       // 404 = 项目没了（书签指向已删项目、别的标签页刚删掉）：任何时候都转到「不存在」态，画布撤掉
       if (e instanceof ApiError && e.status === 404) { hasDetail.current = false; setDetail(null); setLoadFailure({ kind: 'not-found' }); return null; }
-      if (!hasDetail.current) setLoadFailure({ kind: 'failed', reason: e instanceof ApiError ? e.problem.title : '连不上 Quilt 服务' });
-      else if (!quiet) toast(e instanceof ApiError ? e.problem.title : '项目加载失败', 'error');
+      if (!hasDetail.current) setLoadFailure({ kind: 'failed', reason: e instanceof ApiError ? e.problem.title : null });
+      else if (!quiet) toast(e instanceof ApiError ? e.problem.title : tNow('load.refreshFailed'), 'error');
       return null;
     }
   }, [projectId, toast, drafts]);
@@ -271,12 +290,12 @@ function CanvasPage() {
   const onJobEvent = useRef<(job: JobDto, e: JobEventDto) => void>(() => {});
   onJobEvent.current = (job, e) => {
     const d = e.data as Record<string, unknown>;
-    const setP = (text: string) => setProgress((m) => ({ ...m, [job.id]: text }));
+    const setP = (p: JobProgress) => setProgress((m) => ({ ...m, [job.id]: p }));
     // 聊天作业的进度是助手每次工具调用的一句话（REQ-CORE-023）
     // 改组件（REQ-EDIT-006）：模型回来后先确定性回刷用它的屏，再逐屏截图
-    if (e.type === 'progress') setP(progressText(job.kind, d));
-    if (e.type === 'screen_planned') { setP(`正在生成「${d.name}」…`); scheduleRefresh(); }
-    if (e.type === 'screen_html_ready') { setP('正在截图…'); scheduleRefresh(); }
+    if (e.type === 'progress') setP({ type: e.type, data: d });
+    if (e.type === 'screen_planned') { setP({ type: e.type, data: d }); scheduleRefresh(); }
+    if (e.type === 'screen_html_ready') { setP({ type: e.type, data: d }); scheduleRefresh(); }
     if (e.type === 'screen_screenshot_ready') scheduleRefresh();
     if (e.type === 'succeeded' || e.type === 'failed' || e.type === 'cancelled') {
       const settled = settleJob({ seen: seenRef.current, finished: finishedRef.current, trackedAt: trackedAt.current }, job.id);
@@ -287,14 +306,13 @@ function CanvasPage() {
       setProgress((m) => { const next = { ...m }; delete next[job.id]; return next; });
       refresh();
       // 作业 chip：失败的变成警告色 chip 留着（写原因、可重试），成功的写「完成」后淡出，取消的直接消失
+      const from: EndedFrom = { job, screens, components, errorClass: d.errorClass as string | undefined, message: d.message as string | undefined };
+      if (e.type !== 'cancelled') endedFrom.current.set(job.id, from);
       const chip = { id: job.id, createdAt: job.createdAt, label: jobLabel(job, screens, components), kind: job.kind };
-      if (e.type === 'failed') {
-        // 失败只在 chip 上说（v1.17）：chip 留到用户关掉，再弹一条提示条是同一件事说两遍
-        const reason = failureText(job.kind, d.errorClass as string | undefined, d.message as string | undefined);
-        endJob({ ...chip, state: 'failed', reason });
-      }
+      // 失败只在 chip 上说（v1.17）：chip 留到用户关掉，再弹一条提示条是同一件事说两遍
+      if (e.type === 'failed') endJob({ ...chip, state: 'failed', reason: endedReason(from, getLocale()) });
       if (e.type === 'succeeded') endJob({ ...chip, state: 'succeeded' });
-      if (e.type === 'succeeded' && job.kind === 'export_prototype') { toast('原型已导出，开始下载'); window.location.assign(api.exportUrl(job.id)); }
+      if (e.type === 'succeeded' && job.kind === 'export_prototype') { toast(t('jobs.exported')); window.location.assign(api.exportUrl(job.id)); }
       if (e.type === 'succeeded' && job.kind === 'generate') {
         const fresh = ((d.screenIds as string[] | undefined) ?? []).filter((id) => !before.has(id));
         // 只在目标为空时接管（INT-008）：一批屏在造、同时手动选了另一张屏要改，是 REQ-CORE-020 的主场景，
@@ -306,7 +324,7 @@ function CanvasPage() {
         void api.jobs.get(job.id).then(({ job: full }) => {
           const proposal = (full.output as { proposal?: DesignProposalDto } | null)?.proposal;
           if (proposal) { setProposal(proposal); setPanel('design'); }
-        }).catch(() => toast('提案取不回来了，重新说一次', 'error'));
+        }).catch(() => toast(t('jobs.proposalLost'), 'error'));
       }
     }
   };
@@ -370,28 +388,41 @@ function CanvasPage() {
   // 发送前的冲突预判：没有目标 = 造，撞在跑的 generate；有目标 = 改，撞目标屏的占用。其余组合一律放行，后端 409 是最终判据
   // 只有组件没有屏也没有锚点 = 改组件（REQ-EDIT-006）：一次一个，且不撞同一组件在跑的 edit_component
   // 项目还没到手时发送与工具栏一律不可用，理由随加载 / 失败态写
-  const pendingReason = loadFailure?.kind === 'not-found' ? '这个项目不存在' : loadFailure || configFailed ? '项目没加载出来' : '项目还在加载';
+  const pendingReason = loadFailure?.kind === 'not-found' ? t('load.notFound') : loadFailure || configFailed ? t('load.failed') : t('load.loading');
   const blockedReason = useMemo(() => {
     if (!detail) return pendingReason;
     const targets = targetScreens.slice(0, MAX_TARGETS);
     if (!targets.length && !anchor && targetComponents.length) {
-      if (targetComponents.length > 1) return '一次只能改一个组件，其余先从目标里去掉';
+      if (targetComponents.length > 1) return t('blocked.oneComponent');
       const c = targetComponents[0];
-      return guardJobs.some((j) => j.kind === 'edit_component' && (j.input as JobInput).componentId === c.id) ? `「${c.name}」正在改，等这一轮完事` : null;
+      return guardJobs.some((j) => j.kind === 'edit_component' && (j.input as JobInput).componentId === c.id) ? t('blocked.editing', { name: c.name }) : null;
     }
-    if (!targets.length) return generating ? GENERATE_BUSY : null;
+    if (!targets.length) return generating ? generateBusy : null;
     const hit = targets.filter((s) => busyScreens.has(s.id));
     if (!hit.length) return null;
-    return hit.length === 1 ? `「${hit[0].name}」正在改，等这一轮完事` : `选中的 ${hit.length} 屏正在改（含「${hit[0].name}」），等这一轮完事`;
-  }, [detail, pendingReason, targetScreens, targetComponents, anchor, busyScreens, generating, guardJobs]);
+    return hit.length === 1 ? t('blocked.editing', { name: hit[0].name }) : t('blocked.editingMany', { n: hit.length, name: hit[0].name });
+  }, [detail, pendingReason, targetScreens, targetComponents, anchor, busyScreens, generating, guardJobs, t, generateBusy]);
   // 在跑作业按创建时间倒序：最新的贴着输入框（Esc 取消的就是它，必须始终可见、不被折进「还有 N 个」）；时间相同取后加入的那个
   const runningJobs = useMemo(() => [...activeJobs].reverse().sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [activeJobs]);
   // 进度兜底收在这里：作业刚建、事件还没来时 chip 也要有话说，不能看起来卡住
-  const chips = useMemo(() => jobChips(runningJobs.map((j) => ({ id: j.id, createdAt: j.createdAt, label: jobLabel(j, screens, components), progress: progress[j.id] ?? '排队中…' })), ended), [runningJobs, screens, components, progress, ended]);
+  const chips = useMemo(() => {
+    // 已撤掉的 chip 不再留它的原始字段
+    for (const id of endedFrom.current.keys()) if (!ended.some((x) => x.id === id)) endedFrom.current.delete(id);
+    return jobChips(runningJobs.map((j) => {
+      const p = progress[j.id];
+      const text = !p ? t('progress.queued') : p.type === 'progress' ? progressText(j.kind, p.data) : p.type === 'screen_planned' ? t('progress.planned', { name: p.data.name }) : t('progress.screenshotting');
+      return { id: j.id, createdAt: j.createdAt, label: jobLabel(j, screens, components), progress: text };
+    }), ended.map((x) => {
+      const f = endedFrom.current.get(x.id);
+      if (!f) return x;
+      const label = jobLabel(f.job, f.screens, f.components);
+      return x.state === 'failed' ? { ...x, label, reason: endedReason(f, locale) } : { ...x, label };
+    }));
+  }, [runningJobs, screens, components, progress, ended, t, locale]);
 
   const handleJobError = (e: unknown, fallback: string) => {
-    if (e instanceof ApiError && e.type === '/errors/screen-busy') toast('该屏正在生成中，等它完成再改', 'error');
-    else if (e instanceof ApiError && e.type === '/errors/rate-limited') toast('操作太频繁，稍后再试', 'error');
+    if (e instanceof ApiError && e.type === '/errors/screen-busy') toast(t('jobs.screenBusy'), 'error');
+    else if (e instanceof ApiError && e.type === '/errors/rate-limited') toast(t('jobs.rateLimited'), 'error');
     else toast(e instanceof ApiError ? e.problem.title : fallback, 'error');
   };
   // 追加而不是替换：并行作业各自一枚 chip，且 job.input 里带着目标屏，冲突判定不必等下一次 refresh
@@ -404,10 +435,10 @@ function CanvasPage() {
     try {
       const { job } = await api.projects.createJob(projectId, body);
       // 投递到本机会话的作业不进作业 chip，去 agent 面板看状态
-      if (job.runner === 'agent') { refresh(); toast(`已投递到本机 ${(job.input as { runner?: { tool?: string } })?.runner?.tool === 'codex' ? 'Codex 线程' : 'Claude Code 会话'}，在本机 agent 面板看状态`); } else trackJob(job);
+      if (job.runner === 'agent') { refresh(); toast((job.input as { runner?: { tool?: string } })?.runner?.tool === 'codex' ? t('jobs.deliveredCodex') : t('jobs.deliveredClaude')); } else trackJob(job);
       return job;
     } catch (e) {
-      if (e instanceof ApiError && e.type === '/errors/validation' && JSON.stringify(e.problem).includes('sessionId')) { toast('会话已关闭或不存在，重新选一个', 'error'); void loadSessions(); }
+      if (e instanceof ApiError && e.type === '/errors/validation' && JSON.stringify(e.problem).includes('sessionId')) { toast(t('jobs.sessionGone'), 'error'); void loadSessions(); }
       else handleJobError(e, fallback);
       return null;
     }
@@ -425,13 +456,13 @@ function CanvasPage() {
     if (!failed) return;
     try {
       const user = (await api.projects.messages(projectId)).items.find((m) => m.role === 'user' && m.jobId === id);
-      if (!user) { toast('这一轮的记录找不到了，重新发一次', 'error'); return; }
+      if (!user) { toast(t('jobs.retryNoRecord'), 'error'); return; }
       roundStarted((await api.projects.retry(projectId, user.id, failed.kind === 'chat' ? undefined : sendRunner)).job);
       dismissJob(id);
     } catch (e) {
-      if (e instanceof ApiError && e.type === '/errors/job-not-finished') toast('这一轮还在跑，等它结束再重试', 'error');
+      if (e instanceof ApiError && e.type === '/errors/job-not-finished') toast(t('jobs.retryNotFinished'), 'error');
       else if (e instanceof ApiError && e.type === '/errors/validation') toast((e.problem as { errors?: { message: string }[] }).errors?.[0]?.message ?? e.problem.title, 'error');
-      else handleJobError(e, '重试失败');
+      else handleJobError(e, t('jobs.retryFailed'));
     }
   };
   // 发送（REQ-CORE-006）：有目标 = 改（targetScreenIds），没有 = 造（count / anchor）；版数两边都带。
@@ -447,15 +478,15 @@ function CanvasPage() {
       return true;
     } catch (e) {
       // 记住的会话在发送前关掉了：说清楚并重取列表，下拉会回到「选择会话」
-      if (e instanceof ApiError && e.type === '/errors/validation' && JSON.stringify(e.problem).includes('sessionId')) { toast('会话已关闭或不存在，重新选一个', 'error'); void loadSessions(); }
+      if (e instanceof ApiError && e.type === '/errors/validation' && JSON.stringify(e.problem).includes('sessionId')) { toast(t('jobs.sessionGone'), 'error'); void loadSessions(); }
       // 预判之外真撞上了（别处刚建的作业、多屏改屏的后端缺口）：problem 体不带屏信息，重取项目后用本轮目标 ∩ 覆盖屏集点名
       else if (e instanceof ApiError && e.type === '/errors/screen-busy') {
         const d = await refresh();
         const ids = new Set((d?.activeJobs ?? []).flatMap((j) => coveredScreens(j, (d?.screens ?? []).map((s) => s.id), d?.components ?? [])));
         const hit = targets?.map((id) => (d?.screens ?? []).find((s) => s.id === id)).find((s) => s && ids.has(s.id));
-        toast(hit ? `「${hit.name}」正在改，等这一轮完事` : targets ? '目标屏有作业在跑，等它完成再改' : GENERATE_BUSY, 'error');
+        toast(hit ? t('blocked.editing', { name: hit.name }) : targets ? t('blocked.targetsBusy') : generateBusy, 'error');
       }
-      else handleJobError(e, '发送失败');
+      else handleJobError(e, t('jobs.sendFailed'));
       return false;
     }
   };
@@ -466,7 +497,7 @@ function CanvasPage() {
     catch (e) {
       // 连按两次会撞上「它已经结束了」，这不是失败，不必打扰用户
       if (e instanceof ApiError && e.type === '/errors/job-finished') return;
-      toast('取消失败', 'error');
+      toast(t('jobs.cancelFailed'), 'error');
     }
   };
   const cancelNewest = () => { const j = runningJobs[0]; if (j) void cancelJob(j.id); };
@@ -480,18 +511,19 @@ function CanvasPage() {
   // 组件里的直改撤不了（会同步到所有用它的屏），也压一步：撤到它时说明，不越过它去撤更早的一步
   const succeeded = useRef(new Map<string, string>());
   const latest = (rev: string) => { let r = rev; while (succeeded.current.has(r)) r = succeeded.current.get(r)!; return r; };
+  // 撤销步晚于直改才跑，提示文案按撤销那一刻的界面语言取（tNow / tInspect），不用压栈时那一帧的 t
   const onDirectEdit = (e: DirectEdit) => undoStack.push('componentName' in e
-    ? { label: '改组件', run: async () => { toast(`组件「${e.componentName}」里的改动撤销不了，要改回去就再改一次组件`, 'error'); return 'drop'; } }
-    : { label: e.label, run: async () => {
+    ? { label: '改组件', run: async () => { toast(tNow('undo.componentEdit', { name: e.componentName }), 'error'); return 'drop'; } }
+    : { label: e.op, run: async () => {
       try {
         const { revision } = await api.screens.restore(e.screenId, e.before, latest(e.after));
         succeeded.current.set(e.before, revision.id);
-        toast(`已撤销${e.label}`); refresh(); return 'done';
+        toast(tNow('undo.done', { label: tInspect(DIRECT_EDIT_LABEL[e.op]) })); refresh(); return 'done';
       }
       catch (err) {
-        if (err instanceof ApiError && err.type === '/errors/screen-busy') { toast('这一屏正在生成，等它完成再撤销', 'error'); return 'keep'; }
-        if (err instanceof ApiError && err.type === '/errors/revision-conflict') { toast('这一屏之后又改过了，撤销不了这一步，去修订面板找回', 'error'); return 'drop'; }
-        toast('撤销失败', 'error'); return 'keep';
+        if (err instanceof ApiError && err.type === '/errors/screen-busy') { toast(tNow('undo.busy'), 'error'); return 'keep'; }
+        if (err instanceof ApiError && err.type === '/errors/revision-conflict') { toast(tNow('undo.conflict'), 'error'); return 'drop'; }
+        toast(tNow('undo.failed'), 'error'); return 'keep';
       }
     } });
   const inspectorKeys = useRef<InspectorKeys | null>(null);
@@ -502,12 +534,12 @@ function CanvasPage() {
     setNewComponentOpen(false);
     await refresh();
     targetOnlyComponent(component.id);
-    toast(`已新建组件「${name}」，在下方描述它`);
+    toast(t('component.created', { name }));
   };
   // 检查器「改组件」：把组件设为唯一目标（屏目标让位——这一句说的是组件，不是屏）
   const onEditComponent = (name: string) => {
     const c = components.find((x) => x.name === name);
-    if (!c) { toast('这个组件已不存在', 'error'); return; }
+    if (!c) { toast(t('component.gone'), 'error'); return; }
     targetOnlyComponent(c.id);
   };
   // 删选中的屏与组件（REQ-EDIT-006）：先屏后组件；组件删掉后屏里已展开的那份留着、只是不再跟着改
@@ -517,11 +549,11 @@ function CanvasPage() {
     const failed: string[] = [];
     for (const s of selectedScreens) {
       try { await api.screens.remove(s.id); }
-      catch (e) { failed.push(e instanceof ApiError && e.type === '/errors/screen-busy' ? `${s.name} 正在生成中` : s.name); }
+      catch (e) { failed.push(e instanceof ApiError && e.type === '/errors/screen-busy' ? t('remove.screenBusy', { name: s.name }) : s.name); }
     }
     for (const c of selectedComponents) {
       try { await api.components.remove(c.id); }
-      catch { failed.push(`组件 ${c.name}`); }
+      catch { failed.push(t('remove.component', { name: c.name })); }
     }
     const gone = new Set(selectedScreens.map((s) => s.id));
     const goneComps = new Set(selectedComponents.map((c) => c.id));
@@ -529,22 +561,22 @@ function CanvasPage() {
     setSelectedComponentIds([]); setTargetComponentIds((t) => t.filter((id) => !goneComps.has(id)));
     refresh();
     const total = selectedScreens.length + selectedComponents.length;
-    if (failed.length) toast(`${failed.length} 项未能删除：${failed.join('、')}`, 'error');
-    else toast(total > 1 ? `已删除 ${total} 项` : '已删除');
+    if (failed.length) toast(t('remove.failed', { count: failed.length, names: failed.join(t('remove.separator')) }), 'error');
+    else toast(total > 1 ? t('remove.doneMany', { n: total }) : t('remove.done'));
   };
   // REQ-PROTO-003：懒生成 = 钉死路由的 generate
   const generateMissing = async (fromScreenId: string, route: string) => {
     setMissing(null);
-    const job = await startJob({ kind: 'generate', input: { prompt: missingPagePrompt(route), count: 1, versions: 1, route, fromScreenId, runner: modelRunner } }, '生成失败');
-    if (job) toast(`正在生成 ${route}`);
+    const job = await startJob({ kind: 'generate', input: { prompt: missingPagePrompt(route), count: 1, versions: 1, route, fromScreenId, runner: modelRunner } }, t('jobs.generateFailed'));
+    if (job) toast(t('jobs.generatingRoute', { route }));
   };
   // REQ-CORE-014：双击空白 / ⌥G 放锚点，然后聚焦输入框；锚点让屏目标让位（造）
   const placeAnchor = (world: { x: number; y: number }) => {
-    if (generating) { toast(GENERATE_BUSY, 'error'); return; }
+    if (generating) { toast(generateBusy, 'error'); return; }
     setAnchor(world); setSelectedIds([]); setTargetIds([]);
     showComposer();
   };
-  const exportPrototype = () => startJob({ kind: 'export_prototype', input: {} }, '导出失败');
+  const exportPrototype = () => startJob({ kind: 'export_prototype', input: {} }, t('jobs.exportFailed'));
   // REQ-PROTO-002：连线开关（本机记忆）与「接上跳转」修复轮（edit_screens 固定指令，按屏计费）
   const [showLinks, setShowLinks] = useState(() => { try { return localStorage.getItem('quilt:links') !== '0'; } catch { return true; } });
   const toggleLinks = () => setShowLinks((v) => { try { localStorage.setItem('quilt:links', v ? '0' : '1'); } catch { /* 无痕模式等写不了，退化为仅本次会话有效 */ } return !v; });
@@ -555,40 +587,40 @@ function CanvasPage() {
     let sent = 0;
     for (let i = 0; i < targets.length; i += MAX_TARGETS) {
       const batch = targets.slice(i, i + MAX_TARGETS);
-      if (!(await startJob({ kind: 'edit_screens', input: { prompt: LINK_REPAIR_PROMPT, screenIds: batch.map((s) => s.id), versions: 1 } }, '接上跳转失败'))) break;
+      if (!(await startJob({ kind: 'edit_screens', input: { prompt: LINK_REPAIR_PROMPT, screenIds: batch.map((s) => s.id), versions: 1 } }, t('repair.failed')))) break;
       sent += batch.length;
     }
-    if (sent === targets.length) toast(targets.length > MAX_TARGETS ? `正在为 ${sent} 屏接上跳转（分 ${Math.ceil(sent / MAX_TARGETS)} 批）` : `正在为 ${sent} 屏接上跳转`);
-    else if (sent) toast(`已为 ${sent} 屏发起接上跳转，其余 ${targets.length - sent} 屏没发出去`, 'error');
+    if (sent === targets.length) toast(targets.length > MAX_TARGETS ? t('repair.startedBatches', { n: sent, batches: Math.ceil(sent / MAX_TARGETS) }) : t('repair.started', { count: sent }));
+    else if (sent) toast(t('repair.partial', { sent, rest: targets.length - sent }), 'error');
   };
-  const applyDesignSystem = () => startJob({ kind: 'apply_design_system', input: { screenIds: 'all' } }, '回刷失败');
+  const applyDesignSystem = () => startJob({ kind: 'apply_design_system', input: { screenIds: 'all' } }, t('jobs.applyFailed'));
   // REQ-EDIT-002：通道由检查器自己选（记忆独立于输入框），本机 agent 时作业投递到会话、提示词限定只重写该子树。
   // 发出后不清选中——面板留在这个元素上，回写后由热更新重选刷新
   const regenerateSubtree = async (qid: string, prompt: string, runner: Runner | undefined): Promise<boolean> => {
     if (!shownScreen?.currentRevisionId) return false;
-    const job = await startJob({ kind: 'regenerate_subtree', input: { screenId: shownScreen.id, qid, prompt, expectedRevisionId: shownScreen.currentRevisionId, runner } }, '重生成失败');
+    const job = await startJob({ kind: 'regenerate_subtree', input: { screenId: shownScreen.id, qid, prompt, expectedRevisionId: shownScreen.currentRevisionId, runner } }, t('jobs.regenerateFailed'));
     return !!job;
   };
   // 出变体（REQ-CORE-025）：钉死默认屏路由的 generate；建不成时抛出去让弹层留着报错
   const createVariant = async (name: string, prompt: string) => {
     if (!variantFor) return;
-    const job = await startJob({ kind: 'generate', input: { prompt, count: 1, versions, variantOf: variantFor.id, variantName: name, runner: modelRunner } }, '出变体失败');
-    if (!job) throw new Error('出变体失败');
+    const job = await startJob({ kind: 'generate', input: { prompt, count: 1, versions, variantOf: variantFor.id, variantName: name, runner: modelRunner } }, t('variant.failed'));
+    if (!job) throw new Error(t('variant.failed'));
     setVariantFor(null);
-    toast(`正在出「${variantFor.name}」的「${name}」变体`);
+    toast(t('variant.started', { base: variantFor.name, name }));
   };
   // 呈现方式（REQ-PROTO-005）：元数据，PATCH 即生效，不重烤修订
   const togglePresentation = async () => {
     if (!selected) return;
     const next = selected.presentation === 'overlay' ? 'push' : 'overlay';
-    try { await api.screens.patch(selected.id, { presentation: next }); await refresh(); toast(next === 'overlay' ? `「${selected.name}」已设为叠层屏：播放时压在来处那一屏上` : `「${selected.name}」已设为整屏`); }
-    catch { toast('设置失败', 'error'); }
+    try { await api.screens.patch(selected.id, { presentation: next }); await refresh(); toast(next === 'overlay' ? t('screen.overlaySet', { name: selected.name }) : t('screen.fullSet', { name: selected.name })); }
+    catch { toast(t('screen.settingFailed'), 'error'); }
   };
   // REQ-CORE-016：样板屏
   const setExemplar = async () => {
     if (!selected) return;
-    try { await api.projects.patch(projectId, { exemplarScreenId: selected.id }); toast(`已把「${selected.name}」设为样板屏`); refresh(); }
-    catch { toast('设置失败', 'error'); }
+    try { await api.projects.patch(projectId, { exemplarScreenId: selected.id }); toast(t('screen.exemplarSet', { name: selected.name })); refresh(); }
+    catch { toast(t('screen.settingFailed'), 'error'); }
   };
   // 到草稿本里改（REQ-CORE-043）：工具栏带整屏、检查器带选中的那一块，建好草稿就打开草稿本落在它上面（API-CORE-048）
   const [forking, setForking] = useState(false);
@@ -596,24 +628,24 @@ function CanvasPage() {
     if (forking) return;
     setForking(true);
     try { const { screen } = await api.sketchbook.createDraft({ fromScreenId: screenId, qid }); navigate(`/sketch?d=${screen.id}`); }
-    catch (e) { toast(e instanceof ApiError ? `没能建草稿：${(e.problem as { errors?: { message: string }[] }).errors?.[0]?.message ?? e.problem.title}` : '没能建草稿：连不上 Quilt 服务', 'error'); }
+    catch (e) { toast(t('screen.forkFailed', { reason: e instanceof ApiError ? (e.problem as { errors?: { message: string }[] }).errors?.[0]?.message ?? e.problem.title : t('load.unreachable') }), 'error'); }
     finally { setForking(false); }
   };
   // REQ-EDIT-003：设计系统只显式改——面板里的一句话指令建 propose_design_system 作业，成功后弹预览
   const propose = async (instruction: string) => {
-    const job = await startJob({ kind: 'propose_design_system', input: { instruction, runner: modelRunner } }, '提炼失败');
-    if (job) toast('正在提炼约定…');
+    const job = await startJob({ kind: 'propose_design_system', input: { instruction, runner: modelRunner } }, t('design.proposeFailed'));
+    if (job) toast(t('design.proposing'));
   };
   // 提案「确认写入」即落库（v0.78）；返回是否写成——写不成提案弹层留着，可以再点一次
   const writeProposal = async (choice: { conventions: string[]; tokens: DesignProposalDto['tokens'] }): Promise<boolean> => {
     if (!detail) return false;
     try {
       await api.designSystem.update(projectId, { conventions: choice.conventions, ...(choice.tokens ?? {}), expectedVersion: detail.designSystem.version });
-      toast('设计系统已更新');
+      toast(t('design.updated'));
       await refresh();
       return true;
     } catch (e) {
-      toast(e instanceof ApiError && e.type === '/errors/version-conflict' ? '设计系统已被更新，请刷新后重试' : '写入失败', 'error');
+      toast(e instanceof ApiError && e.type === '/errors/version-conflict' ? t('design.conflict') : t('design.writeFailed'), 'error');
       return false;
     }
   };
@@ -626,10 +658,10 @@ function CanvasPage() {
     let sent = 0;
     for (let i = 0; i < screens.length; i += MAX_TARGETS) {
       const batch = screens.slice(i, i + MAX_TARGETS);
-      if (!(await startJob({ kind: 'edit_screens', input: { prompt: CONVENTIONS_REGENERATE_PROMPT, screenIds: batch.map((s) => s.id), versions: 1 } }, '重生成失败'))) break;
+      if (!(await startJob({ kind: 'edit_screens', input: { prompt: CONVENTIONS_REGENERATE_PROMPT, screenIds: batch.map((s) => s.id), versions: 1 } }, t('jobs.regenerateFailed')))) break;
       sent += batch.length;
     }
-    if (sent < screens.length) toast(`已为 ${sent} 屏发起重生成，其余 ${screens.length - sent} 屏没发出去`, 'error');
+    if (sent < screens.length) toast(t('jobs.regeneratePartial', { sent, rest: screens.length - sent }), 'error');
   };
 
   // 输入框的停靠与收起（useComposerChrome）：输入框停的边与大小换算成画布安全区（--chrome-*）
@@ -639,7 +671,7 @@ function CanvasPage() {
   const toggleAnnotate = () => {
     if (annotateArmed) { setPanel(null); setFocusedId(null); return; }
     // 组件卡不开放批注（REQ-EDIT-006）：先退出组件交互态，批注模式照开，点一屏进去
-    if (focusedComponentId) { setFocusedComponentId(null); setPanel('annotate'); toast('共享组件不能批注，点任意一屏开始批注'); return; }
+    if (focusedComponentId) { setFocusedComponentId(null); setPanel('annotate'); toast(t('annotate.noComponents')); return; }
     if (focusedId) { if (navStack.length) canvasApi.current?.resetToOwn(); setPanel('annotate'); return; }
     if (selected) { canvasApi.current?.focus(selected.id); setPanel('annotate'); return; }
     setPanel('annotate');
@@ -650,10 +682,10 @@ function CanvasPage() {
   const addAnnotation = async (note: string): Promise<string | null> => {
     if (!shownScreen || !elementSel) return null;
     try { const { annotation } = await api.annotations.create(shownScreen.id, { qid: elementSel.qid, note, anchorText: elementSel.text.slice(0, 200), rect: elementSel.rect }); await refresh(); return annotation.id; }
-    catch (e) { handleJobError(e, '批注失败'); return null; }
+    catch (e) { handleJobError(e, t('annotate.failed')); return null; }
   };
-  const updateAnnotation = async (id: string, note: string): Promise<boolean> => { try { await api.annotations.update(id, { note }); await refresh(); return true; } catch { toast('保存失败', 'error'); return false; } };
-  const removeAnnotation = async (id: string) => { try { await api.annotations.remove(id); await refresh(); } catch { toast('删除失败', 'error'); } };
+  const updateAnnotation = async (id: string, note: string): Promise<boolean> => { try { await api.annotations.update(id, { note }); await refresh(); return true; } catch { toast(t('annotate.saveFailed'), 'error'); return false; } };
+  const removeAnnotation = async (id: string) => { try { await api.annotations.remove(id); await refresh(); } catch { toast(t('annotate.deleteFailed'), 'error'); } };
   const sendAnnotations = async (target: string[]) => {
     if (!target.length) return;
     try {
@@ -661,8 +693,8 @@ function CanvasPage() {
       // 同一屏的多条批注合成一次作业，多屏就是多个作业——逐个跟踪，不只跟第一个
       for (const j of jobs) if (j.runner !== 'agent') trackJob(j);
       await refresh();
-      toast(jobs.length > 1 ? `已发送 ${target.length} 条批注（${jobs.length} 屏）` : `已发送 ${target.length} 条批注`);
-    } catch (e) { handleJobError(e, '发送批注失败'); }
+      toast(jobs.length > 1 ? t('annotate.sentScreens', { n: target.length, screens: jobs.length }) : t('annotate.sent', { count: target.length }));
+    } catch (e) { handleJobError(e, t('annotate.sendFailed')); }
   };
   // 交互态与选择元素态互斥，退出任一都回到静态截图（卡片本来的样子）。
   // 从交互态切进来时若已在屏内跳转过，先把 iframe 拉回这张卡片自己的那一屏——
@@ -687,7 +719,7 @@ function CanvasPage() {
   const removeElement = () => inspectorKeys.current?.remove();
   const saveElement = panel === 'inspect' && elementSel ? () => inspectorKeys.current?.save() : undefined;
   // 适配视图：缩到下限仍装不下全部时说一声，不静默裁掉（v0.76）
-  const fitAll = () => { if (canvasApi.current && !canvasApi.current.fitView()) toast(`内容太大，最小缩放也装不下全部，用小地图或找屏（${CMD}K）定位`); };
+  const fitAll = () => { if (canvasApi.current && !canvasApi.current.fitView()) toast(t('screen.fitTooBig', { key: `${CMD}K` })); };
   // 恰好选中一屏（或只选了一个组件）时 Enter 进入交互（v0.80）：双击的键盘等价入口，iframe 就绪后焦点移进去
   const enterTarget = focusedId || focusedComponentId ? null : selected ?? (selectedScreens.length === 0 && selectedComponents.length === 1 ? selectedComponents[0] : null);
   const plain: Record<string, (() => void) | undefined> = {
@@ -705,12 +737,12 @@ function CanvasPage() {
     KeyG: () => canvasApi.current?.createAtCenter(),
     KeyC: detail ? () => setNewComponentOpen(true) : undefined,
     KeyS: () => setPanel(panel === 'screens' ? null : 'screens'),
-    KeyV: selected && !selected.variantOf && !focusedId ? () => { if (generating) toast(GENERATE_BUSY, 'error'); else setVariantFor(selected); } : undefined,
+    KeyV: selected && !selected.variantOf && !focusedId ? () => { if (generating) toast(generateBusy, 'error'); else setVariantFor(selected); } : undefined,
   };
   // busy = 有任何作业在跑（导出、接上跳转等仍按这个语义走）
   const busy = activeJobs.length > 0;
   // 回刷所有屏、按新约定重生成要改全部屏，与任何在跑作业都冲突：挡住时写出是哪个作业（PAGE-CANVAS「作业进行中时的面板」）
-  const busyReason = runningJobs.length ? `有作业进行中：${jobLabel(runningJobs[0], screens, components)}` : false;
+  const busyReason = runningJobs.length ? t('blocked.jobRunning', { label: jobLabel(runningJobs[0], screens, components) }) : false;
   const keyState = {
     plain, alted, toggleInspect, toggleComposer, undo: undoStack.undo, saveElement, blocked, closeModals, openFinder: () => setFinderOpen(true), expanded: !!candidates, busy, cancel: cancelNewest,
     focused: !!focusedId || !!focusedComponentId, exitFocus: () => { setFocusedId(null); setFocusedComponentId(null); },
@@ -775,54 +807,54 @@ function CanvasPage() {
 
   // 外壳常驻（v0.76）：顶栏、输入框、工具栏在加载与失败时照样画，只有画布区换成加载 / 失败态
   const ready = !!detail && !!tokens && !!previewOrigin && detail.project.kind !== 'sketchbook';
-  const failure: LoadFailure = loadFailure ?? (configFailed ? { kind: 'failed', reason: '运行时配置取不到' } : null);
-  const jobBlocked = busy ? '有作业进行中，等它完成' : screens.length === 0 ? '还没有屏幕' : false;
+  const failure: LoadFailure = loadFailure ?? (configFailed ? { kind: 'failed', reason: t('load.configMissing') } : null);
+  const jobBlocked = busy ? t('blocked.waitForJob') : screens.length === 0 ? t('blocked.noScreens') : false;
 
   const tools: Tool[][] = [
     [
-      { id: 'fit', label: '适配视图', hint: 'F', desc: '缩放画布，把全部屏幕和风格指南卡片一次装进视野', icon: <Maximize2 size={ICON} />, onSelect: fitAll },
-      { id: 'find', label: '找屏', hint: `${CMD}K`, desc: '按名字、路由或用途搜屏与组件，Enter 跳过去并选中', icon: <Search size={ICON} />, testId: 'find-screen', onSelect: () => setFinderOpen(true) },
-      { id: 'screens', label: '屏列表', hint: `${ALT}S`, desc: '按画布顺序列出全部屏，可按断链 / 待选候选 / 有偏离 / 正在改筛选，点一行跳过去', icon: <LayoutList size={ICON} />, active: panel === 'screens', testId: 'toggle-screens', onSelect: () => setPanel(panel === 'screens' ? null : 'screens') },
-      { id: 'minimap', label: '小地图', desc: '左上角的缩略图：画出全部屏与当前视口，点哪儿镜头就到哪儿', icon: <MapIcon size={ICON} />, active: minimapOn, testId: 'toggle-minimap', onSelect: toggleMinimap },
-      { id: 'links', label: '连线', hint: 'L', desc: '在画布上画出屏与屏之间的跳转关系；指向不存在路由的会标成断链', icon: <Waypoints size={ICON} />, active: showLinks, testId: 'toggle-links', onSelect: toggleLinks },
-      { id: 'composer', label: composerVisible ? '收起输入框' : '显示输入框', hint: `${CMD}/`, desc: '把输入框收成边上的一枚胶囊、腾出画布，草稿与参考图都留着；进入屏内交互时自动收起，退出时回来', icon: <TextCursorInput size={ICON} />, active: composerVisible, testId: 'toggle-composer', onSelect: toggleComposer },
-      { id: 'inspect', label: inspectArmed ? '选择元素中' : '选择元素', hint: `${CMD}E`, desc: '开了就一直在：点任意一屏进去点选元素，改文案/样式/跳转（零 token），或只让 AI 重做这一块。再按一次退出，卡片回到静态', icon: <Crosshair size={ICON} />, active: inspectArmed, onSelect: toggleInspect },
-      { id: 'annotate', label: annotateArmed ? '批注中' : '批注', hint: `${ALT}N`, desc: '开了就一直在：点任意一屏的元素写下要改什么，攒成一批再一起发——同一屏的多条批注合成一次作业，少跑几轮', icon: <MessageSquarePlus size={ICON} />, active: annotateArmed, onSelect: toggleAnnotate },
-      { id: 'repair', label: '接上跳转', desc: selectedScreens.length ? `把选中的 ${selectedScreens.length} 屏里点了没反应的按钮和表单，交给 AI 接到该去的那一屏上。会改屏、按屏计费` : '屏里那些点了没反应的按钮和表单，让 AI 判断它们各自该去哪一屏并接上，原型就能连着点下去。先选中几屏可只修这几屏。会改屏、按屏计费', icon: <Link2 size={ICON} />, testId: 'repair-links', unavailable: jobBlocked, onSelect: repairLinks },
-      { id: 'design', label: '设计系统', hint: `${ALT}D`, desc: '看/改这个项目的色板、字体、圆角、应用简介、约定与 DESIGN.md，可一键回刷所有屏', icon: <Palette size={ICON} />, active: panel === 'design', onSelect: openDesign },
+      { id: 'fit', label: t('tools.fit.label'), hint: 'F', desc: t('tools.fit.desc'), icon: <Maximize2 size={ICON} />, onSelect: fitAll },
+      { id: 'find', label: t('tools.find.label'), hint: `${CMD}K`, desc: t('tools.find.desc'), icon: <Search size={ICON} />, testId: 'find-screen', onSelect: () => setFinderOpen(true) },
+      { id: 'screens', label: t('tools.screens.label'), hint: `${ALT}S`, desc: t('tools.screens.desc'), icon: <LayoutList size={ICON} />, active: panel === 'screens', testId: 'toggle-screens', onSelect: () => setPanel(panel === 'screens' ? null : 'screens') },
+      { id: 'minimap', label: t('tools.minimap.label'), desc: t('tools.minimap.desc'), icon: <MapIcon size={ICON} />, active: minimapOn, testId: 'toggle-minimap', onSelect: toggleMinimap },
+      { id: 'links', label: t('tools.links.label'), hint: 'L', desc: t('tools.links.desc'), icon: <Waypoints size={ICON} />, active: showLinks, testId: 'toggle-links', onSelect: toggleLinks },
+      { id: 'composer', label: composerVisible ? t('tools.composer.hide') : t('tools.composer.show'), hint: `${CMD}/`, desc: t('tools.composer.desc'), icon: <TextCursorInput size={ICON} />, active: composerVisible, testId: 'toggle-composer', onSelect: toggleComposer },
+      { id: 'inspect', label: inspectArmed ? t('tools.inspect.on') : t('tools.inspect.label'), hint: `${CMD}E`, desc: t('tools.inspect.desc'), icon: <Crosshair size={ICON} />, active: inspectArmed, onSelect: toggleInspect },
+      { id: 'annotate', label: annotateArmed ? t('tools.annotate.on') : t('tools.annotate.label'), hint: `${ALT}N`, desc: t('tools.annotate.desc'), icon: <MessageSquarePlus size={ICON} />, active: annotateArmed, onSelect: toggleAnnotate },
+      { id: 'repair', label: t('tools.repair.label'), desc: selectedScreens.length ? t('tools.repair.descSelected', { count: selectedScreens.length }) : t('tools.repair.descAll'), icon: <Link2 size={ICON} />, testId: 'repair-links', unavailable: jobBlocked, onSelect: repairLinks },
+      { id: 'design', label: t('tools.design.label'), hint: `${ALT}D`, desc: t('tools.design.desc'), icon: <Palette size={ICON} />, active: panel === 'design', onSelect: openDesign },
     ],
     [
-      { id: 'new-screen', label: '新建屏幕', hint: `${ALT}G`, desc: '在可见区中心放一个新屏落点，然后在下方输入框描述它；双击画布空白处也能放。屏数、版数、通道都在输入框里选', icon: <Plus size={ICON} />, testId: 'new-screen', unavailable: generating ? GENERATE_BUSY : false, onSelect: () => canvasApi.current?.createAtCenter() },
-      { id: 'new-component', label: '新建组件', hint: `${ALT}C`, desc: '起个名字建一个共享组件（导航栏、页头这类每屏都一样的块），然后在输入框里描述它；改组件一次，用它的屏全部同步。从屏里现有元素做组件走检查器的「记为共享组件」', icon: <Component size={ICON} />, testId: 'new-component', onSelect: () => setNewComponentOpen(true) },
-      { id: 'export', label: '导出原型', desc: '把全部屏打包成一个可离线打开的单文件 HTML 原型', icon: <Download size={ICON} />, unavailable: jobBlocked, onSelect: exportPrototype },
-      { id: 'agent', label: '本机 agent', hint: `${ALT}T`, desc: '交给本机 Claude Code / Codex 的作业列表：投递到哪个会话、状态、取消。派活入口在输入框的通道下拉与会话下拉', icon: <Bot size={ICON} />, active: panel === 'agent', onSelect: () => setPanel(panel === 'agent' ? null : 'agent') },
+      { id: 'new-screen', label: t('tools.newScreen.label'), hint: `${ALT}G`, desc: t('tools.newScreen.desc'), icon: <Plus size={ICON} />, testId: 'new-screen', unavailable: generating ? generateBusy : false, onSelect: () => canvasApi.current?.createAtCenter() },
+      { id: 'new-component', label: t('tools.newComponent.label'), hint: `${ALT}C`, desc: t('tools.newComponent.desc'), icon: <Component size={ICON} />, testId: 'new-component', onSelect: () => setNewComponentOpen(true) },
+      { id: 'export', label: t('tools.export.label'), desc: t('tools.export.desc'), icon: <Download size={ICON} />, unavailable: jobBlocked, onSelect: exportPrototype },
+      { id: 'agent', label: t('tools.agent.label'), hint: `${ALT}T`, desc: t('tools.agent.desc'), icon: <Bot size={ICON} />, active: panel === 'agent', onSelect: () => setPanel(panel === 'agent' ? null : 'agent') },
     ],
   ];
   // 进入 / 退出交互是上下文组第一格的同一个工具（v0.80）：id 不变、按钮不重挂——在这一格上连点是进去再出来，焦点也一直留在这一格。
   // 拆成两个工具的话，退出后同一位置换成「出变体」（再点一下就开出变体弹层），被点的按钮卸载、焦点掉到 body
-  const interact = (on: boolean, onSelect: () => void): Tool => ({ id: 'interact', label: on ? '退出交互' : '进入交互', hint: on ? 'Esc' : 'Enter', desc: on ? '结束屏内交互，回到画布' : '在卡片里直接操作这一屏：点按、滚动、填表、屏内跳转。双击卡片同样进入，Esc 退出', icon: on ? <X size={ICON} /> : <MousePointerClick size={ICON} />, testId: 'toggle-interact', onSelect });
+  const interact = (on: boolean, onSelect: () => void): Tool => ({ id: 'interact', label: on ? t('tools.interact.exit') : t('tools.interact.enter'), hint: on ? 'Esc' : 'Enter', desc: on ? t('tools.interact.exitDesc') : t('tools.interact.enterDesc'), icon: on ? <X size={ICON} /> : <MousePointerClick size={ICON} />, testId: 'toggle-interact', onSelect });
   if (selectedScreens.length > 0 && !focusedId) tools.push([
     ...(selected ? [
       interact(false, () => canvasApi.current?.focus(selected.id)),
-      { id: 'revisions', label: '修订', hint: `${ALT}R`, desc: '这一屏的历史版本与候选，可回溯到任意一版（修订链是单屏概念，只在恰好选中一屏时可用）', icon: <History size={ICON} />, active: panel === 'revisions', onSelect: () => setPanel(panel === 'revisions' ? null : 'revisions') } satisfies Tool,
-      { id: 'variant', label: '出变体', hint: `${ALT}V`, desc: '给这一屏出一个状态变体（空态、出错、未登录…）：同路由同布局，只改状态那部分；播放时可切换', icon: <SquareStack size={ICON} />, testId: 'new-variant', unavailable: selected.variantOf ? '选它的默认屏再出变体' : generating ? GENERATE_BUSY : false, onSelect: () => setVariantFor(selected) } satisfies Tool,
-      { id: 'presentation', label: selected.presentation === 'overlay' ? '设为整屏' : '设为叠层', desc: selected.presentation === 'overlay' ? '现在是叠层屏：播放时压在来处那一屏上。改回整屏后跳转时换掉整个画面' : '把它当弹层 / 底部抽屉：播放时压在来处那一屏上，点遮罩或后退关掉。只改呈现方式，不重生成', icon: <Layers size={ICON} />, testId: 'toggle-presentation', active: selected.presentation === 'overlay', onSelect: () => void togglePresentation() } satisfies Tool,
-      { id: 'exemplar', label: detail?.project.exemplarScreenId === selected.id ? '样板屏' : '设为样板', desc: '生成和修改时都以样板屏为风格参照（密度、间距、组件用法）', icon: <Star size={ICON} />, testId: 'set-exemplar', active: detail?.project.exemplarScreenId === selected.id, unavailable: detail?.project.exemplarScreenId === selected.id ? '这一屏已经是样板屏' : !selected.currentRevisionId ? '这一屏还没生成完' : false, onSelect: setExemplar } satisfies Tool,
-      { id: 'fork', label: '到草稿本里改', desc: '把这一屏复制成草稿本里的一张草稿，在那里随便改，改好再写回这一屏；写回之前两边互不影响。只改其中一块：用「选择元素」点中它，再点检查器里的同名按钮', icon: <NotebookPen size={ICON} />, testId: 'fork-to-sketch', pending: forking, unavailable: !selected.currentRevisionId ? '这一屏还没生成完' : false, onSelect: () => void forkToSketch(selected.id) } satisfies Tool,
+      { id: 'revisions', label: t('tools.revisions.label'), hint: `${ALT}R`, desc: t('tools.revisions.desc'), icon: <History size={ICON} />, active: panel === 'revisions', onSelect: () => setPanel(panel === 'revisions' ? null : 'revisions') } satisfies Tool,
+      { id: 'variant', label: t('tools.variant.label'), hint: `${ALT}V`, desc: t('tools.variant.desc'), icon: <SquareStack size={ICON} />, testId: 'new-variant', unavailable: selected.variantOf ? t('tools.variant.fromDefault') : generating ? generateBusy : false, onSelect: () => setVariantFor(selected) } satisfies Tool,
+      { id: 'presentation', label: selected.presentation === 'overlay' ? t('tools.presentation.toFull') : t('tools.presentation.toOverlay'), desc: selected.presentation === 'overlay' ? t('tools.presentation.overlayDesc') : t('tools.presentation.fullDesc'), icon: <Layers size={ICON} />, testId: 'toggle-presentation', active: selected.presentation === 'overlay', onSelect: () => void togglePresentation() } satisfies Tool,
+      { id: 'exemplar', label: detail?.project.exemplarScreenId === selected.id ? t('tools.exemplar.current') : t('tools.exemplar.set'), desc: t('tools.exemplar.desc'), icon: <Star size={ICON} />, testId: 'set-exemplar', active: detail?.project.exemplarScreenId === selected.id, unavailable: detail?.project.exemplarScreenId === selected.id ? t('tools.exemplar.already') : !selected.currentRevisionId ? t('tools.notGenerated') : false, onSelect: setExemplar } satisfies Tool,
+      { id: 'fork', label: t('tools.fork.label'), desc: t('tools.fork.desc'), icon: <NotebookPen size={ICON} />, testId: 'fork-to-sketch', pending: forking, unavailable: !selected.currentRevisionId ? t('tools.notGenerated') : false, onSelect: () => void forkToSketch(selected.id) } satisfies Tool,
     ] : []),
-    { id: 'delete', label: selectedComponents.length ? `删除 ${selectedScreens.length + selectedComponents.length} 项` : selectedScreens.length > 1 ? `删除 ${selectedScreens.length} 屏` : '删除', hint: 'Del', desc: selectedComponents.length ? '删掉选中的屏（连同修订历史）与组件；组件在屏里已展开的那份留着，只是不再跟着改' : '删掉选中的屏及其修订历史，指向它们的链接会变成断链', icon: <Trash2 size={ICON} />, onSelect: () => setConfirmDelete(true) },
+    { id: 'delete', label: selectedComponents.length ? t('tools.delete.items', { n: selectedScreens.length + selectedComponents.length }) : selectedScreens.length > 1 ? t('tools.delete.screens', { n: selectedScreens.length }) : tc('delete'), hint: 'Del', desc: selectedComponents.length ? t('tools.delete.mixedDesc') : t('tools.delete.desc'), icon: <Trash2 size={ICON} />, onSelect: () => setConfirmDelete(true) },
   ]);
   // 只选了组件（REQ-EDIT-006）：上下文组给「删除组件」；改组件走输入框（它已是目标）
   if (selectedComponents.length > 0 && selectedScreens.length === 0 && !focusedId) tools.push([
-    { id: 'delete-component', label: selectedComponents.length > 1 ? `删除 ${selectedComponents.length} 个组件` : '删除组件', hint: 'Del', desc: '删掉组件；屏里已经展开的那份留着，只是不再跟着改', icon: <Trash2 size={ICON} />, testId: 'delete-component', onSelect: () => setConfirmDelete(true) },
+    { id: 'delete-component', label: selectedComponents.length > 1 ? t('tools.deleteComponent.many', { n: selectedComponents.length }) : t('tools.deleteComponent.label'), hint: 'Del', desc: t('tools.deleteComponent.desc'), icon: <Trash2 size={ICON} />, testId: 'delete-component', onSelect: () => setConfirmDelete(true) },
   ]);
   if (focused) tools.push([
     interact(true, () => { setFocusedId(null); setFocusedComponentId(null); }),
-    { id: 'back', label: '后退', hint: 'Alt+←', desc: '退回屏内上一次跳转之前', icon: <ArrowLeft size={ICON} />, unavailable: navStack.length === 0 && '还没有在这一屏里跳转过', onSelect: () => canvasApi.current?.goBack() },
+    { id: 'back', label: t('tools.back.label'), hint: 'Alt+←', desc: t('tools.back.desc'), icon: <ArrowLeft size={ICON} />, unavailable: navStack.length === 0 && t('tools.back.none'), onSelect: () => canvasApi.current?.goBack() },
   ]);
   // 设置（v0.97 从顶栏移来）：最末单独一组，排在上下文组之后
   tools.push([
-    { id: 'settings', label: '设置', desc: '本月用量、生成通道与外观：添加 / 验证 Key 与本机订阅，复制 MCP 接入命令，切换浅色 / 深色', icon: <Settings size={ICON} />, testId: 'open-settings', onSelect: () => setSettings('usage') },
+    { id: 'settings', label: t('tools.settings.label'), desc: t('tools.settings.desc'), icon: <Settings size={ICON} />, testId: 'open-settings', onSelect: () => setSettings('usage') },
   ]);
 
   const panelBody = !detail ? null
@@ -845,13 +877,13 @@ function CanvasPage() {
         {feedShown && feed !== 'open' && !gone && (
           <span role="status" data-testid="live-status" className="chrome inline-flex h-8 min-w-0 items-center gap-0.5 truncate whitespace-nowrap rounded-md px-3 type-label font-medium text-text-primary">
             {/* 警告色只给圆点：毛玻璃下压着深色设计稿时，警告色字读不清 */}
-            <span aria-hidden="true" className="mr-1.5 size-1.5 shrink-0 rounded-pill bg-warning" />实时更新已断开 · {feed === 'offline'
-              ? <button type="button" onClick={() => { setFeed('reconnecting'); setFeedEpoch((n) => n + 1); }} className="inline-flex h-6 items-center rounded-sm px-1.5 text-(--semantic-color-action-link) state-layer focus-ring">重连</button>
-              : '重连中'}
+            <span aria-hidden="true" className="mr-1.5 size-1.5 shrink-0 rounded-pill bg-warning" />{t('live.disconnected')} · {feed === 'offline'
+              ? <button type="button" onClick={() => { setFeed('reconnecting'); setFeedEpoch((n) => n + 1); }} className="inline-flex h-6 items-center rounded-sm px-1.5 text-(--semantic-color-action-link) state-layer focus-ring">{t('live.reconnect')}</button>
+              : t('live.reconnecting')}
           </span>
         )}
       </>}>
-        <ProjectSwitcher current={detail?.project ?? null} placeholder={failure?.kind === 'not-found' ? '项目不存在' : failure ? '项目没加载出来' : '加载中…'} onRenamed={(id) => { if (id === projectId) refresh(); }} />
+        <ProjectSwitcher current={detail?.project ?? null} placeholder={failure?.kind === 'not-found' ? t('switcher.notFound') : failure ? t('load.failed') : t('switcher.loading')} onRenamed={(id) => { if (id === projectId) refresh(); }} />
       </TopNav>
       <div className="absolute inset-0">
         {ready && detail && tokens && previewOrigin ? (
@@ -870,7 +902,7 @@ function CanvasPage() {
             components={components} selectedComponentIds={selectedComponentIds} onSelectComponent={setSelectedComponentId}
             onNavigateMissing={(fromScreenId, href) => setMissing({ fromScreenId, hrefs: [href] })}
             onDanglingClick={(screenId, hrefs) => setMissing({ fromScreenId: screenId, hrefs })}
-            onDeadLink={() => toast('这个交互还没有设计；想让它跳转，用「选择元素」给它连线')}
+            onDeadLink={() => toast(t('screen.deadLink'))}
             onShortcut={(code, alt) => { if (blocked) return; if (alt) alted[code]?.(); else if (code === 'KeyE') toggleInspect(); else if (code === 'Slash') toggleComposer(); else if (code === 'KeyK') setFinderOpen(true); else if (code === 'KeyS') saveElement?.(); else if (code === 'KeyZ') void undoStack.undo(); else if (code === 'Delete' || code === 'Backspace') plain[code]?.(); }}
             onAnchor={placeAnchor}
             onCandidates={(jobId, screenId) => setCandidates((c) => (c?.screenId === screenId ? null : { jobId, screenId }))}
@@ -886,7 +918,7 @@ function CanvasPage() {
             onShown={setShownScreenId}
             navStack={navStack} setNavStack={setNavStack}
             onStale={() => refresh({ quiet: true })} onShotError={onShotError}
-            onPreviewError={(s) => toast(`「${s.name}」这一屏没取到，稍后再试一次`, 'error')}
+            onPreviewError={(s) => toast(t('screen.previewFailed', { name: s.name }), 'error')}
           />
         ) : <CanvasPending failure={failure} onRetry={retryLoad} />}
       </div>
@@ -915,7 +947,7 @@ function CanvasPage() {
       {finderOpen && detail && <ScreenFinder screens={screens} components={components} links={detail.links} busy={busyScreens} onPick={(pick) => { setFinderOpen(false); reveal(pick); }} onClose={() => setFinderOpen(false)} />}
       {variantFor && <VariantDialog base={variantFor} onCreate={createVariant} onClose={() => setVariantFor(null)} />}
       {confirmDelete && (selectedScreens.length > 0 || selectedComponents.length > 0) && <DeleteDialog screens={selectedScreens} components={selectedComponents} selected={selected} variantCount={screens.filter((s) => s.variantOf && selectedIds.includes(s.variantOf) && !selectedIds.includes(s.id)).length} onConfirm={onDelete} onClose={() => setConfirmDelete(false)} />}
-      {missing && <MissingDialog missing={missing} busyReason={generating ? GENERATE_BUSY : false} onGenerate={generateMissing} onClose={() => setMissing(null)} />}
+      {missing && <MissingDialog missing={missing} busyReason={generating ? generateBusy : false} onGenerate={generateMissing} onClose={() => setMissing(null)} />}
     </div>
   );
 }
@@ -925,21 +957,23 @@ function CanvasPage() {
 // 摆在可用区（与画布的 safe-area 探针同一组 CSS 变量）中央、层级压过输入框与作业 chip：出口不能被它们挡住
 function CanvasPending({ failure, onRetry }: { failure: LoadFailure; onRetry: () => void }) {
   const navigate = useNavigate();
+  const t = useT(canvasPageMessages);
+  const tc = useT(commonMessages);
   return (
     <div className="viewport" data-testid="canvas-pending" data-state={failure?.kind ?? 'loading'}>
       <div className="pointer-events-none absolute bottom-[var(--chrome-bottom)] left-[var(--chrome-left)] right-[var(--chrome-right)] top-[var(--chrome-top)] z-[25] grid place-items-center p-4">
       {!failure ? (
         <div role="status" className="pending-in chrome flex items-center gap-2 rounded-md px-3.5 py-2 type-label text-text-secondary">
-          <span className="size-3.5 animate-spin rounded-full border-2 border-text-secondary border-r-transparent motion-reduce:animate-none" aria-hidden="true" />加载项目…
+          <span className="size-3.5 animate-spin rounded-full border-2 border-text-secondary border-r-transparent motion-reduce:animate-none" aria-hidden="true" />{t('pending.loading')}
         </div>
       ) : (
         <div role="alert" className="pointer-events-auto fade-up chrome w-[min(24rem,100%)] rounded-lg p-4">
-          <p className="type-body font-semibold text-text-primary">{failure.kind === 'not-found' ? '这个项目不存在或已被删除' : '项目没加载出来'}</p>
-          <p className="mt-1 type-label text-text-secondary leading-(--semantic-typography-body-line-height)">{failure.kind === 'not-found' ? '可能在别的标签页里删掉了，或者链接里的项目 id 不对。' : `${failure.reason}。确认 Quilt 还在运行，然后重试。`}</p>
+          <p className="type-body font-semibold text-text-primary">{failure.kind === 'not-found' ? t('pending.notFound') : t('load.failed')}</p>
+          <p className="mt-1 type-label text-text-secondary leading-(--semantic-typography-body-line-height)">{failure.kind === 'not-found' ? t('pending.notFoundHint') : t('pending.failedHint', { reason: failure.reason ?? t('load.unreachable') })}</p>
           <div className="mt-3">
             {failure.kind === 'not-found'
-              ? <Button variant="primary" size="sm" onClick={() => navigate('/')}>回到最近的项目</Button>
-              : <Button variant="primary" size="sm" onClick={onRetry}>重试</Button>}
+              ? <Button variant="primary" size="sm" onClick={() => navigate('/')}>{t('pending.backToRecent')}</Button>
+              : <Button variant="primary" size="sm" onClick={onRetry}>{tc('retry')}</Button>}
           </div>
         </div>
       )}

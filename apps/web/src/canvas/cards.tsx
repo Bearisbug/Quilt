@@ -1,5 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import type { AnnotationDto, ComponentDto, ScreenDto } from '@quilt/core/browser';
+import { useT } from '@/i18n';
+import canvasMessages from '@/i18n/locales/canvas-parts';
 
 // 画布上的屏卡片与组件卡（v1.07 从 CanvasView.tsx 抽出）：memo 化，props 只给这一张卡的标量与稳定的动作表——
 // 拖一张卡、框选、截图档位变化时，只有受影响的那几张重渲染，不再整片画布跟着跑
@@ -43,6 +45,7 @@ type ScreenCardProps = {
 };
 
 export const ScreenCard = memo(function ScreenCard({ s, idx, x, y, selected, focused, live, dragging, shotUrl, shotFailed, shotRetry, working, annotations, dangling, exemplar, variants, tabbable, panReady, stacked, candExpanded, frame, chrome, act }: ScreenCardProps) {
+  const t = useT(canvasMessages);
   const desktop = s.width > 600;
   const gestureRef = useCallback((el: HTMLDivElement | null) => act.gesture(s.id, el), [act, s.id]);
   const onGiveUp = useCallback((failed: boolean) => act.shotGiveUp(s.id, failed), [act, s.id]);
@@ -51,7 +54,7 @@ export const ScreenCard = memo(function ScreenCard({ s, idx, x, y, selected, foc
     <>
       {stacked && [2, 1].map((k) => <div key={k} className={`cand-ghost${desktop ? ' desktop' : ''}`} aria-hidden="true" style={{ width: s.width, height: s.height, transform: `translate(${x + 14 * k}px, ${y + 10 * k}px)`, opacity: 1 - 0.25 * k }} />)}
       <div ref={act.watchOnscreen} data-testid="screen-card" data-route={s.route} data-variant={s.variantOf ? 'true' : undefined} data-presentation={s.presentation} className={`card${desktop ? ' desktop' : ''}${s.presentation === 'overlay' ? ' overlay' : ''}${selected ? ' selected' : ''}${focused ? ' focused' : ''}${live ? ' live' : ''}${dragging ? ' dragging' : ''}`} style={{ width: s.width, height: s.height, transform: `translate(${x}px, ${y}px)` }}>
-        <div className="label">{s.variantOf && <span className="chip fill">变体</span>}{s.presentation === 'overlay' && <span className="chip fill">叠层</span>}<b>{s.name}</b> {s.route}{exemplar ? ' · 样板' : ''}{variants ? ` · ${variants} 个变体` : ''}{s.deviations ? ` · ${s.deviations} 处偏离` : ''}</div>
+        <div className="label">{s.variantOf && <span className="chip fill">{t('card.variant')}</span>}{s.presentation === 'overlay' && <span className="chip fill">{t('card.overlay')}</span>}<b>{s.name}</b> {s.route}{exemplar ? ` · ${t('card.exemplar')}` : ''}{variants ? ` · ${t('card.variants', { count: variants })}` : ''}{s.deviations ? ` · ${t('deviations', { count: s.deviations })}` : ''}</div>
         {/* 圆角裁切只包截图 / 骨架 / iframe 这一层（v0.80）：裁整张卡的话，画在卡片上方的标签一起被裁掉 */}
         <div className="card-clip">
           {/* 截图（或骨架）始终垫在底下（v0.76）：聚焦时 iframe 盖在上面、收到 quilt:ready 前透明，就绪才接班（卡片加 live，底层藏起）——
@@ -61,17 +64,17 @@ export const ScreenCard = memo(function ScreenCard({ s, idx, x, y, selected, foc
               retryKey={shotRetry} onGiveUp={onGiveUp} onShown={onShown}
               fallback={<CardSkeleton desktop={desktop} delay={(idx % 6) * -230} />} failed={<CardSkeleton desktop={desktop} delay={0} failed />} />
           ) : (
-            <CardSkeleton desktop={desktop} delay={(idx % 6) * -230} status={s.currentRevisionId ? '截图中' : '生成中'} />
+            <CardSkeleton desktop={desktop} delay={(idx % 6) * -230} status={s.currentRevisionId ? 'shooting' : 'generating'} />
           )}
           {frame}
         </div>
         {/* 截图取不到（v0.83）：盖在手势层之上、卡片正中，点了从头再取；聚焦时 iframe 接班，不出 */}
         {!focused && s.screenshotUrl && shotFailed && (
           <button type="button" className="shot-retry state-layer nopan" data-testid="shot-retry" onPointerDown={(ev) => ev.stopPropagation()}
-            onClick={(ev) => { ev.stopPropagation(); act.retryShot(s.id); }}>截图没取到 · 重试</button>
+            onClick={(ev) => { ev.stopPropagation(); act.retryShot(s.id); }}>{t('card.shotRetry')}</button>
         )}
         {/* 同一张卡同时有未结清候选时错开一行：两者右上同位、同底色同尺寸，叠在一起会把角标整块盖住 */}
-        {!focused && working && <span className={`working${s.pendingCandidates ? ' below' : ''}`} data-testid="card-working">局部修改中…</span>}
+        {!focused && working && <span className={`working${s.pendingCandidates ? ' below' : ''}`} data-testid="card-working">{t('card.working')}</span>}
         {!focused && <div ref={gestureRef} className={`gesture${panReady ? '' : ' nopan'}`} role="button" tabIndex={tabbable ? 0 : -1} aria-label={`${s.name} ${s.route}`}
           onFocus={() => act.cardFocus(s.id)} onKeyDown={(ev) => act.cardKey(ev, 'screen', s.id)} onMouseDown={keepPointerFocus}
           onPointerDown={(ev) => act.dragStart(ev, 'screen', s.id)} onDoubleClick={(ev) => { ev.stopPropagation(); act.enterScreen(s.id); }} />}
@@ -82,7 +85,7 @@ export const ScreenCard = memo(function ScreenCard({ s, idx, x, y, selected, foc
             <button
               key={a.id} type="button" className={`anno-pin state-layer nopan${a.status === 'sent' ? ' sending' : ''}`}
               style={{ left: Math.min(Math.max(a.rect.x + a.rect.w, 12), s.width - 12), top: clamped ? s.height - 16 : a.rect.y + a.rect.h / 2 }}
-              title={clamped ? `${a.note}（元素在折叠区域内）` : a.note}
+              title={clamped ? t('card.belowFold', { note: a.note }) : a.note}
               data-testid="anno-pin" data-anno={a.id}
               onPointerDown={(ev) => ev.stopPropagation()}
               onClick={(ev) => { ev.stopPropagation(); act.annotation(a.id); }}
@@ -90,8 +93,8 @@ export const ScreenCard = memo(function ScreenCard({ s, idx, x, y, selected, foc
           );
         })}
         {dangling && (
-          <button type="button" className="warn state-layer focus-ring nopan cursor-pointer" style={{ pointerEvents: 'auto' }} title={`点击生成：${dangling.join(', ')}`} onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); act.dangling(s.id, dangling); }}>
-            断链 {dangling.length}：{dangling[0]}{dangling.length > 1 ? ' …' : ''}
+          <button type="button" className="warn state-layer focus-ring nopan cursor-pointer" style={{ pointerEvents: 'auto' }} title={t('card.danglingTitle', { hrefs: dangling.join(', ') })} onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); act.dangling(s.id, dangling); }}>
+            {t('card.dangling', { count: dangling.length, href: dangling[0] })}{dangling.length > 1 ? ' …' : ''}
           </button>
         )}
       </div>
@@ -101,7 +104,7 @@ export const ScreenCard = memo(function ScreenCard({ s, idx, x, y, selected, foc
       {s.pendingCandidates && !focused && (
         <div className={`cand-badge-slot${candExpanded ? ' expanded' : ''}`} style={{ width: s.width, transform: `translate(${x}px, ${y}px)` }}>
           <button type="button" className="cand-badge state-layer focus-ring nopan" data-testid="candidate-badge" data-route={s.route} data-count={s.pendingCandidates.count} onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); act.candidates(s.pendingCandidates!.jobId, s.id); }}>
-            {s.pendingCandidates.count} 版 · 展开
+            {t('card.candidates', { count: s.pendingCandidates.count })}
           </button>
         </div>
       )}
@@ -121,11 +124,12 @@ type ComponentCardProps = {
 // 共享组件卡（REQ-EDIT-006）：活渲染在预览域里，尺寸由它量根元素后上报；同一套选中 outline，拖动走 .gesture。
 // iframe 与聚焦屏同样带 allow-same-origin：尺寸上报要按 origin 认，纯 allow-scripts 的沙箱 origin 是 "null" 对不上
 export const ComponentCard = memo(function ComponentCard({ c, x, y, w, h, shift, ready, selected, focused, dragging, tabbable, panReady, screenW, screenH, act }: ComponentCardProps) {
+  const t = useT(canvasMessages);
   const frameRef = useCallback((el: HTMLIFrameElement | null) => act.compFrame(c.id, el), [act, c.id]);
   const gestureRef = useCallback((el: HTMLDivElement | null) => act.gesture(c.id, el), [act, c.id]);
   return (
     <div ref={act.watchOnscreen} data-testid="component-card" data-name={c.name} data-ready={ready || undefined} className={`comp${ready ? ' live' : ''}${selected ? ' selected' : ''}${focused ? ' focused' : ''}${dragging ? ' dragging' : ''}`} style={{ width: w, height: h, transform: `translate(${x}px, ${y}px)` }}>
-      <div className="label"><b>{c.name}</b> · 用于 {c.usedBy.length} 屏</div>
+      <div className="label"><b>{c.name}</b> · {t('usedIn', { count: c.usedBy.length })}</div>
       {/* 上报尺寸前：屏卡片那一套骨架垫着、iframe 透明，上报后 iframe 淡入（v0.76）。iframe 恒按整个设备渲染、平移到根元素左上角，由卡片裁切 */}
       <div className="card-clip">
         <div className="skeleton" aria-hidden="true" />
@@ -134,27 +138,28 @@ export const ComponentCard = memo(function ComponentCard({ c, x, y, w, h, shift,
       {/* 交互态（与屏一致：双击进、Esc 出）。这层手势罩摘掉，指针才落得到 iframe 上；
           **镜头不动**——组件卡是按自身内容尺寸渲染的、本来就是 1:1，没有屏那种「推到 1:1 居中」的理由，
           为看一眼组件把整块画布推走反而丢了上下文（屏那条见 REQ-CORE-005） */}
-      {!focused && <div ref={gestureRef} className={`gesture${panReady ? '' : ' nopan'}`} role="button" tabIndex={tabbable ? 0 : -1} aria-label={`组件 ${c.name}`}
+      {!focused && <div ref={gestureRef} className={`gesture${panReady ? '' : ' nopan'}`} role="button" tabIndex={tabbable ? 0 : -1} aria-label={t('card.component', { name: c.name })}
         onFocus={() => act.cardFocus(c.id)} onKeyDown={(ev) => act.cardKey(ev, 'component', c.id)} onMouseDown={keepPointerFocus}
         onPointerDown={(ev) => act.dragStart(ev, 'component', c.id)} onDoubleClick={(ev) => { ev.stopPropagation(); act.enterComponent(c.id); }} />}
       {/* 交互态只用一个呼吸绿点：组件名已经写在卡片标签上，角标再重复一遍就是拿走卡片右上一整条。
           不是纯靠颜色表态——名字给了读屏，卡片本身还有标记色外框（A11Y-001） */}
-      {focused && <span className="live-dot" role="status" aria-label="交互中" title="交互中" />}
+      {focused && <span className="live-dot" role="status" aria-label={t('interacting')} title={t('interacting')} />}
     </div>
   );
 });
 
 // 屏卡片的占位：设备线框 + 整块呼吸；status 给了就是「截图中 / 生成中」这类状态标签（没有截图时），没给就是截图还在下载。
 // failed = 截图重试到头仍取不到（v0.83）：线框不动、不呼吸、不带标签，说明与「重试」由卡片盖在手势层之上给（shot-retry）
-function CardSkeleton({ desktop, delay, status, failed }: { desktop: boolean; delay: number; status?: string; failed?: boolean }) {
+function CardSkeleton({ desktop, delay, status, failed }: { desktop: boolean; delay: number; status?: 'shooting' | 'generating'; failed?: boolean }) {
+  const t = useT(canvasMessages);
   return (
-    <div className={`skeleton${desktop ? ' desktop' : ''}${failed ? ' failed' : ''}`} style={{ animationDelay: `${delay}ms` }} role="img" aria-label={failed ? '截图没取到' : status === '生成中' ? '生成中' : status ? '截图生成中' : '截图加载中'}>
+    <div className={`skeleton${desktop ? ' desktop' : ''}${failed ? ' failed' : ''}`} style={{ animationDelay: `${delay}ms` }} role="img" aria-label={failed ? t('card.skeleton.failed') : status === 'generating' ? t('card.generating') : status ? t('card.skeleton.shooting') : t('card.skeleton.loading')}>
       {desktop ? (
         <><div className="sk sk-side" /><div className="sk sk-topbar" /><div className="sk sk-title" /><div className="sk sk-grid"><i /><i /><i /></div><div className="sk sk-table" /></>
       ) : (
         <><div className="sk sk-appbar" /><div className="sk sk-hero" /><div className="sk sk-line" /><div className="sk sk-line short" /><div className="sk sk-card" /><div className="sk sk-card" /><div className="sk sk-cta" /><div className="sk sk-tabbar"><i /><i /><i /><i /></div></>
       )}
-      {status && <div className="sk-label"><span className="sk-dot" />{status}</div>}
+      {status && <div className="sk-label"><span className="sk-dot" />{t(`card.${status}`)}</div>}
     </div>
   );
 }

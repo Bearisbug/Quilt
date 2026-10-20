@@ -9,6 +9,7 @@ import { assetsForPrompt } from '../services/assets.ts';
 import { resolveChannelSpec } from '../services/channels.ts';
 import { completeWithRetry, ProviderError, type LlmDriver, type LlmEffort } from '../lib/llm.ts';
 import { emitJobEvent } from '../lib/events.ts';
+import { countEn, listJoin, outsideRequest, tr } from '../lib/locale.ts';
 import { storage, objectKeys } from '../lib/storage.ts';
 import { screenshotHtml, extractTailwindCss } from '../lib/screenshot.ts';
 import { recordUsage } from '../services/usage.ts';
@@ -26,7 +27,7 @@ import {
   OVERLAY_SCREEN_NOTE, screenSystemPrompt, planSystemPrompt, planUserPrompt, planOneScreenSystemPrompt, planOneScreenUserPrompt, screenUserPrompt, editUserPrompt, editPatchUserPrompt, subtreeUserPrompt, linkRepairPrompt,
   proposeDesignSystemSystemPrompt, proposeDesignSystemUserPrompt, parseConventions, REFERENCE_IMAGE_NOTE, FONT_FAMILIES, RADIUS_SCALES, MAX_CONVENTIONS,
   sketchSystemPrompt, SKETCH_REFERENCE_IMAGE_NOTE, draftNameFromPrompt, frameFromBody, shotSpecFor,
-  VENDOR, inputOf, jobInputSchemas, DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput, type JobKind, type JobInputOf, type Presentation, type DraftFrame, failureText,
+  VENDOR, inputOf, jobInputSchemas, withUiLanguage, jobLocale, DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput, type JobKind, type JobInputOf, type Presentation, type DraftFrame, failureText,
 } from '@quilt/core';
 
 // 导出件内联的 lucide 取仓库里与屏同版本的副本（§17 v1.06），不走外网
@@ -94,7 +95,9 @@ async function expandLatest(ctx: Ctx, body: string, route: string): Promise<stri
 // 再把图塞一遍既多花 token 又会把模型往复刻方向带（REQ-CORE-012）
 // effort：按调用类型定思考深度（ADR-012 v1.05）——规划与提炼 low、改屏补丁 medium，其余不传（驱动缺省）
 // 草稿本（REQ-CORE-040）换一句参考图说明：没有设计系统要守，参考图可以照着取色；草稿按参照项目写时仍守它的设计系统
-async function llmCall(ctx: Ctx, system: string, prompt: string, model?: string, withImages = false, opts: { effort?: LlmEffort; maxTokens?: number } = {}) {
+// 网页端建的写屏作业带界面语言（REQ-CORE-046）：系统提示末尾补一句「请求没说语言时屏上文字用 <语言>」，预热与正式调用同一份前缀
+async function llmCall(ctx: Ctx, systemPrompt: string, prompt: string, model?: string, withImages = false, opts: { effort?: LlmEffort; maxTokens?: number } = {}) {
+  const system = withUiLanguage(systemPrompt, ctx.job);
   const images = withImages ? ctx.images : undefined;
   const spec = ctx.runner.driver ? { driver: ctx.runner.driver, apiKey: ctx.runner.apiKey, baseUrl: ctx.runner.baseUrl } : undefined;
   const imageNote = ctx.project.kind === 'sketchbook' && !ctx.draftReferenced ? SKETCH_REFERENCE_IMAGE_NOTE : REFERENCE_IMAGE_NOTE;
@@ -627,8 +630,10 @@ export async function runJob(jobId: string): Promise<void> {
     await failJob(jobId, 'validation', `作业输入不合法：${issue.path.join('.') || 'input'} ${issue.message}`, ['running']).catch((x) => console.error(`[job ${jobId}] fail`, x));
     return;
   }
-  // 领取之后的任何异常（查项目、落库事务里的数据库错误）都走统一失败收尾（§16 v1.03），不让作业停在 running
-  try { await runClaimed(claimed); }
+  // 领取之后的任何异常（查项目、落库事务里的数据库错误）都走统一失败收尾（§16 v1.03），不让作业停在 running。
+  // 失败原因（output.message）是原始原因，一律中文，画布与助手消息由 failureText 按界面语言译（REQ-CORE-046）：
+  // 进程内队列在建作业的请求里同步起跑，所以显式当作不在请求里，通道、本机工具的报错不跟着那个请求的语言
+  try { await outsideRequest(() => runClaimed(claimed)); }
   catch (e) {
     console.error(`[job ${jobId}]`, e);
     await failJob(jobId, 'system', (e as Error).message, ['running']).catch((x) => console.error(`[job ${jobId}] fail`, x));
@@ -709,23 +714,28 @@ async function runClaimed(claimed: JobRow): Promise<void> {
     const screens = screenIds.length ? await tx.select().from(schema.screens).where(and(eq(schema.screens.projectId, project.id), sql`${schema.screens.id} = any(${sql.raw(`array[${screenIds.map((s) => `'${s}'::uuid`).join(',')}]`)})`)) : [];
     const entryId = ctx.entryRepair ? screens.find((s) => s.name === ctx.entryRepair!.name)?.id : undefined;
     const fresh = screens.filter((s) => s.id !== entryId);
-    const names = fresh.map((s) => s.name).join('、');
+    // 回执与失败文案按作业的语言（REQ-CORE-046），没有时中文
+    const locale = jobLocale(job) ?? 'zh';
+    const names = listJoin(fresh.map((s) => s.name), locale);
     const versions = Number((job.input as { versions?: number }).versions ?? 1);
-    const candidateNote = versions > 1 ? `，每屏 ${versions} 版候选，点卡片角标选一版` : '';
-    const entryNote = ctx.entryRepair ? `；已把「${ctx.entryRepair.name}」接到新屏${ctx.entryRepair.added.length ? `（${ctx.entryRepair.added.join('、')}）` : ''}` : '';
+    const candidateNote = versions > 1 ? tr(`，每屏 ${versions} 版候选，点卡片角标选一版`, `, ${versions} candidates per screen; pick one with the badge on the card`, locale) : '';
+    const entry = ctx.entryRepair;
+    const entryNote = entry ? tr(`；已把「${entry.name}」接到新屏${entry.added.length ? `（${listJoin(entry.added, locale)}）` : ''}`, `; linked “${entry.name}” to the new screens${entry.added.length ? ` (${listJoin(entry.added, locale)})` : ''}`, locale) : '';
+    const skipped = (extraOutput.skipped as string[] | undefined) ?? [];
     const proposal = extraOutput.proposal as DesignProposalDto | undefined;
     const content = failure
-      ? failureText(job.kind as JobKind, failure.errorClass, failure.message, screenIds.length)
+      ? failureText(job.kind as JobKind, failure.errorClass, failure.message, screenIds.length, locale)
       // 聊天回执就是助手最后一段文字；它只动手没说话时至少报出改了哪几屏
-      : job.kind === 'chat' ? ((extraOutput.reply as string | undefined) || (screens.length ? `已更新 ${screens.length} 屏：${names}` : '（助手没有回话）'))
-      : job.kind === 'export_prototype' ? '原型已导出'
+      : job.kind === 'chat' ? ((extraOutput.reply as string | undefined) || (screens.length ? tr(`已更新 ${screens.length} 屏：${names}`, `Updated ${countEn(screens.length, 'screen')}: ${names}`, locale) : tr('（助手没有回话）', '(The assistant did not reply)', locale)))
+      : job.kind === 'export_prototype' ? tr('原型已导出', 'Prototype exported', locale)
       // 改组件的回执点名同步了哪几屏；有屏因作业在跑没同步上也说出来（它落地时会自己用上新版）
-      : job.kind === 'edit_component' ? `已更新组件「${extraOutput.component}」，同步 ${screens.length} 屏${names ? `：${names}` : ''}${(extraOutput.skipped as string[] | undefined)?.length ? `；${(extraOutput.skipped as string[]).join('、')} 正在改、落地后自动用新版` : ''}`
-      : job.kind === 'apply_design_system' ? `设计系统已回刷 ${screens.length} 屏`
-      : job.kind === 'propose_design_system' ? `设计系统提案已生成${proposal?.summary ? `：${proposal.summary}` : ''}，在设计系统面板预览后确认写入`
-      : job.kind === 'regenerate_subtree' ? `已重生成「${names}」的一块`
-      : job.kind === 'edit_screens' ? `已更新 ${screens.length} 屏：${names}${candidateNote}`
-      : `已生成 ${fresh.length} 屏：${names}${candidateNote}${entryNote}`;
+      : job.kind === 'edit_component' ? tr(`已更新组件「${extraOutput.component}」，同步 ${screens.length} 屏${names ? `：${names}` : ''}${skipped.length ? `；${listJoin(skipped, locale)} 正在改、落地后自动用新版` : ''}`,
+        `Updated component “${extraOutput.component}” and synced ${countEn(screens.length, 'screen')}${names ? `: ${names}` : ''}${skipped.length ? `; ${listJoin(skipped, locale)} ${skipped.length === 1 ? 'is' : 'are'} being edited and will use the new version when done` : ''}`, locale)
+      : job.kind === 'apply_design_system' ? tr(`设计系统已回刷 ${screens.length} 屏`, `Re-applied the design system to ${countEn(screens.length, 'screen')}`, locale)
+      : job.kind === 'propose_design_system' ? tr(`设计系统提案已生成${proposal?.summary ? `：${proposal.summary}` : ''}，在设计系统面板预览后确认写入`, `Design system proposal ready${proposal?.summary ? `: ${proposal.summary}` : ''}; preview it in the design system panel, then confirm to write it`, locale)
+      : job.kind === 'regenerate_subtree' ? tr(`已重生成「${names}」的一块`, `Regenerated one block of “${names}”`, locale)
+      : job.kind === 'edit_screens' ? tr(`已更新 ${screens.length} 屏：${names}${candidateNote}`, `Updated ${countEn(screens.length, 'screen')}: ${names}${candidateNote}`, locale)
+      : tr(`已生成 ${fresh.length} 屏：${names}${candidateNote}${entryNote}`, `Generated ${countEn(fresh.length, 'screen')}: ${names}${candidateNote}${entryNote}`, locale);
     await tx.update(schema.messages).set({ content, affectedScreenIds: screenIds }).where(and(eq(schema.messages.jobId, jobId), eq(schema.messages.role, 'assistant')));
     await tx.update(schema.projects).set({ updatedAt: new Date() }).where(eq(schema.projects.id, project.id));
   });

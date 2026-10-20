@@ -3,7 +3,7 @@ import { db, schema } from '../db/client.ts';
 import { problems } from '../lib/errors.ts';
 import { notifyCanvas } from '../lib/events.ts';
 import { storage } from '../lib/storage.ts';
-import { applyElementOps, extractBody, assembleDocument, buildPrelude, lintScreenBody, tokensFromSeed, withConventions, RADIUS_SCALES, type ElementOp, type Tokens, type RevisionDto, type Palette, type ColorMode, type FontSource } from '@quilt/core';
+import { applyElementOps, extractBody, assembleDocument, buildPrelude, lintScreenBody, tokensFromSeed, withConventions, RADIUS_SCALES, L, type ElementOp, type Tokens, type RevisionDto, type Palette, type ColorMode, type FontSource } from '@quilt/core';
 import { ownedScreen, hasActiveJob, createRevision, deriveLinks, revisionDto } from './screens.ts';
 import { ownedProject, designSystemDto } from './projects.ts';
 import { enqueueScreenshot } from './jobs.ts';
@@ -50,14 +50,14 @@ export async function updateDesignSystem(ownerId: string, projectId: string, pat
   // 字体来源（v0.44）：换成 url 来源时链接得同批给到，否则 prelude 发不出 <link>，屏静默退回系统字体
   const fontSource = patch.fontSource ?? current.typography.fontSource ?? 'google';
   const fontUrl = fontSource === 'url' ? (patch.fontUrl === undefined ? (current.typography.fontUrl ?? null) : patch.fontUrl) : null;
-  if (fontSource === 'url' && !fontUrl) throw problems.validation([{ path: 'fontUrl', message: '来源为自定义链接时要给字体样式表地址' }]);
+  if (fontSource === 'url' && !fontUrl) throw problems.validation([{ path: 'fontUrl', message: L('来源为自定义链接时要给字体样式表地址', 'A Custom URL font source needs the font stylesheet URL') }]);
   const radiusScale = patch.radiusScale ?? (Object.entries(RADIUS_SCALES).find(([, v]) => v.md === current.radius.md)?.[0] as keyof typeof RADIUS_SCALES | undefined) ?? 'default';
   // 品牌色板（REQ-EDIT-005）：给对象整份替换、给 null 清空、不给沿用；tokens 是「派生 + 覆盖」的成品
   const patched = patch.palette === undefined ? (ds.palette as Palette | null) : patch.palette;
   // 零个覆盖键的暗色色板与「没有暗色色板」是同一件事：留着 `dark:{}` 会让 dark 可选而色值全是派生值
   const palette = patched && !Object.keys(patched.dark ?? {}).length ? { light: patched.light } : patched;
   // 400 只针对「请求里选了 dark 却没有 dark 色板」；清空色板这类请求没碰 colorMode，不该被存量模式连带拒掉
-  if (patch.colorMode === 'dark' && !palette?.dark) throw problems.validation([{ path: 'colorMode', message: '没有暗色色板可切——先给 palette.dark' }]);
+  if (patch.colorMode === 'dark' && !palette?.dark) throw problems.validation([{ path: 'colorMode', message: L('没有暗色色板可切——先给 palette.dark', 'There is no dark palette to switch to; set palette.dark first') }]);
   // 暗色色板被这次请求撤掉时回落 light：dark 没了还留在 dark 模式，面板的亮 / 暗段控（挂在 palette.dark 上）也就消失了
   const colorMode: ColorMode = palette?.dark ? (patch.colorMode ?? (ds.colorMode as ColorMode)) : 'light';
   const tokens = tokensFromSeed(seedColor, { fontFamily, fontSource, fontUrl, radiusScale, colorMode, palette: palette?.[colorMode] });

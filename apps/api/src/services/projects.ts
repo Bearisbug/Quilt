@@ -5,7 +5,8 @@ import { problems } from '../lib/errors.ts';
 import { storage } from '../lib/storage.ts';
 import { notifyCanvas } from '../lib/events.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
-import { tokensFromSeed, newProjectDesign, shotSpecFor, type DeviceType, type ProjectDto, type ProjectDetailDto, type DesignSystemDto, type ScreenDto, type LinkDto, type JobDto, type JobRunner, RADIUS_SCALES, type Palette, type ColorMode, type FontSource, type Presentation, type ProjectKind, type DraftFrame } from '@quilt/core';
+import { requestLocale, sketchbookName } from '../lib/locale.ts';
+import { tokensFromSeed, newProjectDesign, shotSpecFor, L, type DeviceType, type ProjectDto, type ProjectDetailDto, type DesignSystemDto, type ScreenDto, type LinkDto, type JobDto, type JobRunner, RADIUS_SCALES, type Palette, type ColorMode, type FontSource, type Presentation, type ProjectKind, type DraftFrame } from '@quilt/core';
 
 export type ProjectRow = typeof schema.projects.$inferSelect;
 export type ScreenRow = typeof schema.screens.$inferSelect;
@@ -52,7 +53,7 @@ export async function updateProject(ownerId: string, projectId: string, patch: {
   const project = await ownedProject(ownerId, projectId);
   if (patch.exemplarScreenId) {
     const [s] = await db.select({ id: schema.screens.id }).from(schema.screens).where(and(eq(schema.screens.id, patch.exemplarScreenId), eq(schema.screens.projectId, project.id)));
-    if (!s) throw problems.validation([{ path: 'exemplarScreenId', message: '样板屏必须是本项目的屏' }]);
+    if (!s) throw problems.validation([{ path: 'exemplarScreenId', message: L('样板屏必须是本项目的屏', 'The exemplar screen must be a screen in this project') }]);
   }
   const [updated] = await db.update(schema.projects).set({ ...patch, updatedAt: new Date() }).where(eq(schema.projects.id, project.id)).returning();
   await notifyCanvas(project.id, { reason: 'project' });
@@ -81,7 +82,7 @@ export async function listProjects(ownerId: string, cursor?: string, limit = 50)
   return { items, nextCursor: rows.length > limit ? rows[limit - 1].updatedAt.toISOString() : null };
 }
 
-export const projectDto = (p: ProjectRow): ProjectDto => ({ id: p.id, name: p.name, deviceType: p.deviceType as DeviceType, status: p.status as 'active' | 'archived', brief: p.brief, exemplarScreenId: p.exemplarScreenId, kind: p.kind as ProjectKind, createdAt: p.createdAt.toISOString(), updatedAt: p.updatedAt.toISOString() });
+export const projectDto = (p: ProjectRow): ProjectDto => ({ id: p.id, name: p.kind === 'sketchbook' ? sketchbookName() : p.name, deviceType: p.deviceType as DeviceType, status: p.status as 'active' | 'archived', brief: p.brief, exemplarScreenId: p.exemplarScreenId, kind: p.kind as ProjectKind, createdAt: p.createdAt.toISOString(), updatedAt: p.updatedAt.toISOString() });
 export const designSystemDto = (d: typeof schema.designSystems.$inferSelect): DesignSystemDto => ({ id: d.id, projectId: d.projectId, seedColor: d.seedColor, tokens: d.tokens, palette: (d.palette as DesignSystemDto['palette']) ?? null, colorMode: d.colorMode as DesignSystemDto['colorMode'], designMd: d.designMd, components: d.components, version: d.version });
 export const jobDto = (j: JobRow): JobDto => ({ id: j.id, projectId: j.projectId, kind: j.kind as JobDto['kind'], status: j.status as JobDto['status'], runner: j.runner as JobRunner, input: j.input, output: j.output, createdAt: j.createdAt.toISOString(), startedAt: j.startedAt?.toISOString() ?? null, finishedAt: j.finishedAt?.toISOString() ?? null });
 
@@ -114,7 +115,8 @@ export async function screenDtos(project: ProjectRow, rows: ScreenRow[]): Promis
       currentRevisionId: rev?.id ?? null, currentRevisionSeq: rev?.seq ?? null,
       screenshotUrl: rev?.screenshotKey ? await storage.signedUrl(rev.screenshotKey) : null,
       thumbUrl: rev?.thumbKey ? await storage.signedUrl(rev.thumbKey) : null,
-      previewUrl: rev ? `${config.previewOrigin}/p/${project.id}/${s.id}?rev=${rev.id}&t=${previewToken}` : null,
+      // 草稿本的草稿带上界面语言：预览服务按它给文档标题里的草稿本名（API-CORE-046）
+      previewUrl: rev ? `${config.previewOrigin}/p/${project.id}/${s.id}?rev=${rev.id}&t=${previewToken}${project.kind === 'sketchbook' ? `&lang=${requestLocale()}` : ''}` : null,
       lintPassed: rev ? (rev.lintReport as { passed?: boolean }).passed ?? null : null,
       // 偏离条数（v0.43）：契约是透镜不是闸门，画布只报「偏离了几处」，取舍由设计师做
       deviations: rev ? ((rev.lintReport as { violations?: unknown[] }).violations ?? []).length : 0,

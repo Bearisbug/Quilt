@@ -3,6 +3,7 @@ import { DEVICE_TYPES, PRESENTATIONS, type Presentation } from './device.ts';
 import { TOKEN_COLOR_KEYS } from './tokens.ts';
 import { COMPONENT_NAME_RE, MAX_COMPONENT_HTML_BYTES } from './component-meta.ts';
 import { ROUND_PRESETS } from './contract.ts';
+import { localeSchema } from './i18n.ts';
 
 // 契约 schema（§8 / §9 / §24）：服务端校验与前端类型的唯一出处。
 // v0.31：三种 generate 合一（整组 / 单屏 / 懒生成都是 `generate`）；历史行里的旧 kind 只读保留
@@ -86,6 +87,8 @@ export const MAX_COMPONENT_TARGETS = 10;
 const componentIdsSchema = z.array(z.uuid()).max(MAX_COMPONENT_TARGETS).optional();
 
 export const variantNameSchema = z.string().trim().min(1).max(20);
+// 界面语言（REQ-CORE-046）：写屏上文字的四种作业可带，建作业时服务端按请求的 X-Quilt-Locale 填（不看请求体），提示词据此补一句语言要求
+const jobLocaleSchema = localeSchema.optional();
 export const jobInputSchemas = {
   // 造（REQ-CORE-003 / REQ-CORE-014 / REQ-PROTO-003）：count 是屏数档位（1 单屏规划、2–4 与 auto 整组规划）；
   // versions 是每张新屏的候选版数；anchor 是画布世界坐标；route 钉死即懒生成（跳过规划器，fromScreenId 作来源屏参考）
@@ -108,13 +111,14 @@ export const jobInputSchemas = {
     frame: z.enum(DRAFT_FRAME_CHOICES).optional(),
     // 参照项目（REQ-CORE-042）：新草稿从第一版起就参照它，同样只对草稿本的新草稿有效
     refProjectId: z.uuid().optional(),
+    locale: jobLocaleSchema,
   }).refine((v) => !!v.variantOf === !!v.variantName, { path: ['variantName'], message: 'variantOf 与 variantName 要一起给' }),
   // annotations（v0.87）：批注发出的作业由 API-EDIT-003 填上每条批注的锚点文字与说明，只用来把这一轮写进历史指令（ADR-012），本轮指令仍是 prompt
-  edit_screens: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).min(1).max(20), versions: versionsSchema.default(1), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), componentIds: componentIdsSchema, annotations: z.array(z.object({ anchorText: z.string().max(200), note: z.string().min(1).max(2000) })).max(50).optional() }),
+  edit_screens: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).min(1).max(20), versions: versionsSchema.default(1), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), componentIds: componentIdsSchema, annotations: z.array(z.object({ anchorText: z.string().max(200), note: z.string().min(1).max(2000) })).max(50).optional(), locale: jobLocaleSchema }),
   // 改共享组件（REQ-EDIT-006）：一次一个；成功后所有用到它的屏确定性回刷（零 LLM）
-  edit_component: z.object({ componentId: z.uuid(), prompt: z.string().trim().min(1).max(8000), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional() }),
+  edit_component: z.object({ componentId: z.uuid(), prompt: z.string().trim().min(1).max(8000), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), locale: jobLocaleSchema }),
   // 子树重生成（REQ-EDIT-002）：runner 可单独选（检查器里有自己的通道 / 会话选择器，记忆独立于输入框）
-  regenerate_subtree: z.object({ screenId: z.uuid(), qid: z.string().regex(/^q\d+$/), prompt: z.string().trim().min(1).max(4000), expectedRevisionId: z.uuid(), runner: runnerSchema.optional() }),
+  regenerate_subtree: z.object({ screenId: z.uuid(), qid: z.string().regex(/^q\d+$/), prompt: z.string().trim().min(1).max(4000), expectedRevisionId: z.uuid(), runner: runnerSchema.optional(), locale: jobLocaleSchema }),
   apply_design_system: z.object({ screenIds: z.union([z.literal('all'), z.array(z.uuid()).min(1)]) }),
   // 设计系统提炼（REQ-EDIT-003）：只产出提案（output.proposal），写入由 API-EDIT-002 在预览确认后完成
   propose_design_system: z.object({ instruction: z.string().trim().min(1).max(4000), screenId: z.uuid().optional(), runner: runnerSchema.optional() }),

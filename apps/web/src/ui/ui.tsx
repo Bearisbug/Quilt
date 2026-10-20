@@ -1,4 +1,6 @@
 import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type TextareaHTMLAttributes, type ReactNode } from 'react';
+import { useT } from '@/i18n';
+import uiMessages from '@/i18n/locales/shellUi';
 
 export const cn = (...xs: (string | false | null | undefined)[]) => xs.filter(Boolean).join(' ');
 
@@ -125,5 +127,6 @@ export function EmptyState({ title, hint, action }: { title: string; hint?: stri
 }
 
 export function Spinner() {
-  return <div className="flex h-full items-center justify-center gap-2 type-label text-text-secondary" role="status"><span className="size-4 rounded-full border-2 border-text-secondary border-r-transparent animate-spin" aria-hidden />加载中</div>;
+  const t = useT(uiMessages);
+  return <div className="flex h-full items-center justify-center gap-2 type-label text-text-secondary" role="status"><span className="size-4 rounded-full border-2 border-text-secondary border-r-transparent animate-spin" aria-hidden />{t('loading')}</div>;
 }

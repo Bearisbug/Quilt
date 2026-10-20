@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { AgentSessionDto } from '@quilt/core';
 import { config } from '../config.ts';
 import { codexBin } from './agentCli.ts';
+import { tr } from './locale.ts';
 
 // 本机 Codex 线程（REQ-AGENT-003 v0.68 / ADR-020 / API-AGENT-010）。Codex 没有 Claude Code 那种 inbox socket，投递走文档化的
 // `codex queue --thread <id> --message …`：Codex 的每个 app-server（桌面版、VS Code 插件、终端）都开着同一个队列库，
@@ -29,15 +30,15 @@ const COLS = 'id, name, title, cwd, source, originator, updated_at_ms';
 /** 读线程库；读不了（目录不存在、Node < 22.13 没有 node:sqlite、表结构变了）时带原因返回空 */
 async function query(sql: string, ...args: (string | number)[]): Promise<{ rows: Row[]; reason?: string }> {
   const file = stateDb();
-  if (!file) return { rows: [], reason: `没有找到 Codex 线程库（${config.codexHome}）` };
+  if (!file) return { rows: [], reason: tr(`没有找到 Codex 线程库（${config.codexHome}）`, `Codex thread database not found (${config.codexHome})`) };
   let sqlite: typeof import('node:sqlite');
-  try { sqlite = await import('node:sqlite'); } catch { return { rows: [], reason: '读取 Codex 线程库需要 Node ≥ 22.13' }; }
+  try { sqlite = await import('node:sqlite'); } catch { return { rows: [], reason: tr('读取 Codex 线程库需要 Node ≥ 22.13', 'Reading the Codex thread database requires Node ≥ 22.13') }; }
   let db: import('node:sqlite').DatabaseSync | null = null;
   try {
     db = new sqlite.DatabaseSync(file, { readOnly: true });
     return { rows: db.prepare(sql).all(...args) as unknown as Row[] };
   } catch (e) {
-    return { rows: [], reason: `读取 Codex 线程库失败：${(e as Error).message}` };
+    return { rows: [], reason: tr(`读取 Codex 线程库失败：${(e as Error).message}`, `Could not read the Codex thread database: ${(e as Error).message}`) };
   } finally { db?.close(); }
 }
 

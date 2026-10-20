@@ -135,10 +135,13 @@
   var mode = 'interact';
   // 画布标记的颜色（§13.1）：父页按当前外观经 quilt:mode 给（标记色、标记上的字、halo、成功色），运行时不写颜色；
   // 外观切换时父页重发，已画出来的框与标记当场换色。收到之前沿用 currentColor
-  /** @type {{ line: string, onLine: string, halo: string, success: string } | null} */
+  // 修改标记角标上的字同样由父页按界面语言给（labels，REQ-CORE-046），没给时用中文
+  /** @type {{ line: string, onLine: string, halo: string, success: string, labels?: { working: string, done: string } } | null} */
   var pal = null;
   /** @param {'line' | 'onLine' | 'halo' | 'success'} k */
   function color(k) { return pal ? pal[k] : 'currentColor'; }
+  /** @param {'working' | 'done'} kind */
+  function markLabel(kind) { var l = pal && pal.labels; return kind === 'working' ? (l ? l.working : '修改中…') : (l ? l.done : '已更新'); }
   /** @type {HTMLElement | null} */
   var box = null;
   // 选择元素模式下让每个元素都可命中（v0.57）：设计里常给装饰层或被 <label> 包着的文字写 pointer-events:none，
@@ -243,7 +246,6 @@
     if (m.kind !== kind) {
       m.kind = kind;
       el.style.outlineOffset = '2px';
-      m.badge.textContent = working ? '修改中…' : '已更新';
       m.badge.setAttribute('data-kind', kind);
       m.badge.style.cssText = 'position:fixed;z-index:2147483645;pointer-events:none;font:600 11px/16px system-ui,sans-serif;padding:1px 7px;border-radius:999px';
       paintMark(m);
@@ -252,9 +254,11 @@
     // 「已更新」每次都重新计时：父页可能收口时打一次、换完 DOM 再补一次
     if (!working) m.timer = setTimeout(function () { unmark(qid); }, 4000);
   }
-  // 修改中用标记色虚线，已更新用成功色实线；角标的字用标记上的字色（深浅两套里它与 halo 同值，压在两种底上都读得出）
+  // 修改中用标记色虚线，已更新用成功色实线；角标的字用标记上的字色（深浅两套里它与 halo 同值，压在两种底上都读得出）。
+  // 角标文字也在这里写：父页换外观或界面语言时重发 quilt:mode，已画出来的角标当场换色、换字
   /** @param {Mark} m */
   function paintMark(m) {
+    m.badge.textContent = markLabel(m.kind === 'working' ? 'working' : 'done');
     var hue = m.kind === 'working' ? color('line') : color('success');
     m.el.style.outline = '2px ' + (m.kind === 'working' ? 'dashed ' : 'solid ') + hue;
     m.badge.style.background = hue; m.badge.style.color = color('onLine'); m.badge.style.boxShadow = '0 0 0 1px ' + color('halo');

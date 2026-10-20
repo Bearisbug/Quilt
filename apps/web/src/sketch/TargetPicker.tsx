@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Trans } from 'react-i18next';
 import { DEVICE_SIZE, isPreviewMessage, type DeviceType, type ParentToPreview, type ScreenDto } from '@quilt/core/browser';
 import { loadConfig } from '@/lib/api';
 import { markPalette, useResolvedMode } from '@/lib/theme';
+import { useLocale, useT } from '@/i18n';
+import sketchMessages from '@/i18n/locales/sketch';
 
 /** 「换一块」点中的元素：写回要它的 qid，「换掉 …」那句要标签与文字 */
 export type PickedElement = { qid: string; tag: string; text: string };
@@ -13,7 +16,6 @@ const MAX_H_VH = 0.46;
 const EDGE = 2;
 // 「换掉 …」那句里文字最多带几个字（按码点截，不把 emoji 截成半个）
 const TEXT_MAX = 24;
-const GONE = '这一块已经不在目标屏上了，重新点一下';
 
 const clip = (s: string) => { const cs = Array.from(s.trim()); return cs.length > TEXT_MAX ? `${cs.slice(0, TEXT_MAX).join('')}…` : cs.join(''); };
 
@@ -35,6 +37,7 @@ export function TargetPicker({ screen, deviceType, picked, initialQid, onPick, o
   /** 预览签名过期时重取目标项目详情，返回这一屏的新值 */
   onStale: () => Promise<ScreenDto | null>;
 }) {
+  const t = useT(sketchMessages);
   const view = DEVICE_SIZE[deviceType];
   const wrapRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -89,23 +92,24 @@ export function TargetPicker({ screen, deviceType, picked, initialQid, onPick, o
         if (q) post({ type: 'quilt:reselect', qid: q });
       }
       if (m.type === 'quilt:select') {
-        if (m.component) { post({ type: 'quilt:highlight', qid: p.picked?.qid ?? null }); setNote(`这是共享组件，去改组件「${m.component}」`); return; }
+        if (m.component) { post({ type: 'quilt:highlight', qid: p.picked?.qid ?? null }); setNote(t('lockedName', { name: m.component })); return; }
         setNote(null);
         p.onPick({ qid: m.qid, tag: m.tag, text: m.text });
       }
-      if (m.type === 'quilt:deselect') { setNote(GONE); p.onPick(null); }
+      if (m.type === 'quilt:deselect') { setNote(t('blockGone')); p.onPick(null); }
       if (m.type === 'quilt:key' && m.key === 'Escape') p.onEscape();
     };
     window.addEventListener('message', on);
     return () => window.removeEventListener('message', on);
-  }, [origin, post]);
+  }, [origin, post, t]);
 
   // 父页清掉或换了选中（写回撞上「元素已不在」）时，常驻框跟着走；就绪之前不发，就绪时由上面的预选接手
   const pickedQid = picked?.qid ?? null;
   useEffect(() => { if (readyRef.current) post({ type: 'quilt:highlight', qid: pickedQid }); }, [pickedQid, post]);
-  // 换外观时重发一次：屏内的选中框、悬停框跟着换色（§13.1）
+  // 换外观、换界面语言时重发一次：屏内的选中框、悬停框跟着换色，修改标记跟着换字（§13.1）
   const themeMode = useResolvedMode();
-  useEffect(() => { if (readyRef.current) post({ type: 'quilt:mode', mode: 'inspect', marks: markPalette() }); }, [themeMode, post]);
+  const locale = useLocale();
+  useEffect(() => { if (readyRef.current) post({ type: 'quilt:mode', mode: 'inspect', marks: markPalette() }); }, [themeMode, locale, post]);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
   const reloadFresh = async () => {
@@ -125,14 +129,14 @@ export function TargetPicker({ screen, deviceType, picked, initialQid, onPick, o
   const retry = () => { if (!origin) { fetchOrigin(); return; } setFailed(false); retried.current = true; void reloadFresh(); };
 
   return (
-    <div ref={wrapRef} role="group" aria-label={`在「${screen.name}」上点选要换掉的一块`} data-testid="target-picker" data-ready={ready ? 'true' : undefined} className="w-full">
+    <div ref={wrapRef} role="group" aria-label={t('picker.label', { name: screen.name })} data-testid="target-picker" data-ready={ready ? 'true' : undefined} className="w-full">
       {room && (
         // 外框是用户设计稿的白（同画布卡片），1px 边线把它和弹层底分开；iframe 按设备视口渲染再整体缩小
         <div className="relative mx-auto overflow-hidden rounded-md border border-border-subtle bg-neutral-0" style={{ width: Math.round(view.w * scale) + EDGE, height: Math.round(view.h * scale) + EDGE }}>
           <div className="absolute left-0 top-0" style={{ width: view.w, height: view.h, transform: `scale(${scale})`, transformOrigin: '0 0' }}>
             {origin && src && (
               <iframe
-                key={loadKey} ref={iframeRef} src={src} title={`「${screen.name}」的预览`} sandbox="allow-scripts allow-same-origin allow-forms"
+                key={loadKey} ref={iframeRef} src={src} title={t('picker.frameTitle', { name: screen.name })} sandbox="allow-scripts allow-same-origin allow-forms"
                 onLoad={onLoad} inert={!ready} tabIndex={ready ? undefined : -1}
                 className="absolute left-0 top-0 block size-full border-0 bg-neutral-0"
                 // 预览文档按 light 渲染；不写会继承外壳的 dark，浏览器给 iframe 铺一层不透明底（同草稿看板）
@@ -142,21 +146,24 @@ export function TargetPicker({ screen, deviceType, picked, initialQid, onPick, o
           </div>
           {!ready && !failed && (
             <div className="draft-skeleton absolute inset-0 grid place-items-center">
-              <span role="status" className="max-w-[calc(100%-1.5rem)] truncate rounded-sm px-3 py-1.5 type-label inverse">加载「{screen.name}」…</span>
+              <span role="status" className="max-w-[calc(100%-1.5rem)] truncate rounded-sm px-3 py-1.5 type-label inverse">{t('picker.loading', { name: screen.name })}</span>
             </div>
           )}
           {failed && (
             <div className="absolute inset-0 grid place-items-center bg-(--semantic-color-surface-sunken)">
               <button type="button" data-testid="target-picker-retry" onClick={retry}
-                className="state-layer focus-ring whitespace-nowrap rounded-sm border border-warning bg-surface-raised px-3 py-1.5 type-label font-semibold text-warning">预览没加载出来 · 重试</button>
+                className="state-layer focus-ring whitespace-nowrap rounded-sm border border-warning bg-surface-raised px-3 py-1.5 type-label font-semibold text-warning">{t('picker.retry')}</button>
             </div>
           )}
         </div>
       )}
       <p className="mt-2 type-label" aria-live="polite">
         {picked
-          ? <span data-testid="copy-picked" className="text-text-primary">换掉 <code>&lt;{picked.tag}&gt;</code>{picked.text.trim() ? `「${clip(picked.text)}」` : ''}</span>
-          : <span className="text-text-secondary">在预览里点一下要换掉的那一块</span>}
+          ? <span data-testid="copy-picked" className="text-text-primary">
+            {/* 标签与文字作为整件嵌进句子（<el/>、<txt/>），不经插值：元素文字里的尖括号不会被当成标记 */}
+            <Trans ns={sketchMessages.ns} i18nKey={picked.text.trim() ? 'picker.pickedText' : 'picker.picked'} components={{ el: <code>&lt;{picked.tag}&gt;</code>, txt: <>{clip(picked.text)}</> }} />
+          </span>
+          : <span className="text-text-secondary">{t('picker.hint')}</span>}
       </p>
       {note && <p data-testid="copy-locked" className="mt-1 type-label text-warning">{note}</p>}
     </div>

@@ -6,9 +6,10 @@ import { problems, isUniqueViolation } from '../lib/errors.ts';
 import { storage } from '../lib/storage.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
 import { emitProjectEvent, notifyCanvas } from '../lib/events.ts';
+import { requestLocale } from '../lib/locale.ts';
 import {
   assembleDocument, buildPrelude, extractBody, lintScreenBody, expandComponents, extractComponent, findComponentMatch, replaceWithPlaceholder,
-  componentSummary, componentSlots, componentPlacement, componentOf, validateComponentHtml, classifyComponentHtml, applyElementOps, injectQids, componentInstructionHistory, MAX_COMPONENTS_PER_PROJECT,
+  componentSummary, componentSlots, componentPlacement, componentOf, validateComponentHtml, classifyComponentHtml, applyElementOps, injectQids, componentInstructionHistory, MAX_COMPONENTS_PER_PROJECT, L,
   type ComponentDto, type SharedComponent, type SharedComponentCard, type Tokens, type ElementOp,
 } from '@quilt/core';
 import { ownedProject, type ProjectRow, type ScreenRow } from './projects.ts';
@@ -175,7 +176,7 @@ async function dtoOf(project: ProjectRow, id: string): Promise<ComponentDto> {
 export async function createComponent(ownerId: string, projectId: string, input: { name: string; html: string } | { name: string; fromScreenId: string; qid: string; applyToScreens?: boolean }): Promise<ComponentResult> {
   const project = await ownedProject(ownerId, projectId);
   const existing = await componentRows(project.id);
-  if (existing.length >= MAX_COMPONENTS_PER_PROJECT) throw problems.validation([{ path: 'name', message: `每个项目最多 ${MAX_COMPONENTS_PER_PROJECT} 个共享组件` }]);
+  if (existing.length >= MAX_COMPONENTS_PER_PROJECT) throw problems.validation([{ path: 'name', message: L(`每个项目最多 ${MAX_COMPONENTS_PER_PROJECT} 个共享组件`, `A project can have at most ${MAX_COMPONENTS_PER_PROJECT} shared components`) }]);
   const pos = { x: COLUMN_X, y: COLUMN_Y0 + existing.length * COLUMN_GAP };
   const insert = async (values: { name: string; html: string; activeClass: string | null; inactiveClass: string | null }): Promise<Row> => {
     try {
@@ -184,7 +185,7 @@ export async function createComponent(ownerId: string, projectId: string, input:
     } catch (e) { if (isUniqueViolation(e)) throw problems.componentNameTaken(); throw e; }
   };
   if ('html' in input) {
-    const v = validateComponentHtml(input.html);
+    const v = validateComponentHtml(input.html, requestLocale());
     if (!v.ok) throw problems.validation([{ path: 'html', message: v.error }]);
     const c = classifyComponentHtml(input.html);
     const row = await insert({ name: input.name, html: c.html, activeClass: c.activeClass, inactiveClass: c.inactiveClass });
@@ -197,14 +198,14 @@ export async function createComponent(ownerId: string, projectId: string, input:
   if (!source) throw problems.elementNotFound();
   if (await hasActiveJob(db, project.id, source.screen.id)) throw problems.screenBusy();
   const live = existing.map((r) => r.name);
-  const ext = extractComponent(source.body, input.qid, source.screen.route, live);
-  if ('error' in ext) throw ext.error.includes('不存在') ? problems.elementNotFound() : problems.validation([{ path: 'qid', message: ext.error }]);
+  const ext = extractComponent(source.body, input.qid, source.screen.route, live, requestLocale());
+  if ('error' in ext) throw ext.notFound ? problems.elementNotFound() : problems.validation([{ path: 'qid', message: ext.error }]);
   // 提取时把屏里那套 qid 整套剥掉了（extractComponent），这里要给组件补上自己的一套——
   // 组件里的元素直改（API-EDIT-005）按 qid 定位，不补的话这条路径建出来的组件永远选不中元素，
   // 而且要等下次重启被 backfillComponentQids 补上才突然能用，同一个组件重启前后行为不同。
   // 不走 classifyComponentHtml：它重算 navClasses 时没有 route 上下文，会把提取时按屏算出的激活态丢掉。
   const html = injectQids(ext.html);
-  const v = validateComponentHtml(html);
+  const v = validateComponentHtml(html, requestLocale());
   if (!v.ok) throw problems.validation([{ path: 'qid', message: v.error }]);
   const row = await insert({ name: input.name, html, activeClass: ext.activeClass, inactiveClass: ext.inactiveClass });
   const shared = [...existing.map(toShared), toShared(row)];
@@ -249,7 +250,7 @@ export async function applyComponentElementEdit(ownerId: string, componentId: st
   if (component.version !== expectedVersion) throw problems.versionConflict();
   const next = applyElementOps(component.html, qid, ops);
   if (next === null) throw problems.elementNotFound();
-  const v = validateComponentHtml(next);
+  const v = validateComponentHtml(next, requestLocale());
   // 删掉根元素就没有组件了；其余结构性错误同样退回去，不落库（422：请求合法、改出来的内容不合规，API-EDIT-005）
   if (!v.ok) throw problems.unprocessable([{ path: 'ops', message: v.error }]);
   return updateComponent(ownerId, componentId, { html: next, expectedVersion });
@@ -267,7 +268,7 @@ export async function updateComponent(ownerId: string, componentId: string, patc
   if (component.version !== patch.expectedVersion) throw problems.versionConflict();
   let values: Partial<Row> = { version: component.version + 1, updatedAt: new Date(), ...(patch.x !== undefined ? { x: patch.x } : {}), ...(patch.y !== undefined ? { y: patch.y } : {}) };
   if (patch.html !== undefined) {
-    const v = validateComponentHtml(patch.html);
+    const v = validateComponentHtml(patch.html, requestLocale());
     if (!v.ok) throw problems.validation([{ path: 'html', message: v.error }]);
     const c = classifyComponentHtml(patch.html);
     // 激活态那对类描述的是「选中长什么样」，不是「哪一条选中」——哪条亮由屏的路由在展开时算（applyActiveState）。
@@ -300,7 +301,7 @@ async function assertComponentJob(projectId: string, componentId: string, jobId:
   const [job] = await db.select().from(schema.generationJobs).where(and(eq(schema.generationJobs.id, jobId), eq(schema.generationJobs.projectId, projectId)));
   if (!job) throw problems.notFound();
   if (job.runner !== 'agent' || job.kind !== 'edit_component' || (job.input as { componentId?: string }).componentId !== componentId) {
-    throw problems.validation([{ path: 'jobId', message: '这个作业不是投递给本机会话改这个组件的作业' }]);
+    throw problems.validation([{ path: 'jobId', message: L('这个作业不是投递给本机会话改这个组件的作业', 'This job was not delivered to a local session to edit this component') }]);
   }
   if (job.status !== 'running') throw problems.jobFinished();
 }

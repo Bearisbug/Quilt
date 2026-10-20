@@ -31,7 +31,8 @@ export const previewMessageSchema = z.discriminatedUnion('type', [
 ]);
 export type PreviewToParent = z.infer<typeof previewMessageSchema>;
 
-export type MarkPalette = { line: string; onLine: string; halo: string; success: string };
+// labels（REQ-CORE-046）：屏内修改标记角标上的两段字，父页按界面语言给；不给时运行时用中文「修改中…」「已更新」
+export type MarkPalette = { line: string; onLine: string; halo: string; success: string; labels?: { working: string; done: string } };
 
 export type ParentToPreview =
     // keepScroll：同一屏换新修订（聚焦态热更新）时保留滚动位置；跳转不传，回到顶部

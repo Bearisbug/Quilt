@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { and, eq, desc, asc, lt, inArray, isNull } from 'drizzle-orm';
-import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, ROUND_PRESET_PROMPTS, missingPagePrompt, variantPrompt, presetPrompt, presetNote, createProjectSchema, createJobSchema, createMessageSchema, retryMessageSchema, createAttachmentSchema, updateProjectSchema, cursorQuerySchema, listJobsQuerySchema, type MessageDto, type LinkDto, type CreateJobInput, type JobKind, type ProjectEventDto, type Runner, createPresetSchema, applyPresetSchema } from '@quilt/core';
+import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, ROUND_PRESET_PROMPTS, missingPagePrompt, variantPrompt, presetPrompt, presetNote, createProjectSchema, createJobSchema, createMessageSchema, retryMessageSchema, createAttachmentSchema, updateProjectSchema, cursorQuerySchema, listJobsQuerySchema, type MessageDto, type LinkDto, type CreateJobInput, type JobKind, type ProjectEventDto, type Runner, createPresetSchema, applyPresetSchema, L } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
 import { parseBody, parseQuery, requireUser, type Env } from '../app.ts';
 import { createProject, deleteProject, getProjectDetail, listProjects, ownedProject, updateProject, projectDto, designSystemDto, jobDto } from '../../services/projects.ts';
@@ -12,7 +12,7 @@ import { applyPreset, createPreset, deletePreset, listPresets } from '../../serv
 import { listChannels } from '../../services/channels.ts';
 import { assertSketchbookMessage, isSketchbook } from '../../services/sketchbook.ts';
 // 聊天通道（REQ-CORE-023）：Agent SDK 只认 Claude——必须是 agent-sdk 通道；缺省取第一条已验证的，一条都没有就点名去设置页加
-const CHAT_CHANNEL_HINT = '聊天需要「本机 Claude 订阅」通道：去设置页添加并验证一条';
+const CHAT_CHANNEL_HINT = L('聊天需要「本机 Claude 订阅」通道：去设置页添加并验证一条', 'Chat needs a Local Claude subscription channel: add and verify one in Settings');
 async function chatRunner(userId: string, runner: Runner | undefined): Promise<Runner> {
   const mine = await listChannels(userId);
   if (runner) {
@@ -28,13 +28,18 @@ import { problems } from '../../lib/errors.ts';
 import { findSession } from '../../lib/claudeSessions.ts';
 import { findCodexThread } from '../../lib/codexSessions.ts';
 import { subscribeProject } from '../../lib/events.ts';
+import { countEn, tr } from '../../lib/locale.ts';
 
 // 本机 agent 作业的助手回执：写明投给了谁。Claude Code 会话没起过名时显示 UUID；Codex 线程没起过名时 name 就是标题，照用（v0.68）
 async function deliveredText(runner?: { tool?: string; sessionId?: string }): Promise<string> {
   const id = runner?.sessionId ?? '';
-  if (runner?.tool === 'codex') return `已投递到本机 Codex 线程「${(await findCodexThread(id))?.name ?? id}」：它做完会经 MCP 收口，结果回写到画布`;
+  if (runner?.tool === 'codex') {
+    const name = (await findCodexThread(id))?.name ?? id;
+    return tr(`已投递到本机 Codex 线程「${name}」：它做完会经 MCP 收口，结果回写到画布`, `Delivered to the local Codex thread “${name}”: it reports back through MCP when done, and the results land on the canvas`);
+  }
   const s = await findSession(id);
-  return `已投递到本机 Claude Code 会话「${s ? (s.named ? s.name : s.sessionId) : id}」：它做完会经 MCP 收口，结果回写到画布`;
+  const name = s ? (s.named ? s.name : s.sessionId) : id;
+  return tr(`已投递到本机 Claude Code 会话「${name}」：它做完会经 MCP 收口，结果回写到画布`, `Delivered to the local Claude Code session “${name}”: it reports back through MCP when done, and the results land on the canvas`);
 }
 
 export const projectRoutes = new Hono<Env>();
@@ -74,19 +79,32 @@ projectRoutes.patch('/v1/projects/:projectId', async (c) => {
 const withNote = (note: string | null, sep: string) => (note ? `${sep}${note}` : '');
 function describeJob(input: CreateJobInput): string | null {
   switch (input.kind) {
-    case 'generate': return input.input.variantOf ? `出「${input.input.variantName}」状态变体：${input.input.prompt}` : input.input.route ? `生成缺失的页面 ${input.input.route}${withNote(presetNote(input.input.prompt, missingPagePrompt(input.input.route)), '：')}` : `新建${input.input.count === 'auto' ? '一组屏' : input.input.count > 1 ? ` ${input.input.count} 屏` : '一屏'}${input.input.versions > 1 ? `（${input.input.versions} 版候选）` : ''}：${input.input.prompt}`;
-    case 'regenerate_subtree': return `重生成一块：${input.input.prompt}`;
-    case 'apply_design_system': return input.input.screenIds === 'all' ? '把最新设计系统回刷到所有屏' : `把最新设计系统回刷到 ${input.input.screenIds.length} 屏`;
-    case 'propose_design_system': return `提炼设计系统约定：${input.input.instruction}`;
-    case 'export_prototype': return '导出单文件原型';
+    case 'generate': {
+      const { variantOf, variantName, route, prompt, count, versions } = input.input;
+      if (variantOf) return tr(`出「${variantName}」状态变体：${prompt}`, `Create the “${variantName}” state variant: ${prompt}`);
+      if (route) {
+        const note = presetNote(prompt, missingPagePrompt(route));
+        return tr(`生成缺失的页面 ${route}${withNote(note, '：')}`, `Generate the missing page ${route}${withNote(note, ': ')}`);
+      }
+      return tr(`新建${count === 'auto' ? '一组屏' : count > 1 ? ` ${count} 屏` : '一屏'}${versions > 1 ? `（${versions} 版候选）` : ''}：${prompt}`,
+        `Generate ${count === 'auto' ? 'a set of screens' : count > 1 ? `${count} screens` : 'a screen'}${versions > 1 ? ` (${versions} candidates)` : ''}: ${prompt}`);
+    }
+    case 'regenerate_subtree': return tr(`重生成一块：${input.input.prompt}`, `Regenerate one block: ${input.input.prompt}`);
+    case 'apply_design_system': return input.input.screenIds === 'all'
+      ? tr('把最新设计系统回刷到所有屏', 'Re-apply the latest design system to all screens')
+      : tr(`把最新设计系统回刷到 ${input.input.screenIds.length} 屏`, `Re-apply the latest design system to ${countEn(input.input.screenIds.length, 'screen')}`);
+    case 'propose_design_system': return tr(`提炼设计系统约定：${input.input.instruction}`, `Distill design system conventions: ${input.input.instruction}`);
+    case 'export_prototype': return tr('导出单文件原型', 'Export a single-file prototype');
     case 'edit_screens': {
       const n = input.input.screenIds.length;
       const link = presetNote(input.input.prompt, LINK_REPAIR_PROMPT);
       const conv = presetNote(input.input.prompt, CONVENTIONS_REGENERATE_PROMPT);
-      return link !== null ? `接上跳转：把 ${n} 屏的按钮 / 表单连上路由${withNote(link, '。附加要求：')}` : conv !== null ? `按新约定重生成 ${n} 屏${withNote(conv, '。附加要求：')}` : input.input.prompt;
+      if (link !== null) return tr(`接上跳转：把 ${n} 屏的按钮 / 表单连上路由${withNote(link, '。附加要求：')}`, `Connect links: wire the buttons / forms on ${countEn(n, 'screen')} to routes${withNote(link, '. Extra requirements: ')}`);
+      if (conv !== null) return tr(`按新约定重生成 ${n} 屏${withNote(conv, '。附加要求：')}`, `Regenerate ${countEn(n, 'screen')} with new conventions${withNote(conv, '. Extra requirements: ')}`);
+      return input.input.prompt;
     }
     case 'chat': return input.input.prompt;
-    case 'edit_component': return `改组件：${input.input.prompt}`;
+    case 'edit_component': return tr(`改组件：${input.input.prompt}`, `Edit component: ${input.input.prompt}`);
     default: return null;
   }
 }
@@ -126,11 +144,11 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
   const chat = body.mode === 'chat';
   const pinned = !chat && !!(body.variantOf || body.route);
   const preset = chat ? undefined : body.preset;
-  if (pinned && targets) throw problems.validation([{ path: 'targetScreenIds', message: '出变体 / 补缺失页是造屏，不能同时带目标屏' }]);
-  if (!chat && body.variantOf && body.route) throw problems.validation([{ path: 'route', message: '出变体与补缺失页不能同时给' }]);
-  if (preset && (!targets || pinned)) throw problems.validation([{ path: 'targetScreenIds', message: '接上跳转 / 按新约定重生成要带目标屏' }]);
+  if (pinned && targets) throw problems.validation([{ path: 'targetScreenIds', message: L('出变体 / 补缺失页是造屏，不能同时带目标屏', 'A state variant or a missing page generates a new screen, so it cannot also have target screens') }]);
+  if (!chat && body.variantOf && body.route) throw problems.validation([{ path: 'route', message: L('出变体与补缺失页不能同时给', 'A state variant and a missing page cannot be given together') }]);
+  if (preset && (!targets || pinned)) throw problems.validation([{ path: 'targetScreenIds', message: L('接上跳转 / 按新约定重生成要带目标屏', 'Connect links and Regenerate with new conventions need target screens') }]);
   const editComponent = !!compTargets && !targets && !body.anchor && !pinned;
-  if (editComponent && compTargets!.length !== 1) throw problems.validation([{ path: 'targetComponentIds', message: '一次只能改一个组件' }]);
+  if (editComponent && compTargets!.length !== 1) throw problems.validation([{ path: 'targetComponentIds', message: L('一次只能改一个组件', 'You can edit only one component at a time') }]);
   // 参考图（REQ-CORE-012）：先把 id 解析成真实存在的对象，取不到就判非法——
   // 用户看得见自己贴了图，静默丢掉比报错更糟
   // 通道是否属于本人、带图时是否支持视觉由 createJob 统一查（CH-2）
@@ -163,7 +181,7 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
 async function assertOwnComponents(projectId: string, ids: string[]) {
   const want = Array.from(new Set(ids));
   const mine = await db.select({ id: schema.components.id }).from(schema.components).where(and(eq(schema.components.projectId, projectId), inArray(schema.components.id, want)));
-  if (mine.length !== want.length) throw problems.validation([{ path: 'targetComponentIds', message: '有组件不属于这个项目或已被删除' }]);
+  if (mine.length !== want.length) throw problems.validation([{ path: 'targetComponentIds', message: L('有组件不属于这个项目或已被删除', 'Some components are not in this project or were deleted') }]);
 }
 
 // 建一轮（消息 + 作业）并给出响应体：发消息与重试共用。本机 agent 的轮次助手回执立刻写明投给了谁
@@ -192,7 +210,7 @@ projectRoutes.post('/v1/projects/:projectId/messages/:messageId/retry', async (c
   const [msg] = await db.select().from(schema.messages).where(and(eq(schema.messages.id, c.req.param('messageId')), eq(schema.messages.projectId, project.id), eq(schema.messages.role, 'user')));
   const [old] = msg?.jobId ? await db.select().from(schema.generationJobs).where(eq(schema.generationJobs.id, msg.jobId)) : [];
   if (!msg || !old) throw problems.notFound();
-  if (!RETRYABLE.includes(old.kind as JobKind)) throw problems.validation([{ path: 'messageId', message: '这一轮不能重试' }]);
+  if (!RETRYABLE.includes(old.kind as JobKind)) throw problems.validation([{ path: 'messageId', message: L('这一轮不能重试', 'This round cannot be retried') }]);
   if (old.status === 'queued' || old.status === 'running') throw problems.jobNotFinished();
   const prev = old.input as { runner?: Runner; screenIds?: string[]; componentId?: string; componentIds?: string[] };
   // 原作业的目标可能已被删：组件在这里查（与发消息同一句 400），目标屏与 variantOf 由 createJob 查（404 / 422）
@@ -285,10 +303,10 @@ projectRoutes.post('/v1/projects/:projectId/assets', async (c) => {
   const user = requireUser(c);
   const form = await c.req.parseBody();
   const file = form['file'];
-  if (!(file instanceof File)) throw problems.unprocessable([{ path: 'file', message: '缺少 file 字段' }]);
+  if (!(file instanceof File)) throw problems.unprocessable([{ path: 'file', message: L('缺少 file 字段', 'The file field is missing') }]);
   const nameField = typeof form['name'] === 'string' ? form['name'].trim() : '';
   const asset = await createAsset(user.id, c.req.param('projectId'), {
-    name: nameField || file.name || '素材',
+    name: nameField || file.name || tr('素材', 'Asset'),
     body: Buffer.from(await file.arrayBuffer()),
   });
   return c.json({ asset }, 201);

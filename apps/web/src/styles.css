@@ -8,8 +8,10 @@
 @import "./brand/state-layer.css" layer(base);
 @import "./brand/fonts/fonts.css";
 /* 类名说明表（lib/twClass.ts）里是用户屏会写的 Tailwind 词汇（bg-gradient-to-*、backdrop-blur-* 等），不是外壳的类名；
-   不排除的话 Tailwind 会照着它把这些工具类生成进外壳样式表 */
+   语言资源（i18n/locales/，类名说明的中英文案也在其中）里是界面文案，英文里的 sticky、shadow、outline、static 这类词同样不是类名。
+   不排除的话 Tailwind 会照着它们把这些工具类生成进外壳样式表 */
 @source not "./lib/twClass.ts";
+@source not "./i18n/locales";
 
 /* dark: 变体与 tokens.css 的模式层同一判据（THEME-003）：显式 data-theme="dark"，或系统暗色且没有显式选浅色 */
 @custom-variant dark {

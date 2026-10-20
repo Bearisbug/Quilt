@@ -1,12 +1,14 @@
 import { useRef, useState } from 'react';
 import { IconButton } from '@/ui/ui';
+import { useT } from '@/i18n';
+import canvasMessages from '@/i18n/locales/canvas-parts';
 import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, GalleryHorizontal, GalleryVertical } from 'lucide-react';
 import { LAYOUT_GAP, type ArrangeKind } from './arrange';
 
-// 排列条的按钮（REQ-CORE-018）：六个对齐 + 两个等距 + 两个排列（v0.52），数组顺序就是方向键在工具条里移动的顺序
-const ALIGN_BTNS = [['left', '左对齐', AlignStartVertical], ['hcenter', '水平居中', AlignCenterVertical], ['right', '右对齐', AlignEndVertical], ['top', '上对齐', AlignStartHorizontal], ['vcenter', '垂直居中', AlignCenterHorizontal], ['bottom', '下对齐', AlignEndHorizontal]] as const;
-const SPACE_BTNS = [['hspace', '横向等距', AlignHorizontalDistributeCenter], ['vspace', '纵向等距', AlignVerticalDistributeCenter]] as const;
-const LAYOUT_BTNS = [['hrow', '排成一行', GalleryHorizontal], ['vcol', '排成一列', GalleryVertical]] as const;
+// 排列条的按钮（REQ-CORE-018）：六个对齐 + 两个等距 + 两个排列（v0.52），数组顺序就是方向键在工具条里移动的顺序；名字在 canvas-parts 的 arrange.btn.<kind>
+const ALIGN_BTNS = [['left', AlignStartVertical], ['hcenter', AlignCenterVertical], ['right', AlignEndVertical], ['top', AlignStartHorizontal], ['vcenter', AlignCenterHorizontal], ['bottom', AlignEndHorizontal]] as const;
+const SPACE_BTNS = [['hspace', AlignHorizontalDistributeCenter], ['vspace', AlignVerticalDistributeCenter]] as const;
+const LAYOUT_BTNS = [['hrow', GalleryHorizontal], ['vcol', GalleryVertical]] as const;
 const ARRANGE_N = ALIGN_BTNS.length + SPACE_BTNS.length + LAYOUT_BTNS.length;
 
 // 多选排列条（REQ-CORE-018）：选中 ≥ 2 屏且没聚焦时出现在画布顶部中央；等距要 ≥ 3 屏。
@@ -18,6 +20,7 @@ const ARRANGE_N = ALIGN_BTNS.length + SPACE_BTNS.length + LAYOUT_BTNS.length;
 // 出现条件由父组件判（选中 ≥ 2 屏、未聚焦、未在选元素 / 批注、候选没展开）；这里只管排版与键盘。
 // 排列条声明了 role=toolbar：整组在 Tab 序里只占一个停靠点，方向键在组内移动焦点（INT-002，与 CanvasToolbar 同一套做法）
 export function ArrangeBar({ count, yieldToPanel, onArrange }: { count: number; yieldToPanel: boolean; onArrange: (kind: ArrangeKind) => void }) {
+  const t = useT(canvasMessages);
   const [cursor, setCursor] = useState(0);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -30,21 +33,21 @@ export function ArrangeBar({ count, yieldToPanel, onArrange }: { count: number; 
     refs.current[at]?.focus();
   };
   return (
-      <div role="toolbar" aria-orientation="horizontal" aria-label={`排列已选的 ${count} 屏`} data-testid="arrange-bar" onKeyDown={onKey}
+      <div role="toolbar" aria-orientation="horizontal" aria-label={t('arrange.toolbar', { count })} data-testid="arrange-bar" onKeyDown={onKey}
         className={`absolute left-0 right-[var(--chrome-right)] top-16 z-20 mx-auto flex w-max items-center gap-0.5 chrome rounded-lg p-1${yieldToPanel ? ' [@media(max-width:48rem)]:hidden' : ''}`}>
-        <span className="whitespace-nowrap px-2 type-label text-text-secondary tabular-nums">{count} 屏</span>
-        {ALIGN_BTNS.map(([k, label, Icon], i) => (
-          <IconButton key={k} ref={(el) => { refs.current[i] = el; }} tabIndex={i === cursor ? 0 : -1} size="xs" tip="bottom" label={label} data-testid={`arrange-${k}`} onFocus={() => setCursor(i)} onClick={() => { setCursor(i); onArrange(k); }}><Icon size={16} aria-hidden="true" /></IconButton>
+        <span className="whitespace-nowrap px-2 type-label text-text-secondary tabular-nums">{t('screenCount', { count })}</span>
+        {ALIGN_BTNS.map(([k, Icon], i) => (
+          <IconButton key={k} ref={(el) => { refs.current[i] = el; }} tabIndex={i === cursor ? 0 : -1} size="xs" tip="bottom" label={t(`arrange.btn.${k}`)} data-testid={`arrange-${k}`} onFocus={() => setCursor(i)} onClick={() => { setCursor(i); onArrange(k); }}><Icon size={16} aria-hidden="true" /></IconButton>
         ))}
         <span className="mx-1 h-5 w-px bg-border-subtle" aria-hidden="true" />
-        {SPACE_BTNS.map(([k, label, Icon], i) => {
+        {SPACE_BTNS.map(([k, Icon], i) => {
           const at = ALIGN_BTNS.length + i;
-          return <IconButton key={k} ref={(el) => { refs.current[at] = el; }} tabIndex={at === cursor ? 0 : -1} size="xs" tip="bottom" label={label} desc="保住最左 / 最上和最右 / 最下两屏，中间按间隙均分" unavailable={count < 3 ? '至少选 3 屏' : false} data-testid={`arrange-${k}`} onFocus={() => setCursor(at)} onClick={() => { setCursor(at); onArrange(k); }}><Icon size={16} aria-hidden="true" /></IconButton>;
+          return <IconButton key={k} ref={(el) => { refs.current[at] = el; }} tabIndex={at === cursor ? 0 : -1} size="xs" tip="bottom" label={t(`arrange.btn.${k}`)} desc={t('arrange.spaceDesc')} unavailable={count < 3 ? t('arrange.needThree') : false} data-testid={`arrange-${k}`} onFocus={() => setCursor(at)} onClick={() => { setCursor(at); onArrange(k); }}><Icon size={16} aria-hidden="true" /></IconButton>;
         })}
         <span className="mx-1 h-5 w-px bg-border-subtle" aria-hidden="true" />
-        {LAYOUT_BTNS.map(([k, label, Icon], i) => {
+        {LAYOUT_BTNS.map(([k, Icon], i) => {
           const at = ALIGN_BTNS.length + SPACE_BTNS.length + i;
-          return <IconButton key={k} ref={(el) => { refs.current[at] = el; }} tabIndex={at === cursor ? 0 : -1} size="xs" tip="bottom" label={label} desc={k === 'hrow' ? `按当前左右顺序排成一行，间距 ${LAYOUT_GAP}` : `按当前上下顺序排成一列，间距 ${LAYOUT_GAP}`} data-testid={`arrange-${k}`} onFocus={() => setCursor(at)} onClick={() => { setCursor(at); onArrange(k); }}><Icon size={16} aria-hidden="true" /></IconButton>;
+          return <IconButton key={k} ref={(el) => { refs.current[at] = el; }} tabIndex={at === cursor ? 0 : -1} size="xs" tip="bottom" label={t(`arrange.btn.${k}`)} desc={t(k === 'hrow' ? 'arrange.hrowDesc' : 'arrange.vcolDesc', { gap: LAYOUT_GAP })} data-testid={`arrange-${k}`} onFocus={() => setCursor(at)} onClick={() => { setCursor(at); onArrange(k); }}><Icon size={16} aria-hidden="true" /></IconButton>;
         })}
       </div>
   );

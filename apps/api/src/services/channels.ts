@@ -1,10 +1,11 @@
 import { and, asc, eq } from 'drizzle-orm';
-import { VENDOR_PRESETS, LOCAL_CHANNEL_KINDS, type ChannelDto, type ChannelKind, type ChannelVendor, type ChannelStatus, type ProbeResultDto, type RunnerOptionDto } from '@quilt/core';
+import { VENDOR_PRESETS, LOCAL_CHANNEL_KINDS, L, textIn, type Localized, type ChannelDto, type ChannelKind, type ChannelVendor, type ChannelStatus, type ProbeResultDto, type RunnerOptionDto } from '@quilt/core';
 import { db, schema } from '../db/client.ts';
 import { problems } from '../lib/errors.ts';
 import { decryptSecret, encryptSecret, secretHint, secretsConfigured } from '../lib/secrets.ts';
 import { driverSupportsVision, llmFor, type LlmDriver, type LlmSpec } from '../lib/llm.ts';
-import { SETUP_HINT, toolAvailable } from '../lib/agentCli.ts';
+import { setupHint, toolAvailable } from '../lib/agentCli.ts';
+import { requestLocale, tr } from '../lib/locale.ts';
 import type { UserRow } from './user.ts';
 
 // 生成通道可配置（REQ-CORE-013 / API-CORE-020~023）。
@@ -26,7 +27,7 @@ export const channelDto = (r: Row): ChannelDto => ({
 });
 
 const needSecrets = () => {
-  if (!secretsConfigured()) throw problems.validation([{ path: 'apiKey', message: '服务端未配置 QUILT_SECRETS_KEY，无法加密保存密钥；请在 .env 设置后重启' }]);
+  if (!secretsConfigured()) throw problems.validation([{ path: 'apiKey', message: L('服务端未配置 QUILT_SECRETS_KEY，无法加密保存密钥；请在 .env 设置后重启', 'QUILT_SECRETS_KEY is not set on the server, so keys cannot be stored encrypted; set it in .env and restart') }]);
 };
 
 async function owned(userId: string, id: string): Promise<Row> {
@@ -72,46 +73,48 @@ export async function deleteChannel(userId: string, id: string): Promise<void> {
   await db.delete(schema.channels).where(eq(schema.channels.id, id));
 }
 
-/** worker 用：把作业里的 channelId 还原成可调用的驱动规格（此时才解密） */
+/** worker 用：把作业里的 channelId 还原成可调用的驱动规格（此时才解密）。报错按当前请求的语言（设置页验证时直接显示）；worker 里不在请求中，是中文的原始原因 */
 export async function resolveChannelSpec(userId: string, channelId: string): Promise<LlmSpec & { model: string }> {
   const [row] = await db.select().from(schema.channels).where(and(eq(schema.channels.id, channelId), eq(schema.channels.userId, userId)));
-  if (!row) throw new Error('通道已删除或不属于该账号');
+  if (!row) throw new Error(tr('通道已删除或不属于该账号', 'The channel was deleted or does not belong to this account'));
   const driver = KIND_DRIVER[row.kind as ChannelKind];
   // 本机订阅没有密钥，凭据是机器上的 claude / codex 登录态
   if (LOCAL_CHANNEL_KINDS.includes(row.kind as ChannelKind)) return { driver, model: row.model };
-  if (!row.apiKeyEnc) throw new Error('通道没有密钥');
+  if (!row.apiKeyEnc) throw new Error(tr('通道没有密钥', 'The channel has no key'));
   let apiKey: string;
   try { apiKey = decryptSecret(row.apiKeyEnc); }
-  catch { throw new Error('通道密钥无法解密：QUILT_SECRETS_KEY 已更换，请到设置页重新填写'); }
+  catch { throw new Error(tr('通道密钥无法解密：QUILT_SECRETS_KEY 已更换，请到设置页重新填写', 'The channel key cannot be decrypted: QUILT_SECRETS_KEY has changed; enter the key again in Settings')); }
   return { driver, model: row.model, apiKey, baseUrl: row.endpoint ?? undefined };
 }
 
-const LOCAL_HINT: Partial<Record<ChannelKind, string>> = {
-  'agent-sdk': '在本机终端执行 `claude` 并完成登录；Quilt 进程会复用这份登录态。',
-  codex: '安装 Codex 并执行 `codex` 用 ChatGPT 账号登录；Quilt 每次生成拉起一次 `codex exec`（不在你的 Codex 历史里留会话，也不读你的 Codex 配置、MCP 与技能），模型名填 Codex 里可选的模型。验证约 20 秒；生成一屏约 2～4 分钟（桌面屏更久），比 API 通道慢得多，gpt-reserve 比 gpt-6-astra 快约三成。',
+const LOCAL_HINT: Partial<Record<ChannelKind, Localized>> = {
+  'agent-sdk': L('在本机终端执行 `claude` 并完成登录；Quilt 进程会复用这份登录态。', 'Run `claude` in a terminal on this machine and log in; the Quilt process reuses that login.'),
+  codex: L('安装 Codex 并执行 `codex` 用 ChatGPT 账号登录；Quilt 每次生成拉起一次 `codex exec`（不在你的 Codex 历史里留会话，也不读你的 Codex 配置、MCP 与技能），模型名填 Codex 里可选的模型。验证约 20 秒；生成一屏约 2～4 分钟（桌面屏更久），比 API 通道慢得多，gpt-reserve 比 gpt-6-astra 快约三成。',
+    'Install Codex and run `codex` to log in with your ChatGPT account; Quilt starts `codex exec` once per generation (it leaves no session in your Codex history and does not read your Codex config, MCP servers or skills). Enter a model name that Codex offers. Verifying takes about 20 seconds; a screen takes about 2–4 minutes (longer for desktop screens), much slower than API channels, and gpt-reserve is about 30% faster than gpt-6-astra.'),
 };
 
 /** 统一目录（API-CORE-023）：输入框只渲染 available 的，设置页渲染全部 */
 export async function runnerCatalog(user: UserRow): Promise<{ items: RunnerOptionDto[]; default: string }> {
+  const locale = requestLocale();
   const mine: RunnerOptionDto[] = (await listChannels(user.id)).map((r) => ({
     id: `channel:${r.id}`, label: r.label, hint: r.model, runner: { kind: 'channel' as const, channelId: r.id },
     available: r.status === 'verified',
-    unavailableReason: r.status === 'failed' ? `验证失败：${r.lastError ?? '未知原因'}` : r.status === 'unverified' ? '尚未验证：在设置页点「验证」' : undefined,
+    unavailableReason: r.status === 'failed' ? tr(`验证失败：${r.lastError ?? '未知原因'}`, `Verification failed: ${r.lastError ?? 'unknown reason'}`, locale) : r.status === 'unverified' ? tr('尚未验证：在设置页点「验证」', 'Not verified yet: click “Verify” in Settings', locale) : undefined,
     vision: driverSupportsVision(KIND_DRIVER[r.kind as ChannelKind]), source: 'channel' as const, vendor: r.vendor as ChannelVendor, status: r.status as ChannelStatus, channelId: r.id, channelKind: r.kind as ChannelKind,
-    ...(LOCAL_HINT[r.kind as ChannelKind] ? { setupHint: LOCAL_HINT[r.kind as ChannelKind] } : {}),
+    ...(LOCAL_HINT[r.kind as ChannelKind] ? { setupHint: textIn(LOCAL_HINT[r.kind as ChannelKind]!, locale) } : {}),
   }));
   // 本机 agent（REQ-AGENT-003 v0.34 / v0.68）：PATH 上有 claude / codex 就算装了；投给哪个会话由输入框旁的会话下拉决定，
   // 这里的 runner 只是模板（sessionId 留空），前端发送时填上选中的会话
   const claude = toolAvailable('claude-code');
   const codex = toolAvailable('codex');
   const agents: RunnerOptionDto[] = [{
-    id: 'agent:claude-code', label: '交给本机 Claude Code', hint: claude.version ?? '本机 CLI',
+    id: 'agent:claude-code', label: tr('交给本机 Claude Code', 'Hand to local Claude Code', locale), hint: claude.version ?? tr('本机 CLI', 'Local CLI', locale),
     runner: { kind: 'agent' as const, tool: 'claude-code' as const, sessionId: '' }, available: claude.ok, unavailableReason: claude.ok ? undefined : claude.hint,
-    vision: true, source: 'builtin' as const, vendor: 'anthropic' as const, setupHint: SETUP_HINT['claude-code'],
+    vision: true, source: 'builtin' as const, vendor: 'anthropic' as const, setupHint: setupHint('claude-code'),
   }, {
-    id: 'agent:codex', label: '交给本机 Codex', hint: codex.version ?? '本机 CLI',
+    id: 'agent:codex', label: tr('交给本机 Codex', 'Hand to local Codex', locale), hint: codex.version ?? tr('本机 CLI', 'Local CLI', locale),
     runner: { kind: 'agent' as const, tool: 'codex' as const, sessionId: '' }, available: codex.ok, unavailableReason: codex.ok ? undefined : codex.hint,
-    vision: true, source: 'builtin' as const, vendor: 'codex-subscription' as const, setupHint: SETUP_HINT.codex,
+    vision: true, source: 'builtin' as const, vendor: 'codex-subscription' as const, setupHint: setupHint('codex'),
   }];
   const items = [...mine, ...agents];
   const pick = (pred: (i: RunnerOptionDto) => boolean) => items.find(pred)?.id;
@@ -135,7 +138,7 @@ export async function probeRunner(user: UserRow, runnerId: string): Promise<Prob
   if (runnerId.startsWith('agent:')) {
     const tool = runnerId.slice('agent:'.length);
     const a = toolAvailable(tool);
-    return a.ok ? { ok: true, detail: `已找到 ${a.version ?? tool}；画布派的活会投递到你在输入框旁选中的${tool === 'codex' ? '线程' : '会话'}` } : { ok: false, error: a.hint };
+    return a.ok ? { ok: true, detail: tr(`已找到 ${a.version ?? tool}；画布派的活会投递到你在输入框旁选中的${tool === 'codex' ? '线程' : '会话'}`, `Found ${a.version ?? tool}; jobs from the canvas are delivered to the ${tool === 'codex' ? 'thread' : 'session'} you pick next to the composer`) } : { ok: false, error: a.hint };
   }
   throw problems.notFound();
 }

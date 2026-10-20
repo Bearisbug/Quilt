@@ -3,6 +3,10 @@ import type { ScreenDto, AnnotationDto } from '@quilt/core/browser';
 import { Button, EmptyState, Panel } from '@/ui/ui';
 import { ConfirmDialog } from '@/ui/modal';
 import type { ElementSel } from './InspectorPanel';
+import { Trans } from 'react-i18next';
+import { useT } from '@/i18n';
+import inspectMessages from '@/i18n/locales/panels-inspect';
+import commonMessages from '@/i18n/locales/common';
 
 // 批注面板（REQ-EDIT-004）：选中元素后写一条改动说明，可单独发也可一起发。
 // 发送按屏合并成一条整屏指令——N 屏计 N 次费，而不是 N 条批注计 N 次。
@@ -12,6 +16,8 @@ export function AnnotationPanel({ screen, sel, items, busy, onClose, onAdd, onUp
   onClose: () => void; onAdd: (note: string) => Promise<string | null>; onUpdate: (id: string, note: string) => Promise<boolean>;
   onRemove: (id: string) => Promise<void>; onSend: (ids: string[]) => Promise<void>;
 }) {
+  const t = useT(inspectMessages);
+  const tc = useT(commonMessages);
   // 说明框的草稿按「屏 + 元素」暂存（v0.78）：点别的元素换成它自己的草稿，点回来原样还在
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const draftKey = sel ? `${screen.id}:${sel.qid}` : '';
@@ -36,39 +42,39 @@ export function AnnotationPanel({ screen, sel, items, busy, onClose, onAdd, onUp
   };
 
   return (
-    <Panel title={`批注 · ${screen.name}`} className="h-full" actions={<Button size="sm" onClick={onClose}>关闭</Button>}>
+    <Panel title={t('annotation.title', { name: screen.name })} className="h-full" actions={<Button size="sm" onClick={onClose}>{tc('close')}</Button>}>
       <div className="scroll flex-1 space-y-4 p-3">
         <div className="space-y-1.5">
           <label htmlFor="anno-note" className="block type-label font-semibold text-text-secondary" data-testid="anno-target" data-qid={sel?.qid ?? ''}>
-            {sel ? <>给 <code className="text-text-primary">&lt;{sel.tag}&gt;{sel.text ? ` 「${sel.text.slice(0, 20)}」` : ''}</code> 写一条改动说明</> : '在屏幕里点选一个元素，再写改动说明'}
+            {sel ? <Trans ns={inspectMessages.ns} i18nKey="annotation.target" components={{ code: <code className="text-text-primary">&lt;{sel.tag}&gt;{sel.text ? ` ${t('quoted', { text: sel.text.slice(0, 20) })}` : ''}</code> }} /> : t('annotation.pickFirst')}
           </label>
-          {locked && <p className="fill rounded-md px-2 py-1.5 type-label leading-(--semantic-typography-body-line-height)" data-testid="anno-component-lock">这个元素属于共享组件「<b className="text-text-primary">{locked}</b>」，批注请改组件本身（选中画布上的组件卡后在输入框里说）。</p>}
+          {locked && <p className="fill rounded-md px-2 py-1.5 type-label leading-(--semantic-typography-body-line-height)" data-testid="anno-component-lock"><Trans ns={inspectMessages.ns} i18nKey="annotation.locked" components={{ b: <b className="text-text-primary">{locked}</b> }} /></p>}
           <textarea id="anno-note" value={draft} onChange={(e) => setDraft(e.target.value)} rows={3} disabled={!sel || !!locked}
             className="fill w-full resize-none focus-ring rounded-md border border-transparent p-2 type-body text-text-primary placeholder:text-(--semantic-color-text-tertiary)"
-            placeholder={sel && !locked ? '例如：这个按钮改成次要样式，文案换成「稍后再说」' : ''} />
+            placeholder={sel && !locked ? t('annotation.placeholder') : ''} />
           <div className="flex gap-2">
             <Button size="sm" disabled={!sel || !!locked || !draft.trim() || pending} pending={pending}
-              onClick={() => run(() => add(false))}>记下（不发送）</Button>
+              onClick={() => run(() => add(false))}>{t('annotation.add')}</Button>
             <Button size="sm" variant="primary" disabled={!sel || !!locked || !draft.trim() || pending || busy}
-              onClick={() => run(() => add(true))}>记下并立刻发送</Button>
+              onClick={() => run(() => add(true))}>{t('annotation.addAndSend')}</Button>
           </div>
         </div>
 
         <div className="border-t border-border-subtle pt-3">
           <div className="mb-2 flex items-center justify-between">
-            <h3 className="type-label font-semibold text-text-secondary">这一屏的批注（{open.length} 条未处理）</h3>
+            <h3 className="type-label font-semibold text-text-secondary">{t('annotation.listTitle', { open: open.length })}</h3>
             <Button size="sm" variant="primary" disabled={open.length === 0 || pending || busy} data-testid="send-annotations"
-              onClick={() => run(() => onSend(open.map((a) => a.id)))}>一起发送</Button>
+              onClick={() => run(() => onSend(open.map((a) => a.id)))}>{t('annotation.sendAll')}</Button>
           </div>
-          {busy && <p className="mb-2 type-caption text-warning" data-testid="anno-busy">这一屏正在改，等这一轮完事再发</p>}
-          {items.length === 0 ? <EmptyState title="还没有批注" hint="点选元素后写下改动说明，可以攒够一起发。" /> : (
+          {busy && <p className="mb-2 type-caption text-warning" data-testid="anno-busy">{t('annotation.busy')}</p>}
+          {items.length === 0 ? <EmptyState title={t('annotation.emptyTitle')} hint={t('annotation.emptyHint')} /> : (
             <ul className="space-y-2">
               {items.map((a, i) => (
                 <li key={a.id} className="fill rounded-md p-2 type-label" data-testid="anno-item" data-status={a.status}>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-text-primary">#{i + 1} {a.anchorText ? `「${a.anchorText.slice(0, 16)}」` : a.qid}</span>
+                    <span className="font-medium text-text-primary">#{i + 1} {a.anchorText ? t('quoted', { text: a.anchorText.slice(0, 16) }) : a.qid}</span>
                     <span className={a.status === 'sent' ? 'text-warning' : a.status === 'resolved' ? 'text-success' : 'text-text-secondary'}>
-                      {a.status === 'sent' ? '已发送' : a.status === 'resolved' ? '已处理' : '未处理'}
+                      {a.status === 'sent' ? t('annotation.status.sent') : a.status === 'resolved' ? t('annotation.status.resolved') : t('annotation.status.open')}
                     </span>
                   </div>
                   {editing?.id === a.id ? (
@@ -77,8 +83,8 @@ export function AnnotationPanel({ screen, sel, items, busy, onClose, onAdd, onUp
                         className="fill w-full resize-none focus-ring rounded-md border border-transparent p-2 type-label text-text-primary" />
                       <div className="flex gap-1.5">
                         <Button size="sm" variant="primary" disabled={!editing.note.trim() || pending}
-                          onClick={() => run(async () => { if (await onUpdate(a.id, editing.note.trim())) setEditing(null); })}>保存</Button>
-                        <Button size="sm" onClick={() => setEditing(null)}>取消</Button>
+                          onClick={() => run(async () => { if (await onUpdate(a.id, editing.note.trim())) setEditing(null); })}>{t('annotation.save')}</Button>
+                        <Button size="sm" onClick={() => setEditing(null)}>{tc('cancel')}</Button>
                       </div>
                     </div>
                   ) : (
@@ -86,9 +92,9 @@ export function AnnotationPanel({ screen, sel, items, busy, onClose, onAdd, onUp
                       <p className="mt-1 whitespace-pre-wrap text-text-secondary [overflow-wrap:anywhere]">{a.note}</p>
                       {a.status === 'open' && (
                         <div className="mt-1.5 flex flex-wrap gap-1.5">
-                          <Button size="sm" onClick={() => setEditing({ id: a.id, note: a.note })}>改写</Button>
-                          <Button size="sm" disabled={pending || busy} onClick={() => run(() => onSend([a.id]))}>只发这条</Button>
-                          <Button size="sm" variant="danger-ghost" disabled={pending} onClick={() => setPendingRemove(a)}>删除</Button>
+                          <Button size="sm" onClick={() => setEditing({ id: a.id, note: a.note })}>{t('annotation.rewrite')}</Button>
+                          <Button size="sm" disabled={pending || busy} onClick={() => run(() => onSend([a.id]))}>{t('annotation.sendOne')}</Button>
+                          <Button size="sm" variant="danger-ghost" disabled={pending} onClick={() => setPendingRemove(a)}>{tc('delete')}</Button>
                         </div>
                       )}
                     </>
@@ -100,7 +106,7 @@ export function AnnotationPanel({ screen, sel, items, busy, onClose, onAdd, onUp
         </div>
       </div>
       {pendingRemove && (
-        <ConfirmDialog title="删除这条批注？" body={`「${pendingRemove.note.length > 40 ? `${pendingRemove.note.slice(0, 40)}…` : pendingRemove.note}」删了撤销不了。`} confirmLabel="删除"
+        <ConfirmDialog title={t('annotation.confirmTitle')} body={t('annotation.confirmBody', { note: pendingRemove.note.length > 40 ? `${pendingRemove.note.slice(0, 40)}…` : pendingRemove.note })} confirmLabel={tc('delete')}
           onCancel={() => setPendingRemove(null)} onConfirm={async () => { const a = pendingRemove; setPendingRemove(null); await run(() => onRemove(a.id)); }} />
       )}
     </Panel>

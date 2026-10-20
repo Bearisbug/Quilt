@@ -8,7 +8,8 @@ import { verifyPreview } from '../lib/signing.ts';
 import { storage } from '../lib/storage.ts';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { withCurrentRuntime, withPaletteDarkMode, withOverlayStyle, withDraftComponentStyle, withLocalVendor, buildPrelude, SCREEN_CSP, VENDOR, type Tokens } from '@quilt/core';
+import { withCurrentRuntime, withPaletteDarkMode, withOverlayStyle, withDraftComponentStyle, withLocalVendor, buildPrelude, pickLocale, SCREEN_CSP, VENDOR, type Tokens } from '@quilt/core';
+import { sketchbookName } from '../lib/locale.ts';
 import { readAsset } from '../services/assets.ts';
 import { componentPreviewDocument } from '../services/components.ts';
 import { DRAFT_ROOT_JS } from '../lib/screenshot.ts';
@@ -41,6 +42,8 @@ for (const route of ['/p/:projectId/:id', '/c/:projectId/:id', '/a/:projectId/:i
     await next();
   });
 }
+const escapeText = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const retitle = (doc: string, title: string) => doc.replace(/<title>[\s\S]*?<\/title>/, () => `<title>${escapeText(title)}</title>`);
 // 画布可能从来源名单里任一种回环写法打开（§15）：frame-ancestors 列全，ACAO 回显名单内的请求 Origin
 const FRAME_ANCESTORS = requestSource.origins.join(' ');
 
@@ -49,7 +52,7 @@ previewApp.get('/p/:projectId/:screenId', async (c) => {
   const rev = c.req.query('rev') ?? '';
   const token = c.req.query('t') ?? '';
   if (!verifyPreview(token, projectId)) return problem(c, 403, '/errors/preview-token-invalid', '预览签名无效或过期');
-  const [row] = await db.select({ htmlKey: schema.screenRevisions.htmlKey, presentation: schema.screens.presentation, frame: schema.screens.frame, kind: schema.projects.kind })
+  const [row] = await db.select({ htmlKey: schema.screenRevisions.htmlKey, presentation: schema.screens.presentation, frame: schema.screens.frame, kind: schema.projects.kind, name: schema.screens.name })
     .from(schema.screenRevisions).innerJoin(schema.screens, eq(schema.screens.id, schema.screenRevisions.screenId))
     .innerJoin(schema.projects, eq(schema.projects.id, schema.screens.projectId))
     .where(and(eq(schema.screenRevisions.id, rev), eq(schema.screenRevisions.screenId, screenId), eq(schema.screens.projectId, projectId)));
@@ -60,7 +63,9 @@ previewApp.get('/p/:projectId/:screenId', async (c) => {
   // 它同样注入透明背景：看板上组件四周露出看板底色，而不是草稿本设计系统的背景色
   const draftComponent = row.kind === 'sketchbook' && (row.frame === 'component' || row.frame === null);
   const shown = draftComponent ? withDraftComponentStyle(raw) : row.presentation === 'overlay' ? withOverlayStyle(raw) : raw;
-  const html = draftComponent ? withDraftMeasure(shown, screenId) : shown;
+  const measured = draftComponent ? withDraftMeasure(shown, screenId) : shown;
+  // 草稿本的草稿：文档标题里的草稿本名按预览地址带的界面语言给（没带看 Accept-Language），存修订时写进去的那个不算（API-CORE-046）
+  const html = row.kind === 'sketchbook' ? retitle(measured, `${sketchbookName(pickLocale(c.req.query('lang'), c.req.header('accept-language')))} · ${row.name}`) : measured;
   c.header('Content-Type', 'text/html; charset=utf-8');
   // 修订本身不可变，但这份响应不是：运行时每次下发都换成当前版本（上一行）。标成 immutable 时浏览器 10 分钟内
   // 连条件请求都不发，运行时修复到不了已经开着的会话，而 iframe 是聚焦时才建的、硬刷新页面也绕不过这层缓存。

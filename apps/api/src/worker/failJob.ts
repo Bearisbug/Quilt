@@ -3,9 +3,10 @@ import { db, schema } from '../db/client.ts';
 import { emitJobEvent } from '../lib/events.ts';
 import { pointCurrentToFirstCandidate, deriveLinks } from '../services/screens.ts';
 import { settleByJob } from '../services/annotations.ts';
-import { failureText, type ErrorClass, type JobKind } from '@quilt/core';
+import { failureText, jobLocale, type ErrorClass, type JobKind } from '@quilt/core';
 
-type FailedJob = { id: string; kind: string; projectId: string };
+// input：失败文案按作业的语言写（REQ-CORE-046，input.locale）
+type FailedJob = { id: string; kind: string; projectId: string; input: unknown };
 
 // 进程在造屏 / 改屏中途退出时，runGenerate / runEditScreens 在 finally 里的收尾没跑（进程被杀时 finally 不执行）：按作业自己的
 // screen_planned 事件与修订补做——候选批让 current 指向第 1 版（改屏候选只在 current 仍是它的基线时），一版都没落的新屏删掉
@@ -27,7 +28,7 @@ export async function settleInterrupted(job: { id: string; projectId: string }) 
 // 失败收尾（§16 v1.03）：领取后的异常、启动时上次没跑完的作业、job.timeout 扫到的超时作业都走这里——
 // 回填空的助手消息（否则对话一直显示「排队中…」）、补做中断收尾、批注回落、发 failed。每一步各自兜错，一步失败不挡后面
 export async function finishFailed(job: FailedJob, errorClass: ErrorClass, message: string) {
-  await db.update(schema.messages).set({ content: failureText(job.kind as JobKind, errorClass, message) })
+  await db.update(schema.messages).set({ content: failureText(job.kind as JobKind, errorClass, message, 0, jobLocale(job) ?? 'zh') })
     .where(and(eq(schema.messages.jobId, job.id), eq(schema.messages.role, 'assistant'), eq(schema.messages.content, ''))).catch((e) => console.error(`[job ${job.id}] message`, e));
   await settleInterrupted(job).catch((e) => console.error(`[job ${job.id}] settle`, e));
   await settleByJob(job.id, false).catch((e) => console.error(`[job ${job.id}] annotations`, e));
@@ -39,7 +40,7 @@ export async function failJob(jobId: string, errorClass: ErrorClass, message: st
   const [row] = await db.update(schema.generationJobs)
     .set({ status: 'failed', finishedAt: new Date(), output: sql`coalesce(${schema.generationJobs.output}, '{}'::jsonb) || ${JSON.stringify({ errorClass, message })}::jsonb` })
     .where(and(eq(schema.generationJobs.id, jobId), inArray(schema.generationJobs.status, statuses)))
-    .returning({ id: schema.generationJobs.id, kind: schema.generationJobs.kind, projectId: schema.generationJobs.projectId });
+    .returning({ id: schema.generationJobs.id, kind: schema.generationJobs.kind, projectId: schema.generationJobs.projectId, input: schema.generationJobs.input });
   if (!row) return false;
   await finishFailed(row, errorClass, message);
   return true;

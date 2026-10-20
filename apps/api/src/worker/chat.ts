@@ -3,7 +3,8 @@ import { mkdir } from 'node:fs/promises';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
-import { chatSystemPrompt, chatUserPrompt, type ChatScreen, type DeviceType, type Presentation } from '@quilt/core';
+import { tr } from '../lib/locale.ts';
+import { chatSystemPrompt, chatUserPrompt, jobLocale, type ChatScreen, type DeviceType, type Locale, type Presentation } from '@quilt/core';
 import type { ProjectRow, JobRow } from '../services/projects.ts';
 
 // 聊天回合（REQ-CORE-023 / ADR-018）：借 Claude Agent SDK 的回路——循环、会话记忆（resume）、上下文压缩都是它的；
@@ -21,26 +22,28 @@ export type ChatTurnArgs = {
 };
 export type ChatTurnResult = { reply: string; sessionId: string | null; tokensIn: number; tokensOut: number; produced: { screenId: string; revisionId: string }[] };
 
-// 工具调用 → 一句话进度（在跑作业行与折叠横条都显示）。工具名经 SDK 会带 mcp__quilt__ 前缀，只认后缀
-function stepLabel(tool: string, input: unknown, names: Map<string, string>): string {
+// 工具调用 → 一句话进度（在跑作业行与折叠横条都显示）。工具名经 SDK 会带 mcp__quilt__ 前缀，只认后缀。
+// 按作业的语言写（REQ-CORE-046），屏名中文用「」括、英文用双引号
+function stepLabel(tool: string, input: unknown, names: Map<string, string>, locale: Locale): string {
   const key = tool.replace(/^mcp__quilt__/, '').replace(/^quilt[._]/, '');
   const i = (input ?? {}) as Record<string, unknown>;
-  const screen = (id: unknown) => (typeof id === 'string' && names.has(id) ? `「${names.get(id)}」` : '');
-  const named = typeof i.name === 'string' ? `「${i.name}」` : '';
+  const quote = (s: string) => (locale === 'en' ? `“${s}”` : `「${s}」`);
+  const screen = (id: unknown) => (typeof id === 'string' && names.has(id) ? quote(names.get(id)!) : '');
+  const named = typeof i.name === 'string' ? quote(i.name) : '';
   switch (key) {
-    case 'get_outline': return '正在看项目大纲';
-    case 'get_project': case 'get_app_map': case 'list_revisions': return '正在看项目';
-    case 'get_design_contract': return '正在读设计系统';
-    case 'get_screen': return `正在读${screen(i.screenId) || '一屏'}`;
-    case 'get_screenshot': return `正在看${screen(i.screenId) || '截图'}`;
-    case 'update_screen': return `正在改${named || screen(i.screenId) || '一屏'}`;
-    case 'patch_screen': return `正在改${screen(i.screenId) || '一屏'}`;
-    case 'append_upload': return '正在写入一屏';
-    case 'create_screen': return `正在造${named || '新屏'}`;
-    case 'update_design_system': return '正在改设计系统';
-    case 'update_project': return '正在改项目简介';
-    case 'validate_screen': return '正在检查偏离';
-    default: return `正在调用 ${key}`;
+    case 'get_outline': return tr('正在看项目大纲', 'Reading the project outline', locale);
+    case 'get_project': case 'get_app_map': case 'list_revisions': return tr('正在看项目', 'Looking at the project', locale);
+    case 'get_design_contract': return tr('正在读设计系统', 'Reading the design system', locale);
+    case 'get_screen': return tr(`正在读${screen(i.screenId) || '一屏'}`, `Reading ${screen(i.screenId) || 'a screen'}`, locale);
+    case 'get_screenshot': return tr(`正在看${screen(i.screenId) || '截图'}`, `Looking at ${screen(i.screenId) || 'a screenshot'}`, locale);
+    case 'update_screen': return tr(`正在改${named || screen(i.screenId) || '一屏'}`, `Editing ${named || screen(i.screenId) || 'a screen'}`, locale);
+    case 'patch_screen': return tr(`正在改${screen(i.screenId) || '一屏'}`, `Editing ${screen(i.screenId) || 'a screen'}`, locale);
+    case 'append_upload': return tr('正在写入一屏', 'Writing a screen', locale);
+    case 'create_screen': return tr(`正在造${named || '新屏'}`, `Generating ${named || 'a new screen'}`, locale);
+    case 'update_design_system': return tr('正在改设计系统', 'Editing the design system', locale);
+    case 'update_project': return tr('正在改项目简介', 'Editing the project brief', locale);
+    case 'validate_screen': return tr('正在检查偏离', 'Checking for deviations', locale);
+    default: return tr(`正在调用 ${key}`, `Calling ${key}`, locale);
   }
 }
 
@@ -56,6 +59,7 @@ export async function runChatTurn(a: ChatTurnArgs): Promise<ChatTurnResult> {
   const rows = await db.select().from(schema.screens).where(eq(schema.screens.projectId, a.project.id)).orderBy(schema.screens.createdAt);
   const screens: ChatScreen[] = rows.map((s) => ({ id: s.id, name: s.name, route: s.route, purpose: s.purpose || undefined, currentRevisionId: s.currentRevisionId, presentation: s.presentation as Presentation }));
   const names = new Map(rows.map((s) => [s.id, s.name]));
+  const locale = jobLocale(a.job) ?? 'zh';
   const { componentCards } = await import('../services/components.ts');
   const system = chatSystemPrompt({
     app: { name: a.project.name, description: 'existing app being discussed', brief: a.project.brief },
@@ -103,7 +107,7 @@ export async function runChatTurn(a: ChatTurnArgs): Promise<ChatTurnResult> {
       for await (const m of q) {
         if ('session_id' in m && typeof m.session_id === 'string' && m.session_id) sessionId = m.session_id;
         if (m.type === 'assistant') {
-          for (const block of m.message.content) if (block.type === 'tool_use') a.onStep(stepLabel(block.name, block.input, names));
+          for (const block of m.message.content) if (block.type === 'tool_use') a.onStep(stepLabel(block.name, block.input, names, locale));
         }
         if (m.type === 'result') {
           const u = m.usage;

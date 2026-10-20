@@ -6,12 +6,17 @@ import { Button, Field, Input, cn } from '@/ui/ui';
 import { Select } from '@/ui/Select';
 import { VendorIcon } from '@/ui/VendorIcon';
 import { ConfirmDialog, Overlay, useModal } from '@/ui/modal';
+import { Trans } from 'react-i18next';
+import { tOf, useT } from '@/i18n';
+import settingsMessages from '@/i18n/locales/settings';
+import commonMessages from '@/i18n/locales/common';
 
 // 生成通道管理器（REQ-CORE-013 / PAGE-SETTINGS）。两组：我的通道（可增删改，云端通道只有这一种来源）、本机 agent（固定）。
 // 每行都能「验证」——真的发一次最小请求；只有验证通过的才会出现在画布输入框的下拉里。
 // 数据：/v1/runners 给统一目录（含不可用项与原因），/v1/channels 给自建通道的明细（端点、状态、密钥末位）。
 
-const KIND_LABEL: Record<ChannelKind, string> = { anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI 兼容', 'agent-sdk': '本机 Claude 订阅', codex: '本机 Codex 订阅' };
+// 通道类型的显示名在 settings 命名空间的 drivers.<键>；键的顺序就是「类型」下拉的顺序
+const KIND_KEY: Record<ChannelKind, 'anthropic' | 'gemini' | 'openai' | 'agentSdk' | 'codex'> = { anthropic: 'anthropic', gemini: 'gemini', openai: 'openai', 'agent-sdk': 'agentSdk', codex: 'codex' };
 const DEFAULT_VENDOR: Record<ChannelKind, ChannelVendor> = { anthropic: 'anthropic', gemini: 'google', openai: 'openai', 'agent-sdk': 'claude-subscription', codex: 'codex-subscription' };
 // 模型名不预填（型号更新太快），只给一个看得出格式的例子
 const MODEL_HINT: Record<ChannelVendor, string> = {
@@ -20,18 +25,23 @@ const MODEL_HINT: Record<ChannelVendor, string> = {
   moonshot: 'kimi-k2', zhipu: 'glm-4.6', openrouter: 'anthropic/claude-sonnet-5', ollama: 'llama3.1', siliconflow: 'Qwen/Qwen3-32B', custom: 'model-id',
 };
 const OPENAI_VENDORS = CHANNEL_VENDORS.filter((v) => VENDOR_PRESETS[v].kind === 'openai');
+// 厂商预设里 label 带中文的几家，显示名换成 settings 命名空间的 channels.vendors.<vendor>
+const VENDOR_KEY: Partial<Record<ChannelVendor, 'qwen' | 'zhipu' | 'ollama' | 'custom'>> = { qwen: 'qwen', zhipu: 'zhipu', ollama: 'ollama', custom: 'custom' };
+const ts = tOf(settingsMessages);
 
 const hostOf = (endpoint: string | null) => { if (!endpoint) return ''; try { return new URL(endpoint).host; } catch { return endpoint; } };
 const problemText = (e: unknown, fallback: string) => {
   if (!(e instanceof ApiError)) return fallback;
   const errs = (e.problem as { errors?: { message: string }[] }).errors ?? [];
-  return [e.problem.title, ...errs.map((x) => x.message)].filter(Boolean).join('：');
+  return [e.problem.title, ...errs.map((x) => x.message)].filter(Boolean).join(ts('channels.problemSep'));
 };
 
 // onCatalog：通道增删改与验证之后，把刚取到的通道清单交给上层——画布那份清单是挂载时取的，
 // 不回传的话新加的通道要刷新页面才出现在输入框下拉里
 export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOptionDto[], defaultId: string) => void }) {
   const toast = useToast();
+  const t = useT(settingsMessages);
+  const tc = useT(commonMessages);
   const [runners, setRunners] = useState<RunnerOptionDto[] | null>(null);
   const [channels, setChannels] = useState<ChannelDto[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -54,7 +64,7 @@ export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOption
       const [r, c] = await Promise.all([api.runners(), api.channels.list()]);
       setRunners(r.items); setChannels(c.items);
       onCatalog?.(r.items, r.default);
-    } catch (e) { setLoadError(problemText(e, '通道清单加载失败')); setRunners([]); setChannels([]); }
+    } catch (e) { setLoadError(problemText(e, t('channels.loadFailed'))); setRunners([]); setChannels([]); }
   };
   // 打开时取一次：load 读 onCatalog，每次渲染换引用，列进依赖就成了每次渲染都重取
   useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -62,7 +72,7 @@ export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOption
   const probe = async (id: string) => {
     setProbing((m) => ({ ...m, [id]: true }));
     try { const r = await api.probeRunner(id); setProbeResults((m) => ({ ...m, [id]: r })); await load(); }
-    catch (e) { setProbeResults((m) => ({ ...m, [id]: { ok: false, error: problemText(e, '验证请求失败') } })); }
+    catch (e) { setProbeResults((m) => ({ ...m, [id]: { ok: false, error: problemText(e, t('channels.probe.requestFailed')) } })); }
     finally { setProbing((m) => ({ ...m, [id]: false })); }
   };
   const openDialog = (e: React.MouseEvent<HTMLElement>, d: NonNullable<typeof dialog>) => { returnFocus.current = e.currentTarget; setDialog(d); };
@@ -87,41 +97,41 @@ export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOption
     <div data-testid="channel-manager" ref={rootRef} tabIndex={-1} className="outline-none">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="type-heading3 font-semibold">生成通道</h2>
-          <p className="mt-1 type-label text-text-secondary">画布输入框的下拉只列<b className="font-medium text-text-primary">验证通过</b>的通道。在这里添加、验证、修改或删除；密钥加密保存，只回显末 4 位。</p>
+          <h2 className="type-heading3 font-semibold">{t('sections.runners')}</h2>
+          <p className="mt-1 type-label text-text-secondary"><Trans ns={settingsMessages.ns} i18nKey="channels.intro" components={{ b: <b className="font-medium text-text-primary" /> }} /></p>
         </div>
-        <Button size="sm" variant="primary" data-testid="add-channel" aria-label="添加通道" onClick={(e) => openDialog(e, { mode: 'add' })}>添加通道</Button>
+        <Button size="sm" variant="primary" data-testid="add-channel" aria-label={t('channels.add')} onClick={(e) => openDialog(e, { mode: 'add' })}>{t('channels.add')}</Button>
       </div>
 
       {!secretsOk && (
         <p data-testid="secrets-missing" className="tint-warning mt-3 rounded-md px-3 py-2 type-label leading-(--semantic-typography-body-line-height)">
-          服务端没配 <code className="font-mono">QUILT_SECRETS_KEY</code>，需要 API Key 的通道（Anthropic / Gemini / OpenAI 兼容）存不了：在仓库根的 .env 里设置后重启服务端。本机订阅不存密钥，照常可加。
+          <Trans ns={settingsMessages.ns} i18nKey="channels.secretsMissing" components={{ code: <code className="font-mono" /> }} />
         </p>
       )}
 
       {loadError && (
         <p role="alert" className="tint-error mt-3 flex items-center justify-between gap-2 rounded-md px-3 py-2 type-label">
-          <span>{loadError}</span><Button size="sm" onClick={() => void load()}>重试</Button>
+          <span>{loadError}</span><Button size="sm" onClick={() => void load()}>{tc('retry')}</Button>
         </p>
       )}
 
       {loading ? <RowsSkeleton /> : (
         <div className="mt-4 space-y-5">
-          <Group title="我的通道" hint={mine.length === 0 ? '还没有自建通道。点右上角「添加通道」，填端点与密钥，保存时会自动验证。' : undefined}>{mine.map(row)}</Group>
-          {builtins.length > 0 && <Group title="本机 agent" hint="Quilt 会把画布派的活投递到本机的 Claude Code 会话或 Codex 线程，投给谁在输入框旁的会话下拉里选；可用与否只看 claude / codex 命令是否在 PATH 上，展开「如何配置」看安装与接入步骤。">{builtins.map(row)}</Group>}
+          <Group title={t('channels.mine')} hint={mine.length === 0 ? t('channels.mineEmpty') : undefined}>{mine.map(row)}</Group>
+          {builtins.length > 0 && <Group title={t('channels.local')} hint={t('channels.localHint')}>{builtins.map(row)}</Group>}
         </div>
       )}
 
       {dialog && <ChannelDialog channel={dialog.mode === 'edit' ? dialog.channel : undefined} secretsOk={secretsOk} onClose={closeDialog} onSaved={() => void load()} returnTo={returnFocus} fallback={rootRef} />}
       {deleting && (
         <ConfirmDialog
-          title={`删除「${deleting.label}」？`}
-          body="已在排队或运行中、引用它的作业会失败。删除不可撤销。"
-          confirmLabel="删除"
+          title={t('channels.deleteTitle', { name: deleting.label })}
+          body={t('channels.deleteBody')}
+          confirmLabel={tc('delete')}
           returnTo={returnFocus}
           fallback={rootRef}
           onCancel={closeDialog}
-          onConfirm={async () => { try { await api.channels.remove(deleting.id); toast('已删除'); await load(); closeDialog(); } catch (e) { toast(problemText(e, '删除失败'), 'error'); } }}  // 先刷新再关：让那一行先卸掉，焦点归还才会落到回退目标而不是一个即将消失的按钮
+          onConfirm={async () => { try { await api.channels.remove(deleting.id); toast(t('channels.deleted')); await load(); closeDialog(); } catch (e) { toast(problemText(e, t('channels.deleteFailed')), 'error'); } }}  // 先刷新再关：让那一行先卸掉，焦点归还才会落到回退目标而不是一个即将消失的按钮
         />
       )}
     </div>
@@ -160,21 +170,23 @@ type Tone = 'success' | 'muted' | 'danger';
 // 一次探测超时不代表它不可用（用户实测：本机订阅显示「可用 + 验证失败」自相矛盾）。
 function statusOf(r: RunnerOptionDto, c: ChannelDto | undefined): { tone: Tone; text: string; detail?: string } {
   if (r.source === 'channel') {
-    if (c?.status === 'verified') return { tone: 'success', text: '已验证' };
-    if (c?.status === 'failed') return { tone: 'danger', text: '验证失败', detail: c.lastError ?? undefined };
-    return { tone: 'muted', text: '未验证' };
+    if (c?.status === 'verified') return { tone: 'success', text: ts('channels.status.verified') };
+    if (c?.status === 'failed') return { tone: 'danger', text: ts('channels.status.failed'), detail: c.lastError ?? undefined };
+    return { tone: 'muted', text: ts('channels.status.unverified') };
   }
-  if (r.available) return { tone: 'success', text: '可用' };
-  return { tone: 'danger', text: '未配置', detail: r.unavailableReason };
+  if (r.available) return { tone: 'success', text: ts('channels.status.available') };
+  return { tone: 'danger', text: ts('channels.status.notConfigured'), detail: r.unavailableReason };
 }
 
 function RunnerRow(p: {
   r: RunnerOptionDto; channel?: ChannelDto; probing: boolean; probeResult?: ProbeResultDto; onProbe: () => void;
   hintOpen: boolean; onToggleHint: () => void; onEdit: (e: React.MouseEvent<HTMLElement>) => void; onDelete: (e: React.MouseEvent<HTMLElement>) => void;
 }) {
+  const t = useT(settingsMessages);
+  const tc = useT(commonMessages);
   const { r, channel: c } = p;
   const st = statusOf(r, c);
-  const sub = r.source === 'channel' && c ? [KIND_LABEL[c.kind], c.model, hostOf(c.endpoint)].filter(Boolean).join(' · ') : r.hint ?? '';
+  const sub = r.source === 'channel' && c ? [t(`drivers.${KIND_KEY[c.kind]}`), c.model, hostOf(c.endpoint)].filter(Boolean).join(' · ') : r.hint ?? '';
   const pill = st.tone === 'success' ? 'tint-success' : st.tone === 'danger' ? 'tint-error' : 'fill text-text-secondary';
   return (
     <li data-testid="runner-row" data-runner-id={r.id} className="py-3">
@@ -191,9 +203,9 @@ function RunnerRow(p: {
           {p.probeResult && (
             <p role="status" className={cn('mt-1 type-caption [overflow-wrap:anywhere]', p.probeResult.ok ? 'text-success' : 'text-error')}>
               {p.probeResult.ok
-                ? `验证通过${p.probeResult.latencyMs != null ? ` · ${p.probeResult.latencyMs} ms` : ''}${p.probeResult.detail ? ` · ${p.probeResult.detail}` : ''}`
+                ? [t('channels.probe.ok'), p.probeResult.latencyMs != null && `${p.probeResult.latencyMs} ms`, p.probeResult.detail].filter(Boolean).join(' · ')
                 /* 自建通道的失败即结论（状态已落库）；预置 / 本机通道只是「这一次没通」，可用性另有来源 */
-                : `${r.source === 'channel' ? '验证失败' : '这次没验证通过'}：${p.probeResult.error ?? '未知原因'}`}
+                : t(r.source === 'channel' ? 'channels.probe.failed' : 'channels.probe.failedOnce', { error: p.probeResult.error ?? t('channels.probe.unknown') })}
             </p>
           )}
           {/* 收起时整块卸载，不留看不见的可聚焦内容（A11Y-011） */}
@@ -201,14 +213,14 @@ function RunnerRow(p: {
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {r.setupHint && (
-            <Button size="sm" data-testid="setup-hint" aria-expanded={p.hintOpen} aria-label={`${p.hintOpen ? '收起' : '展开'}「${r.label}」的配置说明`} onClick={p.onToggleHint}>如何配置</Button>
+            <Button size="sm" data-testid="setup-hint" aria-expanded={p.hintOpen} aria-label={t(p.hintOpen ? 'channels.row.setupCollapse' : 'channels.row.setupExpand', { name: r.label })} onClick={p.onToggleHint}>{t('channels.row.setup')}</Button>
           )}
           {/* 验证中不禁用按钮：原生 disabled 会立刻把焦点甩到 body（A11Y-013），只用 aria-busy + 转圈 */}
-          <Button size="sm" data-testid="probe-runner" aria-busy={p.probing || undefined} aria-label={`验证「${r.label}」`} onClick={() => { if (!p.probing) p.onProbe(); }}>
-            {p.probing && <span className="size-3 animate-spin rounded-full border-2 border-current border-r-transparent motion-reduce:animate-none" aria-hidden="true" />}验证
+          <Button size="sm" data-testid="probe-runner" aria-busy={p.probing || undefined} aria-label={t('channels.row.verifyLabel', { name: r.label })} onClick={() => { if (!p.probing) p.onProbe(); }}>
+            {p.probing && <span className="size-3 animate-spin rounded-full border-2 border-current border-r-transparent motion-reduce:animate-none" aria-hidden="true" />}{t('channels.row.verify')}
           </Button>
-          {c && <Button size="sm" data-testid="edit-channel" aria-label={`编辑「${r.label}」`} onClick={p.onEdit}>编辑</Button>}
-          {c && <Button size="sm" variant="danger-ghost" data-testid="delete-channel" aria-label={`删除「${r.label}」`} onClick={p.onDelete}>删除</Button>}
+          {c && <Button size="sm" data-testid="edit-channel" aria-label={t('channels.row.editLabel', { name: r.label })} onClick={p.onEdit}>{t('channels.row.edit')}</Button>}
+          {c && <Button size="sm" variant="danger-ghost" data-testid="delete-channel" aria-label={t('channels.row.deleteLabel', { name: r.label })} onClick={p.onDelete}>{tc('delete')}</Button>}
         </div>
       </div>
     </li>
@@ -220,6 +232,8 @@ function RunnerRow(p: {
 const FIELD_ORDER = ['ch-label', 'ch-endpoint', 'ch-model', 'ch-key'];
 function ChannelDialog(p: { channel?: ChannelDto; secretsOk: boolean; onClose: () => void; onSaved: () => void; returnTo?: React.RefObject<HTMLElement | null>; fallback?: React.RefObject<HTMLElement | null> }) {
   const toast = useToast();
+  const t = useT(settingsMessages);
+  const tc = useT(commonMessages);
   const ref = useModal<HTMLFormElement>(p.onClose, p.returnTo, p.fallback);
   // 「添加」成功但验证失败时留在面板里：此后再提交走更新，不能再建第二条
   const [saved, setSaved] = useState<ChannelDto | undefined>(p.channel);
@@ -246,12 +260,12 @@ function ChannelDialog(p: { channel?: ChannelDto; secretsOk: boolean; onClose: (
 
   const fieldErrors = (v: { kind: ChannelKind; label: string; endpoint: string; model: string; apiKey: string }) => {
     const e: Record<string, string> = {};
-    if (!v.label.trim()) e['ch-label'] = '给这个通道起个名字，例如「DeepSeek 主力」';
-    if (!v.model.trim()) e['ch-model'] = '填模型名，供应商文档里的模型 id';
+    if (!v.label.trim()) e['ch-label'] = t('channels.dialog.errors.label');
+    if (!v.model.trim()) e['ch-model'] = t('channels.dialog.errors.model');
     if (!LOCAL_CHANNEL_KINDS.includes(v.kind)) {
-      if (v.kind === 'openai' && !v.endpoint.trim()) e['ch-endpoint'] = 'OpenAI 兼容通道必须填端点';
-      else if (v.endpoint.trim()) { try { new URL(v.endpoint.trim()); } catch { e['ch-endpoint'] = '端点要是完整 URL，例如 https://api.deepseek.com/v1'; } }
-      if (!editing && !v.apiKey) e['ch-key'] = '填 API Key';
+      if (v.kind === 'openai' && !v.endpoint.trim()) e['ch-endpoint'] = t('channels.dialog.errors.endpointRequired');
+      else if (v.endpoint.trim()) { try { new URL(v.endpoint.trim()); } catch { e['ch-endpoint'] = t('channels.dialog.errors.endpointUrl'); } }
+      if (!editing && !v.apiKey) e['ch-key'] = t('channels.dialog.errors.key');
     }
     return e;
   };
@@ -294,9 +308,9 @@ function ChannelDialog(p: { channel?: ChannelDto; secretsOk: boolean; onClose: (
       setSaved(ch); setApiKey(''); p.onSaved();
       const r = await api.probeRunner(`channel:${ch.id}`);
       setProbe(r); p.onSaved();
-      if (r.ok) { toast(`「${ch.label}」已验证${r.latencyMs != null ? `，${r.latencyMs} ms` : ''}`); p.onClose(); return; }
+      if (r.ok) { toast(r.latencyMs != null ? t('channels.dialog.verifiedLatency', { name: ch.label, ms: r.latencyMs }) : t('channels.dialog.verified', { name: ch.label })); p.onClose(); return; }
     } catch (e) {
-      setServerError(problemText(e, '保存失败'));
+      setServerError(problemText(e, t('channels.dialog.saveFailed')));
     } finally { setSaving(false); }
     requestAnimationFrame(() => alertRef.current?.focus());
   };
@@ -304,67 +318,67 @@ function ChannelDialog(p: { channel?: ChannelDto; secretsOk: boolean; onClose: (
   const err = (id: string) => errors[id] ? { 'aria-invalid': true as const, 'aria-describedby': `${id}-error` } : {};
   // 普通函数而不是内嵌组件：内嵌组件每次渲染都是新类型，会整段重挂、role=alert 反复播报
   const errorLine = (id: string) => (errors[id] ? <p id={`${id}-error`} role="alert" className="mt-1 type-label text-error">{errors[id]}</p> : null);
-  const endpointPlaceholder = kind === 'openai' ? (VENDOR_PRESETS[vendor].endpoint || 'https://…/v1') : `留空用官方端点 ${VENDOR_PRESETS[DEFAULT_VENDOR[kind]].endpoint}`;
+  const endpointPlaceholder = kind === 'openai' ? (VENDOR_PRESETS[vendor].endpoint || 'https://…/v1') : t('channels.dialog.endpointDefault', { endpoint: VENDOR_PRESETS[DEFAULT_VENDOR[kind]].endpoint });
 
   return (
     <Overlay onClose={dirty ? () => {} : p.onClose}>
       <form ref={ref} role="dialog" aria-modal="true" aria-labelledby="ch-title" data-testid="channel-dialog" tabIndex={-1} noValidate onSubmit={submit}
         className="sheet scroll max-h-[calc(100dvh-2rem)] w-full max-w-md p-5 fade-up outline-none">
-        <h2 id="ch-title" className="type-heading3 font-semibold">{editing ? `编辑「${saved!.label}」` : '添加通道'}</h2>
-        <p className="mt-1 type-label text-text-secondary">保存后会立刻发一次最小请求验证；验证通过的通道才会出现在画布输入框的下拉里。</p>
+        <h2 id="ch-title" className="type-heading3 font-semibold">{editing ? t('channels.dialog.editTitle', { name: saved!.label }) : t('channels.add')}</h2>
+        <p className="mt-1 type-label text-text-secondary">{t('channels.dialog.intro')}</p>
         {(serverError || (probe && !probe.ok)) && (
           <p ref={alertRef} tabIndex={-1} role="alert" className="tint-error mt-3 rounded-md px-3 py-2 type-label outline-none [overflow-wrap:anywhere]">
-            {serverError ?? `已保存，但验证失败：${probe?.error ?? '未知原因'}。改好后再点「保存并验证」。`}
+            {serverError ?? t('channels.dialog.savedButFailed', { error: probe?.error ?? t('channels.probe.unknown') })}
           </p>
         )}
         <div className="mt-4 space-y-4">
-          <Field label="类型" htmlFor="ch-kind">
-            <Select id="ch-kind" value={kind} onChange={(v) => pickKind(v as ChannelKind)} disabled={editing} aria-label="通道类型"
-              options={(Object.keys(KIND_LABEL) as ChannelKind[]).map((k) => ({ value: k, label: KIND_LABEL[k], icon: <VendorIcon vendor={DEFAULT_VENDOR[k]} size={14} /> }))} />
+          <Field label={t('channels.dialog.kind')} htmlFor="ch-kind">
+            <Select id="ch-kind" value={kind} onChange={(v) => pickKind(v as ChannelKind)} disabled={editing} aria-label={t('channels.dialog.kindLabel')}
+              options={(Object.keys(KIND_KEY) as ChannelKind[]).map((k) => ({ value: k, label: t(`drivers.${KIND_KEY[k]}`), icon: <VendorIcon vendor={DEFAULT_VENDOR[k]} size={14} /> }))} />
           </Field>
           {kind === 'openai' && !editing && (
-            <Field label="厂商预设" htmlFor="ch-vendor" hint="只决定默认端点与图标，模型名仍要自己填">
-              <Select id="ch-vendor" value={vendor} onChange={(v) => pickVendor(v as ChannelVendor)} aria-label="厂商预设"
-                options={OPENAI_VENDORS.map((v) => ({ value: v, label: VENDOR_PRESETS[v].label, icon: <VendorIcon vendor={v} size={14} /> }))} />
+            <Field label={t('channels.dialog.vendor')} htmlFor="ch-vendor" hint={t('channels.dialog.vendorHint')}>
+              <Select id="ch-vendor" value={vendor} onChange={(v) => pickVendor(v as ChannelVendor)} aria-label={t('channels.dialog.vendor')}
+                options={OPENAI_VENDORS.map((v) => { const key = VENDOR_KEY[v]; return { value: v, label: key ? t(`channels.vendors.${key}`) : VENDOR_PRESETS[v].label, icon: <VendorIcon vendor={v} size={14} /> }; })} />
             </Field>
           )}
-          <Field label="显示名" htmlFor="ch-label">
-            <Input id="ch-label" name="label" value={label} onChange={(e) => { setLabel(e.target.value); recheck({ label: e.target.value }); }} placeholder="例如 DeepSeek 主力" maxLength={60} autoComplete="off" data-1p-ignore data-lpignore="true" {...err('ch-label')} />
+          <Field label={t('channels.dialog.label')} htmlFor="ch-label">
+            <Input id="ch-label" name="label" value={label} onChange={(e) => { setLabel(e.target.value); recheck({ label: e.target.value }); }} placeholder={t('channels.dialog.labelPlaceholder')} maxLength={60} autoComplete="off" data-1p-ignore data-lpignore="true" {...err('ch-label')} />
             {errorLine('ch-label')}
           </Field>
           {!local && (
-          <Field label={kind === 'openai' ? '端点（Base URL）' : '端点（可选）'} htmlFor="ch-endpoint">
+          <Field label={t(kind === 'openai' ? 'channels.dialog.endpointRequired' : 'channels.dialog.endpointOptional')} htmlFor="ch-endpoint">
             <Input id="ch-endpoint" name="endpoint" type="url" inputMode="url" value={endpoint} onChange={(e) => { setEndpoint(e.target.value); setEndpointTouched(true); recheck({ endpoint: e.target.value }); }} placeholder={endpointPlaceholder} autoComplete="off" data-1p-ignore data-lpignore="true" spellCheck={false} className="font-mono" {...err('ch-endpoint')} />
             {errorLine('ch-endpoint')}
           </Field>
           )}
-          <Field label="模型名" htmlFor="ch-model">
+          <Field label={t('channels.dialog.model')} htmlFor="ch-model">
             {/* autoComplete="off" 在 Chromium 上常被忽略：实测这个框被密码管理器自动填成了邮箱。
                 给一个语义不相干的具体值（浏览器只会拿它匹配同类字段），再加两家密码管理器的忽略属性 */}
-            <Input id="ch-model" name="model" value={model} onChange={(e) => { setModel(e.target.value); recheck({ model: e.target.value }); }} placeholder={`例如 ${MODEL_HINT[vendor]}`} maxLength={80} autoComplete="one-time-code" data-1p-ignore data-lpignore="true" spellCheck={false} className="font-mono" {...err('ch-model')} />
+            <Input id="ch-model" name="model" value={model} onChange={(e) => { setModel(e.target.value); recheck({ model: e.target.value }); }} placeholder={t('channels.dialog.modelPlaceholder', { model: MODEL_HINT[vendor] })} maxLength={80} autoComplete="one-time-code" data-1p-ignore data-lpignore="true" spellCheck={false} className="font-mono" {...err('ch-model')} />
             {errorLine('ch-model')}
           </Field>
           {!local && (
-          <Field label="API Key" htmlFor="ch-key" hint={editing ? '留空表示不改；密钥加密保存，不会再回显' : '加密保存，只回显末 4 位'}>
+          <Field label="API Key" htmlFor="ch-key" hint={t(editing ? 'channels.dialog.keyHintEdit' : 'channels.dialog.keyHintNew')}>
             <Input id="ch-key" name="apiKey" type="password" value={apiKey} onChange={(e) => { setApiKey(e.target.value); recheck({ apiKey: e.target.value }); }} placeholder={editing && saved?.apiKeyHint ? `••••${saved.apiKeyHint}` : 'sk-…'} autoComplete="new-password" data-1p-ignore data-lpignore="true" spellCheck={false} className="font-mono" {...err('ch-key')} />
             {errorLine('ch-key')}
           </Field>
           )}
           {kind === 'agent-sdk' && (
             <p className="fill rounded-md p-3 type-label leading-(--semantic-typography-body-line-height) text-text-secondary">
-              用运行 Quilt 服务端那台机器上的 <code className="font-mono text-text-primary">claude</code> 登录态，不需要 API Key。只要填一个这个订阅能用的模型名。
+              <Trans ns={settingsMessages.ns} i18nKey="channels.dialog.agentSdkNote" components={{ code: <code className="font-mono text-text-primary" /> }} />
             </p>
           )}
           {kind === 'codex' && (
             <p className="fill rounded-md p-3 type-label leading-(--semantic-typography-body-line-height) text-text-secondary">
-              用运行 Quilt 服务端那台机器上的 <code className="font-mono text-text-primary">codex</code> 登录态（ChatGPT 账号），不需要 API Key；模型名填 Codex 里可选的模型。每次生成拉起一次 <code className="font-mono text-text-primary">codex exec</code>（不读你的 Codex 配置、MCP 与技能，也不会在你的 Codex 历史里留会话）：验证约 20 秒，生成一屏约 2～4 分钟，比 API 通道慢得多；<code className="font-mono text-text-primary">gpt-reserve</code> 比 <code className="font-mono text-text-primary">gpt-6-astra</code> 快约三成。
+              <Trans ns={settingsMessages.ns} i18nKey="channels.dialog.codexNote" components={{ code: <code className="font-mono text-text-primary" /> }} />
             </p>
           )}
         </div>
-        {keyBlocked && <p className="mt-4 type-label leading-(--semantic-typography-body-line-height) text-warning">服务端没配 <code className="font-mono">QUILT_SECRETS_KEY</code>，这个 API Key 存不了。设置后重启服务端再保存。</p>}
+        {keyBlocked && <p className="mt-4 type-label leading-(--semantic-typography-body-line-height) text-warning"><Trans ns={settingsMessages.ns} i18nKey="channels.dialog.keyBlocked" components={{ code: <code className="font-mono" /> }} /></p>}
         <div className="mt-5 flex justify-end gap-2">
-          <Button onClick={p.onClose}>取消</Button>
-          <Button type="submit" variant="primary" data-testid="ch-save" pending={saving} disabled={keyBlocked}>保存并验证</Button>
+          <Button onClick={p.onClose}>{tc('cancel')}</Button>
+          <Button type="submit" variant="primary" data-testid="ch-save" pending={saving} disabled={keyBlocked}>{t('channels.dialog.save')}</Button>
         </div>
       </form>
     </Overlay>

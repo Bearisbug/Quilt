@@ -2,19 +2,24 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ScreenDto, ComponentDto, LinkDto } from '@quilt/core/browser';
 import { Button, Input } from '@/ui/ui';
 import { Overlay, useModal } from '@/ui/modal';
+import { tOf, useT } from '@/i18n';
+import canvasMessages from '@/i18n/locales/canvas-parts';
+import commonMessages from '@/i18n/locales/common';
 
 // 跳屏面板（REQ-CORE-024 v0.61）：⌘K 打开，按名字 / 路由 / 用途做不区分大小写的子串匹配——名字命中排最前、路由次之、用途最后，
 // 共享组件按名字匹配、排在所有屏之后。命中项全部列出（v0.78），列表封顶 50dvh 内部滚动。↑↓ 选、Enter 跳、Esc 关（Esc / 焦点陷阱 / 背景 inert 由 useModal 管）。
 export type FinderPick = { kind: 'screen' | 'component'; id: string };
 type Row = FinderPick & { title: string; sub: string; badges: string[]; score: number };
 
+// 角标在调用时按界面语言出字（屏列表面板也用它）
+const tf = tOf(canvasMessages);
 export function screenBadges(s: ScreenDto, links: LinkDto[], busy: Set<string>): string[] {
   const dangling = links.filter((l) => l.fromScreenId === s.id && !l.toScreenId).length;
   const out: string[] = [];
-  if (dangling) out.push(`断链 ${dangling}`);
-  if (s.pendingCandidates) out.push(`${s.pendingCandidates.count} 版待选`);
-  if (s.deviations) out.push(`${s.deviations} 处偏离`);
-  if (busy.has(s.id)) out.push('正在改');
+  if (dangling) out.push(tf('finder.dangling', { count: dangling }));
+  if (s.pendingCandidates) out.push(tf('finder.candidates', { count: s.pendingCandidates.count }));
+  if (s.deviations) out.push(tf('deviations', { count: s.deviations }));
+  if (busy.has(s.id)) out.push(tf('finder.busy'));
   return out;
 }
 
@@ -22,6 +27,8 @@ export function ScreenFinder({ screens, components, links, busy, onPick, onClose
   screens: ScreenDto[]; components: ComponentDto[]; links: LinkDto[]; busy: Set<string>;
   onPick: (pick: FinderPick) => void; onClose: () => void;
 }) {
+  const t = useT(canvasMessages);
+  const tc = useT(commonMessages);
   const ref = useModal<HTMLDivElement>(onClose);
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
@@ -33,10 +40,10 @@ export function ScreenFinder({ screens, components, links, busy, onPick, onClose
         kind: 'screen' as const, id: s.id, title: s.name, sub: s.route, badges: screenBadges(s, links, busy),
         score: !q ? 1 : hit(s.name) ? 3 : hit(s.route) ? 2 : hit(s.purpose) ? 1 : 0,
       })),
-      ...components.map((c) => ({ kind: 'component' as const, id: c.id, title: c.name, sub: `组件 · 用于 ${c.usedBy.length} 屏`, badges: [], score: hit(c.name) || !q ? 0.5 : 0 })),
+      ...components.map((c) => ({ kind: 'component' as const, id: c.id, title: c.name, sub: `${t('finder.component')} · ${t('usedIn', { count: c.usedBy.length })}`, badges: [], score: hit(c.name) || !q ? 0.5 : 0 })),
     ];
     return all.filter((r) => r.score > 0).sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
-  }, [query, screens, components, links, busy]);
+  }, [query, screens, components, links, busy, t]);
   const at = Math.min(cursor, Math.max(0, rows.length - 1));
   const pick = (r: Row | undefined) => { if (r) onPick({ kind: r.kind, id: r.id }); };
   // 方向键移到列表可视区外的行时把它滚进来，Enter 跳的永远是看得见的那一行
@@ -44,10 +51,10 @@ export function ScreenFinder({ screens, components, links, busy, onPick, onClose
   useEffect(() => { if (activeId) document.getElementById(`finder-${activeId}`)?.scrollIntoView({ block: 'nearest' }); }, [activeId]);
   return (
     <Overlay onClose={onClose}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-label="跳到屏" tabIndex={-1} data-testid="screen-finder"
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={t('finder.title')} tabIndex={-1} data-testid="screen-finder"
         className="sheet flex w-full max-w-md flex-col overflow-hidden fade-up outline-none">
         <div className="border-b border-border-subtle p-3">
-          <Input value={query} onChange={(e) => { setQuery(e.target.value); setCursor(0); }} placeholder="输入屏名、路由或用途…" aria-label="搜索屏与组件" autoComplete="off" spellCheck={false} data-testid="finder-input"
+          <Input value={query} onChange={(e) => { setQuery(e.target.value); setCursor(0); }} placeholder={t('finder.placeholder')} aria-label={t('finder.search')} autoComplete="off" spellCheck={false} data-testid="finder-input"
             role="combobox" aria-expanded aria-controls="finder-list" aria-activedescendant={rows[at] ? `finder-${rows[at].id}` : undefined}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;
@@ -56,8 +63,8 @@ export function ScreenFinder({ screens, components, links, busy, onPick, onClose
               else if (e.key === 'Enter') { e.preventDefault(); pick(rows[at]); }
             }} />
         </div>
-        <ul id="finder-list" role="listbox" aria-label="匹配结果" className="scroll max-h-[50dvh] p-1" data-testid="finder-list">
-          {rows.length === 0 && <li className="px-3 py-6 text-center type-label text-text-secondary">没有匹配的屏或组件</li>}
+        <ul id="finder-list" role="listbox" aria-label={t('finder.results')} className="scroll max-h-[50dvh] p-1" data-testid="finder-list">
+          {rows.length === 0 && <li className="px-3 py-6 text-center type-label text-text-secondary">{t('finder.empty')}</li>}
           {rows.map((r, i) => (
             <li key={`${r.kind}:${r.id}`} id={`finder-${r.id}`} role="option" aria-selected={i === at} data-testid="finder-row" data-id={r.id} data-kind={r.kind}
               className={`flex cursor-pointer items-center justify-between gap-3 rounded-md px-3 py-2 type-body ${i === at ? 'bg-(--semantic-color-surface-selected)' : 'state-layer'}`}
@@ -67,7 +74,7 @@ export function ScreenFinder({ screens, components, links, busy, onPick, onClose
             </li>
           ))}
         </ul>
-        <div className="flex items-center gap-3 border-t border-border-subtle px-3 py-1.5 type-caption text-text-secondary"><span>↑↓ 选择</span><span>Enter 跳过去</span><span>Esc 关闭</span><Button size="sm" className="ml-auto" data-testid="finder-close" onClick={onClose}>关闭</Button></div>
+        <div className="flex items-center gap-3 border-t border-border-subtle px-3 py-1.5 type-caption text-text-secondary"><span>{t('finder.keySelect')}</span><span>{t('finder.keyGo')}</span><span>{t('finder.keyClose')}</span><Button size="sm" className="ml-auto" data-testid="finder-close" onClick={onClose}>{tc('close')}</Button></div>
       </div>
     </Overlay>
   );

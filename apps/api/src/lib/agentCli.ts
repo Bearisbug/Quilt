@@ -3,16 +3,22 @@ import { accessSync, constants } from 'node:fs';
 import path from 'node:path';
 import type { AgentTool } from '@quilt/core';
 import { config } from '../config.ts';
+import { tr } from './locale.ts';
 
 // 本机 agent CLI 的可用性（REQ-CORE-013 本机通道 / REQ-AGENT-003）：只看 PATH 上有没有 claude / codex——装了才谈得上开着会话。
 // 投给哪个会话另由 lib/claudeSessions、lib/codexSessions 决定。放 lib 而不是 worker：services/channels 与 services/jobs 都要问。
 export const AGENT_BIN: Record<AgentTool, string> = { 'claude-code': 'claude', codex: 'codex' };
 const mcpUrl = () => `http://127.0.0.1:${config.apiPort}/mcp`;
-export const SETUP_HINT: Record<AgentTool, string> = {
-  'claude-code': '安装 Claude Code：npm i -g @anthropic-ai/claude-code，在终端运行 claude 完成登录并让这个会话开着；在会话里执行设置页给的 claude mcp add … quilt 命令接入 Quilt。画布派的活会投递到你在输入框旁选中的那个会话。',
+// 安装步骤按当前语言（REQ-CORE-046）
+export function setupHint(tool: AgentTool): string {
+  if (tool === 'claude-code') {
+    return tr('安装 Claude Code：npm i -g @anthropic-ai/claude-code，在终端运行 claude 完成登录并让这个会话开着；在会话里执行设置页给的 claude mcp add … quilt 命令接入 Quilt。画布派的活会投递到你在输入框旁选中的那个会话。',
+      'Install Claude Code (npm i -g @anthropic-ai/claude-code), then run claude in a terminal to log in and keep that session open; in that session, run the claude mcp add … quilt command from Settings to connect Quilt. Jobs from the canvas are delivered to the session you pick next to the composer.');
+  }
   // 线程在打开时加载 MCP 配置，接入后要新开或重开线程；Codex 默认每次调 MCP 工具都要批准，投来的作业才能自己跑完得预先放行（ADR-020）
-  get codex() { return `安装 Codex（桌面版，或 npm i -g @openai/codex），运行 codex 用 ChatGPT 账号登录；执行 codex mcp add quilt --url ${mcpUrl()} 接入 Quilt，再在 ~/.codex/config.toml 的 [mcp_servers.quilt] 下加一行 default_tools_approval_mode = "approve"（不加的话每次调 Quilt 工具都要你在 Codex 里点批准）；接入后新开或重开线程才会加载。画布派的活会投递到你在输入框旁选中的 Codex 线程；线程没打开时 Quilt 会让 Codex 桌面版打开它。`; },
-};
+  return tr(`安装 Codex（桌面版，或 npm i -g @openai/codex），运行 codex 用 ChatGPT 账号登录；执行 codex mcp add quilt --url ${mcpUrl()} 接入 Quilt，再在 ~/.codex/config.toml 的 [mcp_servers.quilt] 下加一行 default_tools_approval_mode = "approve"（不加的话每次调 Quilt 工具都要你在 Codex 里点批准）；接入后新开或重开线程才会加载。画布派的活会投递到你在输入框旁选中的 Codex 线程；线程没打开时 Quilt 会让 Codex 桌面版打开它。`,
+    `Install Codex (the desktop app, or npm i -g @openai/codex) and run codex to log in with your ChatGPT account; run codex mcp add quilt --url ${mcpUrl()} to connect it to Quilt, then add the line default_tools_approval_mode = "approve" under [mcp_servers.quilt] in ~/.codex/config.toml (without it, Codex asks you to approve every Quilt tool call); after connecting, Quilt loads only in a new or reopened thread. Jobs from the canvas are delivered to the Codex thread you pick next to the composer; if that thread is not open, Quilt has the Codex desktop app open it.`);
+}
 
 // PATH 上找命令（不用 which：Windows 没有），结果缓存 10 s——通道目录每次刷新都会问
 const found = new Map<string, { at: number; path: string | null }>();
@@ -46,8 +52,8 @@ function safeVersion(bin: string): string | undefined {
 }
 
 export function toolAvailable(tool: string = 'claude-code'): { ok: boolean; hint: string; version?: string } {
-  if (tool !== 'claude-code' && tool !== 'codex') return { ok: false, hint: `本机 agent 只支持 Claude Code 与 Codex（${tool} 尚未接入）` };
+  if (tool !== 'claude-code' && tool !== 'codex') return { ok: false, hint: tr(`本机 agent 只支持 Claude Code 与 Codex（${tool} 尚未接入）`, `Local agents only support Claude Code and Codex (${tool} is not supported yet)`) };
   const p = tool === 'codex' ? codexBin() : findOnPath(AGENT_BIN[tool]);
-  if (!p) return { ok: false, hint: `本机没有找到 ${AGENT_BIN[tool]} 命令。${SETUP_HINT[tool]}` };
+  if (!p) return { ok: false, hint: tr(`本机没有找到 ${AGENT_BIN[tool]} 命令。${setupHint(tool)}`, `The ${AGENT_BIN[tool]} command was not found on this machine. ${setupHint(tool)}`) };
   return { ok: true, hint: '', version: safeVersion(p) };
 }

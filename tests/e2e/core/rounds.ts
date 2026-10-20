@@ -3,7 +3,7 @@ import http from 'node:http';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { seedJson, apiJson, EVIDENCE, ROOT, WEB, API, eventually, pickOption } from '../lib.ts';
+import { seedJson, apiJson, EVIDENCE, ROOT, WEB, API, eventually, pickOption, zhCN } from '../lib.ts';
 import { startOpenAiStub } from '../openai-stub.ts';
 import { connectMcp, callTool } from '../mcp-client.ts';
 import { expect, softly, waitJob, sleep } from '../harness.ts';
@@ -250,7 +250,7 @@ await step('TC-CORE-060', async () => {
   } finally { await mcp.close(); }
 
   // 4 真实浏览器：攻击者域名解析到回环（DNS 重绑之后的状态），页内同源 fetch 与跨站 text/plain 表单
-  const rb = await chromium.launch({ channel: 'msedge', headless: true, args: ['--host-resolver-rules=MAP rebind.test 127.0.0.1', '--no-proxy-server'] });
+  const rb = zhCN(await chromium.launch({ channel: 'msedge', headless: true, args: ['--host-resolver-rules=MAP rebind.test 127.0.0.1', '--no-proxy-server'] }));
   try {
     const pg = await rb.newPage();
     await pg.goto(`http://rebind.test:${port}/`);

@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { IconButton } from '@/ui/ui';
+import { useT } from '@/i18n';
+import canvasMessages from '@/i18n/locales/canvas-parts';
 
 export type Tool = {
   id: string;
@@ -22,6 +24,7 @@ export type Tool = {
 // 右侧竖排工具栏（INT-002）：整组在 Tab 序里只占一个停靠点，方向键在组内移动焦点。
 // 分组之间用分隔线：画布工具 ｜ 发起作业 ｜ 随选中/聚焦态出现的上下文工具。
 export function CanvasToolbar({ groups }: { groups: Tool[][] }) {
+  const tr = useT(canvasMessages);
   const items = groups.flat();
   const [active, setActive] = useState(0);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -78,7 +81,7 @@ export function CanvasToolbar({ groups }: { groups: Tool[][] }) {
     // 圆角 16 = 按钮圆角 10 + 到边的 6（滚动列 p-1 + 胶囊 p-0.5）
     <div ref={wrapRef} className="chrome absolute right-3 top-16 z-30 flex max-h-[calc(100%-7rem)] flex-col rounded-lg p-0.5">
       {fade.includes('top') && <span aria-hidden="true" data-testid="rail-more" data-side="top" className="rail-more"><ChevronUp size={14} /></span>}
-      <div ref={railRef} data-fade={fade || undefined} className="rail flex min-h-0 scroll-py-1 flex-col items-center gap-0.5 p-1" role="toolbar" aria-orientation="vertical" aria-label="画布工具" onKeyDown={onKeyDown}>
+      <div ref={railRef} data-fade={fade || undefined} className="rail flex min-h-0 scroll-py-1 flex-col items-center gap-0.5 p-1" role="toolbar" aria-orientation="vertical" aria-label={tr('toolbar.label')} onKeyDown={onKeyDown}>
         {groups.map((group, gi) => (
           <Fragment key={gi}>
             {gi > 0 && <span className="my-1 h-px w-6 shrink-0 bg-border-subtle" aria-hidden="true" />}

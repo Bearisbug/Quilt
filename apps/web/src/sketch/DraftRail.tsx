@@ -2,6 +2,8 @@ import type { ScreenDto } from '@quilt/core/browser';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { cn, IconButton } from '@/ui/ui';
 import { relTime, useNow } from '@/sketch/relTime';
+import { useT } from '@/i18n';
+import sketchMessages from '@/i18n/locales/sketch';
 
 // 记录栏（PAGE-SKETCH，REQ-CORE-040）：右侧一列，全部草稿按创建时间倒序，每项缩略图 + 名字 + 相对时间；生成中的标「生成中」，
 // 正打开的那张铺选中高亮色；点一项把它摆上看板。开合是本机的视图偏好（页面记在 localStorage）。
@@ -17,24 +19,25 @@ export function DraftRail({ open, onToggle, drafts, openId, generating, onPick, 
   onShotError: () => void;
 }) {
   const now = useNow();
+  const t = useT(sketchMessages);
   return (
     <>
       <div className="absolute right-3 top-3 z-30">
-        <IconButton size="xs" tip="bottom-end" label={open ? '收起记录栏' : '展开记录栏'} data-testid="rail-toggle" aria-expanded={open} aria-controls="sketch-rail" onClick={onToggle}
+        <IconButton size="xs" tip="bottom-end" label={open ? t('rail.collapse') : t('rail.expand')} data-testid="rail-toggle" aria-expanded={open} aria-controls="sketch-rail" onClick={onToggle}
           className="chrome">
           {open ? <PanelRightClose size={16} aria-hidden="true" /> : <PanelRightOpen size={16} aria-hidden="true" />}
         </IconButton>
       </div>
       {open && (
-        <aside id="sketch-rail" data-testid="sketch-rail" aria-label="草稿记录" className="chrome slide-in-right absolute bottom-4 right-3 top-[var(--chrome-top)] z-30 flex w-[var(--sketch-rail-w)] flex-col overflow-hidden rounded-lg">
-          <h2 className="panel-head flex h-10 shrink-0 items-center px-3 type-label font-semibold text-text-secondary">草稿{drafts?.length ? ` · ${drafts.length}` : ''}</h2>
+        <aside id="sketch-rail" data-testid="sketch-rail" aria-label={t('rail.label')} className="chrome slide-in-right absolute bottom-4 right-3 top-[var(--chrome-top)] z-30 flex w-[var(--sketch-rail-w)] flex-col overflow-hidden rounded-lg">
+          <h2 className="panel-head flex h-10 shrink-0 items-center px-3 type-label font-semibold text-text-secondary">{drafts?.length ? t('rail.headingCount', { n: drafts.length }) : t('rail.heading')}</h2>
           {drafts === null ? (
             // 加载态按真实一行的结构占位（IA-006）
             <ul className="flex flex-col gap-1 p-1.5" aria-hidden="true">
               {[0, 1, 2].map((i) => <li key={i} className="flex items-center gap-2.5 p-1.5"><span className="size-12 shrink-0 rounded-sm bg-(--semantic-color-surface-sunken)" /><span className="h-3 flex-1 rounded-sm bg-(--semantic-color-surface-sunken)" /></li>)}
             </ul>
           ) : drafts.length === 0 ? (
-            <p className="p-4 type-label text-text-secondary">还没有草稿。在下方写一句话，出第一张。</p>
+            <p className="p-4 type-label text-text-secondary">{t('rail.empty')}</p>
           ) : (
             <ul className="scroll flex min-h-0 flex-1 flex-col gap-1 p-1.5">
               {drafts.map((s) => {
@@ -53,7 +56,7 @@ export function DraftRail({ open, onToggle, drafts, openId, generating, onPick, 
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate type-body text-text-primary">{s.name}</span>
-                        <span className={cn('block type-caption', busy ? 'text-text-primary' : 'text-text-secondary')}>{busy ? '生成中' : relTime(s.updatedAt, now)}</span>
+                        <span className={cn('block type-caption', busy ? 'text-text-primary' : 'text-text-secondary')}>{busy ? t('rail.generating') : relTime(s.updatedAt, now)}</span>
                       </span>
                     </button>
                   </li>

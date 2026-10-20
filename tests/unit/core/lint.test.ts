@@ -16,6 +16,18 @@ test('lintScreenBody：九条规则各报一次', () => {
   assert.equal(bad.firstTry, true);
 });
 
+test('lintScreenBody：message 缺省中文，locale 为 en 时英文、不夹中文（REQ-CORE-046）', () => {
+  const html = '<div class="bg-blue-500 text-[#123456]" style="color:#fff"></div><script></script><style></style><a href="https://x.com">x</a><form></form>';
+  const zh = lintScreenBody(html, []);
+  assert.deepEqual(lintScreenBody(html, [], true, 'zh'), zh);
+  assert.ok(zh.violations.some((v) => v.message === '内联 style：不随设计系统变'));
+  const en = lintScreenBody(html, [], true, 'en');
+  assert.deepEqual(en.violations.map((v) => v.rule), zh.violations.map((v) => v.rule));
+  for (const v of en.violations) assert.ok(!/[\u3400-\u9fff]/.test(`${v.message} ${v.sample ?? ''}`), v.message);
+  assert.equal(en.violations.find((v) => v.rule === 'single-root')?.message, 'The body has 4 top-level elements; it should have 1');
+  assert.equal(en.violations.find((v) => v.rule === 'form-action')?.sample, '(no action)');
+});
+
 test('extractLinks：href / data-href / form action 三种来源，只收 / 开头的', () => {
   assert.deepEqual(extractLinks('<a href="/a" data-qid="q1"></a><a href="#" data-qid="q2"></a><div data-href="/d" data-qid="q3"></div><form action="/f" data-qid="q4"></form><a href="https://x" data-qid="q5"></a>'), [{ qid: 'q1', href: '/a' }, { qid: 'q3', href: '/d' }, { qid: 'q4', href: '/f' }]);
 });

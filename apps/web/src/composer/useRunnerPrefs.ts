@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import type { RunnerOptionDto, AgentSessionDto, AgentTool } from '@quilt/core/browser';
 import { api } from '@/lib/api';
 import { useToast } from '@/lib/toast';
+import { tOf, useLocale } from '@/i18n';
+import composerMessages from '@/i18n/locales/composer';
 
+const t = tOf(composerMessages);
 const RUNNER_KEY = 'quilt:runner';
 // 投递会话按工具分开记：Claude Code 的会话 id 与 Codex 的线程 id 互不相干，混在一个键里切工具就会带着错的 id（v0.68）
 const SESSION_KEY: Record<AgentTool, string> = { 'claude-code': 'quilt:agent-session', codex: 'quilt:agent-session:codex' };
@@ -39,7 +42,9 @@ export function useRunnerPrefs() {
   // 取不到清单要说出来（v0.76）：当成空的话通道选择器整块消失，用户不知道通道去哪了。留底也不再用——通道位写的是没加载出来，发送就不能走留底里的通道
   const [runnersFailed, setRunnersFailed] = useState(false);
   const loadRunners = useCallback(() => api.runners().then((r) => { setRunnersFailed(false); applyCatalog(r.items, r.default); }).catch(() => { setCatalog(NO_CATALOG); setRunnersFailed(true); }), [applyCatalog]);
-  useEffect(() => { void loadRunners(); }, [loadRunners]);
+  // 通道的显示名、提示与原因是服务端按请求语言给的（REQ-CORE-046）：换界面语言就重取一次，输入框与检查器里的通道名跟着换
+  const locale = useLocale();
+  useEffect(() => { void loadRunners(); }, [loadRunners, locale]);
   // 空值不落（同 onSessionChange）：受控值暂时不在选项里时 Radix Select 隐藏的原生 <select> 回报 ''，
   // 照写会把选中的通道清掉、下一轮静默走默认通道（v0.74）
   const onRunnerChange = (id: string) => { if (!id) return; setPicked(id); try { localStorage.setItem(RUNNER_KEY, id); } catch { /* 无痕模式写不了 */ } };
@@ -52,7 +57,7 @@ export function useRunnerPrefs() {
   const [sessionIds, setSessionIds] = useState<Record<AgentTool, string>>(() => ({ 'claude-code': read(SESSION_KEY['claude-code']), codex: read(SESSION_KEY.codex) }));
   const loadSessionsFor = useCallback((tool: AgentTool) => api.agentSessions(tool)
     .then((r) => setLists((m) => ({ ...m, [tool]: { items: r.items, reason: r.reason } })))
-    .catch(() => { setLists((m) => ({ ...m, [tool]: { items: [] } })); toast('会话列表加载失败', 'error'); }), [toast]);
+    .catch(() => { setLists((m) => ({ ...m, [tool]: { items: [] } })); toast(t('session.loadFailed'), 'error'); }), [toast]);
   // 空值不落：下拉里没有「不选」这一项，空串只会来自 Radix Select 的隐藏原生 <select>——受控值暂时不在选项里时它回报 ''，
   // 照写会把记住的会话冲掉（TC-AGENT-012 实测刷新后记忆丢失）
   const onSessionChange = (id: string) => {
@@ -60,7 +65,7 @@ export function useRunnerPrefs() {
     setSessionIds((m) => ({ ...m, [agentTool]: id }));
     try { localStorage.setItem(SESSION_KEY[agentTool], id); } catch { /* 无痕模式写不了 */ }
   };
-  useEffect(() => { if (agentTool) void loadSessionsFor(agentTool); }, [agentTool, loadSessionsFor]);
+  useEffect(() => { if (agentTool) void loadSessionsFor(agentTool); }, [agentTool, loadSessionsFor, locale]);
   const sessionId = agentTool ? sessionIds[agentTool] : '';
   const sessionList: SessionList = agentTool ? lists[agentTool] : { items: null };
   const loadSessions = useCallback(() => { if (agentTool) void loadSessionsFor(agentTool); }, [agentTool, loadSessionsFor]);

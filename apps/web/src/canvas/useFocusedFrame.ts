@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ParentToPreview, ScreenDto } from '@quilt/core/browser';
 import type { CanvasProps } from '@/canvas/CanvasView';
 import { markPalette, useResolvedMode } from '@/lib/theme';
+import { useLocale } from '@/i18n';
 
 // 卡片正显示的这张（原图或缩略图）是不是当前修订的：退出聚焦的交接按它判
 const shotIsCurrent = (s: ScreenDto, src: string | undefined) => !!src && (src === s.screenshotUrl || src === s.thumbUrl);
@@ -170,9 +171,10 @@ export function useFocusedFrame(p: CanvasProps, propsRef: { current: CanvasProps
     setFocusedSrc(s.previewUrl);
   }, []);
 
-  // 选择元素模式随 props 与 iframe 就绪同步到运行时；换外观时重发一次，屏内的标记跟着换色（§13.1）
+  // 选择元素模式随 props 与 iframe 就绪同步到运行时；换外观时重发一次，屏内的标记跟着换色（§13.1）；换界面语言时同样重发，标记文字跟着换
   const themeMode = useResolvedMode();
-  useEffect(() => { if (iframeReady) postToPreview({ type: 'quilt:mode', mode: p.inspectMode ? 'inspect' : 'interact', marks: markPalette() }); }, [p.inspectMode, iframeReady, postToPreview, themeMode]);
+  const locale = useLocale();
+  useEffect(() => { if (iframeReady) postToPreview({ type: 'quilt:mode', mode: p.inspectMode ? 'inspect' : 'interact', marks: markPalette() }); }, [p.inspectMode, iframeReady, postToPreview, themeMode, locale]);
 
   // 聚焦态热更新（REQ-CORE-005 v0.33）：src 钉住后新修订不会自己进来，由这里显式送——iframe 里正显示的那一屏
   //（导航栈顶，没跳转过就是卡片自己）换了 currentRevisionId，就取新 HTML swap 进同一个文档：不重挂、不丢导航栈，

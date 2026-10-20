@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
-import { updateScreenSchema, restoreRevisionSchema, applyElementEditSchema, updateDesignSystemSchema, createAnnotationSchema, updateAnnotationSchema, sendAnnotationsSchema } from '@quilt/core';
+import { updateScreenSchema, restoreRevisionSchema, applyElementEditSchema, updateDesignSystemSchema, createAnnotationSchema, updateAnnotationSchema, sendAnnotationsSchema, L } from '@quilt/core';
 import { applyElementEdit, updateDesignSystem } from '../../services/edit.ts';
 import { db, schema } from '../../db/client.ts';
 import { problems, isUniqueViolation } from '../../lib/errors.ts';
@@ -22,15 +22,15 @@ screenRoutes.patch('/v1/screens/:screenId', async (c) => {
   const { screen, project } = await ownedScreen(user.id, c.req.param('screenId'));
   const patch = await parseBody(c, updateScreenSchema);
   // 变体（v0.62）：路由与呈现方式属于默认屏，变体改不了；变体名只对变体有意义
-  if (patch.route !== undefined && screen.variantOf) throw problems.unprocessable([{ path: 'route', message: '变体与默认屏同路由，改路由请改默认屏' }]);
-  if (patch.presentation !== undefined && screen.variantOf && patch.presentation !== screen.presentation) throw problems.unprocessable([{ path: 'presentation', message: '变体随默认屏的呈现方式，改呈现方式请改默认屏' }]);
-  if (patch.variantName !== undefined && !screen.variantOf) throw problems.unprocessable([{ path: 'variantName', message: '只有变体才有状态名' }]);
+  if (patch.route !== undefined && screen.variantOf) throw problems.unprocessable([{ path: 'route', message: L('变体与默认屏同路由，改路由请改默认屏', 'A variant shares the route of its default screen; change the route on the default screen') }]);
+  if (patch.presentation !== undefined && screen.variantOf && patch.presentation !== screen.presentation) throw problems.unprocessable([{ path: 'presentation', message: L('变体随默认屏的呈现方式，改呈现方式请改默认屏', 'A variant follows the presentation of its default screen; change it on the default screen') }]);
+  if (patch.variantName !== undefined && !screen.variantOf) throw problems.unprocessable([{ path: 'variantName', message: L('只有变体才有状态名', 'Only state variants have a state name') }]);
   // 画框只对草稿有效（REQ-CORE-040）
-  if (patch.frame !== undefined && !isSketchbook(project)) throw problems.unprocessable([{ path: 'frame', message: '画框只对草稿有效' }]);
+  if (patch.frame !== undefined && !isSketchbook(project)) throw problems.unprocessable([{ path: 'frame', message: L('画框只对草稿有效', 'Frames only apply to drafts') }]);
   // 组件与页面之间不能互换（v1.17）：组件按自身大小、页面按视口排，换过去显示就乱；只有手机页与桌面页之间能改
-  if (patch.frame !== undefined && screen.frame && (patch.frame === 'component') !== (screen.frame === 'component')) throw problems.unprocessable([{ path: 'frame', message: '组件与页面之间不能换画框，只能在手机页与桌面页之间改' }]);
+  if (patch.frame !== undefined && screen.frame && (patch.frame === 'component') !== (screen.frame === 'component')) throw problems.unprocessable([{ path: 'frame', message: L('组件与页面之间不能换画框，只能在手机页与桌面页之间改', 'A draft cannot switch between Component and a page frame; you can only switch between Mobile page and Desktop page') }]);
   // 参照项目只对草稿有效（REQ-CORE-042）：得是本人的普通项目，null 回到自由风格；不建修订，从下一轮出稿、改稿起生效（ADR-033）
-  if (patch.refProjectId !== undefined && !isSketchbook(project)) throw problems.unprocessable([{ path: 'refProjectId', message: '参照项目只对草稿有效' }]);
+  if (patch.refProjectId !== undefined && !isSketchbook(project)) throw problems.unprocessable([{ path: 'refProjectId', message: L('参照项目只对草稿有效', 'Reference projects only apply to drafts') }]);
   if (patch.refProjectId && (await ownedProject(user.id, patch.refProjectId)).kind !== 'app') throw problems.notFound();
   const { presentation, frame, ...rest } = patch;
   let reshoot: string[] = [];

@@ -1,5 +1,6 @@
 {
+  // paths：单测直接引用 apps/web 的模块，它们跨目录用 @/ 写；tsx 跑单测时也按这里解析
   "extends": "../tsconfig.base.json",
-  "compilerOptions": { "types": ["node"], "lib": ["ES2023", "DOM", "DOM.Iterable"] },
+  "compilerOptions": { "types": ["node"], "lib": ["ES2023", "DOM", "DOM.Iterable"], "paths": { "@/*": ["../apps/web/src/*"] } },
   "include": ["e2e", "unit", "bench"]
 }

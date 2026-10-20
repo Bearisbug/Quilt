@@ -8,12 +8,14 @@ import type { JobChip } from '@/composer/JobChips';
 import { ChoiceGroup } from '@/sketch/ChoiceGroup';
 import { RefSelect, type RefProjects } from '@/sketch/RefSelect';
 import type { SketchTool } from '@/sketch/DraftStage';
+import { useT } from '@/i18n';
+import sketchMessages from '@/i18n/locales/sketch';
 
 const FRAME_KEY = 'quilt:sketch-frame';
-const FRAME_CHOICES = [{ value: 'auto', label: '自动' }, { value: 'component', label: '组件' }, { value: 'mobile', label: '手机页' }, { value: 'desktop', label: '桌面页' }] as const;
-const isChoice = (v: string | null): v is DraftFrameChoice => FRAME_CHOICES.some((o) => o.value === v);
+// 画框的显示名在 sketch 命名空间的 frames.<取值>，渲染时再取
+const FRAME_CHOICES = ['auto', 'component', 'mobile', 'desktop'] as const;
+const isChoice = (v: string | null): v is DraftFrameChoice => FRAME_CHOICES.some((o) => o === v);
 const readFrame = (): DraftFrameChoice => { try { const v = localStorage.getItem(FRAME_KEY); return isChoice(v) ? v : 'auto'; } catch { return 'auto'; } };
-const NEW_PHRASES = ['写一句话，出一张组件或页面', '例如：一个登录卡片，左边插画、右边表单', '例如：手机上的订单详情页，顶部是物流时间线'];
 const noop = () => {};
 const short = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
@@ -53,17 +55,19 @@ export function SketchComposer({ handle, laneRef, draft, jobs, blockedReason, pr
   hidden: boolean;
   dock: ComposerDock;
 }) {
+  const t = useT(sketchMessages);
   const [frame, setFrame] = useState<DraftFrameChoice>(readFrame);
   const pickFrame = (v: DraftFrameChoice) => { setFrame(v); try { localStorage.setItem(FRAME_KEY, v); } catch { /* 无痕模式写不了 */ } };
   const [refProjectId, setRefProjectId] = useState<string | null>(null);
   const agent = prefs.sendRunner?.kind === 'agent';
-  const verb = `${draft ? (pick ? '改这一块' : `改「${draft.name}」`) : '新草稿'}${agent ? ' · 交给本机会话' : ''}`;
-  const phrases = !draft ? NEW_PHRASES
-    : pick ? ['说说这一块要怎么改：例如 换成两列卡片，标题加粗']
-    : tool === 'pick' ? [`点草稿里的一块只改它；不点就是改「${draft.name}」整张`]
-    : tool === 'annotate' ? ['点草稿里的元素写批注，攒几条一起发；也可以在这里说整张怎么改']
-    : [`说说「${draft.name}」要怎么改：例如 按钮换成圆形，加一个音量滑块`];
-  const chip = draft && pick ? { label: `「${draft.name}」里的 ${pick.tag}${pick.text ? `「${short(pick.text, 16)}」` : ''}`, onRemove: onClearPick } : undefined;
+  const action = draft ? (pick ? t('composer.verb.editBlock') : t('composer.verb.edit', { name: draft.name })) : t('composer.verb.newDraft');
+  const verb = agent ? t('composer.verb.withAgent', { verb: action }) : action;
+  const phrases = !draft ? [t('composer.phrases.intro'), t('composer.phrases.card'), t('composer.phrases.order')]
+    : pick ? [t('composer.pickPhrase')]
+    : tool === 'pick' ? [t('composer.pickTool', { name: draft.name })]
+    : tool === 'annotate' ? [t('composer.annotateTool')]
+    : [t('composer.editPhrase', { name: draft.name })];
+  const chip = draft && pick ? { label: pick.text ? t('composer.chipText', { name: draft.name, tag: pick.tag, text: short(pick.text, 16) }) : t('composer.chip', { name: draft.name, tag: pick.tag }), onRemove: onClearPick } : undefined;
   const blocked = !!blockedReason || sendingAnnotations;
   const top = draft && openAnnotations > 0 && (
     // 批注攒着一起发（API-EDIT-003）：一张草稿的几条合成一轮改稿；被挡的原因就是输入框上方那一句（同一张草稿上一轮没改完）
@@ -74,7 +78,7 @@ export function SketchComposer({ handle, laneRef, draft, jobs, blockedReason, pr
         className="fill state-layer focus-ring inline-flex h-8 items-center gap-1.5 rounded-pill px-3 type-label font-medium text-text-primary aria-disabled:cursor-not-allowed"
       >
         {sendingAnnotations ? <span className="size-3.5 animate-spin rounded-full border-2 border-current border-r-transparent motion-reduce:animate-none" aria-hidden="true" /> : <MessageSquarePlus size={14} aria-hidden="true" />}
-        {openAnnotations} 条批注 · 发送
+        {t('composer.sendAnnotations', { count: openAnnotations })}
       </button>
     </div>
   );
@@ -85,7 +89,7 @@ export function SketchComposer({ handle, laneRef, draft, jobs, blockedReason, pr
         verb, phrases, onEmptyEscape: onEscape, chip, top,
         extra: !draft && (
           <>
-            <ChoiceGroup label="新草稿的画框" testId="frame-choice" value={frame} options={FRAME_CHOICES} onChange={pickFrame} />
+            <ChoiceGroup label={t('composer.frameLabel')} testId="frame-choice" value={frame} options={FRAME_CHOICES.map((value) => ({ value, label: t(`frames.${value}`) }))} onChange={pickFrame} />
             <RefSelect refs={refs} value={refProjectId} onChange={setRefProjectId} testId="sketch-ref" side="top" className="fill text-text-primary" />
           </>
         ),

@@ -1,5 +1,7 @@
 import type { AssetDto, ColorMode, Palette, Tokens } from '@quilt/core/browser';
 import { toneClass, toneColor, useAssetTone } from '@/lib/assetTone';
+import { useT } from '@/i18n';
+import canvasMessages from '@/i18n/locales/canvas-parts';
 
 export const STYLE_GUIDE_SIZE = { w: 420, h: 640 };
 // 有素材时卡片要长出一行来放它们；画布的适配视图按同一个函数算外接框，否则这一行会被框在视野外
@@ -20,6 +22,7 @@ function BrandTile({ asset, radius, colors }: { asset: AssetDto; radius: string;
 }
 
 export function StyleGuideCard({ tokens, name, palette, colorMode = 'light', assets = [] }: { tokens: Tokens; name: string; palette?: Palette | null; colorMode?: ColorMode; assets?: AssetDto[] }) {
+  const t = useT(canvasMessages);
   const c = tokens.colors;
   // 只数当前生效的那一套：tokens 就是它合并出来的，数两套加起来会报一个没人用得上的数
   const overrides = Object.keys(palette?.[colorMode] ?? {}).length;
@@ -34,10 +37,10 @@ export function StyleGuideCard({ tokens, name, palette, colorMode = 'light', ass
   return (
     <div style={{ width: size.w, height: size.h, background: c.background, color: c.onBackground, fontFamily: `${tokens.typography.fontFamily}, system-ui, sans-serif` }} className="flex flex-col gap-4 overflow-hidden p-5 text-left" data-testid="style-guide">
       <div>
-        <div style={{ fontSize: 18, fontWeight: 600 }}>{name} · Style guide</div>
+        <div style={{ fontSize: 18, fontWeight: 600 }}>{t('guide.title', { name })}</div>
         {/* 字体名要读项目自己的：写死成 Inter 会在项目换了字体之后报假信息 */}
         {/* 色板来源要写实话：挂了品牌色板还说「种子派生」就是在骗看卡片的人 */}
-        <div style={{ fontSize: 12, color: c.onSurfaceVariant }}>{overrides ? `Brand palette · ${overrides} keys` : 'Seed-derived Material 3 palette'} · {tokens.typography.fontFamily}</div>
+        <div style={{ fontSize: 12, color: c.onSurfaceVariant }}>{overrides ? t('guide.brand', { count: overrides }) : t('guide.derived')} · {tokens.typography.fontFamily}</div>
       </div>
       <div className="grid grid-cols-4 gap-2">
         {swatches.map(([k, bg, fg]) => (
@@ -74,7 +77,7 @@ export function StyleGuideCard({ tokens, name, palette, colorMode = 'light', ass
       {/* 品牌素材（REQ-CORE-019）：导进来的标志要在画布上看得见，否则跟没导一样 */}
       {assets.length > 0 && (
         <div className="mt-auto flex flex-col gap-1.5" data-testid="guide-assets">
-          <div style={{ fontSize: 11, color: c.onSurfaceVariant }}>Brand assets · {assets.length}</div>
+          <div style={{ fontSize: 11, color: c.onSurfaceVariant }}>{t('guide.assets', { count: assets.length })}</div>
           <div className="flex items-stretch gap-2">
             {assets.slice(0, 4).map((a) => <BrandTile key={a.id} asset={a} radius={tokens.radius.md} colors={c} />)}
           </div>

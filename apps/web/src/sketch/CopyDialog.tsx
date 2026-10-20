@@ -9,21 +9,23 @@ import { Select } from '@/ui/Select';
 import { Overlay, useModal } from '@/ui/modal';
 import { ChoiceGroup } from '@/sketch/ChoiceGroup';
 import { TargetPicker, type PickedElement } from '@/sketch/TargetPicker';
+import { tOf, useT } from '@/i18n';
+import sketchMessages from '@/i18n/locales/sketch';
+import commonMessages from '@/i18n/locales/common';
 
 // 方式（FLOW-SKETCH-COPY S3）：「换一块」在请求里也是 as="overwrite"，多带点中元素的 qid（API-CORE-047）
+// 各方式的显示名与确认键文案在 sketch 命名空间的 copy.mode.<方式>、copy.submit.<方式>，渲染时再取
 type Mode = 'screen' | 'component' | 'overwrite' | 'replace';
-const MODE_OPTIONS = [{ value: 'screen', label: '新屏' }, { value: 'component', label: '共享组件' }, { value: 'overwrite', label: '覆盖整屏' }, { value: 'replace', label: '换一块' }] as const;
-const SUBMIT_LABEL: Record<Mode, string> = { screen: '放进去', component: '放进去', overwrite: '覆盖这一屏', replace: '换掉这一块' };
-const FRAME_NAME = { mobile: '手机页', desktop: '桌面页' } as const;
-const DEVICE_NAME = { mobile: '手机端', desktop: '桌面端' } as const;
+const MODES = ['screen', 'component', 'overwrite', 'replace'] as const satisfies readonly Mode[];
+const tm = tOf(sketchMessages);
 type Problem = { title: string; errors?: { path?: string; message: string }[]; component?: string; retryAfter?: number };
 
 // 画框与目标对不上时就地说清写进去会怎样（FLOW-SKETCH-COPY S4）：屏的视口取项目的设备形态，换进去的一块按原来那一块的宽度排（API-CORE-047）
 function mismatch(frame: ScreenDto['frame'], project: ProjectDto | undefined, mode: Mode): string | null {
   if (!project || !frame || mode === 'component') return null;
-  if (mode === 'replace') return frame === 'component' ? null : `这张是${FRAME_NAME[frame]}，换进去按那一块的宽度重排`;
-  if (frame === 'component') return `这张是组件，${mode === 'screen' ? '放成屏' : '覆盖整屏'}会按${DEVICE_NAME[project.deviceType]}的整屏宽度铺开`;
-  if (frame !== project.deviceType) return `这张是${FRAME_NAME[frame]}，项目是${DEVICE_NAME[project.deviceType]}，放进去按${project.deviceType === 'desktop' ? '桌面' : '手机'}宽度重排`;
+  if (mode === 'replace') return frame === 'component' ? null : tm(`copy.mismatch.replace.${frame}`);
+  if (frame === 'component') return tm(mode === 'screen' ? `copy.mismatch.componentScreen.${project.deviceType}` : `copy.mismatch.componentOverwrite.${project.deviceType}`);
+  if (frame !== project.deviceType) return tm(`copy.mismatch.page.${frame}`);
   return null;
 }
 
@@ -34,6 +36,8 @@ function mismatch(frame: ScreenDto['frame'], project: ProjectDto | undefined, mo
 export function CopyDialog({ draft, runner, onClose, onCopied }: { draft: ScreenDto; runner: Runner | undefined; onClose: () => void; onCopied?: () => void }) {
   const navigate = useNavigate();
   const toast = useToast();
+  const t = useT(sketchMessages);
+  const tc = useT(commonMessages);
   const ref = useModal<HTMLFormElement>(onClose);
   const [projects, setProjects] = useState<ProjectDto[] | null>(null);
   const [listFailed, setListFailed] = useState(false);
@@ -111,37 +115,37 @@ export function CopyDialog({ draft, runner, onClose, onCopied }: { draft: Screen
 
   // 服务端拒绝的原因就地写出（FLOW-SKETCH-COPY S3 / S6 的分支表），弹层不关
   const explain = async (err: unknown) => {
-    if (!(err instanceof ApiError)) { setError('没写回去：连不上 Quilt 服务，稍后再试'); return; }
+    if (!(err instanceof ApiError)) { setError(t('copy.error.offline')); return; }
     const p = err.problem as Problem;
     const first = p.errors?.[0];
     switch (err.type) {
       case '/errors/screen-busy':
-        setError(targetScreen ? `「${targetScreen.name}」正在改，等这一轮完事` : '目标屏正在改，等这一轮完事'); return;
+        setError(targetScreen ? t('copy.error.busyName', { name: targetScreen.name }) : t('copy.error.busy')); return;
       case '/errors/revision-conflict': {
         // 刷新目标屏：预览按新修订重挂（key 带修订 id）、并排缩略图与「回到第 n 版」跟着换；已点中的那一块作废
         setPicked(null); setPreselect(null);
         const fresh = await loadDetail(projectId);
-        setError(fresh ? '这一屏刚被改过，已刷新，重新确认' : '这一屏刚被改过，刷新没成功，再点一次重试');
+        setError(fresh ? t('copy.error.conflict') : t('copy.error.conflictStale'));
         return;
       }
       case '/errors/element-not-found':
-        setPicked(null); setPreselect(null); setError('这一块已经不在目标屏上了，重新点一下'); return;
+        setPicked(null); setPreselect(null); setError(t('blockGone')); return;
       case '/errors/component-locked':
-        setPicked(null); setPreselect(null); setError(`这是共享组件，去改组件${p.component ? `「${p.component}」` : ''}`); return;
+        setPicked(null); setPreselect(null); setError(p.component ? t('lockedName', { name: p.component }) : t('locked')); return;
       case '/errors/component-name-taken':
-        setNameError('这个项目里已有同名的组件，换个名字'); focusField('copy-name'); return;
+        setNameError(t('copy.error.nameTaken')); focusField('copy-name'); return;
       case '/errors/rate-limited':
-        setError(`写回得太频繁，${p.retryAfter ? `${p.retryAfter} 秒后` : '稍后'}再试`); return;
+        setError(p.retryAfter ? t('copy.error.rateLimitedIn', { count: p.retryAfter }) : t('copy.error.rateLimited')); return;
       case '/errors/not-found':
         // 目标项目或那一屏刚被删：重取列表与屏，用户重新选
-        setError('目标项目或那一屏已经不在了，重新选一个');
+        setError(t('copy.error.notFound'));
         loadProjects();
         if (needsScreens) void loadDetail(projectId);
         return;
     }
     // 400 validation：名字不合规落到名字框；其余（写回后超过 256 KB、组件放不下脚本或样式表……）用服务端的原话
     if (first?.path === 'name') { setNameError(first.message); focusField('copy-name'); return; }
-    setError(first?.message ?? `没写回去：${p.title}`);
+    setError(first?.message ?? t('copy.error.title', { reason: p.title }));
   };
 
   const submit = async (e: FormEvent) => {
@@ -150,13 +154,13 @@ export function CopyDialog({ draft, runner, onClose, onCopied }: { draft: Screen
     setError(null);
     let body: CopyDraftInput;
     if (mode === 'overwrite' || mode === 'replace') {
-      if (!targetScreen?.currentRevisionId) { setScreenError(mode === 'replace' ? '选要换哪一屏里的一块' : '选要覆盖的那一屏'); focusField('copy-target-screen'); return; }
-      if (mode === 'replace' && !picked) { setError('在预览里点一下要换掉的那一块'); return; }
+      if (!targetScreen?.currentRevisionId) { setScreenError(mode === 'replace' ? t('copy.need.replaceScreen') : t('copy.need.overwriteScreen')); focusField('copy-target-screen'); return; }
+      if (mode === 'replace' && !picked) { setError(t('copy.need.block')); return; }
       // 确认那一刻的当前修订 = 弹层加载到、预览与缩略图显示的那一版
       body = { projectId: target.id, as: 'overwrite', screenId: targetScreen.id, expectedRevisionId: targetScreen.currentRevisionId, ...(mode === 'replace' && picked ? { qid: picked.qid } : {}) };
     } else {
       const trimmed = name.trim();
-      if (!trimmed) { setNameError('起个名字'); focusField('copy-name'); return; }
+      if (!trimmed) { setNameError(t('copy.need.name')); focusField('copy-name'); return; }
       body = { projectId: target.id, as: mode, name: trimmed, restyle, runner: restyle ? runner : undefined };
     }
     setPending(true);
@@ -164,7 +168,7 @@ export function CopyDialog({ draft, runner, onClose, onCopied }: { draft: Screen
       await api.sketchbook.copyDraft(draft.id, body);
       onCopied?.();
       onClose();
-      toast(`已写回「${target.name}」`, 'info', { action: { label: '去看看', run: () => navigate(`/p/${target.id}`) } });
+      toast(t('copy.copied', { name: target.name }), 'info', { action: { label: t('copy.view'), run: () => navigate(`/p/${target.id}`) } });
     } catch (err) {
       await explain(err);
       setPending(false);
@@ -179,52 +183,52 @@ export function CopyDialog({ draft, runner, onClose, onCopied }: { draft: Screen
       <form ref={ref} role="dialog" aria-modal="true" aria-labelledby="copy-title" tabIndex={-1} data-testid="copy-dialog" data-mode={mode} onSubmit={submit} noValidate
         className="sheet flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col fade-up outline-none">
         <div className="shrink-0 px-5 pt-5">
-          <h2 id="copy-title" className="type-heading3 font-semibold">写回项目…</h2>
-          <p className="mt-1 type-label text-text-secondary">把「{draft.name}」的当前版写进项目，之后两边各改各的。</p>
+          <h2 id="copy-title" className="type-heading3 font-semibold">{t('copy.title')}</h2>
+          <p className="mt-1 type-label text-text-secondary">{t('copy.intro', { name: draft.name })}</p>
         </div>
         {/* 内容超过视口时只这一段滚，标题与确认键常驻 */}
         <div className="scroll min-h-0 flex-1 space-y-4 px-5 pb-1 pt-4">
-          {gone && <p data-testid="copy-target-gone" className="fill rounded-md px-3 py-2 type-label text-text-secondary">原来那一屏已经不在了，这次缺省放成新屏</p>}
+          {gone && <p data-testid="copy-target-gone" className="fill rounded-md px-3 py-2 type-label text-text-secondary">{t('copy.gone')}</p>}
           <div className="space-y-1.5">
-            <label htmlFor="copy-project" className="block type-label font-medium text-text-secondary">写进哪个项目</label>
+            <label htmlFor="copy-project" className="block type-label font-medium text-text-secondary">{t('copy.projectLabel')}</label>
             {listFailed ? (
-              <p role="alert" className="flex items-center justify-between gap-2 type-label text-error"><span>项目列表没取到</span><Button size="sm" onClick={loadProjects}>重试</Button></p>
+              <p role="alert" className="flex items-center justify-between gap-2 type-label text-error"><span>{t('copy.listFailed')}</span><Button size="sm" onClick={loadProjects}>{tc('retry')}</Button></p>
             ) : projects && projects.length === 0 ? (
-              <p className="type-label text-text-secondary">还没有项目。在左上角的切换器里新建一个，再回来写回。</p>
+              <p className="type-label text-text-secondary">{t('copy.noProjects')}</p>
             ) : (
-              <Select id="copy-project" data-testid="copy-project" aria-label="目标项目" value={projectId} onChange={changeProject} placeholder={projects ? '选一个项目' : '正在加载项目…'} disabled={!projects}
-                options={(projects ?? []).map((p) => ({ value: p.id, label: p.name, hint: p.deviceType === 'mobile' ? '手机' : '桌面' }))} />
+              <Select id="copy-project" data-testid="copy-project" aria-label={t('copy.projectAria')} value={projectId} onChange={changeProject} placeholder={projects ? t('copy.chooseProject') : t('copy.loadingProjects')} disabled={!projects}
+                options={(projects ?? []).map((p) => ({ value: p.id, label: p.name, hint: p.deviceType === 'mobile' ? t('device.mobile') : t('device.desktop') }))} />
             )}
           </div>
           <div className="space-y-1.5">
-            <span className="block type-label font-medium text-text-secondary">方式</span>
-            <ChoiceGroup label="写回方式" testId="copy-as" value={mode} options={MODE_OPTIONS} onChange={(v) => { setMode(v); setError(null); setScreenError(null); }} />
+            <span className="block type-label font-medium text-text-secondary">{t('copy.modeLabel')}</span>
+            <ChoiceGroup label={t('copy.modeAria')} testId="copy-as" value={mode} options={MODES.map((value) => ({ value, label: t(`copy.mode.${value}`) }))} wrap onChange={(v) => { setMode(v); setError(null); setScreenError(null); }} />
           </div>
 
           {needsScreens ? (
             <div className="space-y-1.5">
-              <label htmlFor="copy-target-screen" className="block type-label font-medium text-text-secondary">{mode === 'replace' ? '换哪一屏里的一块' : '覆盖哪一屏'}</label>
+              <label htmlFor="copy-target-screen" className="block type-label font-medium text-text-secondary">{mode === 'replace' ? t('copy.screenLabel.replace') : t('copy.screenLabel.overwrite')}</label>
               {detailFailed && !screens ? (
-                <p role="alert" className="flex items-center justify-between gap-2 type-label text-error"><span>「{target?.name}」的屏没取到</span><Button size="sm" onClick={() => void loadDetail(projectId)}>重试</Button></p>
+                <p role="alert" className="flex items-center justify-between gap-2 type-label text-error"><span>{t('copy.screensFailed', { name: target?.name ?? '' })}</span><Button size="sm" onClick={() => void loadDetail(projectId)}>{tc('retry')}</Button></p>
               ) : screens && screens.length === 0 ? (
-                <p className="flex items-center justify-between gap-2 type-label text-text-secondary"><span>「{target?.name}」里还没有能覆盖的屏</span><Button size="sm" onClick={() => setMode('screen')}>放成新屏</Button></p>
+                <p className="flex items-center justify-between gap-2 type-label text-text-secondary"><span>{t('copy.noScreens', { name: target?.name ?? '' })}</span><Button size="sm" onClick={() => setMode('screen')}>{t('copy.asScreen')}</Button></p>
               ) : (
-                <Select id="copy-target-screen" data-testid="copy-target-screen" aria-label="目标屏" value={targetScreen ? screenId : ''} onChange={changeScreen}
-                  placeholder={screens ? '选一屏' : '正在加载屏…'} disabled={!screens} options={screenOptions} />
+                <Select id="copy-target-screen" data-testid="copy-target-screen" aria-label={t('copy.screenAria')} value={targetScreen ? screenId : ''} onChange={changeScreen}
+                  placeholder={screens ? t('copy.chooseScreen') : t('copy.loadingScreens')} disabled={!screens} options={screenOptions} />
               )}
               {screenError && <p role="alert" className="type-label text-error">{screenError}</p>}
             </div>
           ) : (
             <>
-              <Field label="名字" htmlFor="copy-name" error={nameError ?? undefined}>
+              <Field label={t('copy.name')} htmlFor="copy-name" error={nameError ?? undefined}>
                 <Input id="copy-name" data-testid="copy-name" value={name} maxLength={80} autoComplete="off" aria-invalid={nameError ? true : undefined} aria-describedby={nameError ? 'copy-name-error' : undefined}
                   onChange={(e) => { setName(e.target.value); if (e.target.value.trim()) setNameError(null); setError(null); }} />
               </Field>
               <label className="flex cursor-pointer items-start gap-2.5">
                 <input type="checkbox" data-testid="copy-restyle" checked={restyle} onChange={(e) => setRestyleChoice(e.target.checked)} className="focus-ring mt-0.5 size-4 shrink-0 accent-(--semantic-color-action-link)" />
                 <span>
-                  <span className="block type-body text-text-primary">按该项目的设计系统改写</span>
-                  <span className="block type-label text-text-secondary">1 次模型调用，用输入框当前的通道；原样的那一版留在修订里</span>
+                  <span className="block type-body text-text-primary">{t('copy.restyle')}</span>
+                  <span className="block type-label text-text-secondary">{t('copy.restyleHint')}</span>
                 </span>
               </label>
             </>
@@ -234,12 +238,12 @@ export function CopyDialog({ draft, runner, onClose, onCopied }: { draft: Screen
           {mode === 'overwrite' && targetScreen && (
             <div data-testid="copy-compare" className="grid grid-cols-2 gap-3">
               <figure className="min-w-0 space-y-1.5">
-                <Shot src={targetScreen.thumbUrl ?? targetScreen.screenshotUrl} device={device} alt={`「${targetScreen.name}」现在的样子`} />
-                <figcaption className="truncate text-center type-caption text-text-secondary">现在 · 第 {seq} 版</figcaption>
+                <Shot src={targetScreen.thumbUrl ?? targetScreen.screenshotUrl} device={device} alt={t('copy.nowAlt', { name: targetScreen.name })} />
+                <figcaption className="truncate text-center type-caption text-text-secondary">{t('copy.nowCaption', { seq })}</figcaption>
               </figure>
               <figure className="min-w-0 space-y-1.5">
-                <Shot src={draft.thumbUrl ?? draft.screenshotUrl} device={device} alt={`草稿「${draft.name}」`} component={draft.frame === 'component'} />
-                <figcaption className="truncate text-center type-caption text-text-secondary">覆盖成 · 草稿当前版</figcaption>
+                <Shot src={draft.thumbUrl ?? draft.screenshotUrl} device={device} alt={t('copy.draftAlt', { name: draft.name })} component={draft.frame === 'component'} />
+                <figcaption className="truncate text-center type-caption text-text-secondary">{t('copy.draftCaption')}</figcaption>
               </figure>
             </div>
           )}
@@ -257,11 +261,11 @@ export function CopyDialog({ draft, runner, onClose, onCopied }: { draft: Screen
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-2 px-5 pb-5 pt-4">
           {needsScreens && targetScreen && seq != null && (
-            <p data-testid="copy-restore-hint" className="mr-auto min-w-0 flex-1 basis-56 type-label text-text-secondary">覆盖后可在「{targetScreen.name}」的版本里回到第 {seq} 版</p>
+            <p data-testid="copy-restore-hint" className="mr-auto min-w-0 flex-1 basis-56 type-label text-text-secondary">{t('copy.restoreHint', { name: targetScreen.name, seq })}</p>
           )}
           <div className="flex gap-2">
-            <Button onClick={onClose}>取消</Button>
-            <Button type="submit" variant="primary" data-testid="copy-submit" pending={pending} disabled={!target}>{SUBMIT_LABEL[mode]}</Button>
+            <Button onClick={onClose}>{tc('cancel')}</Button>
+            <Button type="submit" variant="primary" data-testid="copy-submit" pending={pending} disabled={!target}>{t(`copy.submit.${mode}`)}</Button>
           </div>
         </div>
       </form>
@@ -272,6 +276,7 @@ export function CopyDialog({ draft, runner, onClose, onCopied }: { draft: Screen
 // 并排缩略图：框按目标项目的设备比例，手机屏定高、桌面屏占满列宽。截图的底是用户设计稿的白；组件画框的草稿截图是透明底，垫看板底色（同记录栏）。
 // 取图失败按地址记：换了一屏、地址变了就重新取
 function Shot({ src, device, alt, component }: { src: string | null; device: DeviceType; alt: string; component?: boolean }) {
+  const t = useT(sketchMessages);
   const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
   const view = DEVICE_SIZE[device];
   return (
@@ -279,7 +284,7 @@ function Shot({ src, device, alt, component }: { src: string | null; device: Dev
       style={{ aspectRatio: `${view.w} / ${view.h}` }}>
       {src && brokenSrc !== src
         ? <img src={src} alt={alt} draggable={false} onError={() => setBrokenSrc(src)} className={cn('size-full object-contain', !component && 'object-top')} />
-        : <span className="px-2 text-center type-caption text-text-secondary">{src ? '截图没取到' : '还没有截图'}</span>}
+        : <span className="px-2 text-center type-caption text-text-secondary">{src ? t('copy.shotFailed') : t('copy.noShot')}</span>}
     </div>
   );
 }

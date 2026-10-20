@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/ui/ui';
+import { useT } from '@/i18n';
+import commonMessages from '@/i18n/locales/common';
 
 // ---- 弹层基建：焦点陷阱 + 背景 inert + Esc 关闭 + 关闭归还焦点（A11Y-004 / A11Y-005）----
 // 弹层可以叠（设置弹层里再开「添加通道」），所以背景隔离按层栈算：开一层就把 #root 与它下面所有层设成 inert，
@@ -90,6 +92,7 @@ export function Overlay({ children, onClose }: { children: ReactNode; onClose: (
 }
 
 export function ConfirmDialog(p: { title: string; body: string; confirmLabel: string; returnTo?: React.RefObject<HTMLElement | null>; fallback?: React.RefObject<HTMLElement | null>; onCancel: () => void; onConfirm: () => void | Promise<void> }) {
+  const tc = useT(commonMessages);
   const ref = useModal<HTMLDivElement>(p.onCancel, p.returnTo, p.fallback);
   const [busy, setBusy] = useState(false);
   return (
@@ -98,7 +101,7 @@ export function ConfirmDialog(p: { title: string; body: string; confirmLabel: st
         <h2 id="ch-del-title" className="type-heading3 font-semibold">{p.title}</h2>
         <p className="mt-1 type-label text-text-secondary">{p.body}</p>
         <div className="mt-4 flex justify-end gap-2">
-          <Button onClick={p.onCancel}>取消</Button>
+          <Button onClick={p.onCancel}>{tc('cancel')}</Button>
           <Button variant="danger" pending={busy} onClick={async () => { setBusy(true); try { await p.onConfirm(); } finally { setBusy(false); } }}>{p.confirmLabel}</Button>
         </div>
       </div>

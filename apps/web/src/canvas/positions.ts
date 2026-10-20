@@ -2,6 +2,8 @@ import { useCallback, useMemo, useRef, type Dispatch, type SetStateAction } from
 import type { ProjectDetailDto, ComponentDto, ScreenDto } from '@quilt/core/browser';
 import { api } from '@/lib/api';
 import type { useToast } from '@/lib/toast';
+import { tOf } from '@/i18n';
+import canvasMessages from '@/i18n/locales/canvas-parts';
 import { computeArrangement, type ArrangeKind } from './arrange';
 import type { UndoStep } from './undo';
 
@@ -29,6 +31,11 @@ export function usePositionDrafts() {
 }
 type PositionDrafts = ReturnType<typeof usePositionDrafts>;
 
+// 撤销步与排列 toast 按动作取文案，出 toast 的那一刻再按界面语言翻译；computeArrangement 的 label（对齐 / 等距 / 排列）在这里换成动作
+type PosAction = 'move' | 'align' | 'space' | 'layout';
+const ARRANGE_ACTION: Record<NonNullable<ReturnType<typeof computeArrangement>>['label'], Exclude<PosAction, 'move'>> = { 对齐: 'align', 等距: 'space', 排列: 'layout' };
+const t = tOf(canvasMessages);
+
 export function usePositionUndo(args: {
   drafts: PositionDrafts; screensRef: { current: ScreenDto[] }; components: ComponentDto[];
   setDetail: Dispatch<SetStateAction<ProjectDetailDto | null>>; refresh: () => unknown; toast: ReturnType<typeof useToast>;
@@ -37,14 +44,14 @@ export function usePositionUndo(args: {
   const { drafts: { dirtyPos, dirtyCompPos }, screensRef, components, setDetail, refresh, toast, pushStep, undo } = args;
   // 位置撤销（v0.41）：拖动与对齐都是一步把屏挪走的动作，错了没有退路——每次动之前把「这几张原来在哪」压进画布撤销栈（undo.ts），⌘Z 逐步还原。
   // 删屏有确认框，不进栈。一步同时记屏与组件（v0.47 整组一起拖、整组一起还原）
-  const pushUndo = (label: string, screenIds: string[], componentIds: string[] = []) => {
+  const pushUndo = (action: PosAction, screenIds: string[], componentIds: string[] = []) => {
     const pick = (list: PosEntry[], ids: string[]) => list.filter((x) => ids.includes(x.id)).map(({ id, x, y }) => ({ id, x, y }));
     const entry = { screens: pick(screensRef.current, screenIds), components: pick(components, componentIds) };
     if (!entry.screens.length && !entry.components.length) return;
-    pushStep({ label, run: async () => {
+    pushStep({ label: action, run: async () => {
       const failed = await writePositions(entry.screens, entry.components);
-      if (failed.length) { toast('撤销没能全部写回，已重取', 'error'); refresh(); return 'drop'; }
-      toast(`已撤销${label}`);
+      if (failed.length) { toast(t('positions.undoFailed'), 'error'); refresh(); return 'drop'; }
+      toast(t(`positions.undone.${action}`));
       return 'done';
     } });
   };
@@ -63,10 +70,10 @@ export function usePositionUndo(args: {
   };
   // 松手落库：单张与整组同一条路（v0.47 多选批量移动）
   const onMove = async (moved: PosEntry[], movedComps: PosEntry[]) => {
-    pushUndo('移动', moved.map((e) => e.id), movedComps.map((e) => e.id));
+    pushUndo('move', moved.map((e) => e.id), movedComps.map((e) => e.id));
     const failed = await writePositions(moved, movedComps);
     if (!failed.length) return;
-    toast(moved.length + movedComps.length > 1 ? `位置保存失败：${failed.join('、')} 没挪过去，再拖一次` : '位置保存失败', 'error');
+    toast(moved.length + movedComps.length > 1 ? t('positions.moveFailedNamed', { names: failed.join(t('positions.listSep')) }) : t('positions.moveFailed'), 'error');
     refresh();
   };
   // 多选排列（REQ-CORE-018）：算位在 computeArrangement；只动位置变了的屏，落库走同一条 PATCH
@@ -74,18 +81,19 @@ export function usePositionUndo(args: {
     const r = computeArrangement(kind, sel);
     if (!r) return;
     const { next, label } = r;
+    const action = ARRANGE_ACTION[label];
     const moved = sel.filter((s) => { const n = next.get(s.id)!; return n.x !== s.x || n.y !== s.y; });
     if (!moved.length) return;
-    pushUndo(label, moved.map((s) => s.id));
+    pushUndo(action, moved.map((s) => s.id));
     for (const s of moved) dirtyPos.current.set(s.id, next.get(s.id)!);
     setDetail((d) => d && { ...d, screens: d.screens.map((s) => (next.has(s.id) ? { ...s, ...next.get(s.id)! } : s)) });
     // 等每条 PATCH 都有结果再重取：先回来的旧快照会盖掉后落地的那几条写入。
     // 失败的屏把坐标交还服务端（口径是重取、不回滚已落库的那几屏），成功的仍归本地直到刷新里对上
     const done = await Promise.allSettled(moved.map((s) => api.screens.patch(s.id, next.get(s.id)!)));
     const failed = moved.filter((_, i) => done[i].status === 'rejected');
-    if (!failed.length) { toast(`已${label} ${sel.length} 屏`, 'info', { action: { label: '撤销（⌘Z）', run: undo } }); return; }
+    if (!failed.length) { toast(t(`positions.arranged.${action}`, { n: sel.length }), 'info', { action: { label: t('positions.undoAction'), run: undo } }); return; }
     for (const s of failed) dirtyPos.current.delete(s.id);
-    toast(`位置保存失败：${failed.map((s) => s.name).join('、')} 没排上，再点一次对齐`, 'error');
+    toast(t('positions.arrangeFailed', { names: failed.map((s) => s.name).join(t('positions.listSep')) }), 'error');
     refresh();
   };
   return { onMove, arrange };

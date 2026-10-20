@@ -255,6 +255,9 @@
 | RUN-265 | 2026-10-20 | 未提交工作树（设计文档 v1.13 定稿：透明边改为 64 px，够 `shadow-2xl`） | AI(Claude Code) | 全量轮（草稿本动了输入框、项目切换器、生成管线、预览下发、截图、作业入口校验、MCP 这些公共路径）：构建前端；`scripts/e2e-all.sh` 十套整套（新增 SKETCH）与 install，共 45 分钟。隔离栈 lane `main`（3410 / 3411 + `quilt_test` + stub，`apps/web/dist` 重新构建），`LIVE_LLM=0`、`GEMINI_API_KEY=` | `core.ts` 67 通过 · 跳过 3 · 待人工 1 · 预期失败 1，LOAD 12/12，CANVAS 28/28，PROTO 11 通过 · 跳过 2，EDIT 27 通过 · 跳过 2，COMPONENTS 1/1，AGENT 7 通过 · 待人工 1，MCP 3/3，CHAT 失败 1（`TC-CORE-039`：本机 Claude 订阅到了会话用量上限，见明细），SKETCH 14/14，INSTALL 1/1 |
 | RUN-266 | 2026-10-20 | 同 RUN-265 | AI(Claude Code) | 复测轮：订阅额度 02:30 重置后单跑 CHAT 整套；最终代码上补跑 typecheck（core / api / web / tests）、`pnpm --filter @quilt/web lint`、单测轮、`check-tokens --lint` | CHAT 1/1 通过；typecheck 0 错误，lint 0 处，单测 136/136，`check-tokens --lint` PASS |
 | RUN-267 | 2026-10-20 | 未提交工作树（设计文档 v1.15，含 v1.14 写回与参照的后端） | AI(Claude Code) | 全量至 TC-CORE-111、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024 | 通过 130/163 · 失败 5 · 待人工 2 · 跳过 26 |
+| RUN-268 | 2026-10-20 | 未提交工作树（设计文档 v1.15 加 v1.14 写回与参照的前端） | AI(Claude Code) | 全量至 TC-CORE-123、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024 | 通过 157/175 · 失败 5 · 待人工 2 · 跳过 11 |
+| RUN-269 | 2026-10-20 | 未提交工作树（设计文档 v1.16：输入框停靠与收起、草稿放大） | AI(Claude Code) | 全量至 TC-CORE-125、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024 | 通过 134/177 · 失败 2 · 待人工 2 · 跳过 39 |
+| RUN-270 | 2026-10-20 | 同 RUN-269 的构建（修复前） | AI(Claude Code) | 局部(TC-CORE-126) | 通过 0/1 · 失败 1 |
 
 ## 明细（仅登非「通过」项）
 
@@ -609,6 +612,75 @@
 | RUN-267 | TC-CORE-109 | 跳过 | SKETCH 套件开跑即停（见 RUN-267 证据） | RUN-268 |
 | RUN-267 | TC-CORE-110 | 跳过 | SKETCH 套件开跑即停（见 RUN-267 证据） | RUN-268 |
 | RUN-267 | TC-CORE-111 | 跳过 | SKETCH 套件开跑即停（见 RUN-267 证据） | RUN-268 |
+| RUN-268 | TC-CORE-050 | 失败 | 第 1 步「量到终值后组件卡又变了」，7 张卡最后一帧都回到 390×64 的占位尺寸，像是整页又载入了一次；同一构建上单跑 2/2 通过，本轮同时有改代码的 agent 在跑类型检查（证据：`docs/test-runs/run-268-failures.log`） | 判为负载下偶发；RUN-269 复测 |
+| RUN-268 | TC-CORE-120 | 失败 | 第 1 步「覆盖整屏应并排两张缩略图」：脚本要两格都是图，种子项目不拍截图，目标屏那格按设计写「还没有截图」；草稿那格还可能赶在这一版截图拍好之前打开（证据：`docs/test-runs/run-268-failures.log`） | 脚本更正：先等草稿这一版截图拍好，目标屏那格接受占位；单跑通过；RUN-269 复测 |
+| RUN-268 | TC-CORE-121 | 失败 | 第 3 步「换一块后应只换主区、TabBar 实例原样」：写回结果正确，脚本里另写的 nav 比较没去掉 data-qid，而实例写回时按目标项目的正式版重展开、子元素重编号（ADR-032）（证据：`docs/test-runs/run-268-failures.log`） | 脚本更正：用去掉 data-qid 的比较（同 TC-CORE-115）；单跑通过；RUN-269 复测 |
+| RUN-268 | TC-CORE-023 | 失败 | 预期失败：「叫回后安全区底部没复原」，§7 登记项（证据：`docs/test-runs/run-268-failures.log`） | 基线 |
+| RUN-268 | TC-CORE-047 | 失败 | 预期失败：「⌘K 找屏连按 ↓ 到底后选中行跳回」（§7，时过时不过）（证据：`docs/test-runs/run-268-failures.log`） | 基线 |
+| RUN-268 | TC-CORE-020 | 待人工 | 同 RUN-265 | 待人工 |
+| RUN-268 | TC-AGENT-010 | 待人工 | 同 RUN-265 | 待人工 |
+| RUN-268 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-268 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-268 | TC-PROTO-004 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-268 | TC-PROTO-009 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-268 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-268 | TC-EDIT-008 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-268 | TC-CORE-006 | 跳过 | 要以 `LLM_STUB=503` 重启 worker，由 `core-stub.ts` 单独执行，本轮没跑 | 基线 |
+| RUN-268 | TC-CORE-084 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
+| RUN-268 | TC-EDIT-037 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
+| RUN-268 | TC-CORE-038 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
+| RUN-268 | TC-AGENT-013 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
+| RUN-269 | TC-EDIT-001 | 失败 | 第 1 步等「已更新」角标 8 s 超时：角标只显示一阵，前面重选轮询最多等 5 s，负载高时等到时已经消失；同一构建单跑 2/2 通过（证据：`docs/test-runs/run-269-failures.log`） | 判为负载下偶发；下一轮复测 |
+| RUN-269 | TC-CORE-023 | 失败 | 预期失败：「叫回后安全区底部没复原」，§7 登记项（证据：`docs/test-runs/run-269-failures.log`） | 基线 |
+| RUN-269 | TC-CORE-020 | 待人工 | 同 RUN-265 | 待人工 |
+| RUN-269 | TC-AGENT-010 | 待人工 | 同 RUN-265 | 待人工 |
+| RUN-269 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-269 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-269 | TC-PROTO-004 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-269 | TC-PROTO-009 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-269 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-269 | TC-EDIT-008 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-269 | TC-CORE-006 | 跳过 | 要以 `LLM_STUB=503` 重启 worker，由 `core-stub.ts` 单独执行，本轮没跑 | 基线 |
+| RUN-269 | TC-CORE-084 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
+| RUN-269 | TC-EDIT-037 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
+| RUN-269 | TC-CORE-038 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
+| RUN-269 | TC-AGENT-013 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
+| RUN-269 | TC-CORE-031 | 跳过 | install 套件没跑（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-098 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-099 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-100 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-101 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-102 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-103 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-104 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-105 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-106 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-107 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-108 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-109 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-110 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-111 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-112 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-113 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-114 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-115 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-116 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-117 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-118 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-119 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-120 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-121 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-122 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-123 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-269 | TC-CORE-125 | 跳过 | SKETCH 套件开跑即停（见 RUN-269 证据） | 下一轮 |
+| RUN-270 | TC-CORE-126 | 失败 | 第 1 步：开着选择元素点进输入框打字后按 ⌘E，「选择元素中」提示还在——画布的键位表把 ⌘E 放在「焦点在文本框里就不处理」那道门后面（证据：`docs/test-runs/run-270-tc-core-126-fail.log`） | 产品缺陷，已修：⌘E 挪到那道门前（与 ⌘/、⌘K、⌘S 同列）；下一轮复测 |
 
 
 RUN-267 证据：地基变更（界面视觉换成苹果风方向 E，跨全部界面）的全量轮。构建前端后跑 `scripts/e2e-all.sh` 前九套（CORE、LOAD、CANVAS、PROTO、EDIT、COMPONENTS、AGENT、MCP、CHAT）；单测轮 144/144，构建产物 `check-tokens --lint` 通过。SKETCH 与 install 两套没跑：本轮中途 `tests/e2e/sketch.ts` 已按 v1.14 写回前端改写，与被测构建对不上，SKETCH 开跑即停，改在 RUN-268 随新构建再跑全量。`TC-CORE-008` 在毛玻璃开着时 100 屏 2 倍屏 60 fps、每帧 GPU 主线程 1.4 ms（门槛 4 ms）。完整日志 `.e2e/main/run-267.log`（本机，不进仓库）。
+
+RUN-268 证据：v1.14 写回前端接入后的全量轮，`scripts/e2e-all.sh` 十一套全跑（含 SKETCH 与 install）；单测轮 144/144，构建产物 `check-tokens --lint` 通过。RUN-267 的四条失败在本轮都通过（`TC-CORE-026` 弱文字改深、`056` 与 `097` 脚本更正、`058` 未再出现）。本轮之后在同一构建上单跑：`TC-CORE-050` 2/2 通过，`TC-CORE-120`、`121` 脚本更正后各 1/1 通过（`RUN=dbg`，不计轮次，正式复测在 RUN-269）。完整日志 `.e2e/main/run-268.log`（本机，不进仓库）。
+
+RUN-269 证据：v1.16（输入框停靠与收起、草稿放大）的全量轮，构建前端、单测轮 144/144、构建产物 `check-tokens --lint` 通过后跑 `scripts/e2e-all.sh` 前九套。SKETCH 与 install 没跑：本轮中途用户要求输入框浮在草稿本看板上、不让位，`tests/e2e/sketch.ts` 已按新要求改写，与被测构建对不上，SKETCH 开跑即停。RUN-268 失败的 `TC-CORE-050` 本轮通过；`TC-CORE-120`、`121` 属 SKETCH，归入下一轮。`TC-EDIT-001` 在本轮失败、同一构建单跑 2/2 通过：它跑的那几分钟主会话在 l1 栈上并行跑别的用例。完整日志 `.e2e/main/run-269.log`（本机，不进仓库）。
+
+
+RUN-270 证据：用户报告「开着选择元素点进输入框后按 ⌘E 关不掉」，补写源自缺陷用例 `TC-CORE-126`，在修复前的构建（RUN-269 那一份）上用 l1 隔离栈单跑：第 1 步在「焦点在输入框里按 ⌘E 没退出选择元素」处失败，与报告一致。

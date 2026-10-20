@@ -1,6 +1,7 @@
 import { parseHTML } from 'linkedom';
 import { injectQids } from './inject.ts';
 import { MAX_COMPONENT_HTML_BYTES } from './component-meta.ts';
+import type { Locale } from './i18n.ts';
 
 // 共享组件（REQ-EDIT-006 / ADR-019）：项目级的一段 HTML，屏里只放一个占位根元素（data-component="Name"），
 // 每次写入屏时由这里确定性地展开成组件的正式 HTML——改组件一次，所有屏零 LLM 同步。
@@ -14,14 +15,18 @@ const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const maxQid = (root: Element) => Array.from(root.querySelectorAll('[data-qid]')).reduce((m, el) => Math.max(m, Number((el.getAttribute('data-qid') ?? '').slice(1)) || 0), 0);
 
-/** 组件 HTML 的硬校验：恰好一个根元素、无 script / style、不套别的组件、不超体积 */
-export function validateComponentHtml(html: string): { ok: true; tag: string } | { ok: false; error: string } {
-  if (new TextEncoder().encode(html).length > MAX_COMPONENT_HTML_BYTES) return { ok: false, error: `组件 HTML 超过 ${MAX_COMPONENT_HTML_BYTES / 1024} KB` };
+/**
+ * 组件 HTML 的硬校验：恰好一个根元素、无 script / style、不套别的组件、不超体积。
+ * locale 是 error 的语言（REQ-CORE-046），缺省中文；作业里的校验保持中文，失败文案由 failureText 按作业语言换
+ */
+export function validateComponentHtml(html: string, locale: Locale = 'zh'): { ok: true; tag: string } | { ok: false; error: string } {
+  const t = (zh: string, en: string) => (locale === 'en' ? en : zh);
+  if (new TextEncoder().encode(html).length > MAX_COMPONENT_HTML_BYTES) return { ok: false, error: t(`组件 HTML 超过 ${MAX_COMPONENT_HTML_BYTES / 1024} KB`, `The component HTML is over ${MAX_COMPONENT_HTML_BYTES / 1024} KB`) };
   const document = parse(html);
   const roots = Array.from(document.body.children);
-  if (roots.length !== 1) return { ok: false, error: `组件必须恰好一个根元素，现在有 ${roots.length} 个` };
-  if (document.body.querySelector('script, style')) return { ok: false, error: '组件里不能有 <script> 或 <style>：它会被复制进每一屏' };
-  if (document.body.querySelector('[data-component]')) return { ok: false, error: '组件里不能再放别的共享组件' };
+  if (roots.length !== 1) return { ok: false, error: t(`组件必须恰好一个根元素，现在有 ${roots.length} 个`, `A component must have exactly one root element; this one has ${roots.length}`) };
+  if (document.body.querySelector('script, style')) return { ok: false, error: t('组件里不能有 <script> 或 <style>：它会被复制进每一屏', 'A component cannot contain <script> or <style>: it is copied into every screen') };
+  if (document.body.querySelector('[data-component]')) return { ok: false, error: t('组件里不能再放别的共享组件', 'A component cannot contain another shared component') };
   return { ok: true, tag: roots[0].tagName.toLowerCase() };
 }
 
@@ -173,16 +178,18 @@ export type Extracted = { html: string; tag: string; depth: number; classes: str
  * 导航型（≥ 2 条 / 开头的链接）时分出激活 / 未激活两套类——激活 = 带 aria-current 或 href 等于本屏路由的那条，
  * 它独有的类是 activeClass、其余链接共有而它没有的是 inactiveClass；正式 HTML 里给它标上 aria-current。
  * 元素在别的组件里、或自己包着组件时不可提取。
+ * locale 是 error 的语言（REQ-CORE-046），缺省中文；元素不存在时另带 notFound，调用方按它分流，不看文案
  */
-export function extractComponent(bodyHtml: string, qid: string, route: string, liveNames: string[]): Extracted | { error: string } {
+export function extractComponent(bodyHtml: string, qid: string, route: string, liveNames: string[], locale: Locale = 'zh'): Extracted | { error: string; notFound?: true } {
+  const t = (zh: string, en: string) => (locale === 'en' ? en : zh);
   const document = parse(bodyHtml);
   const el = document.querySelector(`[data-qid="${qid}"]`);
-  if (!el) return { error: '元素在当前修订中不存在' };
+  if (!el) return { error: t('元素在当前修订中不存在', 'The element is not in the current revision'), notFound: true };
   // 只认还存在的组件：已删组件留在屏里的实例等于脱离，可以再提取
   const live = new Set(liveNames);
   const inLive = (x: Element | null) => !!x && live.has(x.getAttribute('data-component') ?? '');
-  if (inLive(el.closest('[data-component]'))) return { error: '这个元素已经在一个共享组件里' };
-  if (Array.from(el.querySelectorAll('[data-component]')).some((x) => inLive(x))) return { error: '这个元素里包着别的共享组件，不能再打包成组件' };
+  if (inLive(el.closest('[data-component]'))) return { error: t('这个元素已经在一个共享组件里', 'This element is already inside a shared component') };
+  if (Array.from(el.querySelectorAll('[data-component]')).some((x) => inLive(x))) return { error: t('这个元素里包着别的共享组件，不能再打包成组件', 'This element contains another shared component, so it cannot become a component') };
   for (const x of Array.from(el.querySelectorAll('[data-component]'))) x.removeAttribute('data-component');
   let depth = 0;
   for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) depth += 1;

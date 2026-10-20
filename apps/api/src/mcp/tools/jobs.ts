@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
-import { JOB_RUNNERS, type JobRunner, type Runner } from '@quilt/core';
+import { JOB_RUNNERS, L, type JobRunner, type Runner } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
 import { Problem, problems } from '../../lib/errors.ts';
 import { storage } from '../../lib/storage.ts';
@@ -88,7 +88,7 @@ export function registerJobTools(c: ToolCtx) {
     write();
     const { component, project } = await ownedComponent(user.id, a.componentId as string);
     const runner = a.runner as Runner | undefined;
-    if (runner?.kind === 'agent') throw problems.validation([{ path: 'runner', message: '改组件请换一个模型通道，本机会话不接这类作业' }]);
+    if (runner?.kind === 'agent') throw problems.validation([{ path: 'runner', message: L('改组件请换一个模型通道，本机会话不接这类作业', 'Local sessions do not take component edits; switch to a model channel') }]);
     const { imageKeys } = await prep(project.id, a.attachmentIds);
     return runJob(project.id, { kind: 'edit_component', input: { componentId: component.id, prompt: a.prompt as string, runner, imageKeys } });
   }));

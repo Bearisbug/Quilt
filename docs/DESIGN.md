@@ -12,7 +12,7 @@
 | 项目画像 | 生产产品（全部核心节生效） |
 | Owner | @bug |
 | 评审人 | @bug（产品 / 架构） |
-| 最后更新 | 2026-10-20（v1.19 缩小显示的屏改用 zoom；v1.18 草稿出新版原地换；v1.17 去掉对话记录、作业 chip、记录栏浮层、画框不能跨组件与页面；v1.16 输入框停靠与收起、草稿放大；v1.15 界面视觉换成苹果风；v1.14 草稿写回与参照；v1.13 与 v1.14 的数据模型、接口与 ADR-030～033 已由 Owner 签字） |
+| 最后更新 | 2026-10-20（v1.20 界面支持中文与英文；v1.19 缩小显示的屏改用 zoom；v1.18 草稿出新版原地换；v1.17 去掉对话记录、作业 chip、记录栏浮层、画框不能跨组件与页面；v1.16 输入框停靠与收起、草稿放大；v1.15 界面视觉换成苹果风；v1.14 草稿写回与参照；v1.13 与 v1.14 的数据模型、接口与 ADR-030～033 已由 Owner 签字） |
 | 关联 | 契约 `api/openapi.yaml`（实现期建立） · 仓库 `github.com/Bearisbug/Quilt` · 安装 `npx quilt-canvas`（包 `apps/cli`） · 调研结论见会话记录 2026-09-07/08/09 |
 | 链路层 | 部分 |
 
@@ -22,6 +22,7 @@
 
 | 日期 | 版本 | 涉及 ID | 一句话 | 类型 |
 | --- | --- | --- | --- | --- |
+| 2026-10-20 | v1.20 | REQ-CORE-046、FLOW-LOCALE、PAGE-CANVAS、API-CORE-006、API-CORE-046、ADR-034 | 界面支持中文与英文：缺省跟浏览器、设置里可切，服务端提示与生成内容跟着界面语言 | 功能 |
 | 2026-10-20 | v1.19 | PAGE-CANVAS、PAGE-SKETCH | 缩小显示的屏改用 zoom，修玻璃卡片旁闪出灰色渐变、盖住邻近内容 | 界面 |
 | 2026-10-20 | v1.18 | PAGE-SKETCH | 打开着的草稿出新版、换画框时原地换，不重载、不出「加载中」 | 界面 |
 | 2026-10-20 | v1.17 | REQ-CORE-020、REQ-CORE-023、REQ-CORE-026、REQ-EDIT-003、FLOW-CHAT、PAGE-CANVAS、PAGE-SKETCH、API-CORE-012、ADR-010 | 去掉对话记录与聊天，作业改成输入框上方的 chip，记录栏浮在草稿上，画框不跨组件与页面，内置库少占 90 MB | 界面、功能 |
@@ -65,6 +66,7 @@
 | FLOW-SKETCH-FORK | 屏拿到草稿本改 | 草稿本 | 设计中 | REQ-CORE-043 |
 | FLOW-SKETCH-COPY | 草稿写回项目 | 草稿本 | 设计中 | REQ-CORE-041、REQ-CORE-044 |
 | FLOW-SETTINGS | 通道、用量与外观 | 设置 | 已实现 | REQ-CORE-008、REQ-CORE-011、REQ-CORE-013、REQ-CORE-039 |
+| FLOW-LOCALE | 界面语言 | 设置 | 设计中 | REQ-CORE-046 |
 
 ### 角色：本机 agent
 
@@ -423,6 +425,7 @@
 | 样例页 | 由 token 确定性渲染的一张页面（v0.85 `REQ-CORE-036`）：设计系统的全部基础值与基础组件的全部状态排在一起，不含业务内容、不经模型；画布上的「样例卡」是它的概览视图，完整页另开。规格见 SPEC v1.2（「标准组件样例页」，brand-design 仓 `references/specimen-spec.md`） | `specimen` | `ENT-DesignSystem`（派生视图） |
 | 状态层 | 悬停 / 聚焦 / 按下 / 拖动时叠在元素上的一层当前色，透明度来自 token（`state.hover` 等）；样例页与真实屏共用 prelude 里同一个 `.state-layer` 工具类（v0.85 `ADR-025`） | `state` / `.state-layer` | `ENT-DesignSystem`（`tokens.state`） |
 | 项目语言 | 项目级设置（v0.85 `REQ-CORE-037`）：决定屏文档的 `<html lang>` 与模型写界面文案用的语言；中文排版覆盖（`:lang(zh)` 下的行高、字距、字体族）只在它为中文时对真实屏生效 | `language` | `ENT-Project`（字段） |
+| 界面语言 | Quilt 自己的界面与服务端提示用的语言（v1.20 `REQ-CORE-046`），中文或英文；记在本机浏览器里，网页端每个请求经请求头带给服务端，生成内容在请求没说语言时也跟着它。与项目语言无关：项目语言属于用户设计的产品，界面语言属于看画布的人 | `locale`（`zh` / `en`）、`X-Quilt-Locale` | 前端状态（`localStorage` 的 `quilt:locale`）、`ENT-GenerationJob`（`input.locale`） |
 | 屏幕 | 画布上的一张卡片，代表 APP 的一个页面；有位置、路由、当前修订 | `screen` | `ENT-Screen` |
 | 修订 | 屏幕的一个不可变版本：HTML + 截图 + 来源；带父修订指针，修订链成树（v0.31） | `revision` | `ENT-ScreenRevision` |
 | 候选 | 同一作业为同一屏产出的 N 条兄弟修订（同 `jobId`、`candidateIndex` 0..N−1），采用前 current 默认第 1 版；采用 = 把 current 指向所选修订并结清该批 | `candidate` | `ENT-ScreenRevision`（字段） |
@@ -506,6 +509,7 @@
 | REQ-CORE-043 | 从项目的一屏或其中一块建草稿，带上它的当前内容 | 目标 ⑦ | P1 / 草稿本 |
 | REQ-CORE-044 | 草稿写回时覆盖已有的一屏或屏里的一块，可回溯 | 目标 ⑦ | P1 / 草稿本 |
 | REQ-CORE-045 | 在草稿里点选元素或钉批注，只改那一块 | 目标 ⑦ | P1 / 草稿本 |
+| REQ-CORE-046 | 界面支持中文与英文，缺省跟浏览器语言、可在设置里切换 | 目标 ① | P1 |
 | REQ-AGENT-001 | MCP server（Streamable HTTP，`http://127.0.0.1:3100/mcp`）+ 高层工具（生成/编辑/列表/取屏/截图）。**v0.32：本地版免鉴权**——服务只绑回环地址，不校验凭据；v0.75 起 `/mcp` 先过来源校验（`Host` 须是本机地址，带 `Origin` 时须在名单里，见 §15「本地服务」），本机 MCP 客户端不带 `Origin`、照常接入；OAuth 2.1 接入推迟到 SaaS | 目标 ⑤ | P0 / M4 · M10 改写 · v0.75 补充 |
 | REQ-AGENT-002 | MCP 底层原语与资源：设计契约、校验、创建/更新屏、连接屏、应用地图、上传 URL、resources。**v0.51 与画布同面**：画布能做的每一件事都有对应工具——删屏 / 组件 / 项目，读旧修订与回溯、采用候选，摆放屏与组件，素材、预设、导出，作业列表 / 取消 / 事件，批注处理，元素直改，全部作业类型与造 / 改屏的全部选项（通道、参考图、锚点、懒生成、组件上下文）；只有通道的增删改（含密钥）留在设置页 | 目标 ⑤ | P0 / M4 · v0.51 补充 |
 | REQ-AGENT-003 | **本机 agent 执行作业**（v0.34 改写）：通道选「交给本机 Claude Code」并在会话下拉里选定一个本机正在运行的 Claude Code 交互式会话后，发送建的是 `runner=agent` 的 `generate` / `edit_screens` / `edit_component`（v0.99）作业（`input.runner = { kind:"agent", tool:"claude-code", sessionId }`），由 Quilt 进程的 `agentDelivery` 立即把提示词（项目、指令、目标屏与各自的 `expectedRevisionId`、各目标屏此前已生效的用户指令（v0.87 `ADR-012`）、作业 id、MCP 地址与接入命令、收口要求；改组件时目标是组件：它的 `componentId` 与 `expectedVersion`、用在哪几屏、这个组件此前的指令与组件写法，v0.99）**投递到该会话的 inbox socket**，作业随即 `running`（`output.delivery = { sessionId, name, deliveredAt }`）；会话在自己的终端窗口里做，经本机 MCP 回写（带 `jobId` 的 `quilt.update_screen` 必须传 `expectedRevisionId`，不一致 409；改组件用带 `jobId` 的 `quilt.update_component`，回刷到的屏记在该作业名下，v0.99），做完调 `quilt.finish_job { jobId, status, summary }` 收口 → `succeeded`（`output.screenIds` = 该作业名下修订所在屏）或 `failed errorClass=agent`；投递失败（会话已关、socket 拒绝）→ `failed errorClass=agent`；30 分钟没收口 → `failed errorClass=timeout`；取消作业 = 标 `cancelled`，之后该 jobId 的回写与收口都被拒（会话那边的活由用户自己叫停）；作业运行期间持屏锁（与云端作业同一条索引）；agent 通道固定 1 版。**会话列表**（`API-AGENT-010`）：读 Claude Code 登记处 `~/.claude/sessions/*.json`，只取 `kind=interactive`、`peerProtocol=1`、socket 250 ms 探活通过的，按最近活跃排序、列全机；有名字（`nameSource=user`）显示名字，派生名显示会话 UUID，另带目录名与 idle / busy。**选择跨会话记忆**，同通道选择一样不必每条重选；记住的会话已关闭时不自动换人，下拉回到「选择会话」、发送被挡并说明。agent 面板 = `runner=agent` 的作业列表（投递到谁、状态、收口摘要），靠**轮询** `API-CORE-029` 推进、不订阅作业事件流（各开一条会撞满浏览器同源 6 条的连接额度，见 §16 连接预算）。无头 `claude -p` / `codex exec` 拉起路径删除；派活队列、租约、长轮询领取仍不存在。**Codex（v0.68，`ADR-020`）**：通道「交给本机 Codex」（`input.runner = { kind:"agent", tool:"codex", sessionId: <线程 UUID> }`），会话下拉列 Codex 线程库 `$CODEX_HOME/state_5.sqlite`（只读）里用户自己开的线程（`thread_source=user`、来源为桌面版 / VS Code / 终端，排除无头 `exec`、子 agent 与审查线程，未归档，按最近活跃排序、取前 50），每项带标题、目录名、在哪个应用（桌面版 / VS Code / 终端）与「已打开 / 未打开」（`$CODEX_HOME/thread-writer-locks/<id>.lock` 此刻被某个进程占着即已打开，用 `lsof` 查；只看文件在不在会误判——Codex 进程被杀后锁文件会留下，实测）；投递 = 执行 `codex queue --thread <id> --message <提示词>`，线程在任何 Codex 窗口里打开着就由那个窗口取走执行（排在当前这一轮之后，不打断）；线程未打开时再执行 `open codex://threads/<id>` 让桌面版打开它（会把桌面版切到前台）、取走排队的消息；打开失败（只装了 CLI / VS Code 插件、没有桌面版）不算投递失败——消息已经在队列里，线程之后在哪个窗口打开就由哪个窗口执行：作业保持 `running`、照常 30 分钟计时，`delivery.opened=false` 并记 `openError`，助手消息与 agent 面板提示用户在 Codex 里打开这个线程（v0.79；此前标成「投递失败」，消息之后照样执行，回写与收口全被 `409 job-finished` 挡掉）；`output.delivery` 另记 `tool` 与 `opened`；收口、计时、屏锁、取消与 Claude Code 完全一致。只能投给已有线程：桌面版没有带提示词新开会话的入口。Codex 默认每次调 MCP 工具都要用户批准，要让投来的作业自己跑完，`[mcp_servers.quilt]` 须设 `default_tools_approval_mode = "approve"`（设置页与安装提示写明）；不设时由用户在 Codex 窗口里逐个批准 | 目标 ⑤ | P0 / M4 · M10 · v0.34 改写 · v0.87 补充 |
@@ -556,7 +560,7 @@ flowchart LR
 | --- | --- | --- |
 | `packages/core/src` | 三端共用的纯逻辑：schema、契约提示词、lint、注入、组件展开、大纲、token、导出、预览运行时、作业失败文案 | 不依赖 Node 或浏览器专有 API；纯函数由 `tests/unit/core` 直接覆盖。两个出口（v1.06）：`@quilt/core` 全部模块，服务端与 MCP 用；`@quilt/core/browser` 只含浏览器要用的（schema 与 DTO、token、字体、设备、消息协议、契约提示词与历史指令、补丁、组件的名字规则与占位写法、失败文案），前端只从它引——解析 HTML 的 linkedom 一系、预览运行时与 prelude 不进前端包，误引时类型检查报错，`tests/unit/api/bundle.test.ts` 守着 |
 | `apps/api/src` | `http/routes`（REST）、`mcp`（`ctx.ts` 共用件 + `tools/<域>.ts` + `resources.ts`）、`services`（REST 与 MCP 共用的服务层）、`worker`（作业管线、聊天、投递）、`db`、`lib` | MCP 工具只调 services；每个工具的说明、入参、处理各自成行，不写成一行 |
-| `apps/web/src` | `pages`（路由页）、`canvas`（画布视图、排列、位置、弹层、作业文案、找屏面板、小地图；v1.07 起画布视图 `CanvasView` 只做组合，镜头在 `useViewport`、聚焦屏的 iframe 在 `useFocusedFrame`、卡片在 `cards`（memo 化，拖一张卡只重渲染被拖的那几张）、镜头与框选的算式在 `geometry`、两类 iframe 的选中与按键在 `frameMessages`）、`composer`（输入框、作业 chip、通道 / 停靠与收起偏好）、`panels`（右侧面板与设计系统分区）、`project`（顶栏、切换器、新建）、`sketch`（草稿本页的看板、输入框、记录栏与「放进项目」弹层）、`settings`（设置、通道管理）、`ui`（无业务的基元：按钮、弹层基建、下拉、图标）、`lib`（API 客户端、toast、外观模式） | 跨目录一律 `@/` 绝对引用；`ui` 不 import 业务目录；一个文件超过约 600 行就按域再拆。hooks 的规则与依赖数组由 `pnpm --filter @quilt/web lint` 检查（v1.07，oxlint 只开 `rules-of-hooks` 与 `exhaustive-deps`：仓库用的 TypeScript 7 没有旧版编译器 API，typescript-eslint 的解析器跑不起来）；有意不列依赖的地方写 `eslint-disable` 并注明理由 |
+| `apps/web/src` | `pages`（路由页）、`canvas`（画布视图、排列、位置、弹层、作业文案、找屏面板、小地图；v1.07 起画布视图 `CanvasView` 只做组合，镜头在 `useViewport`、聚焦屏的 iframe 在 `useFocusedFrame`、卡片在 `cards`（memo 化，拖一张卡只重渲染被拖的那几张）、镜头与框选的算式在 `geometry`、两类 iframe 的选中与按键在 `frameMessages`）、`composer`（输入框、作业 chip、通道 / 停靠与收起偏好）、`panels`（右侧面板与设计系统分区）、`project`（顶栏、切换器、新建）、`sketch`（草稿本页的看板、输入框、记录栏与「放进项目」弹层）、`settings`（设置、通道管理）、`ui`（无业务的基元：按钮、弹层基建、下拉、图标）、`lib`（API 客户端、toast、外观模式）、`i18n`（v1.20 界面语言：初始化与切换、`locales/<命名空间>.ts` 每个文件一个命名空间，`ADR-034`） | 跨目录一律 `@/` 绝对引用；`ui` 不 import 业务目录；一个文件超过约 600 行就按域再拆。hooks 的规则与依赖数组由 `pnpm --filter @quilt/web lint` 检查（v1.07，oxlint 只开 `rules-of-hooks` 与 `exhaustive-deps`：仓库用的 TypeScript 7 没有旧版编译器 API，typescript-eslint 的解析器跑不起来）；有意不列依赖的地方写 `eslint-disable` 并注明理由 |
 | `apps/web/src/brand` | 界面视觉系统的运行文件副本（v1.09，§13.1）：`tokens.css`、`tokens.tailwind.css`、`state-layer.css`、`fonts/fonts.css` 与 Space Grotesk 字体，取自本机的 `brand/`（visual-system 开发交接：规范、`tokens.json` 与 `modes/`、生成文件、图标、样例页、检查脚本、品牌包，只在本机、不进仓库） | 不手改：改值改 `brand/tokens.json` / `modes/`，按 `brand/DESIGN.md` 重跑生成与检查后 `node scripts/sync-brand.mjs` 同步过来；`--check` 比对副本与 `brand/`（本机没有 `brand/` 时跳过），`tests/unit/web/brand` 会跑它；`apps/web` 只经 `styles.css` 的三条 `@import` 用它 |
 | `tests/unit` | `node:test` 单测，按来源分 `core` / `web`；`pnpm test` | 只测纯函数，不起库、不起浏览器；HTML 断言用 `lib.ts` 的 `norm` 抹平属性顺序 |
 | `tests/e2e` | Playwright / MCP 脚本，执行 `docs/TEST.md` 的用例 | 只对 `quilt_test` 跑（`assertTestApi`） |
@@ -756,6 +760,9 @@ HTML 与截图正文存对象存储，表内只存 key。**变体**（v0.62 `REQ
 SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
 统一错误信封见 §14。
 除注明外，写端点接受 `Idempotency-Key` 头，24 小时内同键同参返回首次结果。
+**界面语言（v1.20，`REQ-CORE-046`，`ADR-034`）**：网页端每个请求带 `X-Quilt-Locale: zh | en`（界面当前的语言；项目事件流 `API-CORE-030` 用 `EventSource`，带不了自定义头，它的事件里也没有服务端写给人看的文案）。服务端对每个请求（`/v1/*` 与 `/mcp`）定一个语言：`X-Quilt-Locale` 是 `zh` / `en` 就用它（不分大小写，别的值当没有这个头）；没有时看 `Accept-Language` 里优先级最高的一项，以 `zh` 开头为中文、其余英文，只有 `*`（Node 的 `fetch` 缺省就带它）视同没有；两者都没有时中文，现有调用方（MCP、脚本）拿到的文案不变。
+按这个语言给的是服务端写给人看的文字：problem 的 `title` 与 `errors[].message`、`detail`（§14），以及请求处理当中写下的提示（如作业取消时助手消息的「已取消」、投递到本机会话时的占位）；`type`、字段名、枚举值不随语言变。
+生成内容的语言见 `API-CORE-006`「界面语言」。
 
 ### CORE（M1）
 
@@ -789,6 +796,10 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
       `runner.kind=agent`（v0.99）时不调模型：投递到本机会话，由会话经 `quilt.update_component { jobId }` 写回，回刷同一条路，收口见 `REQ-AGENT-003`
   - 目标屏（v0.77）：`edit_screens.screenIds` 里有屏不属于本项目或已被删除 → `404 /errors/not-found`，不建作业（此前照建，worker 过滤掉找不到的屏后「成功」更新 0 屏，回执「已更新 0 屏：」）；建成之后、开跑之前目标屏全被删掉的，worker 判 `failed errorClass=validation`，不再报成功；原因按实际情况说（v0.82）：一屏都不在了是「目标屏都已被删除」，屏还在但还没有当前修订（它的造屏作业还没落第一版）是「目标屏还没有生成出内容」，两种都有是「目标屏有的已被删除，其余还没有生成出内容」
   - `regenerate_subtree.screenId` 不属于建作业的项目同样 `404 /errors/not-found`：草稿本里的「只改一块」靠这一条保证目标是草稿（`REQ-CORE-045`）
+  - 界面语言（v1.20 `REQ-CORE-046`）：带 `X-Quilt-Locale` 的请求建作业时，服务端把它记进 `input.locale`，每种作业都记，worker 写进助手消息的回执、进度与失败文案按它（发消息 `API-CORE-010`、重试 `API-CORE-034`、批注发送 `API-EDIT-003`、写回改写 `API-CORE-047` 都经同一处建作业）。
+    请求没带这个头时作业不记 `input.locale`：请求体里自带的 `locale` 不认，重试以重试请求的头为准，不沿用旧作业的值。
+    `generate` / `edit_screens` / `edit_component` / `regenerate_subtree` 这四种写屏上文字的作业还据此给提示词加语言要求，草稿本的新稿与改稿也是这几种：worker 给它们的每次模型调用在系统提示末尾加一句「请求里没有明确要求语言时，屏上所有可见文字用 English / Simplified Chinese」，并写明它优先于提示词里「跟着请求的语言写」的规则；投递到本机会话的指令末尾加同一句。
+    不带这个头建的作业（MCP、脚本）不加这一句，文案语言照旧跟着提示词。
   - 响应 `202 { job }`（状态 `queued`）；作业事件经 `API-CORE-008` 流式推送
   - 错误：`404 /errors/not-found`（目标屏，见上）、`409 /errors/screen-busy`、`409 /errors/revision-conflict`、`400 /errors/validation`、`422 /errors/validation`（`variantOf`）、`429 /errors/rate-limited`（每分钟 10 次）
   - 入口校验（v1.06）：本接口、`API-CORE-010` 发消息、`API-CORE-034` 重试与 MCP 的建作业工具共用同一份——输入按作业种类过 `jobInputSchemas`（重试拼回去的旧输入也过，不合格 `400 /errors/validation` 并点名字段）；`runner` 是账号自建通道时要属于本人（否则 `404 /errors/not-found`）；带参考图时通道要支持视觉（否则 `400`）。
@@ -816,7 +827,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
     没有 `targetScreenIds` = 新草稿（`generate`，屏数与版数固定 1，跳过规划器；可带 `refProjectId`，新草稿从第一版起就参照那个项目、草稿记下它；得是本人的普通项目，否则 `404 /errors/not-found`；普通项目的消息或改稿带它 `400 /errors/validation`，改稿的参照在草稿上设，见 `API-CORE-012`）；`targetScreenIds` 恰好一张草稿 = 改它（`edit_screens`，版数固定 1）。
     可带 `frame`（`auto` / `component` / `mobile` / `desktop`，缺省 `auto`），只对新草稿生效；非草稿本的项目带 `frame` 一律 `400 /errors/validation`。
     `mode="chat"`、`targetComponentIds`、`anchor`、`count` 或 `versions` 大于 1、`variantOf`、`route`、`preset`、`targetScreenIds` 多于 1 张，都是 `400 /errors/validation` 并点名字段；`API-CORE-006` 与 MCP 的建作业工具走同一份校验。
-    worker 换用草稿提示词：风格只听用户这句话，可写任意色值、`<style>` 与脚本，不带设计系统、屏注册表、参考屏与素材清单；界面文案用这句话的语言；链接一律 `href="#"`。
+    worker 换用草稿提示词：风格只听用户这句话，可写任意色值、`<style>` 与脚本，不带设计系统、屏注册表、参考屏与素材清单；界面文案用这句话的语言（作业带界面语言时，这句话没说语言就用界面语言，见 `API-CORE-006`）；链接一律 `href="#"`。
     新草稿的名字取这句话的第一行、前 20 个字，路由服务端取 `/draft-<n>`；草稿不做设计契约 lint（`lintReport` 记空），也不钉样板屏、不跑反向连线。
     `frame=auto` 时提示词要求模型在根元素上写 `data-frame="component|mobile|desktop"`，第一版落库时据此写 `screens.frame`，缺失或取值不认识按 `component`；用户选定了画框时提示词直接给定，`screens.frame` 建屏时就写好。
     截图按画框：`mobile` / `desktop` 用对应视口拍首屏，`component` 在 1280×800 视口里拍根元素的框（同样 DPR 2，缩略图照常生成）。
@@ -914,7 +925,8 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
 
 - **`API-CORE-046` getSketchbook** — 实现 `REQ-CORE-040`（Owner 2026-10-20 签字，`ADR-030`）
   - `GET /sketchbook`；响应 `200 { projectId }`；`no-store`
-  - 第一次调用时建出草稿本（项目行 + 设计系统行，`kind=sketchbook`，名字「草稿本」，设备形态 `mobile` 只为满足非空约束），之后返回同一个
+  - 第一次调用时建出草稿本（项目行 + 设计系统行，`kind=sketchbook`，名字按这次请求的界面语言取「草稿本」或「Sketchbook」（v1.20 `REQ-CORE-046`），设备形态 `mobile` 只为满足非空约束），之后返回同一个
+  - 名字跟着界面语言（v1.20）：存下的那个名字不读——接口与 MCP 返回草稿本（项目详情、`get_project`）时按这次请求的界面语言给「草稿本」或「Sketchbook」；草稿的 `previewUrl` 带上请求的界面语言（`lang=zh|en`），预览域下发草稿时把文档 `<title>` 重写成「<草稿本名> · <草稿名>」，没带 `lang` 时按 `Accept-Language`、再缺省中文；界面上写草稿本的地方照旧取语言资源
   - 两个请求同时第一次到达：后到的撞上部分唯一索引后按 `owner_id` 重查，两边返回同一个 `projectId`（`INV-CORE-001`）
   - 草稿本被删（`API-CORE-031` / `quilt.delete_project`）后，下次调用再建一个空的
   - 错误：`403 /errors/forbidden`（来源校验，同全部 `/v1/*`）
@@ -1141,6 +1153,7 @@ FE 请求超时：普通 15 s，通道验证（`API-CORE-022`）100 s（v0.69：
 | 最近探测 | `lastProbeAt` / `lastError` | `last_probe_at` / `last_error` | timestamptz / text | 否 | 探测结果；`lastError` 截断 200 字符、不含请求体 | — | 否 |
 | 作业类型 | `kind` | `kind` | enum | 是 | `generate`（v0.31 三合一：整组 / 单屏 / 懒生成）/ `edit_screens` / `regenerate_subtree` / `apply_design_system` / `propose_design_system` / `export_prototype` / `ingest_screen` / `chat`（v0.45）/ `edit_component`（v0.46）/ `capture_specimen`（v0.85 登记，P3：样例页按节截图，`API-CORE-045`，不调模型）；历史行里的 `generate_screens` / `generate_screen` / `generate_missing_screen` 只读保留 | — | 否 |
 | 批注原话 | `input.annotations` | `input->'annotations'` | jsonb | 否 | 只在批注发出的 `edit_screens` 作业里有（v0.87）：`[{anchorText, note}]`，取发送那一刻的批注行（锚点 ≤ 200、说明 ≤ 2000 字符），≤ 50 条；只供历史指令用（`ADR-012` v0.87 修订），批注之后被改或删不影响它 | — | 否 |
+| 界面语言 | `input.locale` | `input->>'locale'` | enum | 否 | `zh` / `en`（v1.20 `REQ-CORE-046`）：只在带 `X-Quilt-Locale` 的请求建的作业里有（每种作业都记），取自那个请求头，不看请求体；服务端写进助手消息的回执、进度与失败文案按它，没有时中文；`generate` / `edit_screens` / `edit_component` / `regenerate_subtree` 还据此给提示词加语言要求（`API-CORE-006`） | — | 否 |
 | 作业执行者 | `runner` | `runner` | enum | 是 | `model`（worker 跑云端 / 自建通道）/ `agent`（投递到本机 Claude Code 会话，不入队列） | `model` | 否 |
 | 作业状态 | `status` | `status` | enum | 是 | `queued` / `running` / `succeeded` / `failed` / `cancelled`（状态机见 §11） | — | 否 |
 | 作业失败类别 | `output.errorClass` | `output->>'errorClass'` | enum | 失败时 | `provider` / `lint` / `timeout` / `validation` / `system` / `agent`（本机 agent 进程非 0 退出） | — | 否 |
@@ -1607,11 +1620,14 @@ v0.32 本地版没有登录页与授权同意页（`PAGE-LOGIN`、`PAGE-AGENT-CO
 导航（v0.28，标识 v0.30，v0.32 收窄，v0.40 补重命名）：顶栏左上第一个元素就是**项目名 ▾**（画布顶栏不挂品牌标识，见 §13.1），它即**项目切换器**——点开为按更新时间倒序的列表（当前项打勾，每项带设备形态药丸），选一项即切到 `/p/:id`；列表底部固定一条「新建项目…」打开新建弹窗，创建成功跳新项目。
 每行 hover / 键盘高亮时露出垃圾桶（键盘等价物：高亮行按 `Delete`）→ 先关下拉再弹确认（写明项目名、级联范围、不可恢复）→ `API-CORE-031` 删除；删的是当前项目就回 `/`（落到最近更新的其它项目，一个不剩就是 `PAGE-FIRST`）；有进行中作业的项目拒删并说明（v0.34）。
 浏览器标签页标题 = 「<项目名> · Quilt」，多个项目开在不同标签页时靠它分辨，离开画布复位为「Quilt」。
-工具栏最下方的「设置」（齿轮，v0.97 前在顶栏右侧）打开**设置弹层**，关闭后焦点回到这个按钮（经 `?settings=` 直接打开的也一样）：分栏布局——左栏是**三节**导航（本月用量 / 生成通道 / 外观（v1.08）；Radix Tabs 垂直方向，整组在 Tab 序里只占一个停靠点，上下方向键换节并立即切换），右栏只显示当前节（自身滚动）。
-当前节即视图标识，进 URL `?settings=usage|runners|appearance`（刷新保持；不认识的值回 `usage`），`Esc` / 右上「关闭」关闭并去掉参数。
+工具栏最下方的「设置」（齿轮，v0.97 前在顶栏右侧）打开**设置弹层**，关闭后焦点回到这个按钮（经 `?settings=` 直接打开的也一样）：分栏布局——左栏是**四节**导航（本月用量 / 生成通道 / 外观（v1.08）/ 语言（v1.20）；Radix Tabs 垂直方向，整组在 Tab 序里只占一个停靠点，上下方向键换节并立即切换），右栏只显示当前节（自身滚动）。
+当前节即视图标识，进 URL `?settings=usage|runners|appearance|language`（刷新保持；不认识的值回 `usage`），`Esc` / 右上「关闭」关闭并去掉参数。
 通道下拉里的「管理通道…」打开 `runners` 节。
 「本月用量」只展示台账（屏数、token 进出、按驱动 / 模型分列）与「本地版不设上限」的说明；「生成通道」一节顶部给出 MCP 接入命令（`claude mcp add --transport http quilt http://127.0.0.1:3100/mcp`，可复制）。
 「外观」一节（`REQ-CORE-039`）是一组单选：跟随系统（缺省）/ 浅色 / 深色，选中即生效、不用保存；选择记在本机 `localStorage` 的 `quilt:theme`（`light` / `dark`，跟随系统时删掉这一键），对所有项目与 `PAGE-FIRST` 生效。
+「语言」一节（`REQ-CORE-046`）是同样的单选列表：中文 / English（语言名各用自己的文字写、标上 `lang`），选中即生效、不刷新页面；选择记在本机 `localStorage` 的 `quilt:locale`（`zh` / `en`），对所有页面生效，说明写明之后生成的屏也用这种语言、除非要求里另说。
+没选过时按浏览器：`navigator.languages` 的第一项（没有时 `navigator.language`）以 `zh` 开头为中文，否则英文。
+切换后 `<html lang>` 跟着变（`zh-CN` / `en`），之后的每个请求带新的 `X-Quilt-Locale`（§8 开头）；界面文字当场换成新语言（屏内修改标记的字见 §13.1「画布标记」）；用户生成的内容不重译，存量屏与已有草稿保持原样。
 设置弹层里可再打开「添加通道」弹层，因此弹层基建的 `inert` 按层栈计数：开一层隔离其下所有层，关一层只放开新的最上层，栈空才解除背景隔离；弹层内的按键不冒泡给画布快捷键。
 画布页进入调 `API-CORE-004`，对话面板调 `API-CORE-010/011` 并订阅 `API-CORE-008`。
 
@@ -1894,6 +1910,7 @@ canvas 不进无障碍树，供测试与排查读的数在它的属性上：`dat
 压在用户设计稿上的标记外面套一圈 halo（`mark.halo`：浅色白、深色纯黑）；用户设计稿大量用蓝时选中框会弱一些，halo 保证它仍看得见。
 卡片上的状态角标（交互中、候选 n、局部修改中）用反色标签；截图失败、加载失败、批注发送中这类要用户留意的角标用抬起面底 + 警告色字，不靠颜色单独表意。
 屏内的标记由预览运行时画，运行时不写颜色：父页在 `quilt:mode` 里带上当前模式的标记色与成功色，切换模式时重发一次。
+修改标记角标上的字（「修改中…」「已更新」）同样由父页在 `quilt:mode` 的 `marks.labels`（`{ working, done }`，v1.20 `REQ-CORE-046`）里按界面语言给，换界面语言时同样重发；没给时运行时用中文。
 画在 `<canvas>` 上的颜色（页面地图连线、小地图）在模式切换时重读 CSS 变量、重画一次。
 
 **标识**：品牌规定完整符号从 64 CSS px 起用、横向组合显示宽度至少 240 px。
@@ -1901,7 +1918,7 @@ canvas 不进无障碍树，供测试与排查读的数在它的属性上：`dat
 组件层对尺寸下限做硬校验，低于 64 px 直接抛错而不是偷偷缩。
 
 **字体与字阶**：界面字体是系统字体：西文 `-apple-system / SF Pro`，中文 `PingFang SC`，其他平台按列表回落（Helvetica Neue、Hiragino Sans GB、Noto Sans SC、Microsoft YaHei）；代码、ID、路由用 SF Mono（拿不到时回落 Menlo）。
-界面是中文（`<html lang="zh-CN">`），字阶走中文覆盖：PingFang SC 在前，中文标点按中文字宽排，正文行高 1.6。Space Grotesk 只给字标与宣传物料，`brand/fonts/fonts.css` 只声明这一个 face，浏览器用到时才下载。
+界面有中文与英文（v1.20 `REQ-CORE-046`），`<html lang>` 跟着界面语言取 `zh-CN` / `en`：中文时字阶走中文覆盖，PingFang SC 在前，中文标点按中文字宽排，正文行高 1.6；英文时由 `tokens.css` 的 `[lang]:not(:lang(zh))` 层换回西文字体在前、正文行高 1.5。Space Grotesk 只给字标与宣传物料，`brand/fonts/fonts.css` 只声明这一个 face，浏览器用到时才下载。
 字阶：说明 11 / 标签 12 / 正文 13 / 小标题 15 / 面板标题 17 / 大标题 24 px，代码 12 px 等宽；标题 600、字距收紧；字号用 rem，跟随浏览器字号设置；字重只有 400 / 500 / 600。
 
 **接线**（ui-constraints `THEME-006`）：`apps/web/src/styles.css` 只引 `tokens.tailwind.css`（它带入 `tokens.css`）、`state-layer.css` 与 `fonts/fonts.css` 三个文件，没有自写的 token 映射；三个文件读的是 `apps/web/src/brand/` 里的副本：`brand/` 只在本机，仓库只带这 5 个文件，由 `scripts/sync-brand.mjs` 从 `brand/` 原样复制、`--check` 比对；组件用适配文件生成的工具类（`bg-surface-bg`、`text-text-secondary`、`border-border-subtle`、`bg-primary`…），适配文件没映射的角色直接引变量（`text-(--semantic-color-action-link)`、毛玻璃的 `--semantic-material-chrome-*`），不写 hex。毛玻璃、填充底、分段控件、弹层与遮罩各有一个共用类（`styles.css` 的 `.chrome` / `.composer`、`.fill`、`.seg`、`.sheet` / `.menu`、`.scrim`、`.tint-*`），组件挂类，不各写一份。
@@ -1913,6 +1930,7 @@ canvas 不进无障碍树，供测试与排查读的数在它的属性上：`dat
 ## 14. 错误处理与错误码
 
 统一信封 RFC 9457 `application/problem+json`，`type` 为本产品稳定 URI（相对 `https://quilt.example/errors/`），扩展字段 `requestId`。
+文案按请求的界面语言给（v1.20 `REQ-CORE-046`，判定见 §8 开头）：`title`、`errors[].message`、`detail` 是中文或英文，`type`、`status`、`errors[].path` 与其余字段不变；没有语言头的请求照旧是中文。前端只认 `type`，换语言不影响任何分支。
 
 | 错误码(type) | HTTP | 语义 | FE 处理 |
 | --- | --- | --- | --- |
@@ -1934,6 +1952,7 @@ canvas 不进无障碍树，供测试与排查读的数在它的属性上：`dat
 | `/errors/provider-unavailable` | 503 | LLM 供应商不可用（作业级以 `failed errorClass=provider` 呈现） | 助手消息提示稍后重试 |
 
 **作业失败文案**（v0.74）：出自 `@quilt/core` 的 `failureText`，写在失败的作业 chip 上（v1.17 起作业失败不再弹提示条：chip 留到用户关掉，再弹一条是同一件事说两遍）。
+它有中文与英文两版（v1.20 `REQ-CORE-046`，末位参数 `locale`，缺省中文）：画布与草稿本按当前界面语言算；服务端写进助手消息的那份按作业的 `input.locale`，没有时中文。下面的说法以中文为准，英文逐条对应。
 开头按作业种类写「造屏失败 / 改屏失败 / 改组件失败 / 重做这一块失败 / 回刷失败 / 提炼约定失败 / 导出失败 / 写入失败 / 回答失败」；原因按 `errorClass`——`provider` 从报文里取 HTTP 状态码说「通道的 Key 被拒绝（HTTP 401）」「通道限流（HTTP 429）」「模型服务暂时不可用（HTTP 503）」「通道拒绝了这次请求（HTTP 400）」，取不到状态码说「连不上模型通道或它没有回应」，输出到上限被截断说「模型这次要写的内容超过了单次输出上限，结果不完整，没有保存」、下一步「把这次的要求拆成几次发」（v0.90，先于状态码判断：报文里的上限数字可能恰好是三位数）；`timeout` 说「超过时限没做完」；`validation` / `lint` / `system` / `agent` 用中文原因，流水线里的英文内部原因先译成中文（`revision conflict` →「这一屏在作业跑的时候被改过」、`route already exists` →「这个路由已经有屏了」…），译不了的不外露；有已落地的屏时补「已保留 N 屏」。
 最后给下一步：稍后点「重试」、换一个通道、到「设置 → 生成通道」检查 Key 或重新验证、减少屏数版数、换个说法；「重试」只给能原样重试的四类（造屏、改屏、改组件、聊天，`API-CORE-034`），其余几类写各自再发一次的入口（「在检查器里再点一次「重生成这块」」「到设计系统面板再回刷一次」「到设计系统面板再发一次」「再点一次工具栏的「导出原型」」「让本机会话再写一次」），chip 上也只有 ×（v1.17）。
 供应商原始报文与英文内部原因不进文案，留在作业 `output.message`（`API-CORE-007` / `quilt.get_job` 可查；通道本身的错误在设置页重新验证时也会显示）。
@@ -2465,6 +2484,14 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
   - Alternatives：每轮在输入框里临时选参照（被否：一轮参照一轮不参照，风格来回漂）；草稿本整体挂一个设计系统（被否：用户同时给几个项目做草稿）。
   - Consequences：参照项目之后改了设计系统，草稿的旧版本仍是旧样子，下一轮改稿才跟上；参照项目被删时置空，草稿退回自由风格。
     草稿本不提供零 token 直改（`API-EDIT-001` 落修订时用的是草稿本自己的 prelude，会把有参照的草稿换回草稿本的样式）。
+- **`ADR-034` 界面语言：浏览器端 i18next 按命名空间文件出文案，请求头带语言，服务端在出口选文案** — Status: Accepted（用户 2026-10-20 定：中英双语、缺省跟浏览器、设置里切并记在本机、用 i18next + react-i18next、生成内容跟界面语言）
+  - Context：界面、服务端提示、预览运行时的标记全是写死的中文；要加英文，又不能动现有调用方——e2e 套件逐字断言这些中文，MCP 与脚本也读这些提示。
+  - Decision：前端用 i18next + react-i18next，同步初始化、资源随包；文案按命名空间放在 `apps/web/src/i18n/locales/<命名空间>.ts`，每个文件用 `defineMessages(命名空间, 中文, 英文)` 定义，英文的键在编译期与中文对齐，导入即注册；`main.tsx` 最先导入的 `i18n/load.ts` 用 `import.meta.glob` 在首帧前把它们全部导入。
+    网页端每个请求带 `X-Quilt-Locale`；服务端中间件按它（其次 `Accept-Language`）定语言，路由读 `c.get('locale')`、服务层读请求上下文，problem 的文案写成中英一对、在出口取一边。
+    带这个头建的作业都把语言记在作业输入里，回执与失败文案按它写；生成内容只对其中写屏的作业加语言要求，worker 与本机会话的指令都据此补一句。预览运行时的标记文字由父页随 `quilt:mode` 下发。
+  - Alternatives：全部文案按中文原文查英文词典（被否：带插值的句子与同字不同义的词对不上；只有 schema 里 zod 的自定义 message 必须是字符串，它们的英文按原文登记在 API 的 `ISSUE_EN` 表里）；语言放 cookie（被否：MCP 与脚本没有 cookie，还得区分谁是浏览器）；所有请求都按 `Accept-Language` 判（被否：界面里选了中文的人，浏览器头可能是英文，选择会失效）；生成内容总跟界面语言（被否：MCP 与脚本没有界面语言，它们的屏一直跟着提示词的语言走）。
+  - Consequences：同一个概念在两种语言里各只有一个说法，英文按术语表定（造 → Generate、屏 → screen、草稿本 → Sketchbook…）；新增界面文字要同时写中英两边，缺一边编译不过。
+    英文界面下生成的屏缺省是英文，用户写中文要求也一样，除非要求里点名语言；已有的屏与草稿不重译。
 ## 19. 验收 / 测试
 
 人工评审门（M1 出口）：同一 5 个需求在 Stitch 与 Quilt 各生成一次，Owner 盲评一致性、完成度、画布手感，Quilt ≥ 3/5 不输 Stitch 方可进入 M2。以下为 AI 与人工共用的可执行口径。
@@ -2948,6 +2975,23 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
   Then data-theme 被移除，外壳跟着系统变深；卡片白底与叠层屏遮罩在三种外观下都不变
   And 构建出的样式表里没有渐变、文字阴影与背景模糊（check-tokens --lint 0 命中），组件代码里没有 hex 字面量与 hover 色 / ring 焦点环 / disabled 透明度类
 
+场景: 界面语言缺省跟浏览器、设置里切换即时生效 (REQ-CORE-046，v1.20)
+  Given 浏览器语言为 en-US，本机没有选过语言
+  When 打开画布
+  Then 界面是英文，<html lang="en">，API 请求都带 X-Quilt-Locale: en
+  When 设置弹层「Language」选「中文」
+  Then 不刷新页面，界面当场换成中文，<html lang="zh-CN">，localStorage 的 quilt:locale 为 zh，之后的请求带 X-Quilt-Locale: zh
+  And 刷新后仍是中文；浏览器语言为 zh-CN 且没有选过时缺省就是中文
+
+场景: 服务端提示与生成内容跟着界面语言 (REQ-CORE-046，v1.20)
+  Given 界面语言为英文
+  When 请求一个不存在的项目
+  Then 返回 404，type 为 /errors/not-found，title 是英文；同一请求不带任何语言头时 title 是「资源不存在」
+  When 用中文写「做一个登录页」发出造屏
+  Then 作业 input.locale 为 en，模型收到的系统提示末尾要求屏上可见文字用英文，除非请求里点名语言
+  When 经 MCP 的 quilt.generate_screens 发同一句
+  Then 作业 input 没有 locale，系统提示不带这一句
+
 场景: 屏内链接跳转保持状态 (REQ-PROTO-001)
   Given 聚焦「填写地址」屏并在输入框填入文字
   When 点击 href=/confirm 的按钮
@@ -3326,6 +3370,7 @@ M1 beta 4 周后对照 §3 指标复盘（生成成功率、首批屏时间、�
 | 类型 | 描述 | 负责人 | 何时需拍板 |
 | --- | --- | --- | --- |
 | 风险 | 单屏上限 256 KB：带交互脚本的面板整页覆盖回去很容易贴着上限（2026-10-20 在预览项目里做的上游账号池页写回后 254 KB），写回会被拒；要么写回时提示拆分，要么放宽上限 | @bug | 第一次因超限写回失败时 |
+| Open Question（v1.20） | 项目语言（`REQ-CORE-037`、`ADR-026`，还没落地）与界面语言（`REQ-CORE-046`）都想决定生成内容的语言：落地项目语言时定谁优先。倾向项目语言优先——屏属于用户的产品，不随看画布的人换语言；界面语言只在项目没设语言时作缺省 | @bug | 做项目语言时 |
 | Open Question | 草稿本一次只能生成一张新草稿（占着项目级的造屏名额，`ADR-030`）；实测用户常想并排试几张时，再考虑给草稿本放开这把锁 | @bug | 草稿本上线 4 周后 |
 | 已拍板（v0.85） | SPEC 落位：迁入 brand-design 仓并公开（用户 2026-10-01 确认），v1.2 在 `references/specimen-spec.md`（提交 4e7293e，已推送）；`~/Documents/Projects/Temp/specimen-standard/SPEC.md` 改为指向新路径的说明，v1.1 原文另存为同目录 `SPEC-v1.1.md`。v1.2 相对 v1.1：§2 改用 profile-2 的 14 个类别键、新增 typographyDisplay；§4.15 取自 `meta.notUsed`；§6 补「强调上的文字 → onPrimary」；§7 的语言设置改为已决说明；新增附录 A（状态层与焦点环，规范性）。四组 token 样件归 Quilt 自己的测试夹具。P0 四项默认（用户 2026-10-01 签字）：新项目语言缺省 `en`；画布样例卡只放概览，完整页另开标签页；双击样例卡进交互；z-index 与断点不进 token，样例页标「不适用」 | Quilt 在 `tests/fixtures/specimen/` 建四组样件并复制 Portsmith 满深度 tokens（记来源 SHA） | P2 开工前 |
 | Open Question（v0.85） | 导入品牌设计系统时 `brand/fonts/` 的字体文件怎么托管：现有字体来源 `google` / `system` / `url` 都不接本地文件。候选：作为项目素材上传、由预览域 `/a/` 下发并生成 `@font-face`（新增字体来源 `asset`） | 做 P5 时定 | P5 开工前 |
