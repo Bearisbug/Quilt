@@ -82,7 +82,7 @@ export function useModal<T extends HTMLElement>(
 // 遮罩只用半透明墨色、不加背景模糊：brand/ 的 meta.notUsed 不用模糊（ui-constraints MOTION-003 的例外条款）
 export function Overlay({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   return createPortal(
-    <div data-modal-layer className="fixed inset-0 z-40 flex items-center justify-center bg-(--semantic-color-scrim) p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div data-modal-layer className="scrim fixed inset-0 z-40 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       {children}
     </div>,
     document.body,
@@ -94,8 +94,8 @@ export function ConfirmDialog(p: { title: string; body: string; confirmLabel: st
   const [busy, setBusy] = useState(false);
   return (
     <Overlay onClose={p.onCancel}>
-      <div ref={ref} role="alertdialog" aria-modal="true" aria-labelledby="ch-del-title" tabIndex={-1} className="w-full max-w-xs rounded-lg border border-border-subtle bg-surface-overlay p-5 shadow-(--semantic-elevation-overlay) fade-up outline-none">
-        <h2 id="ch-del-title" className="type-heading3 font-medium">{p.title}</h2>
+      <div ref={ref} role="alertdialog" aria-modal="true" aria-labelledby="ch-del-title" tabIndex={-1} className="sheet w-full max-w-xs p-5 fade-up outline-none">
+        <h2 id="ch-del-title" className="type-heading3 font-semibold">{p.title}</h2>
         <p className="mt-1 type-label text-text-secondary">{p.body}</p>
         <div className="mt-4 flex justify-end gap-2">
           <Button onClick={p.onCancel}>取消</Button>

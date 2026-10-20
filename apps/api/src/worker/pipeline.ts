@@ -18,13 +18,15 @@ import { timeoutFor, modelAborts, enqueueScreenshot } from '../services/jobs.ts'
 import { runChatTurn, ChatFailure } from './chat.ts';
 import { failJob } from './failJob.ts';
 import { sharedComponentsOf, componentCards, reflowComponent, componentInstructions } from '../services/components.ts';
+import { nextDraftRoute, draftReference, DRAFT_LINT_REPORT } from '../services/sketchbook.ts';
 import {
   buildPrelude, lintScreenBody, injectQids, reconcileQids, applyEdits, parseEditBlocks, assembleDocument, extractBody, stripFences, buildPrototypeDocument, replaceSubtree, extractLinks,
   expandComponents, validateComponentHtml, classifyComponentHtml, componentSummary, componentSystemPrompt, componentUserPrompt,
-  type ProjectAsset,
+  type ProjectAsset, type SketchReference,
   OVERLAY_SCREEN_NOTE, screenSystemPrompt, planSystemPrompt, planUserPrompt, planOneScreenSystemPrompt, planOneScreenUserPrompt, screenUserPrompt, editUserPrompt, editPatchUserPrompt, subtreeUserPrompt, linkRepairPrompt,
   proposeDesignSystemSystemPrompt, proposeDesignSystemUserPrompt, parseConventions, REFERENCE_IMAGE_NOTE, FONT_FAMILIES, RADIUS_SCALES, MAX_CONVENTIONS,
-  VENDOR, inputOf, jobInputSchemas, DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput, type JobKind, type Presentation, failureText,
+  sketchSystemPrompt, SKETCH_REFERENCE_IMAGE_NOTE, draftNameFromPrompt, frameFromBody, shotSpecFor,
+  VENDOR, inputOf, jobInputSchemas, DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput, type JobKind, type JobInputOf, type Presentation, type DraftFrame, failureText,
 } from '@quilt/core';
 
 // 导出件内联的 lucide 取仓库里与屏同版本的副本（§17 v1.06），不走外网
@@ -70,6 +72,8 @@ type Ctx = {
   planned?: number;
   // 反向连线（REQ-CORE-014）：造一组屏后对入口屏跑了一次补链，回执里点名
   entryRepair: { name: string; added: string[] } | null;
+  // 草稿这一轮按参照项目写（REQ-CORE-042 / ADR-033）：参考图说明换回守设计系统的那一句
+  draftReferenced?: boolean;
 };
 
 class JobFailure extends Error { constructor(public errorClass: ErrorClass, msg: string) { super(msg); } }
@@ -89,10 +93,12 @@ async function expandLatest(ctx: Ctx, body: string, route: string): Promise<stri
 // 参考图只跟第一次出屏 / 改屏的调用走；修复轮是「按 lint 违规改你上一版 HTML」，
 // 再把图塞一遍既多花 token 又会把模型往复刻方向带（REQ-CORE-012）
 // effort：按调用类型定思考深度（ADR-012 v1.05）——规划与提炼 low、改屏补丁 medium，其余不传（驱动缺省）
+// 草稿本（REQ-CORE-040）换一句参考图说明：没有设计系统要守，参考图可以照着取色；草稿按参照项目写时仍守它的设计系统
 async function llmCall(ctx: Ctx, system: string, prompt: string, model?: string, withImages = false, opts: { effort?: LlmEffort; maxTokens?: number } = {}) {
   const images = withImages ? ctx.images : undefined;
   const spec = ctx.runner.driver ? { driver: ctx.runner.driver, apiKey: ctx.runner.apiKey, baseUrl: ctx.runner.baseUrl } : undefined;
-  const r = await completeWithRetry({ system, prompt: withImages && images?.length ? `${REFERENCE_IMAGE_NOTE}\n\n${prompt}` : prompt, images, model: ctx.runner.model ?? model, spec, signal: ctx.signal, ...opts }, (n, err) => { void emitJobEvent(ctx.job.id, 'progress', { stage: 'retry', attempt: n, error: err.message }).catch(() => {}); });
+  const imageNote = ctx.project.kind === 'sketchbook' && !ctx.draftReferenced ? SKETCH_REFERENCE_IMAGE_NOTE : REFERENCE_IMAGE_NOTE;
+  const r = await completeWithRetry({ system, prompt: withImages && images?.length ? `${imageNote}\n\n${prompt}` : prompt, images, model: ctx.runner.model ?? model, spec, signal: ctx.signal, ...opts }, (n, err) => { void emitJobEvent(ctx.job.id, 'progress', { stage: 'retry', attempt: n, error: err.message }).catch(() => {}); });
   ctx.usage.tokensIn += r.tokensIn; ctx.usage.tokensOut += r.tokensOut;
   ctx.usage.cacheRead += r.cacheRead ?? 0; ctx.usage.cacheWrite += r.cacheWrite ?? 0;
   return r.text;
@@ -137,9 +143,10 @@ function parseOne(text: string): PlannedScreen & { entryFrom?: string | null } {
 }
 
 // ---- 上下文（ADR-012 v0.31）：稳定前缀里的屏注册表 + 情境层的参考屏 ----
-async function registry(ctx: Ctx): Promise<RegistryEntry[]> {
+// projectId 缺省是本作业的项目；草稿取的是参照项目的（REQ-CORE-042）
+async function registry(ctx: Ctx, projectId = ctx.project.id): Promise<RegistryEntry[]> {
   // 变体不进注册表（v0.62）：路由已由默认屏占着，列两份只会让规划器与 ALLOWED ROUTES 重复
-  const rows = await db.select({ route: schema.screens.route, name: schema.screens.name, purpose: schema.screens.purpose }).from(schema.screens).where(and(eq(schema.screens.projectId, ctx.project.id), isNull(schema.screens.variantOf))).orderBy(schema.screens.createdAt);
+  const rows = await db.select({ route: schema.screens.route, name: schema.screens.name, purpose: schema.screens.purpose }).from(schema.screens).where(and(eq(schema.screens.projectId, projectId), isNull(schema.screens.variantOf))).orderBy(schema.screens.createdAt);
   return rows.map((r) => ({ route: r.route, name: r.name, purpose: r.purpose || undefined }));
 }
 // 参考屏合计 ≤ 40 KB（≈ 10K token 预算里给参考屏的份额），超了先丢排在后面的：一般是来源屏；
@@ -160,6 +167,19 @@ async function references(ctx: Ctx, opts: { sourceScreenId?: string | null; vari
 }
 const app = (ctx: Ctx, description: string) => ({ name: ctx.project.name, description, brief: ctx.project.brief });
 
+// 改草稿与只改一块的系统提示词（REQ-CORE-040 / REQ-CORE-045）：草稿规则 + 这张草稿的画框；有参照项目时（REQ-CORE-042 / ADR-033）
+// 再带它的 DESIGN.md、token 类、组件配方与路由表，这一轮落库也换成它的 prelude。参照项目已被删就按自由风格
+async function draftSystem(ctx: Ctx, draft: { frame: string | null; refProjectId: string | null }): Promise<string> {
+  const found = await draftReference(draft.refProjectId);
+  let ref: SketchReference | undefined;
+  if (found) {
+    ctx.prelude = found.prelude;
+    ctx.draftReferenced = true;
+    ref = { app: { name: found.project.name, description: 'existing app', brief: found.project.brief }, tokens: found.ds.tokens as Tokens, designMd: found.ds.designMd, components: found.ds.components as ComponentRecipe[], registry: await registry(ctx, found.project.id) };
+  }
+  return sketchSystemPrompt((draft.frame as DraftFrame | null) ?? 'auto', ref);
+}
+
 // 单屏单版：生成/编辑 → 展开共享组件 → lint（只报告）→ 注入 qid → 落修订 → 截图
 // 出屏给 prompt（调一次模型）；改屏给已经套好补丁的 body（editBody），qid 用 reconcileQids 对齐——没改的元素保住原来的 qid（ADR-007 v1.05）
 async function produceScreen(ctx: Ctx, args: { screenId: string; system: string; prompt?: string; body?: string; sourceKind: 'generate' | 'edit'; expectedRevisionId?: string | null; parentRevisionId?: string | null; candidateIndex?: number | null; advanceCurrent?: boolean; model?: string }) {
@@ -167,16 +187,29 @@ async function produceScreen(ctx: Ctx, args: { screenId: string; system: string;
   const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, args.screenId));
   // 共享组件占位在这里展开成正式 HTML，再 lint、再打 qid——模型手写的副本也会被盖成正式版
   const body = await expandLatest(ctx, stripFences(raw), screen.route);
-  const routes = (await db.select({ route: schema.screens.route }).from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id))).map((r) => r.route);
-  // v0.43：偏离设计契约不再触发修复回合，也不再让作业失败——token 是共享词汇表，不是判分标准。
-  // 报告照算，进 lintReport 与 screen_html_ready 事件，画布逐屏显示偏离了什么
-  let report: LintReport = lintScreenBody(body, routes, true);
+  const sketch = ctx.project.kind === 'sketchbook';
   const withQids = args.sourceKind === 'edit' ? reconcileQids(body) : injectQids(body);
-  report = lintScreenBody(withQids, routes, report.firstTry); // 违规带上 qid
+  // v0.43：偏离设计契约不再触发修复回合，也不再让作业失败——token 是共享词汇表，不是判分标准。
+  // 报告照算，进 lintReport 与 screen_html_ready 事件，画布逐屏显示偏离了什么。
+  // 草稿（REQ-CORE-040）没有设计契约可偏离，记空报告
+  let report: LintReport = DRAFT_LINT_REPORT;
+  if (!sketch) {
+    const routes = (await db.select({ route: schema.screens.route }).from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id))).map((r) => r.route);
+    report = lintScreenBody(body, routes, true);
+    report = lintScreenBody(withQids, routes, report.firstTry); // 违规带上 qid
+  }
   const html = assembleDocument(withQids, ctx.prelude, `${ctx.project.name} · ${screen.name}`);
   if (Buffer.byteLength(html) > config.maxScreenHtmlBytes) throw new JobFailure('validation', `screen html too large (${Buffer.byteLength(html)} bytes)`);
   assertNotAborted(ctx);
-  const rev = await db.transaction((tx) => createRevision(tx, { projectId: ctx.project.id, screenId: args.screenId, html, sourceKind: args.sourceKind, jobId: ctx.job.id, lintReport: report, expectedRevisionId: args.expectedRevisionId, parentRevisionId: args.parentRevisionId, candidateIndex: args.candidateIndex, advanceCurrent: args.advanceCurrent }));
+  const rev = await db.transaction(async (tx) => {
+    const created = await createRevision(tx, { projectId: ctx.project.id, screenId: args.screenId, html, sourceKind: args.sourceKind, jobId: ctx.job.id, lintReport: report, expectedRevisionId: args.expectedRevisionId, parentRevisionId: args.parentRevisionId, candidateIndex: args.candidateIndex, advanceCurrent: args.advanceCurrent });
+    // 画框选「自动」的新草稿：与第一版同一事务按根元素的 data-frame 定下 screens.frame（缺失或不认识按 component），
+    // 草稿本页收到 screen_html_ready 重取时画框已在
+    if (created && sketch && !screen.frame) {
+      await tx.update(schema.screens).set({ frame: frameFromBody(withQids) ?? 'component' }).where(and(eq(schema.screens.id, args.screenId), isNull(schema.screens.frame)));
+    }
+    return created;
+  });
   if (!rev) throw new JobFailure('validation', 'revision conflict');
   ctx.usage.screens += 1;
   ctx.produced.push({ screenId: args.screenId, revisionId: rev.id, lintPassed: report.passed });
@@ -187,10 +220,12 @@ async function produceScreen(ctx: Ctx, args: { screenId: string; system: string;
 
 async function screenshotRevision(ctx: Ctx, screenId: string, revisionId: string, html: string) {
   try {
-    const [row] = await db.select({ presentation: schema.screens.presentation }).from(schema.screens).where(eq(schema.screens.id, screenId));
+    const [row] = await db.select({ presentation: schema.screens.presentation, frame: schema.screens.frame }).from(schema.screens).where(eq(schema.screens.id, screenId));
     const presentation = (row?.presentation ?? 'push') as Presentation;
-    const png = await screenshotHtml(html, DEVICE_SIZE[ctx.device], { overlay: presentation === 'overlay' });
-    const key = await storeRevisionShot(ctx.project.id, screenId, revisionId, png, presentation);
+    // 尺寸按项目类型与画框（REQ-CORE-040）：草稿按画框拍，组件画框只拍根元素的框；普通屏照旧按设备形态
+    const shot = shotSpecFor(ctx.project, { frame: row?.frame ?? null });
+    const png = await screenshotHtml(html, shot.size, { overlay: presentation === 'overlay', rootOnly: shot.rootOnly });
+    const key = await storeRevisionShot(ctx.project.id, screenId, revisionId, png, presentation, row?.frame ?? null);
     if (!key) return;
     await emitJobEvent(ctx.job.id, 'screen_screenshot_ready', { screenId, revisionId, screenshotUrl: await storage.signedUrl(key) });
   } catch (e) {
@@ -222,6 +257,7 @@ async function uniqueRoute(projectId: string, route: string): Promise<string> {
 // 规划器声明了入口屏（entryFrom）就对它跑一次补链——反向连线。
 async function runGenerate(ctx: Ctx) {
   const input = inputOf(ctx.job, 'generate');
+  if (ctx.project.kind === 'sketchbook') return runGenerateDraft(ctx, input);
   const versions = Math.max(1, input.versions ?? 1);
   const existingRows = await db.select().from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id)).orderBy(schema.screens.createdAt);
   const existing: RegistryEntry[] = existingRows.filter((s) => !s.variantOf).map((s) => ({ route: s.route, name: s.name, purpose: s.purpose || undefined }));
@@ -324,6 +360,32 @@ async function runGenerate(ctx: Ctx) {
   }
 }
 
+// 新草稿（REQ-CORE-040 / INV-CORE-003）：单屏单版，用户这句话原样作提示词（参考图照带）；不走规划器、不排版、不钉样板屏、不跑反向连线——
+// 草稿之间没有路由关系，也没有风格锚点。用户选定了画框就建屏时写好；auto 留空，第一版落库时按根元素的 data-frame 定（produceScreen）
+async function runGenerateDraft(ctx: Ctx, input: JobInputOf<'generate'>) {
+  const frame = input.frame ?? 'auto';
+  const name = draftNameFromPrompt(input.prompt);
+  const route = nextDraftRoute((await db.select({ route: schema.screens.route }).from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id))).map((r) => r.route));
+  // 带参照项目时（REQ-CORE-042）第一版就按它写、按它的 prelude 落库；建作业之后它被删了就按自由风格出，草稿也不记参照
+  const system = await draftSystem(ctx, { frame: frame === 'auto' ? null : frame, refProjectId: input.refProjectId ?? null });
+  const refProjectId = ctx.draftReferenced ? input.refProjectId! : null;
+  // 建屏的同时把它记成本作业的目标屏：删屏、改屏、回溯靠 target_screen_id 判忙（§16），生成中的新草稿要和改屏中的屏一样挡住（FLOW-SKETCH S9）
+  const screen = await db.transaction(async (tx) => {
+    const [row] = await tx.insert(schema.screens).values({ projectId: ctx.project.id, name, route, purpose: '', x: 0, y: 0, frame: frame === 'auto' ? null : frame, refProjectId }).returning();
+    await tx.update(schema.generationJobs).set({ targetScreenId: row.id }).where(eq(schema.generationJobs.id, ctx.job.id));
+    return row;
+  });
+  // screenId 随 screen_planned 投影到项目频道（API-CORE-030），草稿本页据此把本页发出的新草稿摆上看板
+  await emitJobEvent(ctx.job.id, 'screen_planned', { screenId: screen.id, name, route, purpose: '' });
+  ctx.planned = 1;
+  try {
+    if (!ctx.signal.aborted) await produceScreen(ctx, { screenId: screen.id, system, prompt: input.prompt, sourceKind: 'generate', expectedRevisionId: null, parentRevisionId: null, candidateIndex: null, advanceCurrent: true });
+  } finally {
+    // 同 runGenerate：失败或取消时没出内容的新草稿删掉（进程中途退出的由 failJob.ts 的 settleInterrupted 按 screen_planned 补删）
+    await db.delete(schema.screens).where(and(eq(schema.screens.id, screen.id), isNull(schema.screens.currentRevisionId)));
+  }
+}
+
 // 改（REQ-CORE-006）：目标屏当前 HTML + 本次指令 + 祖先链上的历史指令；versions>1 落为候选
 async function runEditScreens(ctx: Ctx) {
   const input = inputOf(ctx.job, 'edit_screens');
@@ -336,8 +398,11 @@ async function runEditScreens(ctx: Ctx) {
     const alive = screens.filter((s) => input.screenIds.includes(s.id)).length;
     throw new JobFailure('validation', !alive ? '目标屏都已被删除' : alive < new Set(input.screenIds).size ? '目标屏有的已被删除，其余还没有生成出内容' : '目标屏还没有生成出内容');
   }
-  // 共享组件卡（REQ-EDIT-006）：框选的与目标屏本来就用的附完整 HTML
-  const system = screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], await registry(ctx), await references(ctx, { omitScreenId: targets.length === 1 ? targets[0].id : undefined }), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds, screenIds: targets.map((s) => s.id) }));
+  // 共享组件卡（REQ-EDIT-006）：框选的与目标屏本来就用的附完整 HTML。
+  // 草稿（REQ-CORE-040）换草稿提示词，不带屏注册表、参考屏与组件卡；草稿本的改恰好一张（INV-CORE-003），画框与参照项目取这张的
+  const system = ctx.project.kind === 'sketchbook'
+    ? await draftSystem(ctx, targets[0])
+    : screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], await registry(ctx), await references(ctx, { omitScreenId: targets.length === 1 ? targets[0].id : undefined }), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds, screenIds: targets.map((s) => s.id) }));
   const prepared = await Promise.all(targets.map(async (screen) => {
     const [rev] = await db.select().from(schema.screenRevisions).where(eq(schema.screenRevisions.id, screen.currentRevisionId!));
     const body = extractBody((await storage.get(rev.htmlKey)).toString('utf8'));
@@ -391,7 +456,8 @@ async function runProposeDesignSystem(ctx: Ctx): Promise<DesignProposalDto> {
   };
 }
 
-// REQ-EDIT-002：子树重生成——只发选中元素（+ 这屏的历史指令，ADR-012 v0.87），整段替换，兄弟节点 qid 不变（ADR-007）
+// REQ-EDIT-002：子树重生成——只发选中元素（+ 这屏的历史指令，ADR-012 v0.87），整段替换，兄弟节点 qid 不变（ADR-007）。
+// 草稿里只改一块（REQ-CORE-045）：提示词换成草稿规则与参照项目，落库不做 lint
 async function runRegenerateSubtree(ctx: Ctx) {
   const input = inputOf(ctx.job, 'regenerate_subtree');
   const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, input.screenId));
@@ -399,9 +465,12 @@ async function runRegenerateSubtree(ctx: Ctx) {
   ctx.planned = 1;
   const [rev] = await db.select().from(schema.screenRevisions).where(eq(schema.screenRevisions.id, screen.currentRevisionId));
   const body = extractBody((await storage.get(rev.htmlKey)).toString('utf8'));
-  const reg = await registry(ctx);
+  const sketch = ctx.project.kind === 'sketchbook';
+  const reg = sketch ? [] : await registry(ctx);
   const routes = reg.map((r) => r.route);
-  const system = screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], reg, [], ctx.assets, await componentCards(ctx.project.id, { screenIds: [screen.id] }));
+  const system = sketch
+    ? await draftSystem(ctx, screen)
+    : screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], reg, [], ctx.assets, await componentCards(ctx.project.id, { screenIds: [screen.id] }));
   const { parseHTML } = await import('linkedom');
   const { document } = parseHTML(`<!doctype html><html><body>${body}</body></html>`);
   const el = document.querySelector(`[data-qid="${input.qid}"]`);
@@ -412,8 +481,8 @@ async function runRegenerateSubtree(ctx: Ctx) {
   if (!replaced) throw new JobFailure('validation', 'replacement produced no element');
   // 共享组件（REQ-EDIT-006）：新片段里放的占位在这里展开；实例根沿用 qid、新子树接着编号
   const expanded = await expandLatest(ctx, replaced.body, screen.route);
-  // v0.43：同 produceScreen——偏离只记录，不为它再烧一次调用
-  const report = lintScreenBody(expanded, routes, true);
+  // v0.43：同 produceScreen——偏离只记录，不为它再烧一次调用；草稿没有设计契约可偏离，记空报告
+  const report = sketch ? DRAFT_LINT_REPORT : lintScreenBody(expanded, routes, true);
   const html = assembleDocument(expanded, ctx.prelude, `${ctx.project.name} · ${screen.name}`);
   assertNotAborted(ctx);
   const created = await db.transaction((tx) => createRevision(tx, { projectId: ctx.project.id, screenId: screen.id, html, sourceKind: 'subtree', jobId: ctx.job.id, lintReport: report, expectedRevisionId: input.expectedRevisionId }));

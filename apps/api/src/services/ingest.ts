@@ -10,35 +10,49 @@ import { createRevision, deriveLinks, hasActiveJob, setFamilyPresentation } from
 import { enqueueScreenshot } from './jobs.ts';
 import { emitProjectEvent } from '../lib/events.ts';
 import { sharedComponentsOf, contractComponents } from './components.ts';
+import { isSketchbook, nextDraftRoute, draftFrame, draftReference, DRAFT_LINT_REPORT } from './sketchbook.ts';
 
 // MCP 底层原语（REQ-AGENT-002）：agent 自带 HTML 推进画布——同步执行：去旧 qid → 注入 → lint → 修订 → 截图队列。
 // 带 jobId（派活任务载荷里的作业，ADR-015）时修订即算该工单产出；改既有屏时 expectedRevisionId 必填——
 // 租约过期期间用户可能已改过这张屏，旧基线回写会顶掉他的改动，所以用 409 兜底。
-export async function ingestScreen(ownerId: string, projectId: string, input: { name: string; route: string; html?: string; uploadId?: string; screenId?: string; expectedRevisionId?: string; jobId?: string; presentation?: Presentation }) {
+// 草稿本（REQ-CORE-040）：新草稿的路由可省（服务端取 /draft-<n>），不做设计契约 lint，画框按作业选定的或根元素的 data-frame 定
+export async function ingestScreen(ownerId: string, projectId: string, input: { name: string; route?: string; html?: string; uploadId?: string; screenId?: string; expectedRevisionId?: string; jobId?: string; presentation?: Presentation }) {
   const project = await ownedProject(ownerId, projectId);
+  const sketch = isSketchbook(project);
+  let jobFrame: string | undefined;
   if (input.jobId) {
-    const [job] = await db.select({ id: schema.generationJobs.id, status: schema.generationJobs.status }).from(schema.generationJobs).where(and(eq(schema.generationJobs.id, input.jobId), eq(schema.generationJobs.projectId, project.id)));
+    const [job] = await db.select({ id: schema.generationJobs.id, status: schema.generationJobs.status, input: schema.generationJobs.input }).from(schema.generationJobs).where(and(eq(schema.generationJobs.id, input.jobId), eq(schema.generationJobs.projectId, project.id)));
     if (!job) throw problems.notFound();
     // 已结束的作业不再收产出：取消之后屏锁已释放，用户可能已在这屏上继续改了（§11 cancelled 是终态）
     if (job.status !== 'running') throw problems.jobFinished();
     if (input.screenId && !input.expectedRevisionId) throw problems.validation([{ path: 'expectedRevisionId', message: '带 jobId 更新既有屏时必须传 expectedRevisionId（取任务载荷 screens[].revisionId）' }]);
+    // 草稿本里一个作业只出一张草稿（INV-CORE-003）：这个作业已写出过一张，再建就拒——改那一张走 update / patch
+    if (sketch && !input.screenId) {
+      const [made] = await db.select({ screenId: schema.screenRevisions.screenId }).from(schema.screenRevisions).where(eq(schema.screenRevisions.jobId, job.id)).limit(1);
+      if (made) throw problems.validation([{ path: 'jobId', message: `这个作业已写出草稿 ${made.screenId}，草稿本里一个作业只出一张；要改它用 quilt.update_screen 或 quilt.patch_screen` }]);
+    }
+    jobFrame = (job.input as { frame?: string }).frame;
   }
   const raw = input.html ?? (input.uploadId ? (await storage.get(`uploads/${input.uploadId}.html`).catch(() => null))?.toString('utf8') : null);
   if (!raw) throw problems.validation([{ path: 'html', message: 'html or a valid uploadId is required' }]);
   // 单屏上限（§15）：模型生成那条路在 pipeline 里查，agent 写入同样要查——超了截图与导出都会被拖垮
   if (Buffer.byteLength(raw) > config.maxScreenHtmlBytes) throw problems.unprocessable([{ path: 'html', message: `screen html is ${Buffer.byteLength(raw)} bytes, the limit is ${config.maxScreenHtmlBytes}` }]);
+  const screens = await db.select().from(schema.screens).where(eq(schema.screens.projectId, project.id));
+  const route = input.route ?? (sketch && !input.screenId ? nextDraftRoute(screens.map((s) => s.route)) : undefined);
+  if (!route) throw problems.validation([{ path: 'route', message: 'route is required' }]);
   // 共享组件（REQ-EDIT-006）：agent 写进来的占位（或它手抄的副本）在这里展开成正式 HTML。
   // qid 对齐而不是全部重编（v0.65）：没动的元素保留原号，连续局部修改的锚点与挂在元素上的批注都还对得上
   const shared = await sharedComponentsOf(project.id);
   const incoming = raw.includes('<body') ? extractBody(raw) : raw;
-  const componentsOverwritten = overwrittenInstances(incoming, shared, input.route);
-  const body = reconcileQids(expandComponents(incoming, shared, input.route).html);
-  const screens = await db.select().from(schema.screens).where(eq(schema.screens.projectId, project.id));
-  const routes = Array.from(new Set([...screens.map((s) => s.route), input.route]));
-  // 偏离设计契约不阻断写入（ADR-005 v0.43）：报告随修订存下来、随返回值给 agent，取舍由写的人做
-  const report: LintReport = lintScreenBody(body, routes, true);
+  const componentsOverwritten = overwrittenInstances(incoming, shared, route);
+  const body = reconcileQids(expandComponents(incoming, shared, route).html);
+  const routes = Array.from(new Set([...screens.map((s) => s.route), route]));
+  // 偏离设计契约不阻断写入（ADR-005 v0.43）：报告随修订存下来、随返回值给 agent，取舍由写的人做；草稿不套设计系统，不 lint（ADR-030）
+  const report: LintReport = sketch ? DRAFT_LINT_REPORT : lintScreenBody(body, routes, true);
   const [ds] = await db.select().from(schema.designSystems).where(eq(schema.designSystems.projectId, project.id));
-  const html = assembleDocument(body, buildPrelude(ds.tokens as Tokens), `${project.name} · ${input.name}`);
+  // 改的是有参照项目的草稿（REQ-CORE-042 / ADR-033）：按参照项目的 prelude 拼装，与模型通道改稿落库一致；参照项目已被删就用草稿本自己的
+  const ref = sketch && input.screenId ? await draftReference(screens.find((x) => x.id === input.screenId)?.refProjectId ?? null) : null;
+  const html = assembleDocument(body, ref?.prelude ?? buildPrelude(ds.tokens as Tokens), `${project.name} · ${input.name}`);
   const size = DEVICE_SIZE[project.deviceType as DeviceType];
   let reshoot: string[] = [];
   const result = await db.transaction(async (tx) => {
@@ -53,16 +67,18 @@ export async function ingestScreen(ownerId: string, projectId: string, input: { 
         if (!input.jobId || holder?.id !== input.jobId) throw problems.screenBusy();
       }
       // 变体的路由与呈现方式属于默认屏（v0.62 / v0.63）：经这条路改一律拒；默认屏改呈现方式，整个家族跟着改
-      if (s.variantOf && input.route !== s.route) throw problems.unprocessable([{ path: 'route', message: '变体与默认屏同路由，改路由请改默认屏' }]);
+      if (s.variantOf && route !== s.route) throw problems.unprocessable([{ path: 'route', message: '变体与默认屏同路由，改路由请改默认屏' }]);
       if (s.variantOf && input.presentation && input.presentation !== s.presentation) throw problems.unprocessable([{ path: 'presentation', message: '变体随默认屏的呈现方式，改呈现方式请改默认屏' }]);
-      if (input.route !== s.route || input.name !== s.name) await tx.update(schema.screens).set({ route: input.route, name: input.name }).where(eq(schema.screens.id, screenId));
+      if (route !== s.route || input.name !== s.name) await tx.update(schema.screens).set({ route, name: input.name }).where(eq(schema.screens.id, screenId));
       if (input.presentation && input.presentation !== s.presentation) reshoot = await setFamilyPresentation(tx, screenId, input.presentation);
       // 默认屏改路由，它的变体跟着改（v0.62 变体与默认屏同路由）
-      if (input.route !== s.route) await tx.update(schema.screens).set({ route: input.route }).where(eq(schema.screens.variantOf, screenId));
+      if (route !== s.route) await tx.update(schema.screens).set({ route }).where(eq(schema.screens.variantOf, screenId));
+      // 还没定画框的草稿（新草稿第一版）：作业选定的优先，否则按这一版根元素上的 data-frame 定
+      if (sketch && !s.frame) await tx.update(schema.screens).set({ frame: draftFrame(jobFrame, body) }).where(eq(schema.screens.id, screenId));
     } else {
-      if (screens.some((s) => s.route === input.route)) throw problems.routeTaken();
+      if (screens.some((s) => s.route === route)) throw problems.routeTaken();
       const x = screens.reduce((m, s) => Math.max(m, s.x + size.w + 80), 0);
-      const [s] = await tx.insert(schema.screens).values({ projectId: project.id, name: input.name, route: input.route, x, y: 0, presentation: input.presentation ?? 'push' }).returning();
+      const [s] = await tx.insert(schema.screens).values({ projectId: project.id, name: input.name, route, x, y: 0, presentation: input.presentation ?? 'push', frame: sketch ? draftFrame(jobFrame, body) : null }).returning();
       screenId = s.id;
     }
     const rev = await createRevision(tx, { projectId: project.id, screenId, html, sourceKind: 'agent_ingest', jobId: input.jobId ?? null, lintReport: report, expectedRevisionId: input.screenId ? (input.expectedRevisionId ?? screens.find((x) => x.id === input.screenId)?.currentRevisionId ?? null) : null });

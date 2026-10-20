@@ -17,8 +17,28 @@ export const JOB_RUNNERS = ['model', 'agent'] as const;
 export type JobRunner = (typeof JOB_RUNNERS)[number];
 export const JOB_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'cancelled'] as const;
 export const ERROR_CLASSES = ['provider', 'lint', 'timeout', 'validation', 'system', 'agent'] as const;
-// component（v0.46）：共享组件提取 / 同步 / 改组件后的确定性回刷（REQ-EDIT-006）
-export const SOURCE_KINDS = ['generate', 'edit', 'subtree', 'manual', 'restore', 'apply_ds', 'agent_ingest', 'component'] as const;
+// component（v0.46）：共享组件提取 / 同步 / 改组件后的确定性回刷（REQ-EDIT-006）；sketch：草稿写回项目（API-CORE-047）；fork：从屏建草稿的第一版（API-CORE-048）
+export const SOURCE_KINDS = ['generate', 'edit', 'subtree', 'manual', 'restore', 'apply_ds', 'agent_ingest', 'component', 'sketch', 'fork'] as const;
+
+// 草稿本（REQ-CORE-040 / ADR-030）：一个 kind=sketchbook 的项目，草稿是它的屏。画框 = 草稿在看板上怎么摆：
+// component 按根元素自身大小居中，mobile / desktop 给对应视口；auto 只出现在请求里，由模型在根元素的 data-frame 上声明
+export const PROJECT_KINDS = ['app', 'sketchbook'] as const;
+export type ProjectKind = (typeof PROJECT_KINDS)[number];
+export const DRAFT_FRAMES = ['component', 'mobile', 'desktop'] as const;
+export type DraftFrame = (typeof DRAFT_FRAMES)[number];
+export const DRAFT_FRAME_CHOICES = ['auto', ...DRAFT_FRAMES] as const;
+export type DraftFrameChoice = (typeof DRAFT_FRAME_CHOICES)[number];
+/** 新草稿的名字：这句话的第一行、前 20 个字（API-CORE-010 草稿本规则） */
+export function draftNameFromPrompt(prompt: string): string {
+  const line = prompt.trim().split(/\r?\n/)[0].trim();
+  const chars = Array.from(line);
+  return (chars.length > 20 ? chars.slice(0, 20).join('') : line) || '草稿';
+}
+/** 从屏拿来的草稿名（API-CORE-048）：来源屏名；只带一块时接「 · 」与那一块可见文字的前 10 个字 */
+export function forkDraftName(screenName: string, blockText?: string): string {
+  const head = Array.from(blockText?.trim() ?? '').slice(0, 10).join('').trimEnd();
+  return head ? `${screenName} · ${head}` : screenName;
+}
 export const JOB_EVENT_TYPES = ['screen_planned', 'screen_html_ready', 'screen_screenshot_ready', 'progress', 'succeeded', 'failed', 'cancelled'] as const;
 
 export const deviceTypeSchema = z.enum(DEVICE_TYPES);
@@ -84,6 +104,10 @@ export const jobInputSchemas = {
     variantOf: z.uuid().optional(),
     variantName: variantNameSchema.optional(),
     presentation: z.enum(PRESENTATIONS).optional(),
+    // 画框（REQ-CORE-040）：只对草稿本的新草稿有效，其他项目带它由建作业校验拒掉
+    frame: z.enum(DRAFT_FRAME_CHOICES).optional(),
+    // 参照项目（REQ-CORE-042）：新草稿从第一版起就参照它，同样只对草稿本的新草稿有效
+    refProjectId: z.uuid().optional(),
   }).refine((v) => !!v.variantOf === !!v.variantName, { path: ['variantName'], message: 'variantOf 与 variantName 要一起给' }),
   // annotations（v0.87）：批注发出的作业由 API-EDIT-003 填上每条批注的锚点文字与说明，只用来把这一轮写进历史指令（ADR-012），本轮指令仍是 prompt
   edit_screens: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).min(1).max(20), versions: versionsSchema.default(1), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), componentIds: componentIdsSchema, annotations: z.array(z.object({ anchorText: z.string().max(200), note: z.string().min(1).max(2000) })).max(50).optional() }),
@@ -169,6 +193,10 @@ export const createMessageSchema = z.object({
   route: routeSchema.optional(),
   fromScreenId: z.uuid().optional(),
   preset: z.enum(ROUND_PRESETS).optional(),
+  // 画框（REQ-CORE-040）：只对草稿本的新草稿有效
+  frame: z.enum(DRAFT_FRAME_CHOICES).optional(),
+  // 参照项目（REQ-CORE-042）：只对草稿本的新草稿有效；改稿的参照在草稿上设（API-CORE-012）
+  refProjectId: z.uuid().optional(),
 }).refine((v) => !!v.variantOf === !!v.variantName, { path: ['variantName'], message: 'variantOf 与 variantName 要一起给' })
   .refine((v) => v.content.length > 0 || (v.mode !== 'chat' && !!(v.variantOf || v.route || v.preset)), { path: ['content'], message: '先写点什么' });
 // 重试一轮（REQ-CORE-026 v0.72 / API-CORE-034）：只换通道，其余照原作业
@@ -206,7 +234,33 @@ export const updateScreenSchema = z.object({
   // 变体名只对变体有效、route 只对默认屏有效（v0.62）；呈现方式是元数据、改了不重烤修订（v0.63）——三条规则在路由层判
   variantName: variantNameSchema.optional(),
   presentation: z.enum(PRESENTATIONS).optional(),
+  // 画框只对草稿有效（REQ-CORE-040），元数据、改了不建修订、截图重拍
+  frame: z.enum(DRAFT_FRAMES).optional(),
+  // 参照项目只对草稿有效（REQ-CORE-042 / ADR-033）：本人的普通项目，null 回到自由风格；元数据，从下一轮起生效
+  refProjectId: z.uuid().nullable().optional(),
 }).refine((v) => Object.keys(v).length > 0, 'empty patch');
+
+// 草稿写回项目（REQ-CORE-041 / REQ-CORE-044，API-CORE-047）：screen / component 是一次性快照，restyle 时再发一次按设计系统改写的作业；
+// overwrite 把草稿原样写成目标屏 screenId 的一条新修订，带 qid 只换那一块（ADR-032）。restyle 不给时由服务端按草稿的参照项目定
+export const copyDraftSchema = z.object({
+  projectId: z.uuid(),
+  as: z.enum(['screen', 'component', 'overwrite']),
+  screenId: z.uuid().optional(),
+  qid: z.string().regex(/^q\d+$/).optional(),
+  expectedRevisionId: z.uuid().optional(),
+  name: z.string().trim().min(1).max(80).optional(),
+  restyle: z.boolean().optional(),
+  runner: runnerSchema.optional(),
+}).superRefine((v, ctx) => {
+  if (v.as !== 'overwrite') return;
+  if (!v.screenId) ctx.addIssue({ code: 'custom', path: ['screenId'], message: '覆盖要给目标屏' });
+  if (!v.expectedRevisionId) ctx.addIssue({ code: 'custom', path: ['expectedRevisionId'], message: '覆盖要给目标屏确认时的当前修订' });
+  if (v.restyle) ctx.addIssue({ code: 'custom', path: ['restyle'], message: '覆盖原样写入，不改写' });
+});
+export type CopyDraftInput = z.infer<typeof copyDraftSchema>;
+// 从屏建草稿（REQ-CORE-043 / API-CORE-048）：整屏或其中一块（qid）
+export const createDraftSchema = z.object({ fromScreenId: z.uuid(), qid: z.string().regex(/^q\d+$/).optional() });
+export type CreateDraftInput = z.infer<typeof createDraftSchema>;
 
 export const restoreRevisionSchema = z.object({ expectedRevisionId: z.uuid() });
 
@@ -348,6 +402,12 @@ export type ScreenDto = {
   variantOf: string | null; variantName: string | null;
   /** 呈现方式（v0.63）：overlay 屏播放时压在当前屏上 */
   presentation: Presentation;
+  /** 画框（REQ-CORE-040）：只在草稿本的屏上有值，null = 非草稿或新草稿还没定 */
+  frame: DraftFrame | null;
+  /** 参照项目（REQ-CORE-042）与写回目标（REQ-CORE-044）：只在草稿上有值；targetQid 空 = 整屏 */
+  refProjectId: string | null; targetScreenId: string | null; targetQid: string | null;
+  /** 写回目标那一屏所在的项目与屏名（服务端派生）；没有写回目标或那一屏已被删时为 null */
+  target: { projectId: string; projectName: string; screenName: string } | null;
   updatedAt: string;
 };
 export type LinkDto = { fromScreenId: string; qid: string; href: string; toScreenId: string | null };
@@ -427,7 +487,11 @@ export type ProjectEventDto = { type: 'screen_changed' | 'job_changed'; data: un
 export type AgentSessionDto = { tool: AgentTool; sessionId: string; name: string; named: boolean; cwd: string; status: 'idle' | 'busy' | 'unknown'; open: boolean; app?: 'desktop' | 'vscode' | 'cli'; updatedAt: string; unverifiedVersion?: string };
 export type JobEventDto = { seq: number; type: JobEventType; data: unknown; at: string };
 export type MessageDto = { id: string; projectId: string; role: 'user' | 'assistant'; content: string; attachments: AttachmentDto[]; jobId: string | null; jobKind: JobKind | null; affectedScreenIds: string[]; createdAt: string };
-export type ProjectDto = { id: string; name: string; deviceType: (typeof DEVICE_TYPES)[number]; status: 'active' | 'archived'; brief: string; exemplarScreenId: string | null; createdAt: string; updatedAt: string };
+export type ProjectDto = { id: string; name: string; deviceType: (typeof DEVICE_TYPES)[number]; status: 'active' | 'archived'; brief: string; exemplarScreenId: string | null; kind: ProjectKind; createdAt: string; updatedAt: string };
+/** 草稿本（API-CORE-046）：草稿与版本的读写都走项目接口 */
+export type SketchbookDto = { projectId: string };
+/** 草稿写回的结果（API-CORE-047）：screen / component 二选一，restyle 时带改写作业；覆盖时带新修订与覆盖前那一版（回溯用） */
+export type CopyDraftResultDto = { screen?: ScreenDto; component?: ComponentDto; job?: JobDto; revisionId?: string; previousRevisionId?: string };
 export type ProjectDetailDto = { project: ProjectDto; designSystem: DesignSystemDto; screens: ScreenDto[]; links: LinkDto[]; activeJobs: JobDto[]; annotations: AnnotationDto[]; assets: AssetDto[]; components: ComponentDto[] };
 export type RevisionDto = { id: string; screenId: string; seq: number; sourceKind: SourceKind; jobId: string | null; parentRevisionId: string | null; candidateIndex: number | null; candidateSettledAt: string | null; htmlUrl: string; screenshotUrl: string | null; thumbUrl: string | null; lintReport: unknown; createdAt: string };
 /** 候选覆盖层的数据（API-CORE-026）：列 = 版本、行 = 屏 */

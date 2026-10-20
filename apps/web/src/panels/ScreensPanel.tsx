@@ -32,7 +32,7 @@ export function ScreensPanel({ screens, links, busy, onPick, onClose }: { screen
       <div className="flex flex-wrap gap-1 border-b border-border-subtle p-2" role="group" aria-label="筛选">
         {FILTERS.map((f) => (
           <button key={f.key} type="button" aria-pressed={filter === f.key} data-testid={`screens-filter-${f.key}`} onClick={() => setFilter(f.key)}
-            className={`rounded-sm border px-2 py-0.5 type-label tabular-nums ${filter === f.key ? 'border-primary bg-(--semantic-color-surface-selected) text-text-primary' : 'border-border-subtle text-text-secondary state-layer'}`}>
+            className={`rounded-pill px-2.5 py-0.5 type-label tabular-nums focus-ring ${filter === f.key ? 'tint-link font-medium' : 'fill text-text-secondary state-layer'}`}>
             {f.label} {counts[f.key]}
           </button>
         ))}
@@ -45,8 +45,8 @@ export function ScreensPanel({ screens, links, busy, onPick, onClose }: { screen
                 className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left type-body state-layer focus-ring"
                 style={depth ? { paddingLeft: `${0.5 + depth * 1}rem` } : undefined}>
                 <span className="min-w-0 truncate">
-                  {depth > 0 && <span className="mr-1 rounded-sm border border-border-subtle px-1 type-caption text-text-secondary">变体</span>}
-                  {s.presentation === 'overlay' && <span className="mr-1 rounded-sm border border-border-subtle px-1 type-caption text-text-secondary">叠层</span>}
+                  {depth > 0 && <span className="fill mr-1 rounded-sm px-1 type-caption text-text-secondary">变体</span>}
+                  {s.presentation === 'overlay' && <span className="fill mr-1 rounded-sm px-1 type-caption text-text-secondary">叠层</span>}
                   <b className="text-text-primary">{s.name}</b> <span className="text-text-secondary">{s.route}</span>
                 </span>
                 {(() => { const b = screenBadges(s, links, busy); return b.length ? <span className="shrink-0 type-caption text-text-secondary">{b.join(' · ')}</span> : null; })()}

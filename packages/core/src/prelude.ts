@@ -1,6 +1,7 @@
 import { kebab, colorVarsCss, isDarkPalette, type Tokens } from './tokens.ts';
 import { fontFace } from './fonts.ts';
 import { RUNTIME_JS } from './runtime.ts';
+import { DRAFT_PAD } from './device.ts';
 
 // 屏只有一套配色，Tailwind 的 dark: 变体按这套配色判、不按看的人的系统偏好（v0.89 ADR-005）：配置写 darkMode:'class'，
 // 暗色配色在 <head> 里给 <html> 加 dark 类。Play CDN 默认按系统偏好，亮色项目在暗色系统里开交互态会命中 dark:，截图浏览器却命中不到
@@ -52,6 +53,13 @@ export function withScreenCsp(html: string): string {
 // 压在别的屏上时露出底下那一屏（截图 omitBackground 拍成带 alpha 的 PNG，卡片再铺暗底）。只认第一个 </head>
 export function withOverlayStyle(html: string): string {
   const tag = '<style data-quilt-overlay>html,body{background:transparent}</style>';
+  return html.includes('</head>') ? html.replace('</head>', `${tag}\n</head>`) : `${tag}\n${html}`;
+}
+
+// 组件画框的草稿（REQ-CORE-040，API-CORE-016 草稿）：透明底，四周再留一圈 DRAFT_PAD 的透明边——根的阴影、外发光画在它的框外，
+// 视口刚好等于根的框时会被裁成一道硬边。看板与截图都按「根的框 + 四周各 DRAFT_PAD」给视口、裁图（DRAFT_PAD 在 device.ts，前端也要用）
+export function withDraftComponentStyle(html: string): string {
+  const tag = `<style data-quilt-draft>html,body{background:transparent}body{margin:0;padding:${DRAFT_PAD}px}</style>`;
   return html.includes('</head>') ? html.replace('</head>', `${tag}\n</head>`) : `${tag}\n${html}`;
 }
 

@@ -1,4 +1,4 @@
-import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, ElementOp, AnnotationDto, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, RoundPresetKind } from '@quilt/core/browser';
+import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, ElementOp, AnnotationDto, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, DraftFrame, DraftFrameChoice, SketchbookDto, CopyDraftInput, CreateDraftInput, CopyDraftResultDto } from '@quilt/core/browser';
 
 // API 客户端：同源 /v1（开发时 Vite 代理 → API；打包后 API 进程自己托管前端），错误统一为 ApiError（RFC 9457 信封）。
 // v0.32 本地版没有登录：所有请求都是默认用户。
@@ -43,10 +43,9 @@ export const api = {
     get: (id: string) => call<ProjectDetailDto>(`/v1/projects/${id}`),
     messages: (id: string) => call<{ items: MessageDto[]; nextCursor: string | null }>(`/v1/projects/${id}/messages?limit=100`),
     // 动词由目标决定（API-CORE-010）：有 targetScreenIds 是改，没有是造；count / versions / anchor 是造改共用的档位。
-    // mode="chat"（REQ-CORE-023）：交给助手定范围，targetScreenIds 只是上下文提示
     // targetComponentIds（REQ-EDIT-006）：只有组件没有屏 = 改这个组件；与屏 / 锚点同发 = 它们的完整 HTML 进上下文
-    // variantOf / variantName / route / fromScreenId / preset（REQ-CORE-026 v0.74）：「修改」还原的系统代发轮次，建同一类作业
-    send: (id: string, body: { content: string; mode?: 'chat'; targetScreenIds?: string[]; targetComponentIds?: string[]; count?: ScreenCount; versions?: number; anchor?: { x: number; y: number }; runner?: Runner; attachmentIds?: string[]; variantOf?: string; variantName?: string; route?: string; fromScreenId?: string; preset?: RoundPresetKind }) =>
+    // frame（REQ-CORE-040）、refProjectId（REQ-CORE-042）：只对草稿本的新草稿有效
+    send: (id: string, body: { content: string; targetScreenIds?: string[]; targetComponentIds?: string[]; count?: ScreenCount; versions?: number; anchor?: { x: number; y: number }; runner?: Runner; attachmentIds?: string[]; frame?: DraftFrameChoice; refProjectId?: string }) =>
       call<{ userMessage: MessageDto; assistantMessage: MessageDto; job: JobDto }>(`/v1/projects/${id}/messages`, { method: 'POST', body: JSON.stringify(body), idempotencyKey: crypto.randomUUID() }),
     // 重试一轮（API-CORE-034）：服务端复制原作业输入，只换通道
     retry: (id: string, messageId: string, runner?: Runner) =>
@@ -75,7 +74,8 @@ export const api = {
     adoptGroup: (id: string, index: number) => call<{ adopted: string[]; skipped: string[] }>(`/v1/jobs/${id}/candidates/adopt`, { method: 'POST', body: JSON.stringify({ index }) }),
   },
   screens: {
-    patch: (id: string, patch: { x?: number; y?: number; presentation?: Presentation }) => call<{ screen: ScreenDto }>(`/v1/screens/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    // name / frame（REQ-CORE-040）：草稿就地改名、换画框；frame 只对草稿有效
+    patch: (id: string, patch: { x?: number; y?: number; name?: string; presentation?: Presentation; frame?: DraftFrame; refProjectId?: string | null }) => call<{ screen: ScreenDto }>(`/v1/screens/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     remove: (id: string) => call<void>(`/v1/screens/${id}`, { method: 'DELETE' }),
     revisions: (id: string) => call<{ items: RevisionDto[] }>(`/v1/screens/${id}/revisions`),
     restore: (id: string, revisionId: string, expectedRevisionId: string) => call<{ revision: RevisionDto }>(`/v1/screens/${id}/revisions/${revisionId}/restore`, { method: 'POST', body: JSON.stringify({ expectedRevisionId }) }),
@@ -120,6 +120,14 @@ export const api = {
     update: (id: string, patch: { note?: string }) => call<{ annotation: AnnotationDto }>(`/v1/annotations/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     remove: (id: string) => call<void>(`/v1/annotations/${id}`, { method: 'DELETE' }),
     send: (projectId: string, annotationIds: string[]) => call<{ jobs: JobDto[] }>(`/v1/projects/${projectId}/annotations/send`, { method: 'POST', body: JSON.stringify({ annotationIds }) }),
+  },
+  // 草稿本（REQ-CORE-040 / REQ-CORE-041）：取回（没有就建）草稿本的项目 id，草稿与版本的读写都走项目与屏的接口；
+  // 写回项目是一次性快照：新屏 / 组件 restyle 时服务端再建一个改写作业，覆盖整屏 / 换一块原样写成目标屏的新一版（API-CORE-047）；
+  // 从项目的一屏或其中一块建草稿（API-CORE-048）
+  sketchbook: {
+    get: () => call<SketchbookDto>('/v1/sketchbook'),
+    copyDraft: (screenId: string, body: CopyDraftInput) => call<CopyDraftResultDto>(`/v1/sketchbook/drafts/${screenId}/copy`, { method: 'POST', body: JSON.stringify(body), idempotencyKey: crypto.randomUUID() }),
+    createDraft: (body: CreateDraftInput) => call<{ screen: ScreenDto }>('/v1/sketchbook/drafts', { method: 'POST', body: JSON.stringify(body), idempotencyKey: crypto.randomUUID() }),
   },
   runners: () => call<{ items: RunnerOptionDto[]; default: string }>('/v1/runners'),
   // 本机正在运行的 Claude Code 会话（API-AGENT-010）：会话下拉打开时取

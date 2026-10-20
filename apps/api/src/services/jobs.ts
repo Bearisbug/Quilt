@@ -64,9 +64,11 @@ export function timeoutFor(input: CreateJobInput, repaintScreens = 0, outputChar
   return Math.min(t.max, t.base + calls * t.perCall + repaintScreens * t.perScreen + Math.ceil(outputChars / t.outputCharsPerSec) * 1000);
 }
 
-// regenerate_subtree 创建前校验：qid 必须在当前修订里（TC-EDIT-004 → 404），expectedRevisionId 必须是当前版
-async function assertSubtreeTarget(input: { screenId: string; qid: string; expectedRevisionId: string }) {
+// regenerate_subtree 创建前校验：目标屏得在这个项目里（草稿本里即目标是草稿，REQ-CORE-045），qid 必须在当前修订里（TC-EDIT-004 → 404），
+// expectedRevisionId 必须是当前版
+async function assertSubtreeTarget(projectId: string, input: { screenId: string; qid: string; expectedRevisionId: string }) {
   const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, input.screenId));
+  if (screen && screen.projectId !== projectId) throw problems.notFound();
   if (!screen?.currentRevisionId) throw problems.elementNotFound();
   if (screen.currentRevisionId !== input.expectedRevisionId) throw problems.revisionConflict();
   const [rev] = await db.select().from(schema.screenRevisions).where(eq(schema.screenRevisions.id, screen.currentRevisionId));
@@ -93,10 +95,15 @@ const jobByKey = async (projectId: string, key: string): Promise<JobRow | undefi
 
 // 作业创建（状态机 [*]→queued）：幂等 → 目标存在 → 限流 → 目标屏占用 → 落库 → 入队（model）或投递到本机会话（agent）。
 // 建作业的入口校验（CH-2 v1.06）：POST /jobs、发消息、重试、MCP 四个入口共用这一份——输入按作业种类过 schema
-// （重试拼回去的旧输入也过）；账号自建通道要属于本人；带参考图时通道要支持视觉（REQ-CORE-012，不支持就说清楚，不静默丢图）
-async function assertInput(user: UserRow, input: CreateJobInput) {
+// （重试拼回去的旧输入也过）；草稿本只受理单屏单版的造与改、画框只给草稿本（REQ-CORE-040）；
+// 账号自建通道要属于本人；带参考图时通道要支持视觉（REQ-CORE-012，不支持就说清楚，不静默丢图）
+async function assertInput(user: UserRow, projectId: string, input: CreateJobInput) {
   const checked = createJobSchema.safeParse(input);
   if (!checked.success) throw problems.validation(checked.error.issues.map((i) => ({ path: ['input', ...i.path].join('.'), message: i.message })));
+  const [project] = await db.select({ kind: schema.projects.kind }).from(schema.projects).where(eq(schema.projects.id, projectId));
+  // 动态引入：sketchbook.ts 放进项目时反过来要用 createJob
+  const { assertSketchbookJob } = await import('./sketchbook.ts');
+  if (project) assertSketchbookJob(project, checked.data);
   const { runner, imageKeys } = input.input as { runner?: Runner; imageKeys?: string[] };
   if (runner?.kind === 'channel' && !(await listChannels(user.id)).some((c) => c.id === runner.channelId)) throw problems.notFound();
   if (imageKeys?.length && runner?.kind === 'model' && !driverSupportsVision(runner.driver)) {
@@ -111,7 +118,7 @@ export async function createJob(args: { user: UserRow; projectId: string; input:
     const existing = await jobByKey(projectId, idempotencyKey);
     if (existing) return { job: existing, reused: true };
   }
-  await assertInput(user, input);
+  await assertInput(user, projectId, input);
   await assertTargets(projectId, input);
   const releaseRate = assertRate(user.id);
   // 没带通道的 LLM 作业（MCP 建的、辅助作业）用用户自己配的默认通道；一条都没有才回落到 .env 的驱动
@@ -134,7 +141,7 @@ export async function createJob(args: { user: UserRow; projectId: string; input:
     // 本机会话拿到的是一段文字指令，钉死路由的懒生成、造变体、叠层屏这三种它没有对应的写法，与其静默当普通造屏做，不如当场拒
     if (input.kind === 'generate' && (input.input.route || input.input.variantOf || input.input.presentation)) throw problems.validation([{ path: 'runner', message: '懒生成、出变体、叠层屏请换一个模型通道，本机会话不接这类作业' }]);
   }
-  if (input.kind === 'regenerate_subtree') await assertSubtreeTarget(input.input);
+  if (input.kind === 'regenerate_subtree') await assertSubtreeTarget(projectId, input.input);
   const targetScreenId = targetScreenOf(input);
   const multi = input.kind === 'edit_screens' ? input.input.screenIds : input.kind === 'apply_design_system' && input.input.screenIds !== 'all' ? input.input.screenIds : [];
 

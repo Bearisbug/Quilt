@@ -86,10 +86,16 @@ async function pgDriver(url: string): Promise<Driver> {
   };
 }
 
+// 缓冲区与工作内存（`ADR-010`，v1.17）：WASM 初始内存最少 128MB，再往下压不动
+const PGLITE_MEMORY = ['-c', 'shared_buffers=16MB', '-c', 'work_mem=2MB', '-c', 'maintenance_work_mem=16MB', '-c', 'temp_buffers=2MB', '-c', 'wal_buffers=1MB'];
+
 async function pgliteDriver(dir: string): Promise<Driver> {
   const { PGlite } = await import('@electric-sql/pglite');
   const { drizzle } = await import('drizzle-orm/pglite');
-  const pglite = await PGlite.create(dir);
+  // 本地版单用户、单连接：Postgres 默认的缓冲区是给共享服务器配的（shared_buffers 128MB），这里压到够用即可——
+  // 实测（2026-10-20，PGlite 0.5.8）单独打开一个库常驻约 270 → 150 MB；大表扫描会慢一些，本地版的查询都是按项目取的小集合。
+  // startParams 会整个替换默认参数，所以在默认参数后面追加
+  const pglite = await PGlite.create(dir, { startParams: [...PGlite.defaultStartParams, ...PGLITE_MEMORY] });
   return {
     kind: 'pglite',
     db: drizzle(pglite, { schema }) as unknown as Db,

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Tabs } from 'radix-ui';
-import { Cable, Gauge, SunMoon, X } from 'lucide-react';
+import { Cable, Check, Gauge, SunMoon, X } from 'lucide-react';
 import type { RunnerOptionDto, UsageDto } from '@quilt/core/browser';
 import { api } from '@/lib/api';
 import { useToast } from '@/lib/toast';
-import { Button, IconButton, Spinner } from '@/ui/ui';
+import { Button, IconButton, Spinner, cn } from '@/ui/ui';
 import { ChannelManager } from '@/settings/ChannelManager';
 import { Overlay, useModal } from '@/ui/modal';
 import { SETTINGS_SECTIONS, type SettingsSection } from '@/settings/sections';
@@ -34,11 +34,11 @@ export function SettingsModal({ section, onSection, onClose, returnTo, onCatalog
   return (
     <Overlay onClose={onClose}>
       <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="settings-title" data-testid="settings-modal" tabIndex={-1}
-        className="relative flex h-[min(42rem,calc(100dvh-2rem))] w-full max-w-4xl overflow-hidden rounded-lg border border-border-subtle bg-surface-overlay shadow-(--semantic-elevation-overlay) fade-up outline-none">
+        className="sheet relative flex h-[min(42rem,calc(100dvh-2rem))] w-full max-w-4xl overflow-hidden fade-up outline-none">
         {/* Radix Tabs 垂直方向（INT-002）：左栏整组只占一个 Tab 停靠点，上下方向键换节并立即切换 */}
         <Tabs.Root value={section} onValueChange={(v) => onSection(v as SettingsSection)} orientation="vertical" className="flex min-h-0 flex-1">
           <div className="flex w-48 shrink-0 flex-col border-r border-border-subtle p-3">
-            <h2 id="settings-title" className="px-2.5 pb-3 pt-1.5 type-heading2 font-medium">设置</h2>
+            <h2 id="settings-title" className="px-2.5 pb-3 pt-1.5 type-heading2 font-semibold">设置</h2>
             <Tabs.List aria-label="设置分节" className="scroll-nav flex min-h-0 flex-1 flex-col gap-0.5">
               {SETTINGS_SECTIONS.map(({ id, label }) => { const Icon = SECTION_ICONS[id]; return (
                 <Tabs.Trigger key={id} value={id} data-testid={`settings-tab-${id}`}
@@ -50,10 +50,10 @@ export function SettingsModal({ section, onSection, onClose, returnTo, onCatalog
           </div>
           <div className="scroll min-w-0 flex-1 p-6 pr-14">
             <Tabs.Content value="usage" className="outline-none" data-testid="usage">
-              <h3 className="type-heading3 font-medium">本月用量</h3>
+              <h3 className="type-heading3 font-semibold">本月用量</h3>
               <p className="mt-1 type-label text-text-secondary">只作记录，没有上限——花的是你自己的 Key 或订阅。交给本机 agent 的作业不计入。</p>
               {usageError ? (
-                <p role="alert" className="mt-3 flex items-center justify-between gap-2 rounded-md border border-error/60 bg-error/10 px-3 py-2 type-label text-error"><span>用量加载失败</span><Button size="sm" onClick={load}>重试</Button></p>
+                <p role="alert" className="tint-error mt-3 flex items-center justify-between gap-2 rounded-md px-3 py-2 type-label"><span>用量加载失败</span><Button size="sm" onClick={load}>重试</Button></p>
               ) : !usage ? <div className="h-20"><Spinner /></div> : (
                 <div className="mt-4 space-y-4">
                   <dl className="grid grid-cols-3 gap-3" data-testid="usage-totals">
@@ -84,10 +84,10 @@ export function SettingsModal({ section, onSection, onClose, returnTo, onCatalog
             <Tabs.Content value="runners" className="outline-none" data-testid="runners">
               <ChannelManager onCatalog={onCatalog} />
               {/* 反向接入（API-AGENT-002）：本机 agent 自己连 Quilt 的 MCP，本地版免鉴权 */}
-              <h3 className="mt-8 type-heading3 font-medium">让本机 agent 接入 Quilt（MCP）</h3>
+              <h3 className="mt-8 type-heading3 font-semibold">让本机 agent 接入 Quilt（MCP）</h3>
               <p className="mt-1 type-label text-text-secondary">在 Claude Code / Codex / Cursor 里接入 Quilt，本地版不需要授权。Codex 接入后要新开或重开线程才会加载；想让画布投来的作业不用逐个批准，在 <code className="font-mono">~/.codex/config.toml</code> 的 <code className="font-mono">[mcp_servers.quilt]</code> 下加 <code className="font-mono">default_tools_approval_mode = "approve"</code>：</p>
-              <div className="mt-2 flex items-center gap-2"><code className="flex-1 truncate rounded-md border border-border-subtle bg-(--semantic-color-surface-sunken) px-2 py-1.5 font-mono type-label" data-testid="mcp-add">{mcpAdd}</code><Button size="sm" aria-label="复制 Claude Code 接入命令" onClick={() => copy(mcpAdd)}>复制</Button></div>
-              <div className="mt-2 flex items-center gap-2"><code className="flex-1 truncate rounded-md border border-border-subtle bg-(--semantic-color-surface-sunken) px-2 py-1.5 font-mono type-label" data-testid="codex-mcp-add">{codexMcpAdd}</code><Button size="sm" aria-label="复制 Codex 接入命令" onClick={() => copy(codexMcpAdd)}>复制</Button></div>
+              <div className="mt-2 flex items-center gap-2"><code className="fill flex-1 truncate rounded-md px-3 py-2 font-mono type-label" data-testid="mcp-add">{mcpAdd}</code><Button size="sm" aria-label="复制 Claude Code 接入命令" onClick={() => copy(mcpAdd)}>复制</Button></div>
+              <div className="mt-2 flex items-center gap-2"><code className="fill flex-1 truncate rounded-md px-3 py-2 font-mono type-label" data-testid="codex-mcp-add">{codexMcpAdd}</code><Button size="sm" aria-label="复制 Codex 接入命令" onClick={() => copy(codexMcpAdd)}>复制</Button></div>
             </Tabs.Content>
 
             <Tabs.Content value="appearance" className="outline-none" data-testid="appearance">
@@ -113,16 +113,19 @@ function Appearance() {
   const pick = (next: ThemePref) => { setPref(next); setThemePref(next); };
   return (
     <>
-      <h3 className="type-heading3 font-medium">外观</h3>
+      <h3 className="type-heading3 font-semibold">外观</h3>
       <p className="mt-1 type-label text-text-secondary">只换 Quilt 自己的界面；画布上的屏和卡片的白底不变。选择记在这台电脑的浏览器里，对所有项目生效。</p>
-      <fieldset className="mt-4 grid max-w-sm gap-1.5" data-testid="theme-options">
+      {/* iOS 单选列表：行间发丝线从文字起点内缩，选中项右侧一枚苹果蓝对勾；原生单选框只给读屏与方向键，不显形 */}
+      <fieldset className="mt-4 max-w-sm" data-testid="theme-options">
         <legend className="sr-only">外观</legend>
-        {THEME_OPTIONS.map((o) => (
-          <label key={o.id} data-testid={`theme-${o.id}`}
-            className={`state-layer is-field focus-ring flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2.5 type-body ${pref === o.id ? 'border-primary bg-(--semantic-color-surface-selected) text-text-primary' : 'border-border-subtle text-text-secondary'}`}>
-            <input type="radio" name="theme" value={o.id} checked={pref === o.id} onChange={() => pick(o.id)} className="size-4 accent-primary outline-none" />
-            <span className="flex-1">{o.label}</span>
-            {o.id === 'system' && <span className="type-label text-text-secondary">现在是{mode === 'dark' ? '深色' : '浅色'}</span>}
+        {THEME_OPTIONS.map((o, i) => (
+          <label key={o.id} data-testid={`theme-${o.id}`} className="state-layer is-field focus-ring flex cursor-pointer rounded-md px-3 type-body text-text-primary">
+            <input type="radio" name="theme" value={o.id} checked={pref === o.id} onChange={() => pick(o.id)} className="sr-only" />
+            <span className={cn('flex min-h-11 flex-1 items-center gap-3', i > 0 && 'border-t border-border-subtle')}>
+              <span className="flex-1">{o.label}</span>
+              {o.id === 'system' && <span className="type-label text-text-secondary">现在是{mode === 'dark' ? '深色' : '浅色'}</span>}
+              <Check size={16} aria-hidden="true" className={cn('shrink-0 text-(--semantic-color-action-link)', pref !== o.id && 'invisible')} />
+            </span>
           </label>
         ))}
       </fieldset>
@@ -132,7 +135,7 @@ function Appearance() {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-border-subtle px-3 py-2">
+    <div className="fill rounded-md px-3 py-2">
       <dt className="type-caption text-text-secondary">{label}</dt>
       <dd className="mt-0.5 type-heading2 font-semibold tabular-nums">{value}</dd>
     </div>

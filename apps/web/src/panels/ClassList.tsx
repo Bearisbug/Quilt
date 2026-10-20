@@ -4,6 +4,7 @@ import { TOKEN_COLOR_KEYS, kebab, type Tokens } from '@quilt/core/browser';
 import { Select } from '@/ui/Select';
 import { IconButton } from '@/ui/ui';
 import { explainClass, splitClasses, stepClass, withColorToken } from '@/lib/twClass';
+import { SWATCH_EDGE } from './designOptions';
 
 // 检查器的类名：一行一个（v0.96 PAGE-CANVAS「类名编辑」）。每个类上面是可改的类名与 ‹ › ×，紧跟着下面一句说明（本项目的实际取值）
 // 与颜色类的 token 色下拉；× 删一行，末尾一行回车加入。说明不要并排放在类名右边：检查器只有约 300px 宽，并排时类名一栏只剩约 90px，常见类名都会被截断。
@@ -21,7 +22,7 @@ export function ClassList({ rows, onChange, tokens, labelledBy }: { rows: string
   };
   const colorOptions = TOKEN_COLOR_KEYS.map((key) => {
     const name = kebab(key);
-    return { value: name, label: name, icon: <span className="size-3 shrink-0 rounded-sm border border-border-subtle" style={{ background: tokens?.colors[key] }} aria-hidden="true" /> };
+    return { value: name, label: name, icon: <span className={`size-3 shrink-0 rounded-sm ${SWATCH_EDGE}`} style={{ background: tokens?.colors[key] }} aria-hidden="true" /> };
   });
   return (
     <div role="group" aria-labelledby={labelledBy} className="space-y-1" data-testid="class-list">
@@ -33,7 +34,7 @@ export function ClassList({ rows, onChange, tokens, labelledBy }: { rows: string
         return (
           <div key={i} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-1" data-testid="class-row" data-class={cls}>
             <input value={cls} onChange={(e) => set(i, e.target.value)} onBlur={() => tidy(i)} aria-label={`类名 ${i + 1}`} spellCheck={false}
-              className="h-7 w-full focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) px-1.5 font-mono type-label" />
+              className="fill h-7 w-full focus-ring rounded-md border border-transparent px-2 font-mono type-label text-text-primary" />
             <div className="flex items-center">
               {steppable ? (<>
                 <IconButton size="2xs" tip="none" label={`第 ${i + 1} 行调小一档`} unavailable={down === null && '已到最小一档'} onClick={() => down && set(i, down)} data-testid="class-down"><ChevronLeft size={14} aria-hidden="true" /></IconButton>
@@ -41,9 +42,9 @@ export function ClassList({ rows, onChange, tokens, labelledBy }: { rows: string
               </>) : <span className="w-12" aria-hidden="true" />}
               <IconButton size="2xs" tip="none" label={`删掉 ${cls || `第 ${i + 1} 行`}`} onClick={() => onChange(rows.filter((_, j) => j !== i))} data-testid="class-remove"><X size={14} aria-hidden="true" /></IconButton>
             </div>
-            <div className="col-span-2 flex flex-wrap items-center gap-x-2 gap-y-1 px-1.5 pb-1.5 pt-0.5">
+            <div className="col-span-2 flex flex-wrap items-center gap-x-2 gap-y-1 px-2 pb-1.5 pt-0.5">
               <p className={`type-label leading-snug [overflow-wrap:anywhere] ${info.known ? 'text-text-secondary' : 'text-(--semantic-color-text-tertiary)'}`} data-testid="class-desc">
-                {info.color?.swatch && !info.color.token && <span className="mr-1 inline-block size-2.5 rounded-sm border border-border-subtle align-middle" style={{ background: info.color.swatch }} aria-hidden="true" />}
+                {info.color?.swatch && !info.color.token && <span className={`mr-1 inline-block size-2.5 rounded-sm align-middle ${SWATCH_EDGE}`} style={{ background: info.color.swatch }} aria-hidden="true" />}
                 {info.text}
               </p>
               {info.color && (
@@ -58,7 +59,7 @@ export function ClassList({ rows, onChange, tokens, labelledBy }: { rows: string
       })}
       <input value={adding} onChange={(e) => setAdding(e.target.value)} placeholder="添加类名…（回车加入）" aria-label="添加类名" spellCheck={false} data-testid="class-add"
         onKeyDown={(e) => { if (e.key !== 'Enter') return; e.preventDefault(); const parts = splitClasses(adding); if (parts.length) onChange([...rows, ...parts]); setAdding(''); }}
-        className="h-7 w-full rounded-md border border-dashed border-border-subtle bg-transparent px-1.5 font-mono type-label" />
+        className="fill h-7 w-full focus-ring rounded-md border border-transparent px-2 font-mono type-label text-text-primary placeholder:text-(--semantic-color-text-tertiary)" />
     </div>
   );
 }

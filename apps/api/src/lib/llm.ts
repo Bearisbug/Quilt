@@ -5,7 +5,7 @@ import path from 'node:path';
 import { config } from '../config.ts';
 import { sha256 } from './signing.ts';
 import { codexBin } from './agentCli.ts';
-import { EDIT_BLOCK } from '@quilt/core';
+import { EDIT_BLOCK, SKETCH_GENERATOR_MARK, type DraftFrame } from '@quilt/core';
 
 // LLM 适配层（§17 Claude API）。驱动：anthropic（生产，API key）| agent-sdk（本机 Claude 订阅，仅开发）| codex（本机 Codex 订阅，v0.68）
 // | gemini | openai（兼容端点）| stub（测试故障注入/回放）。
@@ -307,6 +307,13 @@ class StubLlm implements Llm {
       const [find, replace] = prompt.includes('[stub-patch-miss]') ? ['<h1 data-qid="q0">not in this screen</h1>', '<h1>x</h1>'] : [h1!, h1!.replace(/>[^<]*</, '>Patched title<')];
       return { text: `${EDIT_BLOCK.find}\n${find}\n${EDIT_BLOCK.sep}\n${replace}\n${EDIT_BLOCK.replace}`, tokensIn: 1000, tokensOut: 100, model, ms: 5 };
     }
+    // 草稿（REQ-CORE-040）：画框先取提示里的 [stub-frame:<画框>]（模拟模型在 auto 时自选），其次取系统提示给定的，再次 component。
+    // 草稿里只改一块（REQ-CORE-045，subtreeUserPrompt）回一个认得出的单元素，用例据此核对只换了那一块
+    if (system.startsWith(SKETCH_GENERATOR_MARK)) {
+      if (prompt.startsWith('Within the screen')) return { text: '<p class="mt-1 text-sm text-[#22d3ee]">Regenerated block</p>', tokensIn: 1000, tokensOut: 50, model, ms: 5 };
+      const frame = (/\[stub-frame:(component|mobile|desktop)\]/.exec(prompt)?.[1] ?? /^FRAME: (component|mobile|desktop)\b/m.exec(system)?.[1] ?? 'component') as DraftFrame;
+      return { text: fixtureDraft(frame, prompt.includes('[stub-script]')), tokensIn: 1000, tokensOut: 800, model, ms: 5 };
+    }
     const text = isPlan
       ? JSON.stringify({ screens: [
           { name: 'Home', route: '/home', purpose: 'Overview', links: ['/list', '/settings'], sections: ['header', 'hero', 'list'] },
@@ -332,6 +339,25 @@ function fixtureScreen(prompt: string): string {
 <button type="button" class="inline-flex items-center justify-center h-12 px-6 rounded-full bg-primary text-on-primary font-semibold">Primary action</button>
 </main>
 <nav class="sticky bottom-0 mt-auto grid grid-cols-4 bg-surface border-t border-outline-variant">${nav}</nav>
+</div>`;
+}
+
+// 草稿 fixture：component 是一张定宽小卡片，mobile / desktop 是 min-h-dvh 的整页；都带一个 <h1>，[stub-patch] 才有得改。
+// withScript（[stub-script]）在根里加一段 <style> 与 <script>：带脚本的草稿不能落成组件（API-CORE-047）
+function fixtureDraft(frame: DraftFrame, withScript: boolean): string {
+  const extra = withScript ? '\n<style>[data-frame]{box-shadow:0 0 24px #22d3ee}</style>\n<script>window.__stubDraft = true;</script>' : '';
+  if (frame === 'component') {
+    return `<div data-frame="component" class="w-[360px] rounded-2xl bg-[#111827] p-5 text-white">
+<h1 class="text-lg font-semibold">Now playing</h1>
+<p class="mt-1 text-sm text-white/70">Midnight City · M83</p>
+<div class="mt-4 flex items-center gap-3"><button type="button" class="w-10 h-10 flex items-center justify-center rounded-full bg-white text-[#111827]" aria-label="Play"><i data-lucide="play" class="w-5 h-5"></i></button><div class="h-1.5 flex-1 rounded-full bg-white/20"><div class="h-1.5 w-2/5 rounded-full bg-[#22d3ee]"></div></div></div>${extra}
+</div>`;
+  }
+  const pad = frame === 'mobile' ? 'px-4 py-6' : 'px-10 py-8';
+  return `<div data-frame="${frame}" class="min-h-dvh flex flex-col bg-[#0b1020] text-white ${pad}">
+<h1 class="text-2xl font-semibold">Weekly budget</h1>
+<p class="mt-1 text-sm text-white/60">Oct 13 – Oct 19 · $640 of $900 spent</p>
+<ul class="mt-6 divide-y divide-white/10">${['Groceries · $212', 'Transport · $96', 'Dining out · $184'].map((t) => `<li class="py-3 text-sm"><a href="#">${t}</a></li>`).join('')}</ul>${extra}
 </div>`;
 }
 

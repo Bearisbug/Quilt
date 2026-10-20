@@ -31,7 +31,7 @@ export function ArrangeBar({ count, yieldToPanel, onArrange }: { count: number; 
   };
   return (
       <div role="toolbar" aria-orientation="horizontal" aria-label={`排列已选的 ${count} 屏`} data-testid="arrange-bar" onKeyDown={onKey}
-        className={`absolute left-0 right-[var(--chrome-right)] top-16 z-20 mx-auto flex w-max items-center gap-0.5 rounded-md chrome p-1${yieldToPanel ? ' [@media(max-width:48rem)]:hidden' : ''}`}>
+        className={`absolute left-0 right-[var(--chrome-right)] top-16 z-20 mx-auto flex w-max items-center gap-0.5 chrome rounded-lg p-1${yieldToPanel ? ' [@media(max-width:48rem)]:hidden' : ''}`}>
         <span className="whitespace-nowrap px-2 type-label text-text-secondary tabular-nums">{count} 屏</span>
         {ALIGN_BTNS.map(([k, label, Icon], i) => (
           <IconButton key={k} ref={(el) => { refs.current[i] = el; }} tabIndex={i === cursor ? 0 : -1} size="xs" tip="bottom" label={label} data-testid={`arrange-${k}`} onFocus={() => setCursor(i)} onClick={() => { setCursor(i); onArrange(k); }}><Icon size={16} aria-hidden="true" /></IconButton>

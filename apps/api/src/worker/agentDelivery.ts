@@ -8,7 +8,7 @@ import { registerAgentHooks } from '../services/jobs.ts';
 import { deriveLinks, priorInstructions } from '../services/screens.ts';
 import { componentInstructions } from '../services/components.ts';
 import type { JobRow } from '../services/projects.ts';
-import { priorInstructionsBlock, type AgentTool } from '@quilt/core';
+import { priorInstructionsBlock, sketchRules, sketchFrameRule, type AgentTool, type DraftFrame, type DraftFrameChoice } from '@quilt/core';
 
 // 本机 agent 投递（REQ-AGENT-003 / ADR-015 v0.34）：runner=agent 的作业由这里投递到用户选定的本机 Claude Code 会话——
 // 往它的 inbox socket 写一行用户消息；会话在自己的窗口里做、经 MCP 回写，最后调 quilt.finish_job 收口。
@@ -24,9 +24,13 @@ const MCP_SETUP: Record<AgentTool, (url: string) => string> = {
   codex: (url) => `If this thread has no MCP tools from a server named "quilt", do not attempt the job: tell the user to run \`codex mcp add quilt --url ${url}\` and then start a new Codex thread or reopen this one (MCP servers are loaded when a thread is opened), then send the job again from the Quilt canvas.`,
 };
 
+// 子树重生成（REQ-EDIT-002）只动那一块：屏与草稿（REQ-CORE-045）同一句
+const subtreeScope = (qid: string, target: 'screen' | 'draft') => `Scope: rewrite ONLY the element with data-qid="${qid}" (and its subtree) on the target ${target}. Keep every other element identical: change it with quilt.patch_screen (find = that element's current HTML from quilt.get_screen, replace = the new HTML) instead of resending the whole ${target}.`;
+
 async function buildPrompt(job: JobRow): Promise<string> {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, job.projectId));
   if (job.kind === 'edit_component') return componentPrompt(job, project);
+  if (project.kind === 'sketchbook') return sketchPrompt(job, project);
   // generate / edit_screens 带 screenIds；regenerate_subtree 带单个 screenId + qid（只重写该子树）
   const input = job.input as { prompt: string; screenIds?: string[]; screenId?: string; qid?: string };
   const ids = input.screenIds?.length ? input.screenIds : input.screenId ? [input.screenId] : [];
@@ -34,9 +38,7 @@ async function buildPrompt(job: JobRow): Promise<string> {
   const targets = screens.length
     ? screens.map((s) => `- ${s.name} (${s.route}) screenId=${s.id} expectedRevisionId=${s.currentRevisionId ?? 'none'}${s.presentation === 'overlay' ? ' — an OVERLAY screen: keep its root transparent (bg-transparent) and its close action linking back' : ''}`).join('\n')
     : '- none: create new screen(s) with quilt.create_screen (pick routes that do not collide with the app map)';
-  const scope = job.kind === 'regenerate_subtree' && input.qid
-    ? `Scope: rewrite ONLY the element with data-qid="${input.qid}" (and its subtree) on the target screen. Keep every other element identical: change it with quilt.patch_screen (find = that element's current HTML from quilt.get_screen, replace = the new HTML) instead of resending the whole screen.`
-    : '';
+  const scope = job.kind === 'regenerate_subtree' && input.qid ? subtreeScope(input.qid, 'screen') : '';
   // 每个目标屏此前已生效的用户指令（ADR-012 v0.87）：别的通道、批注、MCP 改过的轮次不在这个会话的记忆里
   const history = job.kind === 'edit_screens' || job.kind === 'regenerate_subtree'
     ? (await Promise.all(screens.map(async (s) => priorInstructionsBlock(`SCREEN "${s.name}" (${s.route})`, await priorInstructions(s.id, s.currentRevisionId)).trim()))).filter(Boolean).join('\n\n')
@@ -74,6 +76,41 @@ async function componentPrompt(job: JobRow, project: typeof schema.projects.$inf
     `Rules: this job changes ONE shared component, not screens. Write it back with quilt.update_component { componentId, html, expectedVersion, jobId="${job.id}" }: Quilt re-bakes every screen that places it, so do not edit those screens' copies with quilt.update_screen / quilt.patch_screen (an edited copy is replaced by the component on the next write). On 409 version-conflict read it again and redo the change on the current version.`,
     'Component HTML: exactly ONE root element (keep its tag unless the instruction requires otherwise); keep every data-slot="…" element; no <script>, no <style>, no data-component element inside. Links to other screens are <a href="/route"> with routes from the app map, and exactly one carries aria-current="page" with the active styling (Quilt decides per screen which one is active); switches within a screen (tabs, segmented controls) work CSS-only.',
     'Steps: quilt.get_design_contract → take this component\'s current html and version from sharedComponents[] (tokens and recipes are the shared vocabulary) → make the change → quilt.update_component. Do not modify any files on disk; all output goes through the MCP tools.',
+    `When you are done, call quilt.finish_job with jobId="${job.id}" and a one-line summary (status "failed" with the reason if you could not do it). Quilt keeps the job open until this call.`,
+  ].filter(Boolean).join('\n\n');
+}
+
+// 草稿本（REQ-CORE-040 / ADR-030）：会话写的是草稿，不是某个应用的屏。规则与模型通道的草稿提示词同一份（sketchRules / sketchFrameRule）；
+// 不调 validate_screen——草稿没有契约可偏离。新草稿恰好一张（INV-CORE-003），route 可省（服务端取 /draft-<n>），画框按根元素的 data-frame 定；
+// 改草稿与只改一块（REQ-CORE-045）带 expectedRevisionId，与改屏同一道回写守卫。草稿有参照项目时（REQ-CORE-042 / ADR-033）让会话读那个项目的
+// 设计契约照着写，写回仍进草稿本（按参照项目的 prelude 拼装由 ingestScreen 做）
+async function sketchPrompt(job: JobRow, project: typeof schema.projects.$inferSelect): Promise<string> {
+  const input = job.input as { prompt: string; screenIds?: string[]; screenId?: string; qid?: string; frame?: DraftFrameChoice };
+  const draftId = job.kind === 'edit_screens' ? input.screenIds?.[0] : job.kind === 'regenerate_subtree' ? input.screenId : undefined;
+  const [draft] = draftId ? await db.select().from(schema.screens).where(eq(schema.screens.id, draftId)) : [];
+  if (draftId && !draft) throw new Error('草稿已被删除');
+  const [ref] = draft?.refProjectId ? await db.select({ id: schema.projects.id, name: schema.projects.name }).from(schema.projects).where(eq(schema.projects.id, draft.refProjectId)) : [];
+  const frame: DraftFrameChoice = draft ? ((draft.frame as DraftFrame | null) ?? 'auto') : (input.frame ?? 'auto');
+  const task = draft
+    ? [
+      priorInstructionsBlock(`DRAFT "${draft.name}"`, await priorInstructions(draft.id, draft.currentRevisionId)).trim(),
+      job.kind === 'regenerate_subtree' && input.qid ? subtreeScope(input.qid, 'draft') : '',
+      `Target draft: "${draft.name}" screenId=${draft.id} expectedRevisionId=${draft.currentRevisionId ?? 'none'}`,
+      `Steps: read the draft with quilt.get_screen (the body with data-qid) → change what the instruction asks and keep everything else identical, including the root's data-frame → write it back with quilt.patch_screen { screenId, expectedRevisionId, edits:[{ find, replace }], jobId: "${job.id}" } for a partial change (only the changed text) or quilt.update_screen { projectId: "${project.id}", screenId, html, expectedRevisionId, jobId: "${job.id}" } for a rewrite. On 409 revision-conflict call quilt.get_screen and redo the change on the current version.`,
+    ]
+    : [`Steps: write exactly ONE new draft with quilt.create_screen { projectId: "${project.id}", name, html, jobId: "${job.id}" } — name is a short title for the request, in its language; route may be omitted (Quilt assigns one). Do not create a second draft and do not touch the other drafts.`];
+  const style = ref
+    ? `This draft is made for the Quilt project "${ref.name}" (its REFERENCE PROJECT): read that project's design system with quilt.get_design_contract { projectId: "${ref.id}" } (designMd, colorClasses, components, routes) and follow it as the rules below say. Only read that project — the draft is written back into the sketchbook, never into "${ref.name}". Do not call quilt.validate_screen.`
+    : 'The sketchbook is a free-form scratch pad, not an app: each draft is ONE standalone component or page whose style follows only the user\'s request. It has no design system — do not call quilt.get_design_contract or quilt.validate_screen.';
+  return [
+    `[Quilt] The Quilt canvas delivered a job to this session (job ${job.id}).`,
+    `You are working in the user's Quilt sketchbook (projectId ${project.id}) through the Quilt MCP server "quilt" at ${mcpUrl()}. ${MCP_SETUP[toolOf(job)](mcpUrl())}`,
+    style,
+    `Instruction from the user:\n${input.prompt}`,
+    ...task,
+    sketchRules(!!ref),
+    sketchFrameRule(frame),
+    'Keep each call\'s HTML under ~8 KB: a larger draft goes through quilt.create_upload_url + quilt.append_upload chunks and uploadId. Do not modify any files on disk; all output goes through the MCP tools.',
     `When you are done, call quilt.finish_job with jobId="${job.id}" and a one-line summary (status "failed" with the reason if you could not do it). Quilt keeps the job open until this call.`,
   ].filter(Boolean).join('\n\n');
 }

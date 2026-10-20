@@ -11,6 +11,7 @@ import { agentRoutes } from './routes/agent.ts';
 import { mcpRoutes } from './routes/mcp.ts';
 import { channelRoutes } from './routes/channels.ts';
 import { componentRoutes } from './routes/components.ts';
+import { sketchbookRoutes } from './routes/sketchbook.ts';
 import { previewApp } from './preview.ts';
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff', '.json': 'application/json', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json' };
@@ -25,6 +26,7 @@ export function buildApiApp() {
   app.route('/', mcpRoutes);
   app.route('/', channelRoutes);
   app.route('/', componentRoutes);
+  app.route('/', sketchbookRoutes);
   // 打包运行时（REQ-CORE-017）：静态前端由同一进程托管，未命中的路径回 index.html（SPA）
   if (config.webDist) {
     const root = config.webDist;

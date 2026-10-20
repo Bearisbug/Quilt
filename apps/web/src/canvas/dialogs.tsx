@@ -12,8 +12,8 @@ export function DeleteDialog({ screens, components, selected, variantCount, onCo
   const ref = useModal<HTMLDivElement>(onClose);
   return (
     <Overlay onClose={onClose}>
-      <div ref={ref} role="alertdialog" aria-modal="true" aria-labelledby="del-title" tabIndex={-1} className="outline-none w-full max-w-xs rounded-lg border border-border-subtle bg-surface-overlay p-5 shadow-(--semantic-elevation-overlay) fade-up" data-testid="delete-dialog">
-        <h2 id="del-title" className="type-heading3 font-medium">
+      <div ref={ref} role="alertdialog" aria-modal="true" aria-labelledby="del-title" tabIndex={-1} className="sheet outline-none w-full max-w-xs p-5 fade-up" data-testid="delete-dialog">
+        <h2 id="del-title" className="type-heading3 font-semibold">
           {screens.length === 0
             ? (components.length === 1 ? `删除组件「${components[0].name}」？` : `删除 ${components.length} 个组件？`)
             : components.length > 0 ? `删除 ${screens.length} 屏与 ${components.length} 个组件？`
@@ -34,12 +34,12 @@ export function MissingDialog({ missing, busyReason, onGenerate, onClose }: { mi
   const ref = useModal<HTMLDivElement>(onClose, undefined, undefined, { initialFocus: 'self' });
   return (
     <Overlay onClose={onClose}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="miss-title" tabIndex={-1} className="outline-none w-full max-w-sm rounded-lg border border-border-subtle bg-surface-overlay p-5 shadow-(--semantic-elevation-overlay) fade-up" data-testid="missing-dialog">
-        <h2 id="miss-title" className="type-heading3 font-medium">{missing.hrefs.length === 1 ? `「${missing.hrefs[0]}」尚不存在，生成它？` : '这些路由尚不存在，生成哪一个？'}</h2>
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="miss-title" tabIndex={-1} className="sheet outline-none w-full max-w-sm p-5 fade-up" data-testid="missing-dialog">
+        <h2 id="miss-title" className="type-heading3 font-semibold">{missing.hrefs.length === 1 ? `「${missing.hrefs[0]}」尚不存在，生成它？` : '这些路由尚不存在，生成哪一个？'}</h2>
         <p className="mt-1 type-label text-text-secondary">会按当前设计系统生成新屏幕并接上链接（消耗额度）。</p>
         <ul className="mt-3 space-y-1.5">
           {missing.hrefs.map((h) => (
-            <li key={h} className="flex items-center justify-between gap-2 rounded-md border border-border-subtle px-3 py-2 type-body">
+            <li key={h} className="fill flex items-center justify-between gap-2 rounded-md px-3 py-2 type-body">
               <code className="text-error">{h}</code>
               <Button size="sm" variant="primary" disabled={!!busyReason} onClick={() => onGenerate(missing.fromScreenId, h)}>生成</Button>
             </li>
@@ -73,8 +73,8 @@ export function NewComponentDialog({ onCreate, onClose }: { onCreate: (name: str
   return (
     <Overlay onClose={onClose}>
       <form ref={ref} role="dialog" aria-modal="true" aria-labelledby="nc-title" data-testid="new-component-dialog" tabIndex={-1} onSubmit={submit}
-        className="w-full max-w-xs rounded-lg border border-border-subtle bg-surface-overlay p-5 shadow-(--semantic-elevation-overlay) fade-up outline-none">
-        <h2 id="nc-title" className="type-heading3 font-medium">新建组件</h2>
+        className="sheet w-full max-w-xs p-5 fade-up outline-none">
+        <h2 id="nc-title" className="type-heading3 font-semibold">新建组件</h2>
         <p className="mt-1 type-label text-text-secondary">先起个名字；建好后在输入框里描述它。改组件一次，用它的屏全部同步。</p>
         <label htmlFor="nc-name" className="mt-3 block type-label font-medium text-text-secondary">组件名</label>
         <Input id="nc-name" data-testid="new-component-name" value={name} onChange={(e) => { setName(e.target.value); setError(null); }} placeholder="例如 TabBar" autoComplete="off" spellCheck={false} maxLength={40} className="mt-1.5"
@@ -110,8 +110,8 @@ export function VariantDialog({ base, onCreate, onClose }: { base: ScreenDto; on
   return (
     <Overlay onClose={onClose}>
       <form ref={ref} role="dialog" aria-modal="true" aria-labelledby="vd-title" data-testid="variant-dialog" tabIndex={-1} onSubmit={submit} noValidate
-        className="w-full max-w-sm rounded-lg border border-border-subtle bg-surface-overlay p-5 shadow-(--semantic-elevation-overlay) fade-up outline-none">
-        <h2 id="vd-title" className="type-heading3 font-medium">给「{base.name}」出一个状态变体</h2>
+        className="sheet w-full max-w-sm p-5 fade-up outline-none">
+        <h2 id="vd-title" className="type-heading3 font-semibold">给「{base.name}」出一个状态变体</h2>
         <p className="mt-1 type-label text-text-secondary">同一路由、同一布局，只改状态所指的那部分；造好后是普通屏，播放时可切换。</p>
         <label htmlFor="vd-name" className="mt-3 block type-label font-medium text-text-secondary">状态名</label>
         <Input id="vd-name" data-testid="variant-name" list="variant-names" value={name} onChange={(e) => { setName(e.target.value); setError(null); }} placeholder="例如 空态" autoComplete="off" spellCheck={false} maxLength={20}

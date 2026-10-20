@@ -13,6 +13,8 @@ export type Tool = {
   active?: boolean;
   /** 不可用的原因；给了就阻止激活并在提示里说明为什么（A11Y-007 / INT-013） */
   unavailable?: string | false;
+  /** 点下去之后的请求还没回来：图标换成转圈、不再响应点击（INT-004） */
+  pending?: boolean;
   testId?: string;
   onSelect: () => void;
 };
@@ -72,9 +74,10 @@ export function CanvasToolbar({ groups }: { groups: Tool[][] }) {
     // scroll-padding 同值，键盘移到首尾时滚动也把焦点环留在可见区里。
     // z-30 高于右侧滑出面板（z-20）：提示画在工具栏这一层里、向左展开正好落在面板上，同层的话被后渲染的面板整块盖住
     // 顶端固定在顶栏下方（v0.80，与右侧滑出面板同一上沿）：上下文组只在末尾增减，垂直居中的话选中一屏全部按钮上移 61 px，用户正要点的按钮被挪走
-    // 不装盒（§13.1 方向 A）：没有外框与投影，底色与画布同色——卡片平移经过时照样被它盖住，图标不会压在设计稿上
-    <div ref={wrapRef} className="absolute right-3 top-16 z-30 flex max-h-[calc(100%-7rem)] flex-col rounded-md bg-(--semantic-color-surface-canvas) p-0.5">
-      {fade.includes('top') && <span aria-hidden="true" data-testid="rail-more" data-side="top" className="rail-more top-0.5"><ChevronUp size={14} /></span>}
+    // 装进一条竖向毛玻璃胶囊（§13.1 方向 E，.chrome）：卡片平移经过时从它底下透过去，图标不会直接压在设计稿上。
+    // 圆角 16 = 按钮圆角 10 + 到边的 6（滚动列 p-1 + 胶囊 p-0.5）
+    <div ref={wrapRef} className="chrome absolute right-3 top-16 z-30 flex max-h-[calc(100%-7rem)] flex-col rounded-lg p-0.5">
+      {fade.includes('top') && <span aria-hidden="true" data-testid="rail-more" data-side="top" className="rail-more"><ChevronUp size={14} /></span>}
       <div ref={railRef} data-fade={fade || undefined} className="rail flex min-h-0 scroll-py-1 flex-col items-center gap-0.5 p-1" role="toolbar" aria-orientation="vertical" aria-label="画布工具" onKeyDown={onKeyDown}>
         {groups.map((group, gi) => (
           <Fragment key={gi}>
@@ -92,6 +95,7 @@ export function CanvasToolbar({ groups }: { groups: Tool[][] }) {
                   unavailable={t.unavailable}
                   tip="none"
                   aria-pressed={t.active}
+                  aria-busy={t.pending || undefined}
                   data-testid={t.testId}
                   data-tool={t.id}
                   onPointerEnter={(e) => showTip(t, e.currentTarget)}
@@ -99,20 +103,20 @@ export function CanvasToolbar({ groups }: { groups: Tool[][] }) {
                   // 只在键盘焦点时出提示：关面板后焦点被程序归还到这里（Canvas），鼠标用户不该因此冒出一个提示
                   onFocus={(e) => { setActive(at); if (e.currentTarget.matches(':focus-visible')) showTip(t, e.currentTarget); }}
                   onBlur={() => setTip(null)}
-                  onClick={() => { setActive(at); t.onSelect(); }}
+                  onClick={() => { setActive(at); if (!t.pending) t.onSelect(); }}
                 >
-                  {t.icon}
+                  {t.pending ? <span className="size-4 rounded-full border-2 border-current border-r-transparent animate-spin" aria-hidden /> : t.icon}
                 </IconButton>
               );
             })}
           </Fragment>
         ))}
       </div>
-      {fade.includes('bottom') && <span aria-hidden="true" data-testid="rail-more" data-side="bottom" className="rail-more bottom-0.5"><ChevronDown size={14} /></span>}
+      {fade.includes('bottom') && <span aria-hidden="true" data-testid="rail-more" data-side="bottom" className="rail-more"><ChevronDown size={14} /></span>}
       {tip && (
         <div
           aria-hidden="true" data-testid="tool-tip" style={{ top: tip.top }}
-          className="inverse tip-in pointer-events-none absolute right-full mr-2 w-56 -translate-y-1/2 rounded-sm px-2.5 py-1.5 type-label shadow-(--semantic-elevation-overlay)"
+          className="inverse tip-in pointer-events-none absolute right-full mr-2 w-56 -translate-y-1/2 rounded-md px-2.5 py-1.5 type-label shadow-(--semantic-elevation-overlay)"
         >
           <span className="flex items-baseline gap-1.5 whitespace-nowrap font-medium">
             {tip.tool.label}

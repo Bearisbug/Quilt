@@ -9,3 +9,5 @@ export const FONT_SOURCE_OPTIONS: { key: FontSource; label: string; hint: string
   { key: 'url', label: '自定义链接', hint: '自托管或 CDN 上带 @font-face 的样式表' },
 ];
 export const RADIUS: { key: 'sharp' | 'default' | 'round'; label: string; md: string }[] = [{ key: 'sharp', label: '锐利', md: '4px' }, { key: 'default', label: '默认', md: '12px' }, { key: 'round', label: '圆润', md: '18px' }];
+// 色块的边（brand/DESIGN.md「表面与层级」不画外框）：正文色 10% 的内描边，白色块在浅底上看得出边，深色块上几乎看不见
+export const SWATCH_EDGE = 'shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--semantic-color-text-primary)_10%,transparent)]';

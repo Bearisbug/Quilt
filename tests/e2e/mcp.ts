@@ -25,7 +25,7 @@ type Detail = { project: { exemplarScreenId: string | null }; screens: Screen[];
 seed('seed');
 await writeFile(PNG_PATH, PNG);
 let mcp = await connectMcp();
-const NEW_TOOLS = ['delete_screen', 'delete_component', 'delete_project', 'get_revision', 'restore_revision', 'list_candidates', 'adopt_candidate', 'move_screens', 'edit_element', 'regenerate_subtree', 'edit_component', 'propose_design_system', 'export_prototype', 'get_export', 'list_runners', 'create_upload_url', 'list_jobs', 'cancel_job', 'get_job_events', 'list_assets', 'create_asset', 'delete_asset', 'list_design_presets', 'create_design_preset', 'apply_design_preset', 'delete_design_preset', 'list_annotations', 'update_annotation', 'delete_annotation', 'send_annotations', 'list_messages', 'patch_screen', 'append_upload'].map((t) => `quilt.${t}`);
+const NEW_TOOLS = ['delete_screen', 'delete_component', 'delete_project', 'get_revision', 'restore_revision', 'list_candidates', 'adopt_candidate', 'move_screens', 'edit_element', 'regenerate_subtree', 'edit_component', 'propose_design_system', 'export_prototype', 'get_export', 'list_runners', 'create_upload_url', 'list_jobs', 'cancel_job', 'get_job_events', 'list_assets', 'create_asset', 'delete_asset', 'list_design_presets', 'create_design_preset', 'apply_design_preset', 'delete_design_preset', 'list_annotations', 'update_annotation', 'delete_annotation', 'send_annotations', 'list_messages', 'patch_screen', 'append_upload', 'get_sketchbook', 'copy_draft', 'create_draft'].map((t) => `quilt.${t}`);
 // 工具调用助手：成功要 JSON、失败要错误类型
 const call = async <T = Record<string, unknown>>(name: string, args: Record<string, unknown>, what = name): Promise<T> => { const r = await callTool(mcp, name, args); expect(!r.isError, `${what} 出错：${r.text.slice(0, 300)}`); return r.json as T; };
 const fail = async (name: string, args: Record<string, unknown>, type: string, what = name) => { const r = await callTool(mcp, name, args); expect(r.isError, `${what} 应失败（${type}），实际成功：${r.text.slice(0, 200)}`); const t = (r.json as { type?: string }).type; expect(t === type, `${what} 应 ${type}，实际 ${t}：${r.text.slice(0, 200)}`); };
@@ -39,11 +39,11 @@ await step('TC-AGENT-011', async () => {
   const pid = r.projectId; const [s1, s2, s3] = r.screens.map((s) => s.id);
   const footer = (await apiJson<{ component: { id: string; version: number } }>(`/v1/projects/${pid}/components`, { method: 'POST', body: JSON.stringify({ name: 'Footer', html: '<footer class="p-4 text-sm">Footer</footer>' }) })).body.component;
 
-  // 1 工具面：54 个工具（v0.60 合并两对、v0.64 增 patch_screen / append_upload）、7 类资源；list_runners 不含密钥
+  // 1 工具面：57 个工具（v0.60 合并两对、v0.64 增 patch_screen / append_upload、v1.13 增 get_sketchbook / copy_draft、v1.14 增 create_draft）、7 类资源；list_runners 不含密钥
   const tools = (await mcp.listTools()).tools.map((t) => t.name);
   const missing = NEW_TOOLS.filter((t) => !tools.includes(t));
   expect(missing.length === 0, `缺工具：${missing.join(',')}`);
-  expect(tools.length === 54, `工具数应为 54，实际 ${tools.length}`);
+  expect(tools.length === 57, `工具数应为 57，实际 ${tools.length}`);
   const resources = (await mcp.listResourceTemplates()).resourceTemplates.length;
   expect(resources === 7, `资源模板应为 7 类，实际 ${resources}`);
   const runnersRaw = await callTool(mcp, 'quilt.list_runners', {});

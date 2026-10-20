@@ -95,10 +95,13 @@ class S3Storage implements Storage {
 
 export const storage: Storage = config.storageDriver === 's3' ? new S3Storage() : new FsStorage();
 
+const shotVariant = (presentation: 'push' | 'overlay', frame: string | null) => `${presentation === 'overlay' ? '.overlay' : ''}${frame ? `.${frame}` : ''}`;
+
 export const objectKeys = {
   revisionHtml: (projectId: string, screenId: string, revisionId: string) => `projects/${projectId}/screens/${screenId}/${revisionId}.html`,
-  // 叠层与整屏拍出来的图不同，键带上呈现方式（§16 v1.03）：切换后重拍的图换了地址，浏览器不会拿内存里的旧图顶替
-  revisionShot: (projectId: string, screenId: string, revisionId: string, presentation: 'push' | 'overlay' = 'push') => `projects/${projectId}/screens/${screenId}/${revisionId}${presentation === 'overlay' ? '.overlay' : ''}.png`,
-  revisionThumb: (projectId: string, screenId: string, revisionId: string, presentation: 'push' | 'overlay' = 'push') => `projects/${projectId}/screens/${screenId}/${revisionId}${presentation === 'overlay' ? '.overlay' : ''}.thumb.webp`,
+  // 叠层与整屏拍出来的图不同，键带上呈现方式（§16 v1.03）：切换后重拍的图换了地址，浏览器不会拿内存里的旧图顶替。
+  // 草稿按画框拍（REQ-CORE-040），键再带上画框；普通屏的 frame 恒为 null，键与之前相同
+  revisionShot: (projectId: string, screenId: string, revisionId: string, presentation: 'push' | 'overlay' = 'push', frame: string | null = null) => `projects/${projectId}/screens/${screenId}/${revisionId}${shotVariant(presentation, frame)}.png`,
+  revisionThumb: (projectId: string, screenId: string, revisionId: string, presentation: 'push' | 'overlay' = 'push', frame: string | null = null) => `projects/${projectId}/screens/${screenId}/${revisionId}${shotVariant(presentation, frame)}.thumb.webp`,
   exportHtml: (projectId: string, jobId: string) => `projects/${projectId}/exports/${jobId}.html`,
 };

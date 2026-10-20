@@ -6,7 +6,7 @@ import { storage, objectKeys } from '../lib/storage.ts';
 import { thumbnailOf } from '../lib/screenshot.ts';
 import { config } from '../config.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
-import { extractLinks, extractBody, outlineBody, componentNamesIn, screenInstructionHistory, type RevisionDto, type SourceKind, type CandidatesDto, DEVICE_SIZE, type DeviceType, type Presentation } from '@quilt/core';
+import { extractLinks, extractBody, outlineBody, componentNamesIn, screenInstructionHistory, type RevisionDto, type SourceKind, type CandidatesDto, DEVICE_SIZE, type DeviceType, type Presentation, type DraftFrame } from '@quilt/core';
 import { ownedProject, type ScreenRow, type RevisionRow, type ProjectRow } from './projects.ts';
 
 type Tx = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -212,19 +212,21 @@ export async function deleteScreen(projectId: string, screenId: string): Promise
 // 截图写回（§16 v0.77）：渲染要几秒，期间屏或整个项目可能已被删、对象前缀已清过。先写对象再按修订行条件回填，
 // 行已不在就清掉这一屏（项目也不在了就清整个项目）的前缀——否则刚写的 PNG 没有任何行指向它，再也没人清。返回 null = 屏已删。
 // 缩略图（v1.02 ADR-029）随截图一起写、同一条 UPDATE 回填；做不出来只回填截图，留给 screenshot.retry 补。
-// 回填是条件更新（§16 v1.03）：截图还空着、且屏的呈现方式仍是拍摄时那一个；拍的途中切了呈现方式，这两张图就作废
-export async function storeRevisionShot(projectId: string, screenId: string, revisionId: string, png: Buffer, presentation: Presentation = 'push'): Promise<string | null> {
-  const key = objectKeys.revisionShot(projectId, screenId, revisionId, presentation);
+// 回填是条件更新（§16 v1.03）：截图还空着、且屏的呈现方式仍是拍摄时那一个；拍的途中切了呈现方式，这两张图就作废。
+// 草稿的画框（REQ-CORE-040）同理：拍的途中改了画框（PATCH frame 已作废截图），按旧画框拍的这张不能落库，否则随后的重拍见已有截图就退出
+export async function storeRevisionShot(projectId: string, screenId: string, revisionId: string, png: Buffer, presentation: Presentation = 'push', frame: string | null = null): Promise<string | null> {
+  const key = objectKeys.revisionShot(projectId, screenId, revisionId, presentation, frame);
   await storage.put(key, png, 'image/png');
-  const thumbKey = await storeThumb(projectId, screenId, revisionId, png, presentation).catch((e: Error) => { console.warn(`[thumbnail] ${revisionId}: ${e.message}`); return null; });
+  const thumbKey = await storeThumb(projectId, screenId, revisionId, png, presentation, frame).catch((e: Error) => { console.warn(`[thumbnail] ${revisionId}: ${e.message}`); return null; });
+  const sameFrame = frame ? sql`${schema.screens.frame} = ${frame}` : sql`${schema.screens.frame} is null`;
   const rows = await db.update(schema.screenRevisions).set({ screenshotKey: key, thumbKey })
     .where(and(eq(schema.screenRevisions.id, revisionId), isNull(schema.screenRevisions.screenshotKey),
-      sql`exists (select 1 from ${schema.screens} where ${schema.screens.id} = ${schema.screenRevisions.screenId} and ${schema.screens.presentation} = ${presentation})`))
+      sql`exists (select 1 from ${schema.screens} where ${schema.screens.id} = ${schema.screenRevisions.screenId} and ${schema.screens.presentation} = ${presentation} and ${sameFrame})`))
     .returning({ id: schema.screenRevisions.id });
   if (rows.length) return key;
   const [rev] = await db.select({ screenshotKey: schema.screenRevisions.screenshotKey }).from(schema.screenRevisions).where(eq(schema.screenRevisions.id, revisionId));
   if (rev) {
-    // 行还在：别处已按同一呈现方式写过同一个键就算成了；否则刚写的是按过期的呈现方式拍的，没有任何行指向它
+    // 行还在：别处已按同一呈现方式（与画框）写过同一个键就算成了；否则刚写的是按过期的呈现方式或画框拍的，没有任何行指向它
     if (rev.screenshotKey === key) return key;
     await storage.delete(key).catch(() => {});
     if (thumbKey) await storage.delete(thumbKey).catch(() => {});
@@ -235,8 +237,8 @@ export async function storeRevisionShot(projectId: string, screenId: string, rev
   return null;
 }
 
-export async function storeThumb(projectId: string, screenId: string, revisionId: string, png: Buffer, presentation: Presentation = 'push'): Promise<string> {
-  const key = objectKeys.revisionThumb(projectId, screenId, revisionId, presentation);
+export async function storeThumb(projectId: string, screenId: string, revisionId: string, png: Buffer, presentation: Presentation = 'push', frame: string | null = null): Promise<string> {
+  const key = objectKeys.revisionThumb(projectId, screenId, revisionId, presentation, frame);
   await storage.put(key, await thumbnailOf(png), 'image/webp');
   return key;
 }
@@ -245,6 +247,14 @@ export async function storeThumb(projectId: string, screenId: string, revisionId
 // 截图按呈现方式拍（整屏不透明、叠层透明底），家族里每屏当前修订的截图作废，返回要重拍的修订由调用方在事务外入队
 export async function setFamilyPresentation(tx: Tx, screenId: string, presentation: Presentation): Promise<string[]> {
   const rows = await tx.update(schema.screens).set({ presentation, updatedAt: new Date() }).where(or(eq(schema.screens.id, screenId), eq(schema.screens.variantOf, screenId))).returning({ rev: schema.screens.currentRevisionId });
+  const revs = rows.map((r) => r.rev).filter((r): r is string => !!r);
+  if (revs.length) await tx.update(schema.screenRevisions).set({ screenshotKey: null, thumbKey: null }).where(inArray(schema.screenRevisions.id, revs));
+  return revs;
+}
+
+// 画框（REQ-CORE-040）只在草稿上有、是元数据：改它不建修订；当前修订的截图是按旧画框拍的，作废后由调用方在事务外重拍
+export async function setDraftFrame(tx: Tx, screenId: string, frame: DraftFrame): Promise<string[]> {
+  const rows = await tx.update(schema.screens).set({ frame, updatedAt: new Date() }).where(eq(schema.screens.id, screenId)).returning({ rev: schema.screens.currentRevisionId });
   const revs = rows.map((r) => r.rev).filter((r): r is string => !!r);
   if (revs.length) await tx.update(schema.screenRevisions).set({ screenshotKey: null, thumbKey: null }).where(inArray(schema.screenRevisions.id, revs));
   return revs;

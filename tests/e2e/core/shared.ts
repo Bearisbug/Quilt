@@ -83,8 +83,11 @@ export const brandFirstRun = await (async (): Promise<string> => {
   });
   expect(wm.family === 'Space Grotesk' && wm.weight === '500', `字标字体/字重不符：${JSON.stringify(wm)}`);
   expect(Math.abs(wm.tracking / wm.size + 0.03) < 0.005, `字标字距不是 -0.03 em：${wm.tracking}px / ${wm.size}px`);
+  // 界面正文用系统字体（v1.15），Space Grotesk 只给字标
+  const bodyFont = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
+  expect(bodyFont.includes('-apple-system') && bodyFont.includes('PingFang SC') && !bodyFont.includes('Space Grotesk'), `界面正文字体应是系统字体：${bodyFont}`);
   await shot(page, 'CORE-026-first-run');
-  return `首屏符号 ${Math.round(sym.w)} px（浅色石墨灰版、深色反白版）、字标 Space Grotesk 500`;
+  return `首屏符号 ${Math.round(sym.w)} px（浅色石墨灰版、深色反白版）、字标 Space Grotesk 500、正文 ${bodyFont.split(',')[0]}`;
 })().catch((e: Error) => e.message);
 seed('seed');
 await openApp(page);

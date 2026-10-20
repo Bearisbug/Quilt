@@ -171,9 +171,9 @@ await step('TC-EDIT-012', async () => {
   await page.keyboard.press('Enter');
   const sent = JSON.parse((await req).postData() ?? '{}') as { targetComponentIds?: string[] };
   expect(JSON.stringify(sent.targetComponentIds) === JSON.stringify([cid]), `消息没带 targetComponentIds=[cid]：${JSON.stringify(sent)}`);
-  const row = page.locator('[data-testid="running-job"]').first();
-  await row.waitFor({ timeout: 10000 });
-  expect((await row.innerText()).includes('改组件「TabBar」'), `在跑作业行文案不对：${await row.innerText()}`);
+  const jobChip = page.getByTestId('job-chip').first();
+  await jobChip.waitFor({ timeout: 10000 });
+  expect((await jobChip.innerText()).includes('改组件「TabBar」'), `作业 chip 文案不对：${await jobChip.innerText()}`);
   const { body: jobs } = await apiJson<{ items: Job[] }>(`/v1/projects/${pid}/jobs?limit=1`);
   expect(jobs.items[0].kind === 'edit_component', `作业类型 ${jobs.items[0].kind}`);
   const j8 = await waitJob(jobs.items[0].id, 300);

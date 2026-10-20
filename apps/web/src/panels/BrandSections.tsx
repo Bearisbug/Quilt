@@ -6,6 +6,7 @@ import { useToast } from '@/lib/toast';
 import { Button } from '@/ui/ui';
 import { ConfirmDialog } from '@/ui/modal';
 import { toneClass, toneColor, useAssetTone } from '@/lib/assetTone';
+import { SWATCH_EDGE } from './designOptions';
 
 // 品牌色板（REQ-EDIT-005）：26 个 token 色键的色块表，逐键标出「派生 / 品牌」，可就地改一个键、可整份清空。
 // 色块底色是数据（用户的品牌色），只能走 inline style；工具自己的外壳仍然只用 token 类。
@@ -35,19 +36,19 @@ export function PaletteSection({ tokens, palette, colorMode, savedColorMode, onC
   return (
     <div className="space-y-1.5" data-testid="palette-section">
       <div className="flex items-center justify-between gap-2">
-        <span className="type-label font-medium text-text-secondary">色板来源</span>
+        <span className="type-label font-semibold text-text-secondary">色板来源</span>
         <div className="flex items-center gap-2">
           {palette?.dark && (
-            <div className="flex rounded-md border border-border-subtle p-0.5" role="group" aria-label="色板模式" data-testid="palette-mode">
+            <div className="seg" role="group" aria-label="色板模式" data-testid="palette-mode">
               {(['light', 'dark'] as const).map((m) => (
                 <button key={m} type="button" aria-pressed={colorMode === m} data-testid={`palette-mode-${m}`}
                   onClick={() => onChange({ palette, colorMode: m })}
-                  className={`rounded-sm px-2 py-0.5 type-caption ${colorMode === m ? 'bg-primary text-on-primary' : 'text-text-secondary state-layer'}`}>{m === 'light' ? '亮' : '暗'}</button>
+                  className={`px-2 py-0.5 type-caption focus-ring ${colorMode === m ? '' : 'state-layer'}`}>{m === 'light' ? '亮' : '暗'}</button>
               ))}
             </div>
           )}
           <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} data-testid="palette-toggle"
-            className="rounded-md px-1.5 py-0.5 type-caption text-text-secondary state-layer focus-ring">
+            className="rounded-md px-1.5 py-0.5 type-caption text-(--semantic-color-action-link) state-layer focus-ring">
             {overridden ? `品牌色板 · ${overridden} 键覆盖` : '种子派生'}{open ? ' ▴' : ' ▾'}
           </button>
         </div>
@@ -62,8 +63,8 @@ export function PaletteSection({ tokens, palette, colorMode, savedColorMode, onC
               const stale = !isBrand && colorMode !== savedColorMode;
               const value = active[key] ?? tokens.colors[key];
               return (
-                <li key={key} className="flex items-center gap-1.5 rounded-md border border-border-subtle px-1.5 py-1" data-token={key} data-source={isBrand ? 'brand' : 'derived'}>
-                  <label className="relative size-5 shrink-0 cursor-pointer rounded-sm border border-border-subtle" style={{ background: value }}>
+                <li key={key} className="fill flex items-center gap-1.5 rounded-md px-1.5 py-1" data-token={key} data-source={isBrand ? 'brand' : 'derived'}>
+                  <label className={`relative size-5 shrink-0 cursor-pointer rounded-sm focus-ring is-field ${SWATCH_EDGE}`} style={{ background: value }}>
                     <span className="sr-only">改 {kebab(key)} 的颜色</span>
                     <input type="color" value={value} onChange={(e) => setKey(key, e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" />
                   </label>
@@ -135,13 +136,13 @@ export function AssetsSection({ projectId, items, colors, onChanged }: { project
   };
 
   return (
-    <div className={`space-y-1.5 border-t pt-3 ${dropping ? 'border-primary outline-2 outline-dashed outline-accent outline-offset-2' : 'border-border-subtle'}`}
+    <div className={`space-y-1.5 border-t pt-3 ${dropping ? 'border-(--semantic-color-action-link) outline-2 outline-dashed outline-(--semantic-color-action-link) outline-offset-2' : 'border-border-subtle'}`}
       data-testid="assets-panel" data-dropping={dropping ? '' : undefined} onDrop={onDrop}
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropping(false); }}>
       <div className="flex items-center justify-between gap-2">
         {/* 拖入提示占用标题本来的位置：另起一行会把下面的列表整块推走 */}
-        <span className={`type-label font-medium ${dropping ? 'text-primary' : 'text-text-secondary'}`}>{dropping ? '松手上传到这个项目' : <>素材（生成时可被 &lt;img&gt; 引用）</>}</span>
+        <span className={`type-label font-semibold ${dropping ? 'text-(--semantic-color-action-link)' : 'text-text-secondary'}`}>{dropping ? '松手上传到这个项目' : <>素材（生成时可被 &lt;img&gt; 引用）</>}</span>
         <Button size="sm" pending={uploading} disabled={uploading} data-testid="asset-upload" onClick={() => fileRef.current?.click()}>
           <Upload size={14} aria-hidden="true" />上传
         </Button>
@@ -154,7 +155,7 @@ export function AssetsSection({ projectId, items, colors, onChanged }: { project
       ) : (
         <ul className="flex flex-col gap-1" data-testid="asset-list">
           {items.map((a) => (
-            <li key={a.id} className="flex items-center gap-2 rounded-md border border-border-subtle p-1.5" data-testid="asset-item" data-name={a.name}>
+            <li key={a.id} className="fill flex items-center gap-2 rounded-md p-1.5" data-testid="asset-item" data-name={a.name}>
               {/* 素材长宽不可控：固定方槽 + contain，logo 不能被裁（VIS-006 / PERF-003） */}
               <AssetTile asset={a} colors={colors} className="size-10 shrink-0 rounded-sm p-0.5" />
               <span className="min-w-0 flex-1">

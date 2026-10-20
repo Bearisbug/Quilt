@@ -4,7 +4,8 @@
    只读，改值回 brand/tokens.json 重新生成再同步；这里不再写 token 映射。
    组件用适配文件生成的工具类（bg-surface-bg、text-text-secondary…），适配文件没映射的角色直接引变量（bg-(--semantic-color-surface-canvas)）。 */
 @import "./brand/tokens.tailwind.css";
-@import "./brand/state-layer.css";
+/* 状态层放进 base 层：它的 :where(.state-layer){position:relative} 不分层时压过 Tailwind 的 absolute / fixed，带这两个类的元素会失去定位 */
+@import "./brand/state-layer.css" layer(base);
 @import "./brand/fonts/fonts.css";
 /* 类名说明表（lib/twClass.ts）里是用户屏会写的 Tailwind 词汇（bg-gradient-to-*、backdrop-blur-* 等），不是外壳的类名；
    不排除的话 Tailwind 会照着它把这些工具类生成进外壳样式表 */
@@ -46,112 +47,156 @@ body { background: var(--semantic-color-surface-canvas); color: var(--semantic-c
 ::selection { background: var(--semantic-color-surface-selected); color: var(--semantic-color-text-primary); }
 /* 字标：Space Grotesk 500、字距 −0.03 em（brand/DESIGN.md「资产映射」，字距取自品牌包，不进界面 tokens）。
    竖向空间不够放完整符号时（符号下限 64 px、横向组合下限 240 px），字标是唯一可以缩小的品牌元素。 */
-.wordmark { font-family: var(--primitive-font-family-sans); font-weight: var(--primitive-font-weight-medium); letter-spacing: -0.03em; }
+.wordmark { font-family: var(--primitive-font-family-brand); font-weight: var(--primitive-font-weight-medium); letter-spacing: -0.03em; }
 
-/* 浮层（§13.1 方向 A）：实底 + 细线外框 + 面板投影，不半透明、不模糊 */
-.chrome {
-  background: var(--semantic-color-surface-background);
-  border: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle);
-  box-shadow: var(--semantic-elevation-panel);
+/* 地基类放在 components 层：组件上的 Tailwind 工具类（圆角、data-[state] 底色）能覆盖它们 */
+@layer components {
+  /* 浮在画布上的 chrome（§13.1 方向 E，brand/DESIGN.md「材质」）：毛玻璃底 + 扩散影，不画外框。
+     只给画布内容会从底下经过的浮层（项目切换器、工具栏、输入框、作业 chip、侧滑面板、小地图、草稿本记录栏）；
+     从它里面展开的菜单、提示用实底（亮材质不叠亮材质，ui-constraints VIS-011）。深色下影子看不清边界，内侧补一道正文色 10% 的描边 */
+  .chrome, .composer {
+    background: var(--semantic-material-chrome-tint);
+    -webkit-backdrop-filter: blur(var(--semantic-material-chrome-blur)) saturate(var(--semantic-material-chrome-saturate));
+    backdrop-filter: blur(var(--semantic-material-chrome-blur)) saturate(var(--semantic-material-chrome-saturate));
+    border: var(--semantic-layout-hairline) solid transparent;
+    box-shadow: var(--semantic-elevation-panel);
+  }
+  /* 弹层与对话框：实底 overlay、大圆角、最深一档投影 */
+  .sheet { background: var(--semantic-color-surface-overlay); border-radius: var(--semantic-radius-xl); box-shadow: var(--semantic-elevation-overlay); }
+  :where([data-theme="dark"]) :is(.chrome, .composer, .sheet) { border-color: color-mix(in srgb, var(--semantic-color-text-primary) 10%, transparent); }
+  @media (prefers-color-scheme: dark) {
+    :where(:root:not([data-theme="light"])) :is(.chrome, .composer, .sheet) { border-color: color-mix(in srgb, var(--semantic-color-text-primary) 10%, transparent); }
+  }
+  /* 系统「降低透明度」：换实底、去模糊；高对比：实底 + 较重的外框 */
+  @media (prefers-reduced-transparency: reduce) {
+    .chrome, .composer { background: var(--semantic-color-surface-background); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  }
+  @media (prefers-contrast: more) {
+    .chrome, .composer { background: var(--semantic-color-surface-background); -webkit-backdrop-filter: none; backdrop-filter: none; border-color: var(--semantic-color-border-strong); }
+    .sheet { border: var(--semantic-layout-hairline) solid var(--semantic-color-border-strong); }
+  }
+  /* 控件形态（brand/DESIGN.md「控件形态」）：填充底 = 正文色 7%，次按钮、输入框、分段控件轨道、标签共用；不描边 */
+  .fill { background: color-mix(in srgb, var(--semantic-color-text-primary) 7%, transparent); }
+  /* 分段控件（iOS）：填充轨道 + 当前项浮起的滑块；当前项靠 aria-checked / aria-pressed / data-state=on 标出 */
+  .seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: var(--semantic-radius-md); background: color-mix(in srgb, var(--semantic-color-text-primary) 7%, transparent); }
+  .seg > * { border-radius: calc(var(--semantic-radius-md) - 2px); color: var(--semantic-color-text-secondary); }
+  .seg > :is([aria-checked="true"], [aria-pressed="true"], [data-state="on"], [data-state="checked"]) { background: var(--semantic-color-surface-raised); color: var(--semantic-color-text-primary); box-shadow: var(--semantic-elevation-raised); }
+  /* 深色下抬起面与压在毛玻璃上的轨道几乎同色，滑块再提亮一档 */
+  :where([data-theme="dark"]) .seg > :is([aria-checked="true"], [aria-pressed="true"], [data-state="on"], [data-state="checked"]) { background: color-mix(in srgb, var(--semantic-color-text-primary) 16%, var(--semantic-color-surface-raised)); }
+  @media (prefers-color-scheme: dark) {
+    :where(:root:not([data-theme="light"])) .seg > :is([aria-checked="true"], [aria-pressed="true"], [data-state="on"], [data-state="checked"]) { background: color-mix(in srgb, var(--semantic-color-text-primary) 16%, var(--semantic-color-surface-raised)); }
+  }
+  /* 状态标签：语义色 12% 混进抬起面的不透明底 + 语义色字，不描边；不透明是为了压在毛玻璃与面板上时字的对比度仍 ≥ 4.5:1 */
+  .tint-success { background: color-mix(in srgb, var(--semantic-color-feedback-success) 12%, var(--semantic-color-surface-raised)); color: var(--semantic-color-feedback-success); }
+  .tint-warning { background: color-mix(in srgb, var(--semantic-color-feedback-warning) 12%, var(--semantic-color-surface-raised)); color: var(--semantic-color-feedback-warning); }
+  .tint-error { background: color-mix(in srgb, var(--semantic-color-feedback-error) 12%, var(--semantic-color-surface-raised)); color: var(--semantic-color-feedback-error); }
+  .tint-link { background: color-mix(in srgb, var(--semantic-color-action-link) 12%, var(--semantic-color-surface-raised)); color: var(--semantic-color-action-link); }
+  /* 对话框遮罩：半透明墨色 + 6 px 背景模糊（ui-constraints MOTION-003） */
+  .scrim { background: var(--semantic-color-scrim); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
 }
-@media (prefers-contrast: more) {
-  .chrome { border-color: var(--semantic-color-border-strong); }
-}
+@media (prefers-reduced-transparency: reduce) { .scrim { -webkit-backdrop-filter: none; backdrop-filter: none; } }
 .panel-head { border-bottom: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle); }
 /* 非画布页（PAGE-FIRST、错误页）的顶栏：实底横条；画布页的顶栏不铺底，见 TopNav */
 .masthead { background: var(--semantic-color-surface-background); border-bottom: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle); }
 /* 提示条与工具提示：反色实底（编辑部的反色标签） */
 .inverse { background: var(--semantic-color-surface-inverse); color: var(--semantic-color-text-on-inverse); }
-.kbd { font-family: var(--semantic-typography-code-font-family); background: var(--semantic-color-surface-sunken); color: var(--semantic-color-text-secondary); border: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle); border-bottom-width: 2px; border-radius: var(--semantic-radius-sm); }
-/* 反色底上的键帽：底色跟着反色走，不能是浅色凹下底压在墨色提示上 */
-.inverse .kbd { background: transparent; color: inherit; border-color: currentColor; }
+/* 快捷键标签：填充底小件（同 .fill 的正文色 7%），不描边 */
+.kbd { font-family: var(--semantic-typography-code-font-family); background: color-mix(in srgb, var(--semantic-color-text-primary) 7%, transparent); color: var(--semantic-color-text-secondary); border-radius: var(--semantic-radius-sm); }
+/* 反色底上的快捷键：填充取提示自己的字色，不能是正文色的填充压在墨色提示上 */
+.inverse .kbd { background: color-mix(in srgb, currentColor 7%, transparent); color: inherit; }
 
-/* 画布外壳：chrome 各自浮在画布上，底部输入框居中于「左侧对话面板与右侧工具栏之间」的空白区。
+/* 画布外壳：chrome 各自浮在画布上，底部输入框缺省压在视口正中。
    各浮层的占位只在这里定义一次，宽度与避让都引用同一组变量。 */
 .canvas-shell {
   --rail-w: 4.75rem;   /* 工具栏及其外边距 */
-  --dock-w: 20rem;     /* 左侧对话记录 */
   --panel-w: 20rem;    /* 右侧滑出面板 */
-  --chrome-left: calc(var(--dock-w) + 1.5rem);
-  /* 输入框的左边界与画布可用区的左边界分开算（v0.78）：对话记录展开或折叠成横条都贴在左下角、和输入框同一条横带，
-     折叠只让出画布可用区（--chrome-left），不让出这一截 */
-  --composer-left: calc(var(--dock-w) + 1.5rem);
-  --chrome-right: var(--rail-w);
+  /* 两侧浮层占的宽（右：工具栏与打开着的面板；左边没有常驻浮层，留出与右侧工具栏同宽的边距）。画布可用区（--chrome-left / --chrome-right）缺省就是它们，
+     输入框停在左 / 右边时那一侧再让到输入框内缘外（见下面的 [data-dock]）；输入框自己按 --side-right 落位，不跟着自己的让位走 */
+  --side-left: var(--rail-w);
+  --side-right: var(--rail-w);
+  --chrome-left: var(--side-left);
+  --composer-left: var(--side-left);  /* 输入框停在底边时横向落点的左界 */
+  --lane-left: var(--composer-left);  /* 输入框这条横带的左边界（composer-lane 探针与输入框的宽同用）；侧停时退到外边距 */
+  --chrome-right: var(--side-right);
   --chrome-top: 3.5rem;
-  --dock-top: 4.5rem;        /* 对话记录上沿最高到这里（顶栏下方） */
   --chrome-bottom: 11.5rem;  /* 首帧默认值（输入框一行时约 162px + 16px 底距）；输入框量到实际高度后由 Canvas 用内联变量覆盖——它会随内容增高、窄视口下工具条会折行 */
+  /* 输入框侧停的可用段（距外壳上 / 下沿，v1.16）：左边在小地图（开着时）下方；右边贴着工具栏与面板的内侧。
+     两边上沿都不高于 7.5rem：画布顶部正中那一排浮条（排列条、连线计数、待命提示）在 4rem～6.5rem */
+  --seg-left-top: 7.5rem;
+  --seg-left-bottom: 1rem;
+  --seg-right-top: 7.5rem;
+  --seg-right-bottom: 1rem;
 }
-.canvas-shell[data-chat="collapsed"] { --chrome-left: var(--rail-w); }
-.canvas-shell[data-panel="open"] { --chrome-right: calc(var(--panel-w) + var(--rail-w) + 1rem); }
-.canvas-shell[data-composer="hidden"] { --chrome-bottom: 1rem; }
-/* 小地图在左上角（顶栏下方 4rem 起、高 112 px）：显示时对话记录的上沿让到它下面，不然消息一多面板往上长、把小地图整块盖住 */
-.canvas-shell[data-minimap="on"] { --dock-top: 11.75rem; }  /* 收起后底部没有任何浮层，只留边距 */
-/* 窄视口：浮层不再横向互相避让（否则总宽超出视口），改为叠在画布上，输入框横跨整宽 */
+.canvas-shell[data-panel="open"] { --side-right: calc(var(--panel-w) + var(--rail-w) + 1rem); }
+/* 小地图在左上角（顶栏下方 4rem 起、高 112 px）：显示时输入框左停的可用段从它下面开始 */
+.canvas-shell[data-minimap="on"] { --seg-left-top: 11.75rem; }
+/* 窄视口：面板不再横向避让（否则总宽超出视口），改为叠在画布上，输入框横跨整宽 */
 @media (max-width: 48rem) {
-  .canvas-shell {
-    --dock-w: min(20rem, calc(100vw - var(--rail-w) - 1.5rem));
-    --panel-w: min(20rem, calc(100vw - var(--rail-w) - 1.5rem));
-    --chrome-left: var(--rail-w);
-  }
-  .canvas-shell[data-panel="open"] { --chrome-right: var(--rail-w); }
+  .canvas-shell { --panel-w: min(20rem, calc(100vw - var(--rail-w) - 1.5rem)); }
+  .canvas-shell[data-panel="open"] { --side-right: var(--rail-w); }
 }
-/* 对话记录（v0.34）：贴左下角、底部对齐，从下往上长（输入框收起时 --chrome-bottom 只剩 1rem，停在它上方的横条随之落底） */
-.chat-dock { --dock-bottom: 1rem; bottom: var(--dock-bottom); max-height: calc(100dvh - var(--dock-top) - var(--dock-bottom)); }
-/* 放不下「对话记录 + 30rem 输入框 + 右侧浮层」时（v0.78），对话记录连同折叠横条改停在输入框上方、输入框的左边界退到边距：
-   面板关着 21.5 + 30 + 4.75 = 56.25rem，开着 21.5 + 30 + 25.75 = 77.25rem。两侧一起让位的话，
-   768～1100 px 同时开着对话记录与面板时输入框被挤成竖条（800 px 下 44 px 宽、顶出视口）。
-   画布可用区照旧为对话记录让位（--chrome-left 不动）：它还在左侧，只是不和输入框抢底部这一条 */
-@media (max-width: 56.25rem) {
-  .canvas-shell { --composer-left: var(--rail-w); }
-  .chat-dock { --dock-bottom: var(--chrome-bottom); }
-}
-@media (max-width: 77.25rem) {
-  .canvas-shell[data-panel="open"] { --composer-left: var(--rail-w); }
-  .canvas-shell[data-panel="open"] .chat-dock { --dock-bottom: var(--chrome-bottom); }
-}
-/* 消息操作（REQ-CORE-026）：精确指针悬停或键盘聚焦到这条消息时显示；触屏没有悬停，常显（INT-006）。
-   只用 opacity 隐藏、不用 visibility / display：纯文字消息里没有别的可聚焦元素，按钮必须留在 Tab 序里，
-   键盘才进得来（进来即 focus-within 显形）；指针能点到它时必然悬停在这条消息上，此时它已经显形 */
-.msg-actions { opacity: 0; transition: opacity var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
-.msg:focus-within .msg-actions { opacity: 1; }
-@media (hover: hover) and (pointer: fine) { .msg:hover .msg-actions { opacity: 1; } }
-@media (hover: none) { .msg-actions { opacity: 1; } }
-/* 底部输入框：实底外壳，不走 .chrome——它是主输入控件，需要一块与画布截图分离的稳定底色。
-   聚焦只加深外框（透明 outline 留给强制配色模式顶上，A11Y-008），不套强调色描边。 */
+/* 输入框停在左 / 右边（PAGE-CANVAS「停靠与收起」v1.16，草稿本同一套）：那一侧的可用区至少让到输入框（或收起后的胶囊）内缘外 16 px——
+   --dock-span 是它的宽，由页面量；底部占位缩回 1rem；横带的左边界退到外边距。data-dock 是实际停的边（窄视口、放不下时都按底边） */
+:is(.canvas-shell, .sketch-shell):is([data-dock="left"], [data-dock="right"]) { --chrome-bottom: 1rem; --lane-left: 0.75rem; }
+:is(.canvas-shell, .sketch-shell)[data-dock="left"] { --chrome-left: max(var(--side-left), calc(var(--dock-span, 0px) + 1.75rem)); }
+:is(.canvas-shell, .sketch-shell)[data-dock="right"] { --chrome-right: calc(var(--side-right) + var(--dock-span, 0px) + 1rem); }
+/* 底部输入框：与其他 chrome 同一块毛玻璃（材质写在上面的 .chrome, .composer），圆角取对话框那一档。
+   聚焦不改外框，焦点环留给里面的控件（透明 outline 留给强制配色模式顶上，A11Y-008）。宽度与落位在外层 .composer-dock（见下） */
 .composer {
-  /* 横向落点：默认压在视口正中，只有当侧边浮层真会压住它时才让位，且只让到不重叠为止。
-     不要写成「在两个浮层之间的空白里居中」——那样折叠一次对话面板就把用户正在打字的框
-     横向搬走 134 px（1440 视口实测）。clamp 的三个参数正好是「左浮层内边界 / 视口居中 / 右浮层内边界」，
-     宽视口下中间那项获胜，于是开合面板时它一动不动。 */
-  /* 宽度 = 工具条排成一行需要多宽（`--composer-need`，由 Composer 量出来写进内联样式），下限 30rem 免得
-     控件少的时候缩成一条细缝，上限是让开左右浮层之后的可用宽。工具条内容变了（换通道、选中一屏少一组档位）
-     宽度跟着变，走下面那条 width 过渡滑过去，不跳。量到之前用 30rem 顶着——首帧就有值，看不到回退宽。 */
-  --composer-w: min(max(30rem, var(--composer-need, 30rem)), calc(100% - var(--composer-left) - var(--chrome-right)));
-  width: var(--composer-w);
-  left: clamp(
-    var(--composer-left),
-    calc((100% - var(--composer-w)) / 2),
-    calc(100% - var(--chrome-right) - var(--composer-w))
-  );
-  background: var(--semantic-color-surface-background);
-  border: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle);
-  border-radius: var(--semantic-radius-lg);
-  box-shadow: var(--semantic-elevation-panel);
+  border-radius: var(--semantic-radius-xl);
   /* 宽度变化期间把溢出裁掉：工具条此时按终态的一行宽度摆着（见 .composer-bar 的 nowrap），比正在收缩的
      外壳宽，不裁就会糊在框外。裁掉之后这一段读起来是「档位从边缘滑进 / 滑出」，而不是错位。
      下拉是 Select.Portal 出去的，不受这层裁剪影响；按钮提示气泡在框内，也不会被切。 */
   /* clip 而不是 hidden，且留 2rem 余量：要裁的是过渡中途横向溢出的那一大截（几十到几百 px），
-     而按钮提示气泡只探出边界十几 px——hidden 会把「取消造 3 屏 [Esc]」这类气泡切掉一半 */
+     而按钮提示气泡只探出边界十几 px——hidden 会把这类气泡切掉一半 */
   overflow: clip;
   overflow-clip-margin: 2rem;
-  transition: width var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard), left var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard),
-    border-color var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard);
+  transition: border-color var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard);
 }
-/* 收起（⌘/ / 聚焦某屏时自动）：不卸载，草稿留着；作者样式会压过 UA 的 [hidden]，这里显式兜底（COMP-008） */
+/* 停靠（PAGE-CANVAS「停靠与收起」v1.16）：外层 .composer-dock 装着输入框（或收起后的胶囊）和叠在它上方的作业 chip，按 data-dock 落位，
+   --at 是沿边的位置（0～1，Composer 写在内联样式里）。拖动跟手与落位动画只动外层的 transform（Composer 内联），chip 随卡片一起走；这里只管静止时停在哪。
+   展开时外层的宽 = 工具条排成一行需要多宽（`--composer-need`，由 Composer 量出来写进内联样式），下限 30rem 免得
+   控件少的时候缩成一条细缝，上限是让开左右浮层之后的可用宽。工具条内容变了（换通道、选中一屏少一组档位）
+   宽度跟着变，走下面那条 width 过渡滑过去，不跳。量到之前用 30rem 顶着——首帧就有值，看不到回退宽。
+   停在左右边时形状不变（同一张横向卡片、同一条宽度规则），只是横带的左边界退到外边距（--lane-left）。收起时外层随胶囊收窄，胶囊的宽由 Composer 量好写进 --pill-w */
+.composer-dock {
+  position: absolute;
+  --lane-left: var(--composer-left);
+  --composer-w: min(max(30rem, var(--composer-need, 30rem)), calc(100% - var(--lane-left) - var(--side-right)));
+  --card-w: var(--composer-w);
+  width: var(--composer-w);
+  transition: width var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard), left var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard),
+    right var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard), top var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard);
+}
+.composer-dock[data-collapsed] { --card-w: var(--pill-w, 7rem); width: auto; }
+/* 停在底边：横向落点 at 按整条底边算，缺省 0.5 = 压在视口正中；只有当侧边浮层真会压住它时才让位，且只让到不重叠为止。
+   不要写成「在两个浮层之间的空白里居中」——那样开合一次侧边浮层就把用户正在打字的框横向搬走。
+   clamp 的三个参数正好是「左浮层内边界 / 视口上的 at 处 / 右浮层内边界」，宽视口下中间那项获胜，于是开合面板时它一动不动。胶囊同一算法 */
+.composer-dock[data-dock="bottom"] { bottom: 1rem; left: clamp(var(--composer-left), calc(var(--at, 0.5) * (100% - var(--card-w))), calc(100% - var(--side-right) - var(--card-w))); }
+/* 停在左 / 右边：贴着那一侧的外边距（右边贴着工具栏与打开着的面板的内侧），沿外壳给的可用段（--seg-*）按 at 落位——
+   top 取段内 at 处、再上移自身高的 at 倍：at = 0 贴段顶、1 贴段底，放得下就出不了段；放不下由页面落回底边。
+   外层的高就是卡片的高：chip 叠是绝对定位，不撑高它 */
+.composer-dock:is([data-dock="left"], [data-dock="right"]) { --lane-left: 0.75rem; top: calc(var(--seg-top) + var(--at, 0.5) * (100% - var(--seg-top) - var(--seg-bottom))); translate: 0 calc(var(--at, 0.5) * -100%); }
+.composer-dock[data-dock="left"] { left: 0.75rem; --seg-top: var(--seg-left-top); --seg-bottom: var(--seg-left-bottom); }
+.composer-dock[data-dock="right"] { right: var(--side-right); --seg-top: var(--seg-right-top); --seg-bottom: var(--seg-right-bottom); }
+/* 可用段探针（Composer 渲染、量长度）：判侧边放不放得下，松手时沿边位置也按它们算；位置与上面同一组变量 */
+.composer-seg { position: absolute; width: 0; height: 0; visibility: hidden; pointer-events: none; }
+.composer-seg[data-side="left"] { left: 0.75rem; top: var(--seg-left-top); bottom: var(--seg-left-bottom); height: auto; }
+.composer-seg[data-side="right"] { right: var(--side-right); top: var(--seg-right-top); bottom: var(--seg-right-bottom); height: auto; }
+.composer-seg[data-side="bottom"] { left: var(--composer-left); right: var(--side-right); bottom: 1rem; width: auto; }
+/* 拖动的抓手：动词行的空白处显示抓手，行里的按钮照常是箭头（写在 components 层，把手与按钮自己的 cursor 工具类压得过它） */
+@layer components {
+  .composer-grab { cursor: grab; }
+  .composer-grab :where(button, a) { cursor: default; }
+}
+/* 拖动中（Composer 在 <html> 上打 data-composer-drag）：全页握拳；页面里的 iframe 不接指针——指针一进画布或看板里的预览，
+   父页就收不到 move / up（与 .viewport[data-pointer-drag] 同一个原因） */
+:root[data-composer-drag], :root[data-composer-drag] * { cursor: grabbing !important; }
+:root[data-composer-drag] iframe { pointer-events: none !important; }
+/* 收起（⌘/ / 右上角「收起」/ 聚焦某屏时自动）：不卸载，草稿留着；作者样式会压过 UA 的 [hidden]，这里显式兜底（COMP-008） */
 .composer[hidden] { display: none; }
 /* 拖着图片经过输入框时给出可放置的提示（REQ-CORE-012） */
-.composer[data-dropping] { border-color: var(--semantic-color-action-primary); border-style: dashed; }
-.composer:focus-within { border-color: var(--semantic-color-border-strong); }
+.composer[data-dropping] { border-color: var(--semantic-color-action-link); border-style: dashed; }
 .composer:has(textarea:focus-visible) { outline: 2px solid transparent; outline-offset: 2px; }
 .composer textarea { max-height: 224px; } /* 8 行 × 28px 行高，到顶后内部滚动 */
 /* 工具条空闲时略退后，聚焦、有内容或生成中回到全亮 */
@@ -166,26 +211,33 @@ body { background: var(--semantic-color-surface-canvas); color: var(--semantic-c
 .composer[data-bar="wrap-all"] .composer-bar,
 .composer[data-bar="wrap-all"] .composer-bar > * { flex-wrap: wrap; }
 /* 首帧不做过渡：宽度要等量完工具条才知道，量出来之前那一帧的宽度是回退值，让它过渡等于每次开页面都先长一下 */
-.composer:not([data-measured]) { transition: none; }
+.composer-dock:not([data-measured]) { transition: none; }
 .composer:focus-within .composer-bar, .composer[data-has-text] .composer-bar, .composer[data-busy] .composer-bar { opacity: 1; }
 /* 占位文案换词：新词从下方浮现，过渡期带一点模糊把两态糊成一次变形（MOTION-016） */
 @keyframes phrase-in { from { opacity: 0; transform: translateY(6px); filter: blur(4px); } to { opacity: 1; transform: none; filter: blur(0); } }
 .phrase-in { animation: phrase-in var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard); }
 /* 锚定菜单（通道下拉）：从触发器那条边长出来（MOTION-007），进 180ms 出 120ms（MOTION-015） */
 .menu {
-  background: var(--semantic-color-surface-overlay); border: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle); border-radius: var(--semantic-radius-md);
+  background: var(--semantic-color-surface-overlay); border: var(--semantic-layout-hairline) solid transparent; border-radius: var(--semantic-radius-md);
   box-shadow: var(--semantic-elevation-overlay); transform-origin: var(--radix-select-content-transform-origin);
 }
 @keyframes menu-in { from { opacity: 0; transform: translateY(4px) scale(0.96); filter: blur(4px); } to { opacity: 1; transform: none; filter: blur(0); } }
 @keyframes menu-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(3px) scale(0.98); } }
 .menu[data-state="open"] { animation: menu-in var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard); }
 .menu[data-state="closed"] { animation: menu-out var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
+/* .menu 的外框写在上面这段（不在 components 层），深色描边与高对比外框跟在它后面才压得住 */
+:where([data-theme="dark"]) .menu { border-color: color-mix(in srgb, var(--semantic-color-text-primary) 10%, transparent); }
+@media (prefers-color-scheme: dark) { :where(:root:not([data-theme="light"])) .menu { border-color: color-mix(in srgb, var(--semantic-color-text-primary) 10%, transparent); } }
+@media (prefers-contrast: more) { .menu { border-color: var(--semantic-color-border-strong); } }
 
 /* 右侧竖排工具栏（RESP-016 / RESP-017）：高度有界、自身滚动、无可见滚动条；溢出时那一侧边缘露出一个小箭头 */
 .rail { max-height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
-/* 只在那一侧还有被遮住的工具时出现（CanvasToolbar 按滚动位置写 data-fade）：贴着工具栏那一边的一条画布底色窄条，正中一个弱文字色的小箭头，
-   盖住正在滚出去的那颗按钮的边缘；不接指针，点击照样落到下面的按钮上。不用渐隐遮罩：界面不用渐变（brand meta.notUsed） */
-.rail-more { position: absolute; inset-inline: 0.125rem; z-index: 1; display: grid; place-items: center; height: 1rem; background: var(--semantic-color-surface-canvas); color: var(--semantic-color-text-tertiary); pointer-events: none; }
+/* 只在那一侧还有被遮住的工具时出现（CanvasToolbar 按滚动位置写 data-fade）：贴着胶囊那一端的一条窄条，正中一个弱文字色的小箭头，
+   盖住正在滚出去的那颗按钮的边缘；不接指针，点击照样落到下面的按钮上。不用渐隐遮罩：界面不用渐变（brand meta.notUsed）。
+   底色与外侧那一端的圆角都从胶囊继承：窄条和胶囊是同一块材质（降低透明度时同为实底），压在玻璃上不露出一块别的颜色 */
+.rail-more { position: absolute; inset-inline: 0; z-index: 1; display: grid; place-items: center; height: 1rem; background: inherit; color: var(--semantic-color-text-tertiary); pointer-events: none; }
+.rail-more[data-side="top"] { top: 0; border-start-start-radius: inherit; border-start-end-radius: inherit; }
+.rail-more[data-side="bottom"] { bottom: 0; border-end-start-radius: inherit; border-end-end-radius: inherit; }
 .rail::-webkit-scrollbar { display: none; }
 /* 开着的工具（aria-pressed 的切换钮）：状态层常驻在按下那一档，按钮里铺一块淡灰底；悬停不再叠加，与没开的工具悬停（0.08）分得开。
    要写在 state-layer.css 之后：同特异性下后写的压过它的 :hover / :focus-visible 档 */
@@ -230,13 +282,18 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
 .world.moving .card .skeleton, .world.moving .card .skeleton::before, .world.moving .card .skeleton *, .world.moving .comp .skeleton::before, .world.moving .comp .skeleton * { animation-play-state: paused; }
 /* 卡片底白是恒定色，不跟外观走：这块白属于用户的设计稿，是他们 APP 的画布底，不是 Quilt 的外壳（VIS-010 的「确需恒定色」情形）。
    取 primitive.color.neutral.0：模式覆盖只改语义层，这一级在深浅两套里都是白。
-   选中描边用画布标记色，按 --canvas-zoom 反算（v0.80，世界层在平移缩放停下时写一次）：屏幕上始终约 2 px，10% 缩放下不会细到看不见 */
-.card { position: absolute; left: 0; top: 0; background: var(--primitive-color-neutral-0); border-radius: var(--semantic-radius-lg); box-shadow: var(--semantic-elevation-panel); outline: calc(2px / var(--canvas-zoom, 1)) solid transparent; outline-offset: calc(4px / var(--canvas-zoom, 1)); transition: outline-color var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
+   选中描边用画布标记色，按 --canvas-zoom 反算（v0.80，世界层在平移缩放停下时写一次）：屏幕上始终约 2 px，10% 缩放下不会细到看不见。
+   圆角按设备取档：手机屏 16（lg），桌面屏 10（md，.desktop）；阴影是抬起那一档（elevation.raised） */
+.card { position: absolute; left: 0; top: 0; background: var(--primitive-color-neutral-0); border-radius: var(--semantic-radius-lg); box-shadow: var(--semantic-elevation-raised); outline: calc(2px / var(--canvas-zoom, 1)) solid transparent; outline-offset: calc(4px / var(--canvas-zoom, 1)); transition: outline-color var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
+/* 与卡片同形的几样（候选错位底板、候选格、新屏落点框）跟着卡片一起换档 */
+.card.desktop, .cand-ghost.desktop, .cand-cell.desktop, .anchor.desktop { border-radius: var(--semantic-radius-md); }
 /* 圆角裁切只包截图 / 骨架 / iframe 这一层（v0.80）：裁整张卡的话，画在卡片上方的标签一起被裁掉 */
 .card-clip { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; }
 .card.selected, .card.focused { outline-color: var(--semantic-color-mark-line); }
 .card .label { position: absolute; left: 0; top: -28px; color: var(--semantic-color-text-secondary); font-size: var(--semantic-typography-label-font-size); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.card .label b { color: var(--semantic-color-text-primary); }
+.card .label b { color: var(--semantic-color-text-primary); font-weight: var(--primitive-font-weight-semibold); }
+/* 聚焦屏 iframe 外面那层：宽高、zoom 与反向 scale 由 CanvasView 的 unscaleFrame 按镜头倍率写进内联样式 */
+.card .frame-box { position: absolute; left: 0; top: 0; width: 100%; height: 100%; transform-origin: 0 0; }
 .card .shot, .card iframe { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border: 0; background: var(--primitive-color-neutral-0); }
 /* 底层接班（v0.76）：新截图解码完之前透明、叠在旧图上；聚焦的 iframe 就绪前透明、截图垫着，就绪后卡片加 live 把底层藏起 */
 .card .shot.pending, .card iframe.loading { opacity: 0; }
@@ -283,8 +340,9 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
 /* 卡片上的状态角标（交互中 / 选择元素中、局部修改中、候选 n）：反色标签 */
 .card .badge, .card .working, .cand-badge { background: var(--semantic-color-surface-inverse); color: var(--semantic-color-text-on-inverse); font-size: var(--semantic-typography-caption-font-size); font-weight: var(--primitive-font-weight-medium); padding: 2px 8px; border-radius: var(--semantic-radius-sm); }
 .card .badge { position: absolute; right: 8px; top: 8px; pointer-events: none; }
-/* 要用户留意的角标（加载失败、截图没取到、断链、批注发送中）：抬起面底 + 警告色字与边框，不靠颜色单独表意 */
-.card .badge.failed, .card .shot-retry, .card .warn { background: var(--semantic-color-surface-raised); color: var(--semantic-color-feedback-warning); border: var(--semantic-layout-hairline) solid currentColor; font-weight: var(--primitive-font-weight-semibold); box-shadow: var(--semantic-elevation-raised); }
+/* 要用户留意的角标（加载失败、截图没取到、断链）：警告色 12% 叠在抬起面上的不透明底 + 警告色字，不描边；文案写明发生了什么，不靠颜色单独表意。
+   底必须不透明：角标压在用户设计稿上，半透明的 .tint-warning 会让底下的内容透出来 */
+.card .badge.failed, .card .shot-retry, .card .warn { background: color-mix(in srgb, var(--semantic-color-feedback-warning) 12%, var(--semantic-color-surface-raised)); color: var(--semantic-color-feedback-warning); font-weight: var(--primitive-font-weight-semibold); box-shadow: var(--semantic-elevation-raised); }
 /* 聚焦的 iframe 重载后仍等不到就绪（v0.76）：角标换成可点的「加载失败 · 重试」 */
 .card .badge.failed { cursor: pointer; pointer-events: auto; }
 /* 卡片截图重试到头仍取不到（v0.83）：卡片正中一枚可点的「截图没取到 · 重试」，盖在手势层之上 */
@@ -306,12 +364,13 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
    动作收进每格右上方（格子外、右缘对齐）的浮层胶囊，按 1/zoom 反向缩放（--zoom 由 CanvasView 写在 .cand-stack 上），按钮始终是屏幕尺寸 */
 .cand-ghost { position: absolute; left: 0; top: 0; border-radius: var(--semantic-radius-lg); background: var(--semantic-color-border-strong); box-shadow: var(--semantic-elevation-raised); pointer-events: none; }
 .cand-stack { position: absolute; left: 0; top: 0; z-index: 5; }
-.cand-cell { position: absolute; background: var(--primitive-color-neutral-0); border-radius: var(--semantic-radius-lg); box-shadow: var(--semantic-elevation-panel); outline: 2px solid transparent; outline-offset: 4px; }
+.cand-cell { position: absolute; background: var(--primitive-color-neutral-0); border-radius: var(--semantic-radius-lg); box-shadow: var(--semantic-elevation-raised); outline: 2px solid transparent; outline-offset: 4px; }
 .cand-cell[data-current] { outline-color: var(--semantic-color-mark-line); }
-.cand-cell > img, .cand-cell > iframe { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border: 0; border-radius: var(--semantic-radius-lg); background: var(--primitive-color-neutral-0); }
+.cand-cell > img, .cand-cell > iframe { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border: 0; border-radius: inherit; background: var(--primitive-color-neutral-0); }
 .cand-cell > img { object-fit: cover; object-position: top; }
-/* 胶囊挂在格子上方、右缘对齐；宽度封在格子的屏幕宽度内（世界宽 × zoom），缩得太小放不下时向上折成两行（标签一行、图标一行），不越过格子左缘去撞左邻的胶囊 */
-.cand-cell .cand-actions { position: absolute; bottom: calc(100% + 10px / var(--zoom, 1)); right: 0; max-width: calc(100% * var(--zoom, 1)); display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; align-content: flex-end; gap: 2px; padding: 3px 3px 3px 10px; border-radius: var(--semantic-radius-md); border: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle); background: var(--semantic-color-surface-background); box-shadow: var(--semantic-elevation-overlay); white-space: nowrap; transform-origin: bottom right; transform: scale(calc(1 / var(--zoom, 1))); }
+/* 胶囊挂在格子上方、右缘对齐；宽度封在格子的屏幕宽度内（世界宽 × zoom），缩得太小放不下时向上折成两行（标签一行、图标一行），不越过格子左缘去撞左邻的胶囊。
+   材质与投影来自 .chrome（CandidateStack 一起挂上），这里只管排版 */
+.cand-cell .cand-actions { position: absolute; bottom: calc(100% + 10px / var(--zoom, 1)); right: 0; max-width: calc(100% * var(--zoom, 1)); display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; align-content: flex-end; gap: 2px; padding: 3px 3px 3px 10px; border-radius: var(--semantic-radius-lg); white-space: nowrap; transform-origin: bottom right; transform: scale(calc(1 / var(--zoom, 1))); }
 .cand-cell .cand-tag { margin-right: 6px; color: var(--semantic-color-text-primary); font-size: var(--semantic-typography-label-font-size); font-weight: var(--primitive-font-weight-semibold); }
 .cand-cell .cand-btns { display: flex; align-items: center; gap: 2px; }
 /* 候选角标（REQ-CORE-015）：可点，就地展开 / 收起。槽位与卡片同位、只占卡片宽度，本身不拦指针——
@@ -328,15 +387,15 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
 .card .working { position: absolute; right: 8px; top: 8px; z-index: 2; pointer-events: none; }
 /* 同一张卡还挂着候选角标时错开一行：两者同位同色同尺寸，拉 z-index 只会换成谁盖谁 */
 .card .working.below { top: 34px; }
-.styleguide { position: absolute; left: 0; top: 0; border-radius: var(--semantic-radius-lg); overflow: hidden; box-shadow: var(--semantic-elevation-panel); outline: calc(2px / var(--canvas-zoom, 1)) solid transparent; outline-offset: calc(4px / var(--canvas-zoom, 1)); cursor: pointer; }
+.styleguide { position: absolute; left: 0; top: 0; border-radius: var(--semantic-radius-lg); overflow: hidden; box-shadow: var(--semantic-elevation-raised); outline: calc(2px / var(--canvas-zoom, 1)) solid transparent; outline-offset: calc(4px / var(--canvas-zoom, 1)); cursor: pointer; }
 .styleguide.selected { outline-color: var(--semantic-color-mark-line); }
 .styleguide:focus-visible { outline-color: var(--focus-ring-color); outline-offset: calc(8px / var(--canvas-zoom, 1)); }
 /* 共享组件卡（REQ-EDIT-006）：与屏卡片同一套选中 outline（单层高亮，INT-015），白底是用户设计稿的底；
    里面是活 iframe 但不接指针——拖拽 / 选中全走盖在上面的 .gesture，与屏卡片一致 */
-.comp { position: absolute; left: 0; top: 0; background: var(--primitive-color-neutral-0); border-radius: var(--semantic-radius-lg); box-shadow: var(--semantic-elevation-panel); outline: calc(2px / var(--canvas-zoom, 1)) solid transparent; outline-offset: calc(4px / var(--canvas-zoom, 1)); transition: outline-color var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
+.comp { position: absolute; left: 0; top: 0; background: var(--primitive-color-neutral-0); border-radius: var(--semantic-radius-lg); box-shadow: var(--semantic-elevation-raised); outline: calc(2px / var(--canvas-zoom, 1)) solid transparent; outline-offset: calc(4px / var(--canvas-zoom, 1)); transition: outline-color var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
 .comp.selected, .comp.focused { outline-color: var(--semantic-color-mark-line); }
 .comp .label { position: absolute; left: 0; top: -28px; color: var(--semantic-color-text-secondary); font-size: var(--semantic-typography-label-font-size); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.comp .label b { color: var(--semantic-color-text-primary); }
+.comp .label b { color: var(--semantic-color-text-primary); font-weight: var(--primitive-font-weight-semibold); }
 /* iframe 恒按设备整屏渲染（宽高、平移写在内联样式里），露出哪一块全靠卡片里那层 .card-clip 裁 */
 .comp iframe { position: absolute; left: 0; top: 0; display: block; border: 0; background: var(--primitive-color-neutral-0); pointer-events: none; opacity: 0; transition: opacity var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
 /* 尺寸上报之前（v0.76）：iframe 透明，垫屏卡片那一套骨架（凹下底 + 呼吸），不画白板；上报后 iframe 淡入，
@@ -368,23 +427,75 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
 .fade-up { animation: fade-up var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard); }
 @media (prefers-reduced-motion: reduce) {
   .card, .comp, .comp .live-dot, .fade-up, .card .skeleton, .card .skeleton::before, .card .skeleton .sk-dot, .comp iframe, .comp .skeleton, .comp .skeleton::before { transition: none; animation: none; }
-  .composer { transition: none; }
+  .composer-dock, .composer { transition: none; }
   .slide-in-right { animation: fade-up var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
   /* 少而柔：换词与菜单只保留淡入，去掉位移、缩放与模糊 */
   .phrase-in, .menu[data-state="open"] { animation: tip-in var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
   .menu[data-state="closed"] { animation: none; }
 }
+/* 成功的作业 chip（PAGE-CANVAS「作业 chip」）：写「完成」停 1 s 再淡出，Composer 在 1.2 s 时撤掉它（JobChips 的 DONE_MS）。
+   只动 opacity，减弱动态下照样淡出（MOTION-004 的「少而柔」）；写在上面那段之后，盖过 .fade-up 在减弱动态下的 animation: none */
+@keyframes job-chip-out { to { opacity: 0; } }
+.job-chip-out { animation: job-chip-out var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard) 1s forwards; }
 
 /* 叠层屏（REQ-PROTO-005 v0.63）：截图带 alpha，卡片铺 45% 黑，与播放时预览运行时画的遮罩同值——那是用户原型里遮罩的示意，不随外观变 */
 .card.overlay { background: rgb(0 0 0 / 0.45); }
 .card.overlay .shot { background: transparent; }
-.card .label .chip { display: inline-block; margin-right: 6px; padding: 0 6px; border: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle); border-radius: var(--semantic-radius-sm); font-size: var(--semantic-typography-caption-font-size); line-height: 16px; color: var(--semantic-color-text-secondary); vertical-align: 1px; }
+.card .label .chip { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: var(--semantic-radius-sm); font-size: var(--semantic-typography-caption-font-size); line-height: 16px; color: var(--semantic-color-text-secondary); vertical-align: 1px; }
 
 /* 状态变体胶囊（REQ-CORE-025 v0.62）：聚焦卡内顶部中央一排，压在 iframe 之上。放在角标下一行：
-   手机屏只有 390 px 宽，和右上的交互角标同一行会叠在一起、把路由读数盖住 */
-.variant-chips { position: absolute; left: 50%; top: 36px; z-index: 3; display: flex; gap: 4px; transform: translateX(-50%); pointer-events: auto; }
-.variant-chip { pointer-events: auto; border: var(--semantic-layout-hairline) solid var(--semantic-color-border-subtle); border-radius: var(--semantic-radius-sm); background: var(--semantic-color-surface-background); color: var(--semantic-color-text-secondary); font-size: var(--semantic-typography-caption-font-size); font-weight: var(--primitive-font-weight-semibold); padding: 3px 10px; cursor: pointer; box-shadow: var(--semantic-elevation-raised); }
-.variant-chip[aria-pressed="true"] { background: var(--semantic-color-action-primary); color: var(--semantic-color-text-on-action); border-color: transparent; }
+   手机屏只有 390 px 宽，和右上的交互角标同一行会叠在一起、把路由读数盖住。
+   形态是压在设计稿上的分段控件：一条毛玻璃胶囊（.chrome，CanvasView 挂上）里排各个状态，正显示的那个浮起 raised 滑块；字重两态同为 500，切换时胶囊宽度不跳。
+   轨道不用 .seg 的正文色 7% 填充：那层填充是透明的，底下的设计稿会透出来，次要文字读不出 */
+.variant-chips { position: absolute; left: 50%; top: 36px; z-index: 3; display: flex; gap: 2px; padding: 2px; border-radius: var(--semantic-radius-pill); transform: translateX(-50%); pointer-events: auto; }
+.variant-chip { pointer-events: auto; border: 0; border-radius: var(--semantic-radius-pill); background: transparent; color: var(--semantic-color-text-secondary); font-size: var(--semantic-typography-caption-font-size); font-weight: var(--primitive-font-weight-medium); padding: 3px 10px; cursor: pointer; }
+.variant-chip[aria-pressed="true"] { background: var(--semantic-color-surface-raised); color: var(--semantic-color-text-primary); box-shadow: var(--semantic-elevation-raised); }
 
 /* 小地图（REQ-CORE-024 v0.61）：顶栏下方左侧，左缘与项目切换器 chip 对齐（12 px）；canvas 绘制（Minimap.tsx），颜色取本元素上的 tokens 变量，切外观时重读 */
-.minimap { position: absolute; left: 0.75rem; top: 4rem; z-index: 20; border-radius: var(--semantic-radius-md); cursor: crosshair; touch-action: none; }
+.minimap { position: absolute; left: 0.75rem; top: 4rem; z-index: 20; border-radius: var(--semantic-radius-lg); cursor: crosshair; touch-action: none; }
+
+/* 草稿本（PAGE-SKETCH，REQ-CORE-040）：没有画布，只有顶部那一行（左上的切换器 chip、草稿工具条、右上的记录栏开关）、看板、右侧记录栏与输入框。
+   各浮层的占位只在这里定义一次，写法同画布外壳（停靠的让位也共用上面那组 [data-dock] 规则）；输入框（.composer-dock）读同名的 --composer-left / --side-right。
+   看板 = 顶部那一行以下的整块区域（--stage-*，v1.16、v1.17）：输入框、胶囊与记录栏都浮在看板上面，停在哪、开没开、收没收起都不改看板；
+   停靠改的那组 --chrome-*（上面的 [data-dock]）只给画布用，看板不读 */
+.sketch-shell {
+  --sketch-rail-w: 15rem;
+  --side-left: 0.75rem;
+  --side-right: calc(var(--sketch-rail-w) + 1.5rem);  /* 记录栏 + 右外边距 + 与输入框的间隙：输入框不压记录栏 */
+  --composer-left: 0.75rem;
+  --lane-left: var(--composer-left);
+  --chrome-left: var(--side-left);
+  --chrome-right: var(--side-right);
+  /* 顶部那一行：草稿工具条在里面，折行时它更高——--top-row 是它的实际底边 + 12 px 间隙，由看板量了写进来；没有草稿时只有切换器 chip */
+  --chrome-top: max(3.5rem, var(--top-row, 0px));
+  --stage-left: var(--side-left);
+  --stage-right: 0.75rem;
+  --stage-bottom: 0.75rem;
+  --chrome-bottom: 11.5rem;  /* 首帧默认值，输入框量到实际高度后由页面用内联变量覆盖 */
+  /* 输入框侧停的可用段：顶部那一行以下到底边；右边贴着记录栏（开着时）的内侧 */
+  --seg-left-top: var(--chrome-top);
+  --seg-left-bottom: 1rem;
+  --seg-right-top: var(--chrome-top);
+  --seg-right-bottom: 1rem;
+  background-color: var(--semantic-color-surface-canvas);
+}
+.sketch-shell[data-rail="closed"] { --side-right: 0.75rem; }
+/* 窄屏：草稿工具条单独占顶部那一行下面一整行、不折行，放不下的在条里横着滚；滚动条不显示但能滚、键盘 Tab 照样走到（RESP-016） */
+@media (max-width: 48rem) {
+  .draft-toolbar { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+  .draft-toolbar::-webkit-scrollbar { display: none; }
+  .draft-toolbar > * { flex-shrink: 0; }  /* 不缩：名字那块允许截断，一缩就被挤没了 */
+}
+/* 窄视口：记录栏连输入框也一起盖住，输入框不再为它让宽 */
+@media (max-width: 48rem) { .sketch-shell { --side-right: 0.75rem; } }
+/* 看板上的草稿：手机页 / 桌面页的底白属于用户的设计稿（同 .card），圆角裁切；组件画框的预览文档是透明底（API-CORE-016 草稿），
+   外框不铺底、不加投影与圆角，组件四周露出的就是看板底色 */
+.draft-frame { position: relative; flex: none; overflow: hidden; border-radius: var(--semantic-radius-lg); background: var(--primitive-color-neutral-0); box-shadow: var(--semantic-elevation-panel); }
+.draft-frame[data-frame="component"] { overflow: visible; border-radius: 0; background: none; box-shadow: none; }  /* 组件四周那圈透明边（DRAFT_PAD）伸到看板上，根的阴影不被裁 */
+/* 生成中的占位：与画布骨架同一个呼吸（sk-breathe，只动 opacity）；这一层是 Quilt 替还不存在的草稿占位，用外壳的凹下色 */
+.draft-skeleton { isolation: isolate; border-radius: var(--semantic-radius-lg); background: var(--semantic-color-surface-sunken); }
+.draft-skeleton::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--semantic-color-surface-background); opacity: 0; animation: sk-breathe 2.4s var(--semantic-motion-easing-emphasized) infinite; pointer-events: none; }
+.draft-frame .sk-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: sk-pulse 1.2s var(--semantic-motion-easing-emphasized) infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .draft-skeleton::before, .draft-frame .sk-dot { animation: none; }
+}

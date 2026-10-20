@@ -60,7 +60,8 @@ export function Minimap({ rects, onView, onPanTo, onMoveView }: {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     const css = getComputedStyle(el);
-    const fg = css.getPropertyValue('--semantic-color-text-primary').trim(); const accent = css.getPropertyValue('--semantic-color-action-primary').trim();
+    // 视口框用画布标记色（与选中框、连线同色）；黑色只给正文与主按钮（brand/DESIGN.md「颜色角色」）
+    const fg = css.getPropertyValue('--semantic-color-text-primary').trim(); const accent = css.getPropertyValue('--semantic-color-mark-line').trim();
     const b = box();
     ctx.lineWidth = 1;
     for (const r of rectsRef.current) {

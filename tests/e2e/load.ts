@@ -6,14 +6,13 @@ import { startOpenAiStub } from './openai-stub.ts';
 import { suite, expect, sleep } from './harness.ts';
 
 // docs/TEST.md 画布加载与数据新鲜度（v0.76）用例 TC-CORE-050~056 的 AI 执行脚本：组件卡首帧、首次适配、适配视图下限、
-// 聚焦过渡与热更新基线、截图换图、项目事件流断线、加载失败与外壳常驻、切项目不串状态、对话记录一致性；
-// v0.83 的 TC-CORE-075~078：不存在的项目、窄视口 toast 与失败角标、骨架动画与截图取不到、路由错误页。
-// 全部走 stub：composer 发出的请求经路由把通道改成 stub（种子会按 .env 建一条真实 Gemini 通道并设为缺省）。
+// 聚焦过渡与热更新基线、截图换图、项目事件流断线、加载失败与外壳常驻、切项目不串状态、别处发起的作业出现在作业 chip 上；
+// v0.83 的 TC-CORE-075~078：不存在的项目、窄视口 toast 与失败 chip、骨架动画与截图取不到、路由错误页。
+// 全部走 stub：输入框发出的一轮用桩通道（种子会按 .env 建一条真实 Gemini 通道并设为缺省）。
 await mkdir(EVIDENCE, { recursive: true });
 let current: Page | null = null;
 // 每条用例自己开页面（newPage）：单步超时时关掉卡住的那一页所在的上下文
 const { RUN, cleanups, step, summary } = suite('LOAD', { page: () => current ?? undefined, onTimeout: async () => { await current?.context().close(); } });
-const STUB = { kind: 'model', driver: 'stub', model: 'stub' };
 type Detail = { project: { id: string; name: string }; screens: { id: string; route: string; currentRevisionId: string; screenshotUrl: string | null; previewUrl: string | null }[] };
 const detail = (pid: string) => apiJson<Detail>(`/v1/projects/${pid}`).then((r) => r.body);
 const seedProject = (name: string, ...args: string[]) => seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', name, ...args);
@@ -32,13 +31,6 @@ const editText = async (pid: string, screenId: string, id: string, text: string)
   return r.body.revision.id;
 };
 const isDetailGet = (req: Request, pid: string) => req.method() === 'GET' && new URL(req.url()).pathname === `/v1/projects/${pid}`;
-const isMessagesGet = (req: Request, pid: string) => req.method() === 'GET' && new URL(req.url()).pathname === `/v1/projects/${pid}/messages`;
-// composer 发出的一轮一律改走 stub：种子建的缺省通道是真实 Gemini
-const stubComposer = (page: Page, pid: string) => page.route(`**/v1/projects/${pid}/messages`, async (route) => {
-  if (route.request().method() !== 'POST') return route.fallback();
-  const body = JSON.parse(route.request().postData() ?? '{}');
-  await route.continue({ postData: JSON.stringify({ ...body, runner: STUB }) });
-});
 // stub 轮次没有云端通道（§3：种子不建 Gemini 通道），输入框缺省落到「交给本机 Claude Code」：没有版数档位、没选会话时 Enter 被挡。
 // 要用档位或从输入框发一轮的用例建一条 OpenAI 兼容桩通道、验证，重载页面（画布在打开时取通道清单）后在输入框里选中；用例结束时删通道、关桩
 const useStubChannel = async (page: Page, label: string) => {
@@ -188,16 +180,16 @@ await step('TC-CORE-051', async () => {
   await page.locator('[data-testid="screen-card"]').first().waitFor();
   const after = await page.locator('.world').evaluate((el) => (el as HTMLElement).style.transform);
   expect(after === r.transform, `刷新后镜头没留住：${r.transform} → ${after}`);
-  // 3 缩到下限也装不下（45 张桌面屏横排约 61000 px）：适配到下限并说一声，不静默裁掉
-  const { projectId: huge } = seedProject('Huge', '--device', 'desktop', '--screens', '45', '--no-shot');
+  // 3 缩到下限也装不下（60 张桌面屏横排约 81000 px，0.02 下约 1630 px，比 1440 视口的可用区宽）：适配到下限并说一声，不静默裁掉
+  const { projectId: huge } = seedProject('Huge', '--device', 'desktop', '--screens', '60', '--no-shot');
   await page.goto(`${WEB}/p/${huge}`);
-  await page.locator('[data-testid="screen-card"]').nth(44).waitFor({ timeout: 15000 });
+  await page.locator('[data-testid="screen-card"]').nth(59).waitFor({ timeout: 15000 });
   await page.keyboard.press('f');
   await page.getByText('最小缩放也装不下全部').waitFor({ timeout: 3000 });
   await sleep(500);
   const zoom = Number((await page.locator('.world').evaluate((el) => (el as HTMLElement).style.transform)).match(/scale\(([\d.]+)\)/)?.[1]);
   expect(Math.abs(zoom - 0.02) < 0.0005, `装不下时没停在下限 0.02：${zoom}`);
-  return `${r.inside}/${r.total} 屏在可用区（${r.transform}），刷新后原样；45 屏时停在 0.02 并提示`;
+  return `${r.inside}/${r.total} 屏在可用区（${r.transform}），刷新后原样；60 屏时停在 0.02 并提示`;
 });
 
 // ---------- TC-CORE-052 聚焦过渡、热更新基线、截图换图（load-3 / canvas-5 / canvas-18 / load-11） ----------
@@ -401,7 +393,7 @@ await step('TC-CORE-053', async () => {
   const page = await newPage();
   const t0 = Date.now();
   const log: { t: number; what: string }[] = [];
-  page.on('request', (req) => { if (isDetailGet(req, pid)) log.push({ t: Date.now() - t0, what: 'detail' }); if (isMessagesGet(req, pid)) log.push({ t: Date.now() - t0, what: 'messages' }); });
+  page.on('request', (req) => { if (isDetailGet(req, pid)) log.push({ t: Date.now() - t0, what: 'detail' }); });
   let n = 0;
   // 第 1 条连上就断（EventSource 自己重连）；第 2~4 条回 502（Vite 代理在 API 重启期间的回包，EventSource 会永久关闭）；之后放行
   await page.route(`**/v1/projects/${pid}/events`, async (route) => {
@@ -417,7 +409,7 @@ await step('TC-CORE-053', async () => {
   await status.filter({ hasText: '实时更新已断开' }).waitFor({ timeout: 9000 }).catch(() => { throw new Error(`断线超过 3 s 没有提示（事件流已连 ${n} 条）`); });
   await eventually(() => expect(n >= 5, `第 2 条回 502 之后没有再连（共 ${n} 条）`), 20000);
   const reopenAt = log.find((x) => x.what === 'events#5')!.t;
-  await eventually(() => expect(log.some((x) => x.what === 'detail' && x.t > reopenAt) && log.some((x) => x.what === 'messages' && x.t > reopenAt), `重连后没有重取详情与消息：${JSON.stringify(log.slice(-6))}`), 6000);
+  await eventually(() => expect(log.some((x) => x.what === 'detail' && x.t > reopenAt), `重连后没有重取详情：${JSON.stringify(log.slice(-6))}`), 6000);
   await eventually(async () => expect((await status.count()) === 0, '重连后断线提示没撤'), 6000);
   await page.context().close();
   // 4 事件密集、详情 GET 慢于 250 ms 防抖：事件流每 ~300 ms 重连一次并带一条 screen_changed，详情 GET 推迟 900 ms、项目名改成 Tick <序号>。
@@ -446,7 +438,7 @@ await step('TC-CORE-053', async () => {
   // 事件流桩每 300 ms 重连一次，不关的话这一页会一直打详情 GET 到进程结束
   await p2.context().close();
   expect(applied >= 3, `事件密集、详情慢时 6 s 里发了 ${held} 次详情 GET，页面只应用了 ${applied} 次`);
-  return `${JSON.stringify(log.filter((x) => x.what.startsWith('events')).map((x) => x.t))} ms 各连一次；重连后重取详情与消息、提示撤掉；事件密集时 6 s 发出 ${held} 次慢详情 GET、应用了 ${applied} 次`;
+  return `${JSON.stringify(log.filter((x) => x.what.startsWith('events')).map((x) => x.t))} ms 各连一次；重连后重取详情、提示撤掉；事件密集时 6 s 发出 ${held} 次慢详情 GET、应用了 ${applied} 次`;
 });
 
 // ---------- TC-CORE-054 加载失败与外壳常驻（load-8 / cross-6 / load-9 / cross-7） ----------
@@ -487,21 +479,11 @@ await step('TC-CORE-054', async () => {
   await page.route(`**/v1/projects/${pid}`, async (route) => { if (route.request().method() === 'GET') await sleep(1500); await route.fallback(); });
   await page.goto(`${WEB}/p/${pid}`);
   await page.getByTestId('canvas-pending').waitFor({ timeout: 3000 });
-  const shell = await page.evaluate(() => ({ switcher: !!document.querySelector('[data-testid="project-switcher"]'), chat: !!document.querySelector('[data-testid="chat-dock"]'), composer: !!document.querySelector('form.composer'), toolbar: !!document.querySelector('[aria-label="画布工具"]') }));
+  const shell = await page.evaluate(() => ({ switcher: !!document.querySelector('[data-testid="project-switcher"]'), composer: !!document.querySelector('form.composer'), toolbar: !!document.querySelector('[aria-label="画布工具"]') }));
   expect(Object.values(shell).every(Boolean), `加载期间外壳不全：${JSON.stringify(shell)}`);
   await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 10000 });
   await page.unroute(`**/v1/projects/${pid}`);
-  // 6 对话记录取不到：写明没加载出来，不当成空
-  await page.route(`**/v1/projects/${pid}/messages?*`, (route) => route.abort());
-  await page.reload();
-  const dock = page.getByTestId('chat-dock');
-  if ((await dock.getAttribute('data-state')) === 'collapsed') await page.getByRole('button', { name: '展开对话记录' }).click();
-  await dock.getByRole('alert').getByText('对话没加载出来').waitFor({ timeout: 8000 });
-  expect(!(await dock.innerText()).includes('试试这样描述') && !(await dock.innerText()).includes('0 条'), `对话取不到时仍显示成空：${await dock.innerText()}`);
-  await page.unroute(`**/v1/projects/${pid}/messages?*`);
-  await dock.getByRole('button', { name: '重试' }).click();
-  await eventually(async () => expect((await dock.getByTestId('message').count()) === 2, '重试后消息没出来'), 8000);
-  // 7 通道清单取不到：通道位写明，重试后回来
+  // 6 通道清单取不到：通道位写明，重试后回来
   await page.route('**/v1/runners', (route) => route.abort());
   await page.reload();
   const failed = page.getByTestId('runners-failed');
@@ -509,7 +491,7 @@ await step('TC-CORE-054', async () => {
   await page.unroute('**/v1/runners');
   await failed.click();
   await page.getByTestId('runner-select').waitFor({ timeout: 8000 });
-  // 8 首帧就是所选外观的画布底色（v1.08，REQ-CORE-039）：样式表在 <head> 里阻塞首帧，选过的外观由内联脚本在它之前写到 data-theme。
+  // 7 首帧就是所选外观的画布底色（v1.08，REQ-CORE-039）：样式表在 <head> 里阻塞首帧，选过的外观由内联脚本在它之前写到 data-theme。
   // 系统偏好是浅色：没选过 → 浅色画布底；选过深色 → 从第一帧起就是深色画布底，不先闪一帧浅色。根元素透明时画布底取 body 的（CSS 背景传播）
   const firstFrames = async (stored: 'dark' | null) => {
     const pg = await newPage();
@@ -531,7 +513,7 @@ await step('TC-CORE-054', async () => {
     await sleep(1600);
     return pg.evaluate(() => (window as unknown as { __bg: string[] }).__bg);
   };
-  const want = { light: 'rgb(236, 234, 229)', dark: 'rgb(20, 19, 17)' };  // brand/ 的 surface.canvas：浅 #ECEAE5、深 #141311
+  const want = { light: 'rgb(234, 234, 239)', dark: 'rgb(10, 10, 11)' };  // brand/ 的 surface.canvas：浅 #EAEAEF、深 #0A0A0B
   const counts: string[] = [];
   for (const [mode, stored] of [['light', null], ['dark', 'dark']] as const) {
     const bgs = await firstFrames(stored);
@@ -539,7 +521,7 @@ await step('TC-CORE-054', async () => {
     expect(bgs.length > 0 && off.length === 0, `${mode}：${bgs.length} 帧里有 ${bgs.filter((b) => b !== want[mode]).length} 帧不是画布底色 ${want[mode]}：${off.join('，')}`);
     counts.push(`${mode} ${bgs.length} 帧`);
   }
-  return `404 / 502 / 配置 / 根路径列表各有原因与出口；加载期间外壳常驻；对话与通道失败可重试；首帧底色就是所选外观的画布底（${counts.join('、')}）`;
+  return `404 / 502 / 配置 / 根路径列表各有原因与出口；加载期间外壳常驻；通道清单失败可重试；首帧底色就是所选外观的画布底（${counts.join('、')}）`;
 });
 
 // ---------- TC-CORE-055 切项目不串状态（frontend-1 / composer-4 / cross-11 / load-9） ----------
@@ -589,76 +571,34 @@ await step('TC-CORE-055', async () => {
   const state = { cards: await page.locator('[data-testid="screen-card"]').count(), pending: await page.getByTestId('canvas-pending').count(), title: await page.title() };
   expect(state.cards === 3 && state.pending === 0 && state.title.startsWith('Bravo'), `A 晚到的刷新覆盖了 B：${JSON.stringify(state)}`);
   slowA = false;
-  // 3 B 的对话慢：新项目顶栏下不显示 A 的对话
-  await switchTo(page, 'Alpha');
-  await page.waitForURL(new RegExp(a.projectId));
-  const dock = page.getByTestId('chat-dock');
-  if ((await dock.getAttribute('data-state')) === 'collapsed') await page.getByRole('button', { name: '展开对话记录' }).click();
-  await eventually(async () => expect((await dock.innerText()).includes('请把首页改得更活泼一点'), 'A 的对话没出来'), 8000);
-  await page.route(`**/v1/projects/${b.projectId}/messages?*`, async (route) => { await sleep(1200); await route.fallback(); });
-  await switchTo(page, 'Bravo');
-  await page.waitForURL(new RegExp(b.projectId));
-  // 顶栏切换器还写着 Alpha 的那几帧是旧页面还没换下来，不算；换下来之后（加载中或 Bravo）对话里不能有 A 的消息
-  const leaked: string[] = [];
-  for (let i = 0; i < 16; i++) {
-    const snap = await page.evaluate(() => ({ who: document.querySelector('[data-testid="project-switcher"]')?.textContent ?? '', chat: document.querySelector('[data-testid="chat-dock"]')?.textContent ?? '' }));
-    if (!snap.who.includes('Alpha') && snap.chat.includes('请把首页改得更活泼一点')) leaked.push(`${i * 50}ms（顶栏「${snap.who}」）`);
-    await sleep(50);
-  }
-  expect(leaked.length === 0, `B 的顶栏下显示了 A 的对话：${leaked.join('，')}`);
-  return 'B 里无锚点、1 版、输入框在、无聚焦；A 晚到的刷新丢弃；B 的对话慢时不串显 A 的';
+  return 'B 里无锚点、1 版、输入框在、无聚焦；A 晚到的刷新丢弃';
 });
 
-// ---------- TC-CORE-056 对话记录一致性（frontend-2 / cross-10） ----------
+// ---------- TC-CORE-056 别处发起的一轮出现在本页的作业 chip 上（frontend-2 / cross-10） ----------
 await step('TC-CORE-056', async () => {
   const { projectId: pid, screens } = seedProject('Talk', '--device', 'mobile', '--screens', '2', '--no-shot');
-  const [s1, s2] = screens;
+  const [s1] = screens;
   const page = await newPage();
-  await stubComposer(page, pid);
   await page.goto(`${WEB}/p/${pid}`);
   await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
-  // 第 1 步在输入框按 Enter：要选中一条模型通道（发出的请求再由 stubComposer 改走 stub）
-  await useStubChannel(page, 'Stub 发送 56');
-  const dock = page.getByTestId('chat-dock');
-  if ((await dock.getAttribute('data-state')) === 'collapsed') await page.getByRole('button', { name: '展开对话记录' }).click();
-  // 1 较早发起的消息 GET 晚到：另一个作业引起的消息 GET 全部扣住，这期间在输入框发出一轮，发出后再按原顺序放行
-  const held: (() => void)[] = [];
-  let holding = false;
-  await page.route(`**/v1/projects/${pid}/messages?*`, async (route) => {
-    if (!holding) return route.fallback();
-    const res = await route.fetch();
-    await new Promise<void>((r) => held.push(r));
-    await route.fulfill({ response: res });
-  });
-  holding = true;
-  const other = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ kind: 'edit_screens', input: { prompt: '另一个作业', screenIds: [s2.id], versions: 1, runner: STUB } }) });
-  expect(other.status === 202, `建作业 ${other.status}`);
-  await eventually(async () => expect(['succeeded', 'failed'].includes((await apiJson<{ job: { status: string } }>(`/v1/jobs/${other.body.job.id}`)).body.job.status) && held.length > 0, `另一个作业结束后没有取消息（扣住 ${held.length} 个）`), 20000);
-  await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
-  await page.locator('form.composer textarea').fill('唯一的一轮 42');
-  const posted = page.waitForResponse((res) => res.request().method() === 'POST' && new URL(res.url()).pathname === `/v1/projects/${pid}/messages`);
-  await page.keyboard.press('Enter');
-  await posted;
-  holding = false;
-  await eventually(async () => expect((await dock.innerText()).includes('唯一的一轮 42'), '发出的一轮没出现在对话里'), 8000);
-  for (const release of held.splice(0)) { release(); await sleep(100); }
-  await sleep(1500);
-  const count = async () => (await dock.getByTestId('message').filter({ hasText: '唯一的一轮 42' }).count());
-  expect((await count()) === 1, `较早发起的消息 GET 晚到后这一轮出现 ${await count()} 次`);
-  // 2 别处发起的一轮：作业还在跑就出现在本页
+  // 别处发起的一轮（等价于另一个标签页或 MCP 发起）：作业还在跑时本页就认领它、出一枚在跑的 chip
   const stub = startOpenAiStub({ port: 3993, apiKey: 'good-key-0056', reply: '<div class="p-4">slow</div>', holdMs: 8000 });
   try {
     const ch = await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label: 'Slow 056', endpoint: stub.url, model: 'stub-56', apiKey: 'good-key-0056' }) });
     expect((await apiJson<{ ok: boolean }>(`/v1/runners/channel:${ch.body.channel.id}/probe`, { method: 'POST' })).body.ok, '慢桩通道验证未通过');
     const r = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/messages`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ content: '别处发起的一轮', targetScreenIds: [s1.id], runner: { kind: 'channel', channelId: ch.body.channel.id } }) });
     expect(r.status === 202, `别处发起 ${r.status}`);
-    await eventually(async () => expect((await dock.innerText()).includes('别处发起的一轮'), '别处发起的一轮在作业结束前没出现'), 4000);
+    const chip = page.locator(`[data-testid="job-chip"][data-job-id="${r.body.job.id}"]`);
+    await eventually(async () => expect((await chip.count()) === 1, '别处发起的一轮在作业结束前没出 chip'), 6000);
+    const text = (await chip.innerText()).replace(/\s+/g, ' ');
+    expect((await chip.getAttribute('data-state')) === 'running' && text.includes('改「'), `chip 应是在跑态、写出它在改哪一屏：${await chip.getAttribute('data-state')}「${text}」`);
+    expect((await chip.getByTestId('cancel-job').count()) === 1, '在跑的 chip 上没有取消键');
     const job = (await apiJson<{ job: { status: string } }>(`/v1/jobs/${r.body.job.id}`)).body.job;
     expect(['queued', 'running'].includes(job.status), `断言时作业已经 ${job.status}，没测到「结束前」`);
     await apiJson(`/v1/jobs/${r.body.job.id}/cancel`, { method: 'POST' });
     await apiJson(`/v1/channels/${ch.body.channel.id}`, { method: 'DELETE' });
+    return `别处发起的一轮在作业结束前出现在本页的在跑 chip 上（「${text}」），带取消键`;
   } finally { await stub.close(); }
-  return '晚到的旧消息快照不抹掉刚发的一轮（出现 1 次）；别处发起的一轮在作业结束前出现';
 });
 
 // ---------- v0.83 画布与面板的前端收尾：TC-CORE-075~078 ----------
@@ -672,16 +612,11 @@ const soft = () => {
 };
 // 一段时间里反复看某个元素出没出现过：「没有发生」不能用 eventually 判
 const everShown = async (page: Page, testId: string, ms: number) => { const end = Date.now() + ms; while (Date.now() < end) { if (await page.getByTestId(testId).count()) return true; await sleep(200); } return false; };
-const openDock = async (page: Page) => {
-  const dock = page.getByTestId('chat-dock');
-  if ((await dock.getAttribute('data-state')) === 'collapsed') await dock.getByRole('button', { name: /^展开对话记录/ }).click();
-  return dock;
-};
 // 点击区下限 24 px：按画布缩放反算出来的尺寸会落在 23.99 这类亚像素上，量的时候留 0.5 px
 const HIT = 23.5;
 const withView = async (page: Page, pid: string, view: { x: number; y: number; zoom: number }) => page.addInitScript(([k, v]) => { localStorage.setItem(k, v); }, [`quilt:view:${pid}`, JSON.stringify(view)]);
 
-// ---------- TC-CORE-075 不存在的项目：不订阅事件流、不显示重连、对话记录不出示例 ----------
+// ---------- TC-CORE-075 不存在的项目：不订阅事件流、不显示重连 ----------
 await step('TC-CORE-075', async () => {
   const S = soft();
   const eventsOf = (page: Page, pid: string, t0: number) => {
@@ -690,7 +625,7 @@ await step('TC-CORE-075', async () => {
     return at;
   };
   const NOT_FOUND = '这个项目不存在或已被删除';
-  // 1 打开不存在的项目：转到「不存在」态之后不再连事件流、顶栏不写「重连中」，对话记录不出空态示例
+  // 1 打开不存在的项目：转到「不存在」态之后不再连事件流、顶栏不写「重连中」
   const ghost = '22222222-3333-4444-8555-666666666666';
   const page = await newPage();
   const t0 = Date.now();
@@ -702,10 +637,8 @@ await step('TC-CORE-075', async () => {
   const later = evs.filter((t) => t > at + 200);
   await S.check(() => expect(!shown, '① 不存在的项目 5 s 内顶栏出现了「实时更新已断开 · 重连中」'));
   await S.check(() => expect(later.length === 0, `① 转到「不存在」态之后 5 s 里又连了 ${later.length} 次事件流（${later.join(', ')} ms）`));
-  const text = (await (await openDock(page)).innerText()).replace(/\s+/g, ' ');
-  await S.check(() => expect(!text.includes('试试这样描述') && !/(^|\D)0 条/.test(text), `① 对话记录不该出空态示例或「0 条」：${text.slice(0, 120)}`));
   await page.context().close();
-  // 2 加载过的项目在别处被删：画布转到「不存在」态，同样不再连、不写「重连中」、不出示例
+  // 2 加载过的项目在别处被删：画布转到「不存在」态，同样不再连、不写「重连中」
   const { projectId: pid } = seedProject('Doomed', '--device', 'mobile', '--screens', '1', '--messages', '2', '--no-shot');
   const p2 = await newPage();
   const t1 = Date.now();
@@ -721,15 +654,13 @@ await step('TC-CORE-075', async () => {
   const later2 = evs2.filter((t) => t > at2 + 200);
   await S.check(() => expect(!shown2, '② 项目被删后 5 s 内顶栏出现了「实时更新已断开 · 重连中」'));
   await S.check(() => expect(later2.length === 0, `② 项目被删、转到「不存在」态之后 5 s 里又连了 ${later2.length} 次事件流`));
-  const text2 = (await (await openDock(p2)).innerText()).replace(/\s+/g, ' ');
-  await S.check(() => expect(!text2.includes('试试这样描述'), `② 对话记录不该出空态示例：${text2.slice(0, 120)}`));
   current = p2;
   S.done();
   await p2.context().close();
-  return `不存在的项目与加载后被删的项目：转到「不存在」态后 5 s 内事件流 0 次、无「重连中」，对话记录无示例`;
+  return `不存在的项目与加载后被删的项目：转到「不存在」态后 5 s 内事件流 0 次、无「重连中」`;
 });
 
-// ---------- TC-CORE-076 窄视口 toast 让开折叠横条；失败角标的点击区 ----------
+// ---------- TC-CORE-076 作业失败写在 chip 上；窄视口 toast 让开输入框与胶囊；失败角标的点击区 ----------
 await step('TC-CORE-076', async () => {
   const S = soft();
   const { projectId: pid } = seedProject('Toasts', '--device', 'mobile', '--screens', '2', '--no-shot');
@@ -744,7 +675,7 @@ await step('TC-CORE-076', async () => {
     const bad = await mk('坏 Key 76', 'wrong-key-0076');
     const box = async (page: Page, sel: string) => (await page.locator(sel).first().boundingBox())!;
     const failJobs = (page: Page) => page.route(`**/v1/projects/${pid}/jobs`, (route) => (route.request().method() === 'POST' ? route.fulfill({ status: 500, contentType: 'application/problem+json', body: JSON.stringify({ type: '/errors/internal', title: '导出没发出去（测试）', status: 500, requestId: 't' }) }) : route.fallback()));
-    // 1 390×844：对话记录折叠、停在输入框上方；一轮造屏失败，toast 的底边在横条之上
+    // 1 390×844：一轮造屏失败——不弹提示条，原因写在输入框上方的失败 chip 上，关掉才消失（v1.17）
     const page = await newPage({ viewport: { width: 390, height: 844 } });
     await page.route(`**/v1/projects/${pid}/messages`, async (route) => {
       if (route.request().method() !== 'POST') return route.fallback();
@@ -753,35 +684,34 @@ await step('TC-CORE-076', async () => {
     });
     await page.goto(`${WEB}/p/${pid}`);
     await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
-    const dock = page.getByTestId('chat-dock');
-    if ((await dock.getAttribute('data-state')) !== 'collapsed') await dock.getByRole('button', { name: '折叠对话记录' }).click();
     await pickOption(page, '[data-testid="runner-select"]', 'Stub 76');
     await page.locator('#chat-input').fill('造一个设置页');
     await page.locator('#chat-input').press('Enter');
-    const t1 = page.getByText(/^造屏失败/).first();
-    await t1.waitFor({ timeout: 30000 });
-    const [tb, db, cb] = [await t1.boundingBox(), await box(page, '[data-testid="chat-dock"]'), await box(page, 'form.composer')];
-    await S.check(() => expect(tb && tb.y + tb.height <= db.y + 1, `① 390 宽下失败 toast 压住了折叠横条：toast 底 ${tb && Math.round(tb.y + tb.height)}，横条顶 ${Math.round(db.y)}`));
-    await S.check(() => expect(tb && tb.y + tb.height <= cb.y + 1, `① toast 压住了输入框：toast 底 ${tb && Math.round(tb.y + tb.height)}，输入框顶 ${Math.round(cb.y)}`));
-    // 错误提示 8 s 后消失（PAGE-CANVAS「提示条」）。悬停时不计时：选通道时指针停在下拉项上，390 宽下提示条正好出在那一块，先把指针挪开
-    await page.mouse.move(1, 1);
-    await eventually(async () => expect((await page.getByText(/^造屏失败/).count()) === 0, 'toast 没自行消失'), 10000);
-    // 1b 收起输入框（⌘/）：横条落到底部，toast 仍在它上方
+    const failed = page.locator('[data-testid="job-chip"][data-state="failed"]').first();
+    await failed.waitFor({ timeout: 30000 });
+    const why = (await failed.innerText()).replace(/\s+/g, ' ');
+    const [fb, cb] = [await failed.boundingBox(), await box(page, 'form.composer')];
+    await S.check(() => expect(why.includes('造屏失败'), `① 失败 chip 上没写失败原因：${why}`));
+    await S.check(async () => expect((await failed.getByTestId('retry-job').count()) === 1, '① 造屏失败的 chip 上没有「重试」'));
+    await S.check(() => expect(fb && fb.y + fb.height <= cb.y + 1, `① 失败 chip 应叠在输入框上方：chip 底 ${fb && Math.round(fb.y + fb.height)}，输入框顶 ${Math.round(cb.y)}`));
+    await S.check(async () => expect((await page.getByTestId('toast').count()) === 0, '① 作业失败还弹了提示条'));
+    // 关掉才消失（PAGE-CANVAS「作业 chip」）：按 × 收掉，1b 量 toast 时这一叠是空的
+    await failed.getByTestId('dismiss-job').click();
+    await S.check(() => eventually(async () => expect((await page.getByTestId('job-chip').count()) === 0, '① 失败 chip 的 × 没把它关掉'), 5000));
+    // 1b 收起输入框（⌘/）：底边留一枚胶囊，toast 仍在它上方
     await page.keyboard.press('ControlOrMeta+Slash');
     await page.locator('form.composer').waitFor({ state: 'hidden', timeout: 3000 });
     await failJobs(page);
     await page.getByRole('button', { name: '导出原型' }).click();
     const t2 = page.getByText('导出没发出去（测试）').first();
     await t2.waitFor({ timeout: 8000 });
-    const [tb2, db2] = [await t2.boundingBox(), await box(page, '[data-testid="chat-dock"]')];
-    await S.check(() => expect(tb2 && tb2.y + tb2.height <= db2.y + 1, `①b 输入框收起时 toast 压住了落底的横条：toast 底 ${tb2 && Math.round(tb2.y + tb2.height)}，横条顶 ${Math.round(db2.y)}`));
+    const [tb2, pb] = [await t2.boundingBox(), await box(page, '[data-testid="composer-pill"]')];
+    await S.check(() => expect(tb2 && tb2.y + tb2.height <= pb.y + 1, `①b 输入框收起时 toast 压住了胶囊：toast 底 ${tb2 && Math.round(tb2.y + tb2.height)}，胶囊顶 ${Math.round(pb.y)}`));
     await page.context().close();
-    // 1c 1440×900：横条不在 toast 底下，toast 照旧紧贴输入框上方（不被多推高）
+    // 1c 1440×900：toast 照旧紧贴输入框上方（不被多推高）
     const p3 = await newPage({ viewport: { width: 1440, height: 900 } });
     await p3.goto(`${WEB}/p/${pid}`);
     await p3.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
-    const dock3 = p3.getByTestId('chat-dock');
-    if ((await dock3.getAttribute('data-state')) !== 'collapsed') await dock3.getByRole('button', { name: '折叠对话记录' }).click();
     await failJobs(p3);
     await p3.getByRole('button', { name: '导出原型' }).click();
     const t3 = p3.getByText('导出没发出去（测试）').first();
@@ -811,7 +741,7 @@ await step('TC-CORE-076', async () => {
     }
   } finally { await stub.close(); for (const id of channels) await apiJson(`/v1/channels/${id}`, { method: 'DELETE' }).catch(() => {}); }
   S.done();
-  return '390 宽：失败 toast 在折叠横条与输入框之上，收起输入框后仍在落底横条之上；1440 宽 toast 紧贴输入框；手机屏与桌面屏聚焦时「加载失败 · 重试」点击区 ≥ 24×24';
+  return '390 宽：造屏失败不弹提示条、原因写在输入框上方的失败 chip 上（可重试、× 才关掉），收起输入框后提示条仍在胶囊之上；1440 宽 toast 紧贴输入框；手机屏与桌面屏聚焦时「加载失败 · 重试」点击区 ≥ 24×24';
 });
 
 // ---------- TC-CORE-077 骨架动画只在卡片可见时运行；截图取不到有出口 ----------

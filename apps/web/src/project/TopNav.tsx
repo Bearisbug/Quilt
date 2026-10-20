@@ -10,7 +10,7 @@ export function TopNav({ children, right, floating }: { children?: ReactNode; ri
   return (
     <header className={cn(
       'flex shrink-0 items-center gap-3',
-      // 画布页的 chip 与小地图、对话记录、工具栏同一圈 12 px 外边距：左缘与小地图对齐
+      // 画布页的 chip 与小地图、工具栏同一圈 12 px 外边距：左缘与小地图对齐
       floating ? 'absolute left-3 top-3 z-30' : 'masthead h-12 px-3',
     )}>
       {/* 画布顶栏不挂品牌：左上角只有项目切换器，那是用户的去向。

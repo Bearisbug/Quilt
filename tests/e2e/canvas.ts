@@ -76,7 +76,7 @@ const openEsc = async () => {
   cancels.length = 0;
   const page = await open(escPid);
   page.on('request', (r) => { if (r.method() === 'POST' && /\/v1\/jobs\/[^/]+\/cancel$/.test(new URL(r.url()).pathname)) cancels.push(r.url()); });
-  await page.locator(`[data-testid="running-job"][data-job-id="${escJob}"]`).waitFor({ timeout: 10000 });
+  await page.locator(`[data-testid="job-chip"][data-job-id="${escJob}"]`).waitFor({ timeout: 10000 });
   await blur(page);
   return page;
 };
@@ -652,10 +652,10 @@ await step('TC-CORE-079', '3', async () => {
 });
 
 // ---------- TC-CORE-097 外观三选一（v1.08，REQ-CORE-039）：切换即时生效、记在本机、跟随系统；画布标记与 canvas 颜色跟着换 ----------
-// 颜色取 brand/ 的值：画布底浅 #ECEAE5 / 深 #141311，标记色浅 #C64A0B / 深 #E05A24，动作色浅 #263C63 / 深 #B4C5E2
+// 颜色取 brand/ 的值（v1.15）：画布底浅 #EAEAEF / 深 #0A0A0B，标记色浅 #0071E3 / 深 #0A84FF（连线与小地图的视口框都用它）
 const THEME = {
-  light: { canvas: 'rgb(236, 234, 229)', mark: 'rgb(198, 74, 11)', markRgb: [198, 74, 11], accentRgb: [38, 60, 99] },
-  dark: { canvas: 'rgb(20, 19, 17)', mark: 'rgb(224, 90, 36)', markRgb: [224, 90, 36], accentRgb: [180, 197, 226] },
+  light: { canvas: 'rgb(234, 234, 239)', mark: 'rgb(0, 113, 227)', markRgb: [0, 113, 227] },
+  dark: { canvas: 'rgb(10, 10, 11)', mark: 'rgb(10, 132, 255)', markRgb: [10, 132, 255] },
 } as const;
 const themePid = seedProject('Theme', '--device', 'mobile', '--screens', '3').projectId;
 const shell = (page: Page) => page.evaluate(() => ({
@@ -663,11 +663,12 @@ const shell = (page: Page) => page.evaluate(() => ({
   canvas: getComputedStyle(document.querySelector('.viewport')!).backgroundColor,
   card: getComputedStyle(document.querySelector('[data-testid="screen-card"]')!).backgroundColor,
 }));
-// 画在 <canvas> 上的颜色：数离目标色很近的像素（连线与它的计数徽标、小地图的视口框）
+// 画在 <canvas> 上的颜色：数离目标色很近的像素（连线与它的计数徽标、小地图的视口框）。容差 12：深浅两套标记色都是蓝、通道和只差 57，
+// 徽标里的字压在标记色上，抗锯齿边混出来的颜色离另一套标记色只有 15 左右，容差放宽就会被数成另一套
 const inkOn = (page: Page, sel: string, rgb: readonly number[]) => page.evaluate(([s, c]) => {
   const el = document.querySelector(s) as HTMLCanvasElement | null; if (!el) return -1;
   const d = el.getContext('2d')!.getImageData(0, 0, el.width, el.height).data; let n = 0;
-  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200 && Math.abs(d[i] - c[0]) + Math.abs(d[i + 1] - c[1]) + Math.abs(d[i + 2] - c[2]) < 24) n++;
+  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200 && Math.abs(d[i] - c[0]) + Math.abs(d[i + 1] - c[1]) + Math.abs(d[i + 2] - c[2]) < 12) n++;
   return n;
 }, [sel, rgb] as const);
 
@@ -695,7 +696,7 @@ await step('TC-CORE-097', '1', async () => {
   const outline = await card(page, '/s1').evaluate((el) => getComputedStyle(el).outlineColor);
   expect(outline === THEME.dark.mark, `深色下选中描边是 ${outline}，应是 ${THEME.dark.mark}`);
   const edgesDark = await inkOn(page, '.viewport > .edges', THEME.dark.markRgb); const edgesLightGone = await inkOn(page, '.viewport > .edges', THEME.light.markRgb);
-  const miniDark = await inkOn(page, '[data-testid="minimap"]', THEME.dark.accentRgb);
+  const miniDark = await inkOn(page, '[data-testid="minimap"]', THEME.dark.markRgb);
   expect(edgesDark > 0 && edgesLightGone === 0, `连线没按深色重画：深色标记色 ${edgesDark} 像素、浅色标记色 ${edgesLightGone} 像素`);
   expect(miniDark > 0, '小地图的视口框没按深色重画');
   return `跟随系统（浅）→ 选深色：data-theme=dark、记在本机、画布底 ${s1.canvas}、描边 ${outline}、连线 ${edgesDark} 像素、卡片白底不变`;
@@ -717,7 +718,7 @@ await step('TC-CORE-097', '2', async () => {
   const box = () => frame.locator('[data-quilt-selection]').evaluate((el) => ({ border: getComputedStyle(el).borderTopColor, halo: getComputedStyle(el).boxShadow }));
   await eventually(async () => expect((await box()).border === THEME.dark.mark, '屏内选中框还没出现或颜色不对'), 8000);
   const b1 = await box();
-  expect(/rgb\(14, 13, 11\) 0px 0px 0px 1px/.test(b1.halo), `深色下屏内选中框外圈应是深色 halo：${b1.halo}`);
+  expect(/rgb\(0, 0, 0\) 0px 0px 0px 1px/.test(b1.halo), `深色下屏内选中框外圈应是深色 halo：${b1.halo}`);
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
   await eventually(async () => expect((await box()).border === THEME.light.mark, '换成浅色后屏内选中框没跟着换色'), 5000);
   const b2 = await box();
@@ -745,6 +746,164 @@ await step('TC-CORE-097', '3', async () => {
   const hint = await page.getByTestId('theme-system').innerText();
   expect(hint.includes('现在是浅色'), `「跟随系统」一行没写当前是哪一套：${hint}`);
   return '固定浅色压过系统深色；跟随系统时去掉 data-theme 与记录，系统偏好一变外壳跟着变';
+});
+
+// ---------- TC-CORE-124 输入框停靠、拖动、收起成胶囊与记忆（v1.16，PAGE-CANVAS「停靠与收起」） ----------
+const dockPid = seedProject('Dock', '--device', 'mobile', '--screens', '3', '--no-shot').projectId;
+const dockOf = (page: Page) => page.locator('form.composer:visible, [data-testid="composer-pill"]').first().getAttribute('data-dock');
+const storedDock = (page: Page, key = 'quilt:composer:canvas') => page.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? 'null') as { edge: string; at: number; collapsed: boolean } | null, key);
+const overlap = (a: { x: number; y: number; width: number; height: number } | null, b: { x: number; y: number; width: number; height: number } | null) => !!a && !!b && a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+// 按住之前先等它停下来：换边有 200 ms 落位动画，抓动画中途的盒子按下去会按在画布上，这一拖就成了平移画布
+const settled = async (page: Page, testId: string) => {
+  const loc = page.getByTestId(testId);
+  let prev = (await loc.boundingBox())!;
+  for (let i = 0; i < 20; i++) {
+    await sleep(80);
+    const now = (await loc.boundingBox())!;
+    if (Math.abs(now.x - prev.x) < 1 && Math.abs(now.y - prev.y) < 1) return now;
+    prev = now;
+  }
+  return prev;
+};
+// 按住输入框顶部那一行的空白处（收起按钮左边一点）拖到 (x, y)；胶囊就按住胶囊本身
+async function dragDock(page: Page, from: 'composer' | 'pill', x: number, y: number) {
+  const b = await settled(page, from === 'composer' ? 'composer-collapse' : 'composer-pill');
+  const sx = from === 'composer' ? b.x - 30 : b.x + b.width / 2, sy = b.y + b.height / 2;
+  await page.mouse.move(sx, sy);
+  await page.mouse.down();
+  for (let i = 1; i <= 12; i++) { await page.mouse.move(sx + (x - sx) * i / 12, sy + (y - sy) * i / 12); await sleep(16); }
+  await page.mouse.up();
+  await sleep(600);
+}
+
+await step('TC-CORE-124', '1', async () => {
+  // 缺省停在底边；拖到左侧中部松手：停到左边，贴着左缘，不压住小地图与右侧工具栏；记在本机
+  const page = await open(dockPid);
+  expect((await dockOf(page)) === 'bottom', `缺省应停在底边：${await dockOf(page)}`);
+  await dragDock(page, 'composer', 60, 460);
+  expect((await dockOf(page)) === 'left', `拖到左侧松手应停到左边：${await dockOf(page)}`);
+  const box = (await page.locator('form.composer').boundingBox())!;
+  const mini = await page.getByTestId('minimap').boundingBox();
+  const rail = await page.getByRole('toolbar', { name: '画布工具' }).boundingBox();
+  expect(box.x <= 24 && !overlap(box, mini) && !overlap(box, rail), `左停的卡片应贴左缘、不压住小地图与右侧工具栏：${JSON.stringify({ box, mini, rail })}`);
+  const st = await storedDock(page);
+  expect(st?.edge === 'left' && st.collapsed === false, `本机记录：${JSON.stringify(st)}`);
+  // 刷新：首帧就停在左边，位置不变
+  await page.reload();
+  await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+  expect((await dockOf(page)) === 'left', '刷新后应仍停在左边');
+  await sleep(600);
+  const box2 = (await page.locator('form.composer').boundingBox())!;
+  expect(Math.abs(box2.x - box.x) <= 2 && Math.abs(box2.y - box.y) <= 2, `刷新后位置变了：${JSON.stringify([box, box2])}`);
+  return `左停 x=${Math.round(box.x)} y=${Math.round(box.y)}，刷新不变`;
+});
+
+await step('TC-CORE-124', '2', async () => {
+  // 把手：→ 换到右边（贴在工具栏内侧）、↓ 回底边；点它弹出三选一
+  const page = await open(dockPid);
+  await page.getByTestId('composer-grip').focus();
+  await page.keyboard.press('ArrowRight');
+  await sleep(500);
+  expect((await dockOf(page)) === 'right', `→ 应换到右边：${await dockOf(page)}`);
+  const box = (await page.locator('form.composer').boundingBox())!;
+  const rail = (await page.locator('[role="toolbar"]').first().boundingBox())!;
+  expect(box.x + box.width <= rail.x + 1, `右停的卡片应在工具栏内侧：${box.x + box.width} vs ${rail.x}`);
+  await page.keyboard.press('ArrowDown');
+  await sleep(500);
+  expect((await dockOf(page)) === 'bottom', '↓ 应回底边');
+  await page.getByTestId('composer-grip').click();
+  await page.getByTestId('composer-dock-menu').waitFor({ timeout: 3000 });
+  await page.getByTestId('composer-dock-left').click();
+  await sleep(500);
+  expect((await dockOf(page)) === 'left', '把手菜单选「左边」应停到左边');
+  return '方向键换右边、回底边；菜单选左边';
+});
+
+await step('TC-CORE-124', '3', async () => {
+  // 收起：在原来那条边留胶囊；胶囊能拖到右边；点胶囊在右边展开；收起状态记在本机
+  const page = await open(dockPid);
+  await page.getByTestId('composer-collapse').click();
+  const pill = page.getByTestId('composer-pill');
+  await pill.waitFor({ timeout: 3000 });
+  expect(!(await page.locator('form.composer').isVisible()) && (await pill.getAttribute('data-dock')) === 'bottom' && (await pill.innerText()).includes('写一句'), '收起后底边应留「写一句」胶囊、输入框不可见');
+  expect((await storedDock(page))?.collapsed === true, '收起应记在本机');
+  await dragDock(page, 'pill', 1380, 500);
+  expect((await pill.getAttribute('data-dock')) === 'right', `胶囊拖到右侧应停到右边：${await pill.getAttribute('data-dock')}`);
+  await pill.click();
+  await sleep(400);
+  expect((await page.locator('form.composer').isVisible()) && (await dockOf(page)) === 'right', '点胶囊应在右边展开');
+  expect(await page.evaluate(() => document.activeElement?.id === 'chat-input'), '展开后光标应落回输入区');
+  return '底边胶囊 → 拖到右边 → 右边展开';
+});
+
+await step('TC-CORE-124', '4', async () => {
+  // 窄视口只停底边（记录不变）；草稿本的记忆单独一份
+  const page = await open(dockPid);
+  await page.evaluate(() => localStorage.setItem('quilt:composer:canvas', JSON.stringify({ edge: 'right', at: 0.5, collapsed: false })));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+  await sleep(500);
+  expect((await dockOf(page)) === 'bottom' && (await storedDock(page))?.edge === 'right', `窄视口应停底边且不改记录：${await dockOf(page)} ${JSON.stringify(await storedDock(page))}`);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${WEB}/sketch`);
+  await page.getByTestId('sketch-page').waitFor({ timeout: 15000 });
+  await sleep(500);
+  expect((await dockOf(page)) === 'bottom' && (await storedDock(page, 'quilt:composer:sketch')) === null, '草稿本的输入框应按自己的记录（缺省底边），不跟画布');
+  return '390 宽只停底边、记录仍是右边；草稿本缺省底边';
+});
+
+// ---------- TC-CORE-126 焦点在文本框里 ⌘E 照样开关选择元素（源自缺陷 2026-10-20） ----------
+const keyPid = seedProject('Keys', '--device', 'mobile', '--screens', '2', '--no-shot').projectId;
+await step('TC-CORE-126', '1', async () => {
+  const page = await open(keyPid);
+  const armed = () => page.getByTestId('armed-hint').isVisible().catch(() => false);
+  // 1 焦点在画布上按 ⌘E：进选择元素
+  await page.keyboard.press('ControlOrMeta+KeyE');
+  await eventually(async () => expect(await armed(), '焦点在画布上按 ⌘E 没进选择元素'), 3000);
+  // 2 点进底部输入框打几个字，按 ⌘E：退出选择元素，字和焦点都不动
+  await page.locator('#chat-input').click();
+  await page.keyboard.type('abc');
+  await page.keyboard.press('ControlOrMeta+KeyE');
+  await eventually(async () => expect(!(await armed()), '焦点在输入框里按 ⌘E 没退出选择元素'), 3000);
+  expect((await page.locator('#chat-input').inputValue()) === 'abc' && (await page.evaluate(() => document.activeElement?.id === 'chat-input')), '⌘E 不该动输入框里的字和焦点');
+  // 3 焦点仍在输入框里再按 ⌘E：重新进入
+  await page.keyboard.press('ControlOrMeta+KeyE');
+  await eventually(async () => expect(await armed(), '焦点在输入框里再按 ⌘E 没进选择元素'), 3000);
+  return '画布上与输入框里 ⌘E 都能开关选择元素，输入框的字与焦点不变';
+});
+
+// ---------- TC-CORE-127 底边收起与展开就地换形，中线不横移（源自缺陷 2026-10-20） ----------
+// 点击与逐帧量都在页面里做：从点下去那一帧开始量，不漏掉 200 ms 动画的前几帧
+const sampleMids = (page: Page, click: string, watch: string) => page.evaluate(async ([c, w]) => {
+  (document.querySelector(c) as HTMLElement).click();
+  const mids: number[] = [];
+  const t0 = performance.now();
+  while (performance.now() - t0 < 320) {
+    await new Promise((r) => requestAnimationFrame(r));
+    const el = document.querySelector(w) as HTMLElement | null;
+    if (el?.offsetWidth) { const b = el.getBoundingClientRect(); mids.push(Math.round(b.x + b.width / 2)); }
+  }
+  return mids;
+}, [click, watch] as const);
+await step('TC-CORE-127', '1', async () => {
+  const page = await open(dockPid);
+  await page.evaluate(() => localStorage.setItem('quilt:composer:canvas', JSON.stringify({ edge: 'bottom', at: 0.5, collapsed: false })));
+  await page.reload();
+  await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+  await sleep(600);
+  const form = (await page.locator('form.composer').boundingBox())!;
+  const mid = Math.round(form.x + form.width / 2);
+  // 1 收起：胶囊从第一帧起中线就在输入框的中线上
+  const down = await sampleMids(page, '[data-testid="composer-collapse"]', '[data-testid="composer-pill"]');
+  const offDown = down.filter((x) => Math.abs(x - mid) > 2);
+  expect(down.length > 0 && offDown.length === 0, `收起后胶囊横移了：输入框中线 ${mid}，胶囊逐帧中线 ${down.join(',')}`);
+  // 2 展开：输入框从第一帧起中线就在胶囊的中线上
+  const back = await sampleMids(page, '[data-testid="composer-pill"]', 'form.composer');
+  const offBack = back.filter((x) => Math.abs(x - mid) > 2);
+  expect(back.length > 0 && offBack.length === 0, `展开后输入框横移了：胶囊中线 ${mid}，输入框逐帧中线 ${back.join(',')}`);
+  await page.evaluate(() => localStorage.removeItem('quilt:composer:canvas'));
+  return `收起 ${down.length} 帧、展开 ${back.length} 帧，中线都在 ${mid}±2`;
 });
 
 await (ctx as BrowserContext | null)?.close().catch(() => {});

@@ -1,16 +1,15 @@
-// docs/TEST.md CORE 域 · 对话轮次与输入框（TC-CORE-043～064）。由 ../core.ts 按顺序引入，共用的浏览器、页面与脚手架在 ./shared.ts
+// docs/TEST.md CORE 域 · 对话轮次与输入框（TC-CORE-045～064）。由 ../core.ts 按顺序引入，共用的浏览器、页面与脚手架在 ./shared.ts
 import http from 'node:http';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT } from '@quilt/core';
-import { seedJson, apiJson, EVIDENCE, ROOT, WEB, API, eventually, pickOption, selectedValue } from '../lib.ts';
+import { seedJson, apiJson, EVIDENCE, ROOT, WEB, API, eventually, pickOption } from '../lib.ts';
 import { startOpenAiStub } from '../openai-stub.ts';
 import { connectMcp, callTool } from '../mcp-client.ts';
-import { expect, softly, waitJob } from '../harness.ts';
-import { page, ctx, RUN, step, shot, verbLine, STUB_RUNNER, PNG_B64, uploadPng, idemKey, useStubChannel } from './shared.ts';
+import { expect, softly, waitJob, sleep } from '../harness.ts';
+import { page, ctx, RUN, step, shot, STUB_RUNNER, PNG_B64, idemKey, useStubChannel } from './shared.ts';
 
-// ---- v0.74 共用（TC-CORE-043~046）：输入框发出的写请求改走 stub ----
+// ---- v0.74 共用（TC-CORE-045 / 046）：输入框发出的写请求改走 stub ----
 // 种子按 .env 建了一条已验证的 Gemini 通道并成为缺省：UI 发送与重试不能打到真实模型。拦下请求体、把 runner 换成 stub
 // （或用例指定的通道）再放行，并记下原始请求体供断言；holdMs 让这一个请求在途一阵
 const SEND_RE = /\/v1\/projects\/[^/]+\/messages(\/[^/]+\/retry)?$/;
@@ -28,274 +27,19 @@ async function pinSends(pg: import('playwright').Page, opts: { runner?: () => un
   });
   return sent;
 }
-type RoundMsg = { id: string; role: string; content: string; jobId: string | null; attachments: { id: string }[] };
-type RoundJob = { id: string; kind: string; status: string; input: Record<string, unknown> };
-const roundsOf = (projectId: string) => {
-  const messages = async () => (await apiJson<{ items: RoundMsg[] }>(`/v1/projects/${projectId}/messages?limit=100`)).body.items;
-  // 只数带作业的轮次：种子的 --messages 是没有作业的纯文字消息
-  const users = async () => (await messages()).filter((m) => m.role === 'user' && m.jobId);
-  const jobOf = async (m: RoundMsg) => (await apiJson<{ job: RoundJob }>(`/v1/jobs/${m.jobId}`)).body.job;
-  // 等到第 n 轮落库，返回它的用户消息与作业
-  const round = async (n: number) => {
-    let out: { user: RoundMsg; job: RoundJob } | null = null;
-    await eventually(async () => { const us = await users(); expect(us.length === n, `应有 ${n} 轮，实际 ${us.length}`); out = { user: us.at(-1)!, job: await jobOf(us.at(-1)!) }; }, 10000);
-    return out!;
-  };
-  // 经接口发一轮（显式走 stub）并等它跑完
-  const send = async (body: Record<string, unknown>) => {
-    const r = await apiJson<{ job: { id: string; kind: string } }>(`/v1/projects/${projectId}/messages`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ runner: STUB_RUNNER, ...body }) });
-    expect(r.status === 202, `发消息 ${r.status} ${JSON.stringify(r.body).slice(0, 160)}`);
-    const j = await waitJob(r.body.job.id, 90);
-    expect(j.status === 'succeeded', `「${body.content}」这一轮作业 ${j.status}`);
-    return r.body.job;
-  };
-  // 系统代发的作业（API-CORE-006）：与画布上的出变体 / 补缺失页 / 补链 / 按新约定重生成同一条路
-  const sysJob = async (kind: string, input: Record<string, unknown>) => {
-    const r = await apiJson<{ job: { id: string } }>(`/v1/projects/${projectId}/jobs`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ kind, input: { ...input, runner: STUB_RUNNER } }) });
-    expect(r.status === 202, `建 ${kind} 作业 ${r.status} ${JSON.stringify(r.body).slice(0, 160)}`);
-    const j = await waitJob(r.body.job.id, 90);
-    expect(j.status === 'succeeded', `${kind} 作业 ${j.status}`);
-  };
-  return { messages, users, jobOf, round, send, sysJob };
-};
 const openCanvas = async (projectId: string) => {
   await page.goto(`${WEB}/p/${projectId}`);
   await page.locator('[data-testid="screen-card"] img').first().waitFor({ timeout: 15000 });
-  if ((await page.getByTestId('chat-dock').getAttribute('data-state')) === 'collapsed') await page.getByRole('button', { name: /^展开对话记录/ }).click();
-  if ((await page.getByTestId('mode-chat').getAttribute('aria-checked')) === 'true') await page.getByTestId('mode-design').click();
 };
 
-// TC-CORE-043 「修改」还原完整参数（REQ-CORE-026 v0.74 / API-CORE-010）
-await step('TC-CORE-043', async () => {
-  const { projectId, screens } = seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', 'Rounds', '--device', 'mobile', '--screens', '2');
-  const [s1, s2] = screens;
-  const R = roundsOf(projectId);
-  const S = softly();
-  const comp = await apiJson<{ component: { id: string } }>(`/v1/projects/${projectId}/components`, { method: 'POST', body: JSON.stringify({ name: 'AuditTab', html: `<nav class="flex gap-4 p-2"><a href="${s1.route}" aria-current="page" class="font-bold">One</a><a href="${s2.route}">Two</a></nav>` }) });
-  expect(comp.status === 201, `建组件 ${comp.status}`);
-  const compId = comp.body.component.id;
-  // 0 接口边界：正文只在带隐藏参数时可空；隐藏参数与动词不配套 → 400
-  const bad = async (body: Record<string, unknown>, path: string) => S.check(async () => {
-    const r = await apiJson<{ errors?: { path: string }[] }>(`/v1/projects/${projectId}/messages`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ runner: STUB_RUNNER, ...body }) });
-    expect(r.status === 400 && !!r.body.errors?.some((e) => e.path === path), `${JSON.stringify(body)} 应 400 path=${path}：${r.status} ${JSON.stringify(r.body).slice(0, 120)}`);
-  });
-  await bad({ content: '', targetScreenIds: [s1.id] }, 'content');
-  await bad({ content: '', preset: 'link_repair' }, 'targetScreenIds');
-  await bad({ content: 'x', variantOf: s1.id, variantName: 'Empty', targetScreenIds: [s2.id] }, 'targetScreenIds');
-
-  const sent = await pinSends(page);
-  try {
-    // 1 「用组件在此处造屏」这一轮：锚点与组件都填回，动词仍是造；再发仍带锚点、建的仍是 generate（修复前锚点被清、变成改组件）
-    // 屏数 2：stub 驱动的单屏规划回的是整组计划，count=1 的造屏在 stub 下必然失败
-    await R.send({ content: '做一个设置页，用这条 tab', targetComponentIds: [compId], anchor: { x: 3000, y: 200 }, count: 2 });
-    await openCanvas(projectId);
-    // 输入框要选着一条云端通道才发得出去（刚重置的测试库里缺省落在本机 agent 上）；发出的请求由 pinSends 改走 stub
-    await useStubChannel(page, { port: 3973, label: 'Stub 43' });
-    const users = page.locator('[data-testid="message"][data-role="user"]');
-    const input = page.locator('#chat-input');
-    const form = page.locator('form.composer');
-    const chip = page.getByTestId('preset-chip');
-    const chipText = async () => ((await chip.count()) ? chip.innerText() : '没有胶囊');
-    const editLast = async (text: string) => {
-      await eventually(async () => expect((await users.last().innerText()).includes(text), `最后一轮应含「${text}」：${(await users.last().innerText()).slice(0, 80)}`), 10000);
-      await users.last().hover();
-      await users.last().getByTestId('msg-edit').click();
-    };
-    const sendNth = async (n: number) => eventually(async () => expect(sent.length === n, `应已发出 ${n} 轮，实际 ${sent.length}`));
-    await editLast('做一个设置页');
-    await eventually(async () => expect((await input.inputValue()) === '做一个设置页，用这条 tab', `修改后正文不对：${await input.inputValue()}`));
-    await S.check(async () => expect((await page.getByTestId('anchor-chip').count()) === 1 && (await page.getByTestId('component-chip').count()) === 1, `① 锚点与组件都应填回：锚点 ${await page.getByTestId('anchor-chip').count()} 组件 ${await page.getByTestId('component-chip').count()}`));
-    await S.check(async () => expect((await form.getAttribute('data-verb')) === 'create' && (await verbLine(page)).includes('此处'), `① 动词应是造 · 此处：${await form.getAttribute('data-verb')} ${await verbLine(page)}`));
-    await input.press('Enter');
-    await sendNth(1);
-    await S.check(() => expect(!!sent[0].body.anchor && (sent[0].body.targetComponentIds as string[] | undefined)?.[0] === compId && !sent[0].body.targetScreenIds, `① 重发应带锚点与组件、不带屏：${JSON.stringify(sent[0].body)}`));
-    let r = await R.round(2);
-    await S.check(() => expect(r.job.kind === 'generate' && !!r.job.input.anchor && (r.job.input.componentIds as string[] | undefined)?.[0] === compId, `① 重发应仍是用组件在此处造屏：${r.job.kind} ${JSON.stringify(r.job.input).slice(0, 120)}`));
-    await waitJob(r.job.id, 90);
-
-    // 2 出变体：胶囊「「Screen 1」的 Loading 变体」，正文是原提示词、屏数档位不显示；改了字再发仍是 Screen 1 的 Loading 变体
-    await R.sysJob('generate', { prompt: 'spinner while loading', count: 1, versions: 1, variantOf: s1.id, variantName: 'Loading' });
-    await editLast('Loading');
-    await S.check(() => eventually(async () => expect((await chip.count()) === 1 && /Screen 1.*Loading/.test(await chip.innerText()), `② 应出「Screen 1」的 Loading 变体胶囊：${await chipText()}`)));
-    await S.check(async () => expect((await input.inputValue()) === 'spinner while loading', `② 变体的正文应是原提示词：${await input.inputValue()}`));
-    await S.check(async () => expect((await verbLine(page)).includes('出变体') && (await page.getByTestId('count-group').count()) === 0 && (await page.getByTestId('target-chip').count()) === 0, `② 变体轮的动词行 / 档位不对：${await verbLine(page)}`));
-    await input.fill('spinner and skeleton rows');
-    await input.press('Enter');
-    await sendNth(2);
-    await S.check(() => expect(sent[1].body.variantOf === s1.id && sent[1].body.variantName === 'Loading' && sent[1].body.content === 'spinner and skeleton rows', `② 变体参数没随请求发出：${JSON.stringify(sent[1].body).slice(0, 160)}`));
-    r = await R.round(4);
-    await S.check(() => expect(r.job.kind === 'generate' && r.job.input.variantOf === s1.id && r.job.input.variantName === 'Loading' && r.job.input.prompt === 'spinner and skeleton rows', `② 应仍是 Screen 1 的 Loading 变体：${JSON.stringify(r.job.input).slice(0, 120)}`));
-    await S.check(() => expect(r.user.content === '出「Loading」状态变体：spinner and skeleton rows', `② 变体轮的消息正文：${r.user.content}`));
-    expect((await waitJob(r.job.id, 90)).status === 'succeeded', '变体作业没成功');
-    await S.check(() => eventually(async () => expect((await chip.count()) === 0, '② 发出后胶囊应收起')));
-
-    // 3 懒生成补缺失页：正文填回为空（提示词是系统拼的），留空可发；写了字作为附加要求
-    await R.sysJob('generate', { prompt: 'Screen for route /audit-help', count: 1, versions: 1, route: '/audit-help', fromScreenId: s1.id });
-    // 这条路由已被刚造的屏占着（懒生成撞已有路由会失败）：删掉再「修改」重发
-    const made = (await apiJson<{ screens: { id: string; route: string }[] }>(`/v1/projects/${projectId}`)).body.screens.find((x) => x.route === '/audit-help');
-    expect(!!made && (await apiJson(`/v1/screens/${made.id}`, { method: 'DELETE' })).status === 204, '懒生成没造出 /audit-help 或删不掉');
-    await editLast('/audit-help');
-    await S.check(() => eventually(async () => expect((await chip.count()) === 1 && (await chip.innerText()).includes('/audit-help'), `③ 应出缺失页胶囊：${await chipText()}`)));
-    await S.check(async () => expect((await input.inputValue()) === '' && (await form.locator('button[type="submit"]').getAttribute('aria-disabled')) !== 'true', `③ 缺失页轮正文应为空且可直接发：「${await input.inputValue()}」`));
-    await input.fill('顶部带搜索框');
-    await input.press('Enter');
-    await sendNth(3);
-    await S.check(() => expect(sent[2].body.route === '/audit-help' && sent[2].body.fromScreenId === s1.id && sent[2].body.content === '顶部带搜索框', `③ 缺失页参数没随请求发出：${JSON.stringify(sent[2].body).slice(0, 160)}`));
-    r = await R.round(6);
-    await S.check(() => expect(r.job.kind === 'generate' && r.job.input.route === '/audit-help' && r.job.input.prompt === 'Screen for route /audit-help\n\nADDITIONAL REQUIREMENTS FROM THE USER: 顶部带搜索框', `③ 应仍是钉死路由的懒生成、附加要求接在后面：${JSON.stringify(r.job.input).slice(0, 160)}`));
-    await S.check(() => expect(r.user.content === '生成缺失的页面 /audit-help：顶部带搜索框', `③ 缺失页轮的消息正文：${r.user.content}`));
-    await waitJob(r.job.id, 90);
-
-    // 4 补链：胶囊 + 两枚目标屏，正文为空，留空直接发 = 与「重试」同一个作业
-    await R.sysJob('edit_screens', { prompt: LINK_REPAIR_PROMPT, screenIds: [s1.id, s2.id], versions: 1 });
-    await editLast('接上跳转');
-    await S.check(() => eventually(async () => expect((await chip.count()) === 1 && (await chip.innerText()).includes('接上跳转'), `④ 应出接上跳转胶囊：${await chipText()}`)));
-    await S.check(async () => expect((await page.getByTestId('target-chip').count()) === 2 && (await input.inputValue()) === '' && (await verbLine(page)).includes('接上跳转 2 屏'), `④ 补链轮的目标 / 正文 / 动词行不对：${await page.getByTestId('target-chip').count()} 「${await input.inputValue()}」 ${await verbLine(page)}`));
-    await input.fill('');
-    await input.press('Enter');
-    await sendNth(4);
-    await S.check(() => expect(sent[3].body.preset === 'link_repair' && sent[3].body.content === '' && (sent[3].body.targetScreenIds as string[]).length === 2, `④ 补链参数没随请求发出：${JSON.stringify(sent[3].body).slice(0, 160)}`));
-    r = await R.round(8);
-    await S.check(() => expect(r.job.kind === 'edit_screens' && r.job.input.prompt === LINK_REPAIR_PROMPT && [...(r.job.input.screenIds as string[])].sort().join() === [s1.id, s2.id].sort().join(), `④ 留空发出的应与重试同一作业：${JSON.stringify(r.job.input).slice(0, 120)}`));
-    await S.check(() => expect(r.user.content === '接上跳转：把 2 屏的按钮 / 表单连上路由', `④ 补链轮的消息正文：${r.user.content}`));
-    await waitJob(r.job.id, 90);
-
-    // 5 按新约定重生成 + 附加要求；再「修改」反解回附加要求；× 去掉胶囊是普通的改；点选一屏胶囊让位
-    await R.sysJob('edit_screens', { prompt: CONVENTIONS_REGENERATE_PROMPT, screenIds: [s2.id], versions: 1 });
-    await editLast('按新约定重生成');
-    await S.check(() => eventually(async () => expect((await chip.count()) === 1 && (await chip.innerText()).includes('按新约定重生成') && (await page.getByTestId('target-chip').count()) === 1, `⑤ 应出按新约定重生成胶囊与一枚目标：${await chipText()}`)));
-    await input.fill('标题用衬线字体');
-    await input.press('Enter');
-    await sendNth(5);
-    r = await R.round(10);
-    await S.check(() => expect(r.job.kind === 'edit_screens' && r.job.input.prompt === `${CONVENTIONS_REGENERATE_PROMPT}\n\nADDITIONAL REQUIREMENTS FROM THE USER: 标题用衬线字体`, `⑤ 附加要求应接在固定指令后：${String(r.job.input.prompt).slice(-60)}`));
-    await S.check(() => expect(r.user.content === '按新约定重生成 1 屏。附加要求：标题用衬线字体', `⑤ 按新约定重生成轮的消息正文：${r.user.content}`));
-    await waitJob(r.job.id, 90);
-    await editLast('标题用衬线字体');
-    await S.check(() => eventually(async () => expect((await input.inputValue()) === '标题用衬线字体' && (await chip.count()) === 1, `⑤ 再修改应反解回附加要求：「${await input.inputValue()}」 ${await chipText()}`)));
-    if (await chip.count()) {
-      await chip.getByRole('button').click();
-      await S.check(async () => expect((await chip.count()) === 0 && (await verbLine(page)).startsWith('改 1 屏'), `⑤ × 去掉胶囊后应是普通的改：${await verbLine(page)}`));
-      await editLast('标题用衬线字体');
-      await eventually(async () => expect((await chip.count()) === 1, '再修改应重新出胶囊'));
-      // 点第 3 步造出的「Audit Help」：路由只对应这一张卡（Screen 1 / 2 一带叠着变体卡）；前面几轮造出的屏把它挤出了视野，先适配视图
-      await page.getByRole('button', { name: '适配视图' }).click();
-      await page.locator('[data-testid="screen-card"][data-route="/audit-help"] .gesture').click();
-      await S.check(() => eventually(async () => expect((await chip.count()) === 0 && (await page.getByTestId('target-chip').innerText()).includes('Audit Help'), `⑤ 点选一屏后胶囊应让位、目标换成那一屏：${await chipText()} ${await verbLine(page)}`)));
-    }
-    await shot(page, 'CORE-043');
-  } catch (e) { S.fail(e); } finally { await page.unroute(SEND_RE); }
-  S.done();
-  return '锚点 + 组件的造屏轮原样填回并仍建 generate；变体 / 缺失页 / 补链 / 按新约定重生成还原成胶囊并建同一类作业，补链留空 = 重试、附加要求接在系统提示词后并能反解；× 与点选屏让位；接口 400 三种';
-});
-
-// TC-CORE-044 对话记录：只在贴底时跟随、重试在途锁、大图预览按图定位（REQ-CORE-026 / PAGE-CANVAS v0.74）
-await step('TC-CORE-044', async () => {
-  const { projectId, screens } = seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', 'Scroll', '--device', 'mobile', '--screens', '2', '--messages', '30');
-  const [s1, s2] = screens;
-  const R = roundsOf(projectId);
-  const S = softly();
-  await R.send({ content: '带图的第一轮', targetScreenIds: [s1.id], attachmentIds: [await uploadPng(projectId)] });
-  await R.send({ content: '带图的第二轮', targetScreenIds: [s2.id], attachmentIds: [await uploadPng(projectId)] });
-  // 拖 4 s 才回的 OpenAI 兼容桩：别处发的那一轮走它，好在它跑着时不断有进度
-  const rev0 = (await apiJson<{ items: { htmlUrl: string }[] }>(`/v1/screens/${s1.id}/revisions`)).body.items[0];
-  const body0 = (await (await fetch(rev0.htmlUrl)).text()).split('<body')[1].replace(/^[^>]*>/, '').replace(/<\/body>[\s\S]*$/, '').replace(/\sdata-qid="q\d+"/g, '');
-  const stub = startOpenAiStub({ port: 3994, apiKey: 'good-key-0044', reply: body0, holdMs: 4000 });
-  let hold = 0;
-  const sent = await pinSends(page, { holdMs: () => hold });
-  const GET_RE = /\/v1\/projects\/[^/]+\/messages\?limit=100$/;
-  try {
-    const slow = await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label: 'Slow 通道 44', endpoint: stub.url, model: 'stub-44', apiKey: 'good-key-0044' }) });
-    // 第 2 步从输入框发一轮：stub 轮次没有云端通道时缺省是本机 agent、Enter 被挡，在打开画布之前验证慢桩通道（画布打开时取通道清单），打开后在输入框选中它
-    expect((await apiJson<{ ok: boolean }>(`/v1/runners/channel:${slow.body.channel.id}/probe`, { method: 'POST' })).body.ok === true, '慢桩通道验证未通过');
-    await openCanvas(projectId);
-    await pickOption(page, '[data-testid="runner-select"]', 'Slow 通道 44');
-    const list = page.locator('[data-testid="chat-dock"] [role="log"]');
-    const atBottom = () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight < 4);
-    // 1 打开时在底部；往上翻到顶后，别处发的一轮一路推进度、落终态回执，列表不动（修复前每条进度都拽回底部）
-    await eventually(async () => expect(await atBottom(), '打开时对话记录应在底部'));
-    await list.hover();
-    await page.mouse.wheel(0, -60000);
-    await eventually(async () => expect((await list.evaluate((el) => el.scrollTop)) === 0, '滚轮应把列表翻到顶'));
-    await list.evaluate((el) => { const w = window as unknown as { __maxTop: number }; w.__maxTop = 0; el.addEventListener('scroll', () => { w.__maxTop = Math.max(w.__maxTop, el.scrollTop); }); });
-    const other = await apiJson<{ job: { id: string } }>(`/v1/projects/${projectId}/messages`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ content: '别处发的一轮', targetScreenIds: [s1.id], runner: { kind: 'channel', channelId: slow.body.channel.id } }) });
-    await eventually(async () => expect((await page.getByTestId('running-job').count()) > 0 && (await page.getByTestId('running-job').first().innerText()).includes('正在'), '别处发的一轮应带着进度出现在在跑作业行'), 8000);
-    expect((await waitJob(other.body.job.id, 60)).status === 'succeeded', '别处发的一轮没成功');
-    await eventually(async () => expect((await page.locator('[data-testid="message"]').last().innerText()).includes('已更新'), '终态回执应进对话记录'), 8000);
-    const maxTop = await page.evaluate(() => (window as unknown as { __maxTop: number }).__maxTop);
-    await S.check(() => expect(maxTop < 4, `① 往上翻看时，进度与新消息把列表拽走了：scrollTop 最大到 ${maxTop}`));
-    // 2 自己发的一轮滚到底
-    await page.locator(`[data-testid="screen-card"][data-route="${s2.route}"] .gesture`).click();
-    await page.locator('#chat-input').fill('自己发的一轮');
-    await page.locator('#chat-input').press('Enter');
-    await S.check(() => eventually(async () => expect(await atBottom(), '② 自己发出的一轮应滚到底'), 5000));
-    const own = await R.round(4);
-    await waitJob(own.job.id, 60);
-
-    // 3 重试在途：请求拖 1.5 s，同一帧里连点三次只发一次，期间置灰且 aria-busy
-    const retry = page.locator('[data-testid="message"][data-role="assistant"]').last().getByTestId('msg-retry');
-    await eventually(async () => expect((await retry.getAttribute('aria-disabled')) !== 'true', '跑完后「重试」应可用'), 8000);
-    hold = 1500;
-    const retries = () => sent.filter((x) => x.url.endsWith('/retry')).length;
-    const before = retries();
-    await retry.evaluate((b) => { const el = b as HTMLButtonElement; el.click(); el.click(); el.click(); });
-    await page.waitForTimeout(300);
-    await S.check(async () => expect((await retry.getAttribute('aria-disabled')) === 'true' && (await retry.getAttribute('aria-busy')) === 'true', `③ 在途时「重试」应置灰并标 aria-busy：${await retry.getAttribute('aria-disabled')} ${await retry.getAttribute('aria-busy')}`));
-    await page.waitForTimeout(1700);
-    hold = 0;
-    const fired = retries() - before;
-    await S.check(() => expect(fired === 1, `③ 连点三次应只发一次重试：${fired}`));
-    for (const job of await Promise.all((await R.users()).slice(4).map((u) => R.jobOf(u)))) await waitJob(job.id, 60);
-
-    // 4 大图预览翻到第 2 张后，最近 100 条的窗口滑过、带第 1 张图的那轮不在了：停在同一张图、序号变 1 / 1；这张也不在了就关闭并说明
-    const withImg = (await R.users()).filter((m) => m.attachments.length).slice(0, 2);
-    let drop = new Set<string>();
-    await page.route(GET_RE, async (route) => {
-      if (route.request().method() !== 'GET') return route.fallback();
-      const res = await route.fetch();
-      const j = (await res.json()) as { items: RoundMsg[] };
-      j.items = j.items.filter((m) => !m.jobId || !drop.has(m.jobId));
-      await route.fulfill({ response: res, json: j });
-    });
-    const thumbs = page.getByTestId('message-attachment-open');
-    await eventually(async () => expect((await thumbs.count()) >= 2, `应有带图的轮次：${await thumbs.count()}`), 8000);
-    await thumbs.nth(1).click();
-    const viewer = page.getByTestId('image-viewer');
-    await viewer.waitFor({ timeout: 3000 });
-    const total = await thumbs.count();
-    expect((await viewer.innerText()).includes(`参考图 2 / ${total}`), `应是 2 / ${total}：${await viewer.innerText()}`);
-    const imgPath = async () => new URL((await page.getByTestId('viewer-image').getAttribute('src'))!, WEB).pathname;
-    const shown = await imgPath();
-    const nudge = () => R.send({ content: '触发一次对话重取', targetScreenIds: [s1.id] });
-    drop = new Set([withImg[0].jobId!]);
-    await nudge();
-    await S.check(() => eventually(async () => expect((await viewer.count()) === 1 && (await viewer.innerText()).includes(`参考图 1 / ${total - 1}`), `④ 列表截短后应停在同一张图、序号变 1 / ${total - 1}：${(await viewer.count()) ? await viewer.innerText() : '预览不在了'}`), 8000));
-    await S.check(async () => expect((await viewer.count()) === 1 && (await imgPath()) === shown, '④ 列表截短后预览换了一张图或不在了'));
-    await S.check(async () => expect((await page.getByText('Unexpected Application Error').count()) === 0, '④ 列表截短后整页崩了'));
-    if ((await page.getByText('Unexpected Application Error').count()) === 0) {
-      drop = new Set([withImg[0].jobId!, withImg[1].jobId!]);
-      // 说明是一条 3.2 s 的 toast，在 nudge 之前就开始等：页面在这一轮作业刚建出来时就补取消息、关掉预览（v0.76），
-      // 而 nudge 要等作业跑完、轮询间隔 3 s，回来再找 toast 可能已经消失
-      const closedNote = page.getByText(/预览已关闭/).first().waitFor({ timeout: 15000 }).then(() => true, () => false);
-      await nudge();
-      await S.check(() => viewer.waitFor({ state: 'detached', timeout: 8000 }));
-      await S.check(async () => expect(await closedNote, '④ 图不在了应关闭预览并说明'));
-      await S.check(async () => expect((await page.getByText('Unexpected Application Error').count()) === 0 && (await page.getByTestId('chat-dock').count()) === 1, '④ 关闭预览后页面应完好'));
-    }
-    await shot(page, 'CORE-044');
-  } catch (e) { S.fail(e); } finally { await page.unroute(SEND_RE); await page.unroute(GET_RE); await stub.close(); }
-  S.done();
-  return '往上翻看时别处一轮的进度与回执不移动列表、自己发的一轮滚到底；重试同帧连点只发一次、在途置灰 aria-busy；预览在列表截短时停在同一张图，图不在了关闭并说明';
-});
-
-// TC-CORE-045 作业失败的呈现：失败文案、折叠横条的失败标记、toast 的位置（§14 / PAGE-CANVAS v0.74）
+// TC-CORE-045 作业失败的呈现：失败的作业 chip 写原因、带「重试」与 ×、不弹提示条（§14 / PAGE-CANVAS「作业 chip」v1.17）
 await step('TC-CORE-045', async () => {
   const { projectId, screens } = seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', 'Fails', '--device', 'mobile', '--screens', '2');
   const [s1, s2] = screens;
   const S = softly();
-  // 桩：Key 不对回 401；Key 对时改组件回两个根元素（结构不合格），其余回一句话。每个回应拖 1.5 s，
-  // 让失败落在画布认领这个作业之后
-  const stub = startOpenAiStub({ port: 3995, apiKey: 'good-key-0045', holdMs: 1500, reply: (hit) => (hit.system.startsWith('You maintain ONE shared component') ? '<div class="p-2">a</div><div class="p-2">b</div>' : 'OK') });
+  // 桩：Key 不对回 401；Key 对时改组件回两个根元素（结构不合格），其余回一句话。每个回应（401 也一样）拖 2.5 s，
+  // 让画布先认领这个作业、再收到失败——没认领就不会有 chip
+  const stub = startOpenAiStub({ port: 3995, apiKey: 'good-key-0045', holdMs: 2500, reply: (hit) => (hit.system.startsWith('You maintain ONE shared component') ? '<div class="p-2">a</div><div class="p-2">b</div>' : 'OK') });
   const channel = async (label: string, apiKey: string) => (await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label, endpoint: stub.url, model: 'stub-45', apiKey }) })).body.channel.id;
   const badKey = await channel('坏 Key 通道', 'wrong-key-0045');
   const twoRoots = await channel('两根通道', 'good-key-0045');
@@ -303,34 +47,57 @@ await step('TC-CORE-045', async () => {
   expect(comp.status === 201, `建组件 ${comp.status}`);
   let runner: unknown = { kind: 'channel', channelId: badKey };
   const sent = await pinSends(page, { runner: () => runner });
+  const chipOf = (id: string) => page.locator(`[data-testid="job-chip"][data-job-id="${id}"]`);
+  const failedIds = () => page.locator('[data-testid="job-chip"][data-state="failed"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-job-id') ?? ''));
   try {
     await openCanvas(projectId);
     // 输入框要选着一条云端通道才发得出去；发出的请求由 pinSends 改成用例指定的通道
     await useStubChannel(page, { port: 3972, label: 'Stub 45' });
-    // 对话记录折叠
-    await page.getByRole('button', { name: /^折叠对话记录/ }).click();
     const input = page.locator('#chat-input');
-    // 1 改屏撞上 401：toast 是「改屏失败」+ HTTP 401 + 下一步、不带原始报文；toast 在输入框上方、限宽 28rem
+    // 1 改屏撞上 401：失败的 chip 写「改屏失败」+ HTTP 401 + 是哪一屏，不带原始报文；带「重试」与 ×；
+    //   有「重试」时原因末尾不再写「点「重试」」；整叠在输入框上方；失败不再弹提示条（chip 留到用户关掉）
     await page.locator(`[data-testid="screen-card"][data-route="${s1.route}"] .gesture`).click();
     await input.fill('改成深色');
     await input.press('Enter');
-    const t1 = page.getByText(/^(改屏失败|生成失败)/).first();
-    await t1.waitFor({ timeout: 30000 });
-    const text1 = await t1.innerText();
-    await S.check(() => expect(text1.startsWith('改屏失败') && text1.includes('HTTP 401') && text1.includes('设置') && !/[{}]|openai-compatible|provider|invalid api key/.test(text1), `① 失败文案应是可读原因 + 下一步：${text1}`));
-    const tb = (await t1.boundingBox())!; const cb = (await page.locator('form.composer').boundingBox())!;
-    await S.check(() => expect(tb.y + tb.height <= cb.y + 1 && tb.width <= 448 + 1, `① toast 应在输入框上方且限宽 28rem：toast ${JSON.stringify(tb)} 输入框 ${JSON.stringify(cb)}`));
-    // 2 折叠横条留下「1 轮失败」，toast 消失后还在；展开即清，助手回执是同一句
-    const mark = page.getByTestId('chat-failed');
-    await S.check(() => eventually(async () => expect((await mark.count()) === 1 && (await mark.innerText()).includes('1 轮失败'), '② 折叠横条应标出 1 轮失败')));
-    // 错误提示 8 s 后消失（PAGE-CANVAS「提示条」）
-    await eventually(async () => expect((await page.getByText(/^(改屏失败|生成失败)/).count()) === 0, 'toast 应自行消失'), 10000);
-    await S.check(async () => expect((await mark.count()) === 1 && (await mark.isVisible()), '② toast 消失后失败标记应还在'));
-    await page.getByRole('button', { name: /^展开对话记录/ }).click();
-    await S.check(async () => expect((await mark.count()) === 0, '② 展开后失败标记应清掉'));
-    const lastAsst = page.locator('[data-testid="message"][data-role="assistant"]').last();
-    await S.check(() => eventually(async () => { const t = await lastAsst.innerText(); expect(t.includes('改屏失败') && t.includes('HTTP 401') && !t.includes('{'), `② 助手回执应是同一句可读文案：${t.slice(0, 120)}`); }, 8000));
-    // 3 改组件：模型产出两个根 →「改组件失败」+ 中文原因 + 下一步
+    await page.locator('[data-testid="job-chip"][data-state="failed"]').first().waitFor({ timeout: 40000 });
+    const firstId = (await failedIds())[0];
+    const first = chipOf(firstId);
+    const text1 = await first.innerText();
+    await S.check(() => expect(text1.includes('Screen 1') && text1.includes('改屏失败') && text1.includes('HTTP 401') && !/[{}]|openai-compatible|provider|invalid api key/.test(text1), `① 失败 chip 应写是哪一屏 + 可读原因：${text1.replace(/\s+/g, ' ')}`));
+    await S.check(() => expect(!text1.includes('点「重试」'), `① chip 上有「重试」按钮，原因里不该再写一遍：${text1.replace(/\s+/g, ' ')}`));
+    await S.check(async () => expect((await first.getByTestId('retry-job').count()) === 1 && (await first.getByTestId('dismiss-job').count()) === 1, '① 失败 chip 应带「重试」与 ×'));
+    const stackBox = (await page.getByTestId('job-chips').boundingBox())!; const cb = (await page.locator('form.composer').boundingBox())!;
+    await S.check(() => expect(stackBox.y + stackBox.height <= cb.y + 1, `① 作业 chip 应叠在输入框上方：chip 底 ${stackBox.y + stackBox.height} 输入框顶 ${cb.y}`));
+    await S.check(async () => expect((await page.locator('[data-testid="toast"][data-kind="error"]').count()) === 0, `① 作业失败不该再弹提示条：${(await page.locator('[data-testid="toast"]').allInnerTexts()).join(' | ')}`));
+    // 2 双击「重试」：只原样再发一轮（还是那条坏 Key 通道，照样 401），旧的那枚撤掉、换成新作业的 chip；点 × 关掉
+    const retries = () => sent.filter((x) => x.url.endsWith('/retry')).length;
+    await first.getByTestId('retry-job').dblclick();
+    await S.check(() => eventually(async () => expect(retries() === 1, `② 双击「重试」应发出一次重试：${retries()} 次`), 10000));
+    await sleep(1000);
+    await S.check(() => expect(retries() === 1, `② 双击「重试」应只发出一次重试：${retries()} 次`));
+    await S.check(() => eventually(async () => expect(!(await failedIds()).includes(firstId), '② 重试发出后旧的那枚失败 chip 应撤掉'), 10000));
+    await S.check(() => eventually(async () => { const ids = (await failedIds()).filter((id) => id !== firstId); expect(ids.length === 1, `② 重试这一轮同样撞 401，应留下新作业的失败 chip：${ids.join(',')}`); }, 40000));
+    const again = (await failedIds()).filter((id) => id !== firstId);
+    if (again.length === 1) {
+      await chipOf(again[0]).getByTestId('dismiss-job').click();
+      await S.check(() => eventually(async () => expect((await chipOf(again[0]).count()) === 0, '② 点 × 后失败 chip 应消失')));
+    }
+    // 3 不能重试的那几类（重生成一块）撞 401：chip 上只有 ×，下一步先说检查 Key，再写它自己再发一次的入口
+    const cur = (await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${projectId}`)).body.screens.find((x) => x.id === s1.id)!;
+    const html = await (await fetch((await apiJson<{ revision: { htmlUrl: string } }>(`/v1/screens/${s1.id}/revisions/${cur.currentRevisionId}`)).body.revision.htmlUrl)).text();
+    const qid = [...html.matchAll(/data-qid="(q\d+)"/g)].map((m) => m[1]).at(-1)!;
+    const sub = await apiJson<{ job: { id: string } }>(`/v1/projects/${projectId}/jobs`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ kind: 'regenerate_subtree', input: { screenId: s1.id, qid, prompt: '换成一句标语', expectedRevisionId: cur.currentRevisionId, runner: { kind: 'channel', channelId: badKey } } }) });
+    expect(sub.status === 202, `建重生成一块的作业 ${sub.status} ${JSON.stringify(sub.body).slice(0, 160)}`);
+    const subChip = chipOf(sub.body.job.id);
+    await S.check(() => subChip.first().waitFor({ timeout: 20000 }).catch(() => { throw new Error('③ 接口建的重生成一块没在输入框上方成一枚 chip'); }));
+    if (await subChip.count()) {
+      await S.check(() => eventually(async () => expect((await subChip.getAttribute('data-state')) === 'failed', `③ 这一轮应失败：${await subChip.getAttribute('data-state')}`), 40000));
+      const text3 = await subChip.innerText();
+      await S.check(async () => expect((await subChip.getByTestId('retry-job').count()) === 0 && (await subChip.getByTestId('dismiss-job').count()) === 1, '③ 不能重试的作业 chip 上只应有 ×'));
+      await S.check(() => expect(text3.includes('HTTP 401') && text3.includes('检查这条通道的 Key') && text3.includes('在检查器里再点一次「重生成这块」') && !text3.includes('点「重试」'), `③ 原因里应先说检查 Key、再写它自己再发一次的入口、不写「点「重试」」：${text3.replace(/\s+/g, ' ')}`));
+      await subChip.getByTestId('dismiss-job').click().catch(() => {});
+    }
+    // 4 改组件：模型产出两个根 → chip 写「改组件失败」+ 中文原因，仍能重试
     runner = { kind: 'channel', channelId: twoRoots };
     await page.getByTestId('clear-targets').click();
     await page.locator('body').press('f');
@@ -338,18 +105,21 @@ await step('TC-CORE-045', async () => {
     await eventually(async () => expect((await page.locator('form.composer').getAttribute('data-verb')) === 'component', '应是改组件'));
     await input.fill('改成三个 tab');
     await input.press('Enter');
-    const t2 = page.getByText(/^(改组件失败|生成失败)/).first();
-    await t2.waitFor({ timeout: 30000 });
-    const text2 = await t2.innerText();
-    await S.check(() => expect(text2.startsWith('改组件失败') && text2.includes('根元素') && text2.includes('重试'), `③ 改组件的失败文案不对：${text2}`));
-    expect(sent.length === 2, `应发出两轮：${sent.length}`);
+    const compChip = page.locator('[data-testid="job-chip"][data-state="failed"]').filter({ hasText: '改组件失败' });
+    await S.check(() => compChip.waitFor({ timeout: 40000 }).catch(async () => { throw new Error(`④ 没出改组件的失败 chip：${(await page.locator('[data-testid="job-chip"]').allInnerTexts()).join(' | ') || '没有 chip'}`); }));
+    if (await compChip.count()) {
+      const text4 = await compChip.innerText();
+      await S.check(() => expect(text4.includes('AuditBar') && text4.includes('根元素'), `④ 改组件的失败原因不对：${text4.replace(/\s+/g, ' ')}`));
+      await S.check(async () => expect((await compChip.getByTestId('retry-job').count()) === 1, '④ 改组件失败也能原样重试'));
+    }
+    expect(sent.filter((x) => !x.url.endsWith('/retry')).length === 2, `应从输入框发出两轮：${sent.length} 次请求`);
     await shot(page, 'CORE-045');
   } catch (e) { S.fail(e); } finally { await page.unroute(SEND_RE); await stub.close(); }
   S.done();
-  return '401 →「改屏失败：通道的 Key 被拒绝（HTTP 401）…」、toast 在输入框上方且 ≤ 28rem；折叠横条「1 轮失败」toast 消失后仍在、展开即清；改组件失败写「改组件失败」+ 根元素原因';
+  return '401 的失败 chip 写「改屏失败：通道的 Key 被拒绝（HTTP 401）」并带「重试」与 ×、不弹提示条；「重试」原样再发一轮、旧 chip 换成新作业的、× 关掉；重生成一块失败只有 × 且写回检查器的入口；改组件失败写根元素原因';
 });
 
-// TC-CORE-046 输入框：通道不被模式切换冲掉、Esc 清草稿可撤销、贴图批量与上限、Enter 被挡说明、在途输入保留（REQ-CORE-006 / 012 / 020 / 023 v0.74）
+// TC-CORE-046 输入框：Esc 清草稿可撤销、贴图批量与上限、Enter 被挡说明、在途输入保留（REQ-CORE-006 / 012 / 020 v0.74）
 await step('TC-CORE-046', async () => {
   const { projectId, screens } = seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', 'Composer', '--device', 'mobile', '--screens', '2');
   const [s1] = screens;
@@ -357,43 +127,24 @@ await step('TC-CORE-046', async () => {
   const stub = startOpenAiStub({ port: 3996, apiKey: 'good-key-0046', reply: 'OK' });
   const ch = (await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label: 'Stub 通道 46', endpoint: stub.url, model: 'stub-46', apiKey: 'good-key-0046' }) })).body.channel.id;
   expect((await apiJson<{ ok: boolean }>(`/v1/runners/channel:${ch}/probe`, { method: 'POST' })).body.ok, 'Stub 通道验证未通过');
-  // 聊天通道：建一条本机 Claude 订阅，只在浏览器读到的 /v1/runners 里把它标成可用（不真的验证、这一条用例也不发聊天）
-  const sub = (await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'agent-sdk', label: '本机 Claude 46', model: 'claude-sonnet-5' }) })).body.channel.id;
-  const RUNNERS_RE = /\/v1\/runners$/;
-  await page.route(RUNNERS_RE, async (route) => {
-    const res = await route.fetch();
-    const j = (await res.json()) as { items: { id: string; available: boolean; status?: string }[] };
-    for (const it of j.items) if (it.id === `channel:${sub}`) { it.available = true; it.status = 'verified'; }
-    await route.fulfill({ response: res, json: j });
-  });
   let hold = 0; let upHold = 0;
   const sent = await pinSends(page, { holdMs: () => hold });
   const UP_RE = /\/v1\/projects\/[^/]+\/attachments$/;
   await page.route(UP_RE, async (route) => { if (upHold) await new Promise((r) => setTimeout(r, upHold)); await route.continue(); });
-  let agentNote = '本机没有 claude，第 6 步跳过';
+  let agentNote = '本机没有 claude，第 5 步跳过';
   try {
     await openCanvas(projectId);
     const input = page.locator('#chat-input');
-    // 1 选了 Stub 通道 → 切聊天 → 切回造 / 改：通道还是它，本机记忆没被冲掉（修复前被写成空串）
-    const want = `channel:${ch}`;
+    // 发出去的请求由 pinSends 改走 stub，输入框这边也要选着一条云端通道才发得出去
     await pickOption(page, '[data-testid="runner-select"]', 'Stub 通道 46');
-    expect((await selectedValue(page, '[data-testid="runner-select"]')) === want, '没选上 Stub 通道');
-    await page.getByTestId('mode-chat').click();
-    await eventually(async () => expect((await page.getByTestId('runner-select').innerText()).includes('本机 Claude 46'), '聊天模式应落到本机 Claude 订阅通道'));
-    await page.getByTestId('mode-design').click();
-    await page.waitForTimeout(300);
-    const v = await selectedValue(page, '[data-testid="runner-select"]');
-    const ls = await page.evaluate(() => localStorage.getItem('quilt:runner'));
-    await S.check(async () => expect(v === want && ls === want && (await page.getByTestId('runner-select').innerText()).includes('Stub 通道 46'), `① 切回造 / 改后通道应还是 Stub 通道：data-value=${v} 本机记忆=${ls}`));
-    if (v !== want) await pickOption(page, '[data-testid="runner-select"]', 'Stub 通道 46');
-    // 2 Esc 清草稿后 ⌘Z 找回
+    // 1 Esc 清草稿后 ⌘Z 找回
     await input.click();
     await page.keyboard.type('一段写了很久的提示词');
     await page.keyboard.press('Escape');
-    await S.check(async () => expect((await input.inputValue()) === '', `② Esc 应清掉草稿：「${await input.inputValue()}」`));
+    await S.check(async () => expect((await input.inputValue()) === '', `① Esc 应清掉草稿：「${await input.inputValue()}」`));
     await page.keyboard.press('ControlOrMeta+z');
-    await S.check(() => eventually(async () => expect((await input.inputValue()) === '一段写了很久的提示词', `② ⌘Z 应找回草稿：「${await input.inputValue()}」`), 2000));
-    // 3 上传拖 2.5 s：一次贴 3 张立刻出 3 张缩略图（都在上传）；再贴 3 张只收第 4 张、当场提示上限
+    await S.check(() => eventually(async () => expect((await input.inputValue()) === '一段写了很久的提示词', `① ⌘Z 应找回草稿：「${await input.inputValue()}」`), 2000));
+    // 2 上传拖 2.5 s：一次贴 3 张立刻出 3 张缩略图（都在上传）；再贴 3 张只收第 4 张、当场提示上限
     upHold = 2500;
     const paste = (n: number) => input.evaluate((el, a) => {
       const dt = new DataTransfer();
@@ -406,20 +157,20 @@ await step('TC-CORE-046', async () => {
     await paste(3);
     await page.waitForTimeout(300);
     const first3 = [await thumbs.count(), await uploadingN()];
-    await S.check(() => expect(first3[0] === 3 && first3[1] === 3, `③ 一次贴 3 张应立刻出 3 张缩略图：${first3[0]} 张，上传中 ${first3[1]}`));
+    await S.check(() => expect(first3[0] === 3 && first3[1] === 3, `② 一次贴 3 张应立刻出 3 张缩略图：${first3[0]} 张，上传中 ${first3[1]}`));
     await paste(3);
-    await S.check(() => eventually(async () => expect((await page.getByText('一条消息最多 4 张参考图').count()) > 0, '③ 超出上限应当场提示')));
+    await S.check(() => eventually(async () => expect((await page.getByText('一条消息最多 4 张参考图').count()) > 0, '② 超出上限应当场提示')));
     await page.waitForTimeout(300);
-    await S.check(async () => expect((await thumbs.count()) === 4, `③ 上限 4 张：实际 ${await thumbs.count()}`));
-    // 4 参考图还在传时按 Enter：理由写在发送键上方那一行、不发请求；传完理由撤掉
+    await S.check(async () => expect((await thumbs.count()) === 4, `② 上限 4 张：实际 ${await thumbs.count()}`));
+    // 3 参考图还在传时按 Enter：理由写在发送键上方那一行、不发请求；传完理由撤掉
     await input.fill('照这几张图改');
     const n0 = sent.length;
     await input.press('Enter');
-    await S.check(() => eventually(async () => expect((await page.getByTestId('send-blocked-reason').count()) === 1 && (await page.getByTestId('send-blocked-reason').innerText()).includes('参考图还在上传'), '④ 按 Enter 被挡时应就地写出理由')));
+    await S.check(() => eventually(async () => expect((await page.getByTestId('send-blocked-reason').count()) === 1 && (await page.getByTestId('send-blocked-reason').innerText()).includes('参考图还在上传'), '③ 按 Enter 被挡时应就地写出理由')));
     expect(sent.length === n0, '参考图没传完不该发出去');
     await eventually(async () => expect((await uploadingN()) === 0, '上传应完成'), 20000);
-    await S.check(() => eventually(async () => expect((await page.getByTestId('send-blocked-reason').count()) === 0, '④ 传完理由应撤掉')));
-    // 5 发送在途（请求拖 1.5 s）时补打的字与新贴的图，发送成功后留着，只去掉发出去的那部分
+    await S.check(() => eventually(async () => expect((await page.getByTestId('send-blocked-reason').count()) === 0, '③ 传完理由应撤掉')));
+    // 4 发送在途（请求拖 1.5 s）时补打的字与新贴的图，发送成功后留着，只去掉发出去的那部分
     while ((await thumbs.count()) > 1) await thumbs.first().click();
     await page.locator(`[data-testid="screen-card"][data-route="${s1.route}"] .gesture`).click();
     hold = 1500;
@@ -431,29 +182,29 @@ await step('TC-CORE-046', async () => {
     await eventually(async () => expect(sent.length === n0 + 1, '应发出一轮'));
     expect(sent[n0].body.content === '照这几张图改' && (sent[n0].body.attachmentIds as string[] | undefined)?.length === 1, `发出的应是原来那句与 1 张图：${JSON.stringify(sent[n0].body).slice(0, 160)}`);
     await page.waitForTimeout(2000);
-    await S.check(async () => expect((await input.inputValue()) === '再补一句', `⑤ 发送成功后应只去掉发出去的那段：「${await input.inputValue()}」`));
-    await S.check(async () => expect((await thumbs.count()) === 1, `⑤ 在途时新贴的图应留着：${await thumbs.count()}`));
+    await S.check(async () => expect((await input.inputValue()) === '再补一句', `④ 发送成功后应只去掉发出去的那段：「${await input.inputValue()}」`));
+    await S.check(async () => expect((await thumbs.count()) === 1, `④ 在途时新贴的图应留着：${await thumbs.count()}`));
     hold = 0;
-    // 6 本机 agent 通道没选会话时按 Enter（claude 在 PATH 上才有这一路）
+    // 5 本机 agent 通道没选会话时按 Enter（claude 在 PATH 上才有这一路）
     const agentOk = (await apiJson<{ items: { id: string; available: boolean }[] }>('/v1/runners')).body.items.some((i) => i.id === 'agent:claude-code' && i.available);
     if (agentOk) {
       await eventually(async () => expect((await uploadingN()) === 0, '上传应完成'), 20000);
       while ((await thumbs.count()) > 0) await thumbs.first().click();
-      // 清掉第 5 步的目标：那一屏的改屏作业可能还在跑，冲突理由会先占住这一行
+      // 清掉第 4 步的目标：那一屏的改屏作业可能还在跑，冲突理由会先占住这一行
       await page.getByTestId('clear-targets').click();
       await pickOption(page, '[data-testid="runner-select"]', '交给本机 Claude Code');
       const n1 = sent.length;
       await input.fill('做一个设置页');
       await input.press('Enter');
-      await S.check(() => eventually(async () => expect((await page.getByTestId('send-blocked-reason').count()) === 1 && (await page.getByTestId('send-blocked-reason').innerText()).includes('会话'), '⑥ 没选会话时按 Enter 应写出理由')));
+      await S.check(() => eventually(async () => expect((await page.getByTestId('send-blocked-reason').count()) === 1 && (await page.getByTestId('send-blocked-reason').innerText()).includes('会话'), '⑤ 没选会话时按 Enter 应写出理由')));
       expect(sent.length === n1, '没选会话不该发出去');
       await pickOption(page, '[data-testid="runner-select"]', 'Stub 通道 46');
       agentNote = '本机 agent 没选会话按 Enter 写出理由';
     }
     await shot(page, 'CORE-046');
-  } catch (e) { S.fail(e); } finally { await page.unroute(SEND_RE); await page.unroute(RUNNERS_RE); await page.unroute(UP_RE); await stub.close(); }
+  } catch (e) { S.fail(e); } finally { await page.unroute(SEND_RE); await page.unroute(UP_RE); await stub.close(); }
   S.done();
-  return `切聊天再切回通道不丢；Esc 清草稿 ⌘Z 找回；一次贴 3 张立刻 3 张、上限 4 当场提示；上传中按 Enter 写理由；在途补打的字与新图保留；${agentNote}`;
+  return `Esc 清草稿 ⌘Z 找回；一次贴 3 张立刻 3 张、上限 4 当场提示；上传中按 Enter 写理由；在途补打的字与新图保留；${agentNote}`;
 });
 
 // v0.75 来源校验（DESIGN §15「本地服务」）：DNS 重绑后的同源请求（Host 是攻击者域名）、跨站表单与 no-cors 盲写
@@ -730,8 +481,19 @@ await step('TC-CORE-062', async () => {
   const rm = await apiJson<Problem>(`/v1/components/${c2.id}/elements/${rootQid}`, { method: 'POST', body: JSON.stringify({ ops: [{ type: 'remove' }], expectedVersion: c2.version }) });
   check(rm.status === 422 && rm.body.type === '/errors/validation', `组件直改删掉根元素应 422：${rm.status}`);
 
+  // 7 发消息的正文与隐藏参数要配套（API-CORE-010）：正文只在带隐藏参数（补链、出变体、钉死路由）时可空，参数与动词不配套一律 400
+  const pairs: [Record<string, unknown>, string][] = [
+    [{ content: '', targetScreenIds: [s1] }, 'content'],
+    [{ content: '', preset: 'link_repair' }, 'targetScreenIds'],
+    [{ content: 'x', variantOf: s1, variantName: 'Empty', targetScreenIds: [s2] }, 'targetScreenIds'],
+  ];
+  for (const [body, at] of pairs) {
+    const r = await post<Problem>(`/v1/projects/${pid}/messages`, { runner: STUB, ...body });
+    check(r.status === 400 && !!r.body.errors?.some((e) => e.path === at), `${JSON.stringify(body)} 应 400 path=${at}：${r.status} ${JSON.stringify(r.body).slice(0, 120)}`);
+  }
+
   if (bad.length) { console.log(`   TC-CORE-062 全部失败项：\n   - ${bad.join('\n   - ')}`); throw new Error(bad.join('；')); }
-  return '目标屏不存在 / 已删 404、组件已删的重试同发消息 400、variantOf 422，均不建作业；15 个非 UUID 路径 404、两处非法游标 400；附件类型 / 空文件与组件删根 422';
+  return '目标屏不存在 / 已删 404、组件已删的重试同发消息 400、variantOf 422，均不建作业；15 个非 UUID 路径 404、两处非法游标 400；附件类型 / 空文件与组件删根 422；空正文与不配套的隐藏参数 400';
 });
 
 // v0.77 并发写入的一致性（DESIGN §16 竞态表）：采用候选 vs 回溯、设计系统同版本并发保存、同一幂等键并发、删屏 / 删项目时在途截图

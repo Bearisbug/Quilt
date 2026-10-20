@@ -3,7 +3,7 @@ import type { ScreenDto, ComponentDto, RunnerOptionDto, AgentTool, Runner, Token
 import type { SessionList } from '@/composer/useRunnerPrefs';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
-import { Button, EmptyState, Input, Panel } from '@/ui/ui';
+import { Button, EmptyState, Input, Panel, Textarea } from '@/ui/ui';
 import { ConfirmDialog } from '@/ui/modal';
 import { Select } from '@/ui/Select';
 import { RunnerSelect, SessionSelect } from '@/composer/Composer';
@@ -60,7 +60,7 @@ function ElementPath({ sel, onPick, onPeek }: { sel: ElementSel; onPick?: (qid: 
 // 目标是一张屏，或一个共享组件（v0.57 `REQ-EDIT-006`）——组件也能选元素直改，op 与屏同一套，
 // 只是落在组件自己的 HTML 上、乐观并发用版本号，改完由服务端回刷所有用它的屏。
 // 组件没有 AI 子树重生成（整块重写走输入框的「改组件」）、没有批注、也不能再「记为共享组件」。
-export function InspectorPanel({ screen, component, sel, routes, busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent, keysRef, onDirectEdit, onUndo, tokens, onPathPick, onPathPeek }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void; keysRef?: { current: InspectorKeys | null }; onDirectEdit?: (e: DirectEdit) => void; onUndo?: () => void; tokens?: Tokens; onPathPick?: (qid: string) => void; onPathPeek?: (qid: string | null) => void }) {
+export function InspectorPanel({ screen, component, sel, routes, busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent, onForkToSketch, forking = false, keysRef, onDirectEdit, onUndo, tokens, onPathPick, onPathPeek }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void; onForkToSketch?: (qid: string) => void; forking?: boolean; keysRef?: { current: InspectorKeys | null }; onDirectEdit?: (e: DirectEdit) => void; onUndo?: () => void; tokens?: Tokens; onPathPick?: (qid: string) => void; onPathPeek?: (qid: string | null) => void }) {
   const toast = useToast();
   // 改了没存的文案 / 类名 / 跳转与重生成说明按元素暂存（v0.78）：点别的元素再点回来还在。
   // 直改三格记着起草时元素的原值：元素本身变了（保存后热更新重选、别处改了它）就作废、回到新值；说明不随元素内容作废
@@ -205,7 +205,7 @@ export function InspectorPanel({ screen, component, sel, routes, busy, runners =
           <ElementPath sel={sel} onPick={onPathPick} onPeek={onPathPeek} />
           <div className="type-label text-text-secondary">&lt;{sel.tag}&gt; · {sel.qid}</div>
           {busy && <p className="type-caption text-warning" data-testid="el-busy">{busyText}</p>}
-          <div className="space-y-2 rounded-md border border-border-subtle bg-(--semantic-color-surface-sunken) p-3 type-label" data-testid="el-component-lock" data-component={sel.component}>
+          <div className="fill space-y-2 rounded-md p-3 type-label" data-testid="el-component-lock" data-component={sel.component}>
             <p className="leading-(--semantic-typography-body-line-height)">这是共享组件「<b className="text-text-primary">{sel.component}</b>」的一部分——改它会同步到所有用它的屏。</p>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="primary" data-testid="el-edit-component" onClick={() => onEditComponent?.(sel.component!)}>改组件</Button>
@@ -220,26 +220,26 @@ export function InspectorPanel({ screen, component, sel, routes, busy, runners =
           <div className="type-label text-text-secondary">&lt;{sel.tag}&gt; · {sel.qid}</div>
           {busy && <p className="type-caption text-warning" data-testid="el-busy">{busyText}</p>}
           <div className="space-y-1.5">
-            <label htmlFor="el-text" className="block type-label font-medium text-text-secondary">文案</label>
-            <input id="el-text" value={text} onChange={(e) => edit({ text: e.target.value })} className="h-9 w-full focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) px-2 type-body" placeholder="（无直接文本）" />
+            <label htmlFor="el-text" className="block type-label font-semibold text-text-secondary">文案</label>
+            <Input id="el-text" value={text} onChange={(e) => edit({ text: e.target.value })} placeholder="（无直接文本）" />
           </div>
           <div className="space-y-1.5">
-            <div id="el-classes-label" className="type-label font-medium text-text-secondary">类名（Tailwind，一行一个，只能用 token 色）</div>
+            <div id="el-classes-label" className="type-label font-semibold text-text-secondary">类名（Tailwind，一行一个，只能用 token 色）</div>
             <ClassList rows={classRows} onChange={(rows) => edit({ classes: rows })} tokens={tokens} labelledBy="el-classes-label" />
           </div>
           <div className="space-y-1.5">
-            <label htmlFor="el-link" className="block type-label font-medium text-text-secondary">跳转到（{sel.tag === 'a' ? 'href' : sel.tag === 'form' ? '提交后 action' : 'data-href'}）</label>
+            <label htmlFor="el-link" className="block type-label font-semibold text-text-secondary">跳转到（{sel.tag === 'a' ? 'href' : sel.tag === 'form' ? '提交后 action' : 'data-href'}）</label>
             <Select id="el-link" data-testid="el-link" value={link || NO_LINK} onChange={(v) => edit({ link: v === NO_LINK ? '' : v })} aria-label="跳转目标"
               options={[{ value: NO_LINK, label: '不跳转' }, ...linkOptions.map((r) => ({ value: r, label: r, hint: routes.includes(r) ? undefined : '断链' }))]} />
           </div>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="primary" pending={saving} disabled={busy} onClick={save} title={`保存（${MOD}S）`} aria-keyshortcuts="Meta+S Control+S">保存（零 token）</Button>
-            <Button size="sm" variant="danger" pending={saving} disabled={busy} onClick={remove} title="删除元素（Delete）" aria-keyshortcuts="Delete Backspace">删除元素</Button>
+            <Button size="sm" variant="danger-ghost" pending={saving} disabled={busy} onClick={remove} title="删除元素（Delete）" aria-keyshortcuts="Delete Backspace">删除元素</Button>
           </div>
           {/* 记为共享组件（REQ-EDIT-006）：把这个元素存成项目级组件，其他屏里对应的元素（同标签、同层级）可一并换成它。
               目标本身就是组件时不显示——组件里不能再套组件（validateComponentHtml 也会拒） */}
           <div className={`space-y-1.5 border-t border-border-subtle pt-3${component ? ' hidden' : ''}`}>
-            <div className="type-label font-medium text-text-secondary">记为共享组件</div>
+            <div className="type-label font-semibold text-text-secondary">记为共享组件</div>
             {!making ? (
               <>
                 <p className="type-caption text-text-secondary">存成项目级组件后，别的屏引用它、改一次全部同步。适合导航栏、页头这类每屏都一样的块。</p>
@@ -251,7 +251,7 @@ export function InspectorPanel({ screen, component, sel, routes, busy, runners =
                 <Input id="comp-name" data-testid="comp-name" value={compName} onChange={(e) => { setCompName(e.target.value); setCompError(null); }} placeholder="例如 TabBar" autoFocus autoComplete="off" spellCheck={false} maxLength={40}
                   aria-invalid={!!compError} aria-describedby={compError ? 'comp-name-error' : undefined} />
                 <label className="flex items-start gap-2 type-label">
-                  <input type="checkbox" data-testid="comp-apply" checked={compApply} onChange={(e) => setCompApply(e.target.checked)} className="mt-0.5 size-3.5 accent-primary" />
+                  <input type="checkbox" data-testid="comp-apply" checked={compApply} onChange={(e) => setCompApply(e.target.checked)} className="mt-0.5 size-3.5 accent-(--semantic-color-action-link)" />
                   <span className="leading-(--semantic-typography-body-line-height)">同时替换其他屏里对应的元素（同标签、同层级）</span>
                 </label>
                 {compError && <p id="comp-name-error" role="alert" className="type-label text-error">{compError}</p>}
@@ -270,8 +270,8 @@ export function InspectorPanel({ screen, component, sel, routes, busy, runners =
             </p>
           ) : (
           <div className="space-y-1.5 border-t border-border-subtle pt-3">
-            <label htmlFor="el-prompt" className="block type-label font-medium text-text-secondary">用 AI 重生成这块</label>
-            <textarea id="el-prompt" value={prompt} onChange={(e) => edit({ prompt: e.target.value })} rows={3} className="w-full resize-none focus-ring rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) p-2 type-body" placeholder="例如：改成横向滑动的卡片列表" disabled={busy}
+            <label htmlFor="el-prompt" className="block type-label font-semibold text-text-secondary">用 AI 重生成这块</label>
+            <Textarea id="el-prompt" value={prompt} onChange={(e) => edit({ prompt: e.target.value })} rows={3} placeholder="例如：改成横向滑动的卡片列表" disabled={busy}
               onKeyDown={(e) => { if (e.key === 'Enter' && e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void regenerate(); } }} />
             {/* 通道单独选：与输入框同一套控件；本机 agent 时还要选投给哪个会话。面板 20rem 宽，两个下拉放不下时折行 */}
             <div className="flex flex-wrap items-center gap-1.5" data-testid="el-runner">
@@ -279,12 +279,21 @@ export function InspectorPanel({ screen, component, sel, routes, busy, runners =
               {tool && <SessionSelect tool={tool} sessions={sessions} reason={list?.reason} value={sessionId} onChange={pickSession} onOpen={() => onSessionsOpen?.(tool)} disabled={busy} testId="el-session-select" />}
             </div>
             <div className="flex items-center gap-2">
-              <Button size="sm" disabled={!canRegenerate} pending={regenerating} onClick={() => void regenerate()}>重生成这块</Button>
+              <Button size="sm" variant="primary" disabled={!canRegenerate} pending={regenerating} onClick={() => void regenerate()}>重生成这块</Button>
               <kbd className="kbd px-1 type-caption">Shift+Enter</kbd>
             </div>
             {working && <p className="type-caption text-primary" data-testid="el-working">这块正在修改中，回写后会标「已更新」</p>}
             {agent && !sessionOk && !working && <p className="type-caption text-warning">先选要投递的会话</p>}
           </div>
+          )}
+          {/* 到草稿本里改（REQ-CORE-043）：只有屏的检查器给这一项（组件不是屏，建不了草稿）。
+              共享组件实例里的元素不给：草稿写回原处会被 component-locked 挡掉，是一条走不通的路 */}
+          {onForkToSketch && (
+            <div className="space-y-1.5 border-t border-border-subtle pt-3">
+              <div className="type-label font-semibold text-text-secondary">到草稿本里改</div>
+              <p className="type-caption text-text-secondary">把这一块按已保存的样子复制成草稿本里的一张草稿，在那里随便改，改好再换回原处；写回之前这一屏不受影响。</p>
+              <Button size="sm" data-testid="el-fork-to-sketch" pending={forking} onClick={() => onForkToSketch(sel.qid)}>到草稿本里改</Button>
+            </div>
           )}
         </div>
       )}

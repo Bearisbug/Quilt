@@ -23,9 +23,14 @@ export const projects = pgTable('projects', {
   exemplarScreenId: uuid('exemplar_screen_id'),
   // 聊天会话（REQ-CORE-023 v0.45）：Agent SDK 的会话 id，一个项目一条，每轮 resume；空 = 还没聊过
   chatSessionId: text('chat_session_id'),
+  // 项目类型（REQ-CORE-040 / ADR-030）：app = 普通项目；sketchbook = 草稿本，每个用户至多一个、不进项目列表
+  kind: text('kind').notNull().default('app'),
   createdAt: ts('created_at').notNull().default(now()),
   updatedAt: ts('updated_at').notNull().default(now()),
-}, (t) => [index('projects_owner_idx').on(t.ownerId, t.updatedAt)]);
+}, (t) => [
+  index('projects_owner_idx').on(t.ownerId, t.updatedAt),
+  uniqueIndex('projects_sketchbook_uq').on(t.ownerId).where(sql`kind = 'sketchbook'`),
+]);
 
 export const designSystems = pgTable('design_systems', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -57,6 +62,13 @@ export const screens = pgTable('screens', {
   variantName: text('variant_name'),
   // 呈现方式（v0.63 REQ-PROTO-005）：push 整屏换 / overlay 压在当前屏上；元数据，不进修订
   presentation: text('presentation').notNull().default('push'),
+  // 画框（REQ-CORE-040）：只在草稿本的屏上有值——component / mobile / desktop；null = 新草稿第一版落库前还没定
+  frame: text('frame'),
+  // 参照项目（REQ-CORE-042 / ADR-033）：只在草稿上有值；项目删了置空，草稿退回自由风格
+  refProjectId: uuid('ref_project_id').references(() => projects.id, { onDelete: 'set null' }),
+  // 写回目标（REQ-CORE-044）：只在草稿上有值；不建外键——那一屏删了就当没有目标。target_qid 空 = 整屏
+  targetScreenId: uuid('target_screen_id'),
+  targetQid: text('target_qid'),
   createdAt: ts('created_at').notNull().default(now()),
   updatedAt: ts('updated_at').notNull().default(now()),
 }, (t) => [

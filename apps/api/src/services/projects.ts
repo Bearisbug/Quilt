@@ -1,11 +1,11 @@
-import { and, eq, desc, inArray, lt, sql, isNull, isNotNull } from 'drizzle-orm';
+import { and, eq, ne, desc, inArray, lt, sql, isNull, isNotNull } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
 import { problems } from '../lib/errors.ts';
 import { storage } from '../lib/storage.ts';
 import { notifyCanvas } from '../lib/events.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
-import { tokensFromSeed, newProjectDesign, DEVICE_SIZE, type DeviceType, type ProjectDto, type ProjectDetailDto, type DesignSystemDto, type ScreenDto, type LinkDto, type JobDto, type JobRunner, RADIUS_SCALES, type Palette, type ColorMode, type FontSource, type Presentation } from '@quilt/core';
+import { tokensFromSeed, newProjectDesign, shotSpecFor, type DeviceType, type ProjectDto, type ProjectDetailDto, type DesignSystemDto, type ScreenDto, type LinkDto, type JobDto, type JobRunner, RADIUS_SCALES, type Palette, type ColorMode, type FontSource, type Presentation, type ProjectKind, type DraftFrame } from '@quilt/core';
 
 export type ProjectRow = typeof schema.projects.$inferSelect;
 export type ScreenRow = typeof schema.screens.$inferSelect;
@@ -15,13 +15,14 @@ export type JobRow = typeof schema.generationJobs.$inferSelect;
 const DEFAULT_SEED = '#3B5BDB';
 
 // REQ-CORE-002：建项目并由种子色算出设计系统（ADR-005）。
-export async function createProject(ownerId: string, input: { name: string; deviceType: DeviceType; seedColor?: string; presetId?: string }) {
+// kind 只由服务端定：API-CORE-003 / MCP 只建 app，草稿本由 ensureSketchbook 建（ADR-030）
+export async function createProject(ownerId: string, input: { name: string; deviceType: DeviceType; seedColor?: string; presetId?: string }, kind: ProjectKind = 'app') {
   // 按设计预设开局（v0.40 REQ-CORE-021）：预设存的是输入，tokens 这里现算；素材在事务外复制（要读写对象存储）
   const { copyPresetAssets, presetSeed } = await import('./presets.ts');
   const preset = input.presetId ? await presetSeed(ownerId, input.presetId) : null;
   const seedColor = preset?.seedColor ?? input.seedColor ?? DEFAULT_SEED;
   const created = await db.transaction(async (tx) => {
-    const [project] = await tx.insert(schema.projects).values({ ownerId, name: input.name, deviceType: input.deviceType }).returning();
+    const [project] = await tx.insert(schema.projects).values({ ownerId, name: input.name, deviceType: input.deviceType, kind }).returning();
     // 没选预设时用新建项目的设计系统（ADR-028 v0.92）：中性色板、sharp 圆角档、按设备的配方与 DESIGN.md
     const fresh = preset ? null : newProjectDesign(input.name, input.deviceType, seedColor);
     const palette = (preset?.palette as Palette | null) ?? fresh?.palette ?? null;
@@ -71,14 +72,16 @@ export async function deleteProject(ownerId: string, projectId: string): Promise
   await notifyCanvas(project.id, { reason: 'project_deleted' });
 }
 
+// 草稿本不进列表（INV-CORE-002）：项目切换器、入口 / 的落点与 quilt.list_projects 都经这里，漏一处它就以一个叫「草稿本」的项目露出来
 export async function listProjects(ownerId: string, cursor?: string, limit = 50): Promise<{ items: ProjectDto[]; nextCursor: string | null }> {
-  const where = cursor ? and(eq(schema.projects.ownerId, ownerId), lt(schema.projects.updatedAt, new Date(cursor))) : eq(schema.projects.ownerId, ownerId);
+  const mine = and(eq(schema.projects.ownerId, ownerId), ne(schema.projects.kind, 'sketchbook'));
+  const where = cursor ? and(mine, lt(schema.projects.updatedAt, new Date(cursor))) : mine;
   const rows = await db.select().from(schema.projects).where(where).orderBy(desc(schema.projects.updatedAt)).limit(limit + 1);
   const items = rows.slice(0, limit).map(projectDto);
   return { items, nextCursor: rows.length > limit ? rows[limit - 1].updatedAt.toISOString() : null };
 }
 
-export const projectDto = (p: ProjectRow): ProjectDto => ({ id: p.id, name: p.name, deviceType: p.deviceType as DeviceType, status: p.status as 'active' | 'archived', brief: p.brief, exemplarScreenId: p.exemplarScreenId, createdAt: p.createdAt.toISOString(), updatedAt: p.updatedAt.toISOString() });
+export const projectDto = (p: ProjectRow): ProjectDto => ({ id: p.id, name: p.name, deviceType: p.deviceType as DeviceType, status: p.status as 'active' | 'archived', brief: p.brief, exemplarScreenId: p.exemplarScreenId, kind: p.kind as ProjectKind, createdAt: p.createdAt.toISOString(), updatedAt: p.updatedAt.toISOString() });
 export const designSystemDto = (d: typeof schema.designSystems.$inferSelect): DesignSystemDto => ({ id: d.id, projectId: d.projectId, seedColor: d.seedColor, tokens: d.tokens, palette: (d.palette as DesignSystemDto['palette']) ?? null, colorMode: d.colorMode as DesignSystemDto['colorMode'], designMd: d.designMd, components: d.components, version: d.version });
 export const jobDto = (j: JobRow): JobDto => ({ id: j.id, projectId: j.projectId, kind: j.kind as JobDto['kind'], status: j.status as JobDto['status'], runner: j.runner as JobRunner, input: j.input, output: j.output, createdAt: j.createdAt.toISOString(), startedAt: j.startedAt?.toISOString() ?? null, finishedAt: j.finishedAt?.toISOString() ?? null });
 
@@ -95,10 +98,16 @@ export async function screenDtos(project: ProjectRow, rows: ScreenRow[]): Promis
       .groupBy(schema.screenRevisions.screenId, schema.screenRevisions.jobId);
     for (const c of rowsC) counts.set(`${c.screenId}|${c.jobId}`, c.n);
   }
-  const size = DEVICE_SIZE[project.deviceType as DeviceType];
   const previewToken = signPreview(project.id, stableExpiry(config.previewTokenMinutes));
+  // 草稿的写回目标（REQ-CORE-044）：那一屏在哪个项目、叫什么，草稿本页的「来自」与写回弹层的缺省值要用；那一屏已被删时取不到，target 为 null
+  const targetIds = rows.map((s) => s.targetScreenId).filter((x): x is string => !!x);
+  const targetRows = targetIds.length ? await db.select({ id: schema.screens.id, screenName: schema.screens.name, projectId: schema.projects.id, projectName: schema.projects.name })
+    .from(schema.screens).innerJoin(schema.projects, eq(schema.projects.id, schema.screens.projectId)).where(inArray(schema.screens.id, targetIds)) : [];
+  const targets = new Map(targetRows.map(({ id, ...t }) => [id, t]));
   return Promise.all(rows.map(async (s) => {
     const rev = s.currentRevisionId ? byId.get(s.currentRevisionId) : undefined;
+    // 草稿按画框给尺寸（REQ-CORE-040），与截图同一出处；普通屏仍是项目的设备形态
+    const { size } = shotSpecFor(project, s);
     const n = rev?.jobId && rev.candidateIndex !== null && !rev.candidateSettledAt ? counts.get(`${s.id}|${rev.jobId}`) ?? 0 : 0;
     return {
       id: s.id, projectId: s.projectId, name: s.name, route: s.route, purpose: s.purpose, x: s.x, y: s.y, width: size.w, height: size.h,
@@ -110,7 +119,9 @@ export async function screenDtos(project: ProjectRow, rows: ScreenRow[]): Promis
       // 偏离条数（v0.43）：契约是透镜不是闸门，画布只报「偏离了几处」，取舍由设计师做
       deviations: rev ? ((rev.lintReport as { violations?: unknown[] }).violations ?? []).length : 0,
       pendingCandidates: n >= 2 && rev?.jobId ? { jobId: rev.jobId, count: n } : null,
-      variantOf: s.variantOf ?? null, variantName: s.variantName ?? null, presentation: s.presentation as Presentation,
+      variantOf: s.variantOf ?? null, variantName: s.variantName ?? null, presentation: s.presentation as Presentation, frame: (s.frame as DraftFrame | null) ?? null,
+      refProjectId: s.refProjectId ?? null, targetScreenId: s.targetScreenId ?? null, targetQid: s.targetQid ?? null,
+      target: s.targetScreenId ? targets.get(s.targetScreenId) ?? null : null,
       updatedAt: s.updatedAt.toISOString(),
     };
   }));

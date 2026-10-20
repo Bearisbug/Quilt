@@ -7,7 +7,7 @@ import { page, step, shot } from './shared.ts';
 type Box = { x: number; y: number; width: number; height: number };
 const overlapArea = (a: Box, b: Box) => Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
 const blurActive = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-// 铺满视口、有底色的 fixed 层（弹层遮罩）有几层：弹层只该有一层遮罩。v1.08 起遮罩是半透明墨色、不模糊（§13.1），按底色认
+// 铺满视口、有底色的 fixed 层（弹层遮罩）有几层：弹层只该有一层遮罩。遮罩是半透明墨色（v1.15 起加 6 px 背景模糊，§13.1），按底色认
 const backdropLayers = () => page.evaluate(() => [...document.querySelectorAll('body *')].filter((el) => {
   const cs = getComputedStyle(el); const r = el.getBoundingClientRect();
   return cs.position === 'fixed' && r.width >= innerWidth - 1 && r.height >= innerHeight - 1 && cs.backgroundColor !== 'rgba(0, 0, 0, 0)';
@@ -230,7 +230,7 @@ await step('TC-CORE-048', async () => {
   return '空提交 3 错、焦点落显示名、改对即清；填过内容点遮罩不关；OpenAI 兼容填过端点再切本机订阅照常提交且不带端点；未配主密钥时顶部说明、Key 类型禁用保存；新建项目错误关联、输入即清';
 });
 
-// TC-CORE-049 窄视口与输入框几何：首帧终值宽度、面板开时先截通道名不折行、对话记录与面板同开不挤竖条、折叠横条不被压、排列条不被小地图盖、窄屏不显示手势提示（v0.78）
+// TC-CORE-049 窄视口与输入框几何：首帧终值宽度、面板开时先截通道名不折行、窄视口下开着面板不挤竖条、排列条不被小地图盖（v0.78）
 await step('TC-CORE-049', async () => {
   const { projectId } = seedJson<{ projectId: string }>('seed:project', '--name', 'Narrow', '--device', 'mobile', '--screens', '3', '--no-shot');
   const S = softly();
@@ -259,7 +259,7 @@ await step('TC-CORE-049', async () => {
     await page.goto(`${WEB}/p/${projectId}`);
     // 前置：先完整打开一次，让通道清单在本机留底（v0.81）——测的是之后每次打开的首帧
     await page.getByTestId('runner-select').waitFor({ timeout: 10000 });
-    await page.evaluate(() => { localStorage.removeItem('quilt:chat-collapsed'); localStorage.setItem('quilt:minimap', '1'); sessionStorage.setItem('quilt:probe-composer', '1'); });
+    await page.evaluate(() => { localStorage.setItem('quilt:minimap', '1'); sessionStorage.setItem('quilt:probe-composer', '1'); });
     // 1 首帧就是终值：从出现起每一帧的宽与左缘都等于最后一帧
     await load();
     await page.waitForTimeout(800);
@@ -281,26 +281,15 @@ await step('TC-CORE-049', async () => {
     await S.check(() => expect(bar1 !== 'wrap' && Math.abs(c1.height - c0.height) <= 1, `② 面板打开后工具条不应折行：data-bar=${bar1} 高 ${c0.height} → ${c1.height}（宽 ${c0.width} → ${c1.width}，通道 ${trig0} → ${trig1}）`));
     await S.check(() => expect(c1.x + c1.width <= p1.x + 1, `② 输入框不应压住面板：右缘 ${c1.x + c1.width} 面板左缘 ${p1.x}`));
     await page.keyboard.press('Alt+d');
-    // 3 对话记录展开 + 右侧面板：1024×700、800×600 下输入框不被挤成竖条、不出视口、不压顶栏 / 对话记录 / 面板
+    // 3 右侧面板开着：1024×700、800×600 下输入框不被挤成竖条、不出视口、不压顶栏 / 面板
     for (const [w, h] of [[1024, 700], [800, 600]] as const) {
       await page.setViewportSize({ width: w, height: h });
       await load('?panel=screens');
-      const c = await box('form.composer'); const d = await box('[data-testid="chat-dock"]'); const p = await box('.slide-in-right');
+      const c = await box('form.composer'); const p = await box('.slide-in-right');
       await S.check(() => expect(c.width >= 280 && c.y >= 56 && c.y + c.height <= h + 1 && c.x >= 0 && c.x + c.width <= w + 1, `③ ${w}×${h} 输入框几何不对：${JSON.stringify(c)}`));
-      await S.check(() => expect(overlapArea(c, d) === 0 && overlapArea(c, p) === 0, `③ ${w}×${h} 输入框与对话记录 / 面板重叠：${overlapArea(c, d)} / ${overlapArea(c, p)} px²`));
+      await S.check(() => expect(overlapArea(c, p) === 0, `③ ${w}×${h} 输入框与面板重叠：${overlapArea(c, p)} px²`));
     }
-    // 4 对话记录折叠：1280×800、1024×700 下横条不被输入框压住，展开箭头点得到
-    await page.evaluate(() => localStorage.setItem('quilt:chat-collapsed', '1'));
-    for (const [w, h] of [[1280, 800], [1024, 700]] as const) {
-      await page.setViewportSize({ width: w, height: h });
-      await load();
-      const c = await box('form.composer'); const d = await box('[data-testid="chat-dock"]');
-      const bb = (await page.getByRole('button', { name: /^展开对话记录/ }).boundingBox())!;
-      const hit = await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('[data-testid="chat-dock"]'), [bb.x + bb.width - 16, bb.y + bb.height / 2]);
-      await S.check(() => expect(overlapArea(c, d) === 0 && hit, `④ ${w}×${h} 折叠横条被输入框压住：重叠 ${overlapArea(c, d)} px²，展开箭头可点 ${hit}`));
-    }
-    await page.evaluate(() => localStorage.removeItem('quilt:chat-collapsed'));
-    // 5 1024×700、屏列表开着、小地图开着，多选两屏：排列条的屏数与「左对齐」不被小地图盖住
+    // 4 1024×700、屏列表开着、小地图开着，多选两屏：排列条的屏数与「左对齐」不被小地图盖住
     await page.setViewportSize({ width: 1024, height: 700 });
     await load('?panel=screens');
     await page.getByRole('button', { name: '适配视图' }).click();
@@ -312,14 +301,9 @@ await step('TC-CORE-049', async () => {
       const bar = document.querySelector('[data-testid="arrange-bar"]')!;
       return [bar.querySelector('span')!, bar.querySelector('[data-testid="arrange-left"]')!].map((el) => { const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!top && bar.contains(top); });
     });
-    await S.check(() => expect(barHit.every(Boolean), `⑤ 排列条的屏数 / 左对齐被盖住：${JSON.stringify(barHit)}`));
-    // 6 390×844：对话记录底部不显示鼠标手势提示
-    await page.setViewportSize({ width: 390, height: 844 });
-    await load();
-    const hint = page.getByText('滚轮/触控板平移', { exact: false });
-    await S.check(async () => expect((await hint.count()) === 0 || !(await hint.first().isVisible()), '⑥ 390 px 下不该显示鼠标手势提示'));
+    await S.check(() => expect(barHit.every(Boolean), `④ 排列条的屏数 / 左对齐被盖住：${JSON.stringify(barHit)}`));
     await shot(page, 'CORE-049');
   } catch (e) { S.fail(e); } finally { await page.setViewportSize({ width: 1440, height: 1000 }); }
   S.done();
-  return '首帧即终值宽度；面板开时截通道名不折行；1024 / 800 下对话记录与面板同开输入框不挤不压；折叠横条不被压、箭头可点；排列条不被小地图盖；390 px 不显示手势提示';
+  return '首帧即终值宽度；面板开时截通道名不折行；1024 / 800 下开着面板输入框不挤不压；排列条不被小地图盖';
 });

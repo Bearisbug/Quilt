@@ -26,7 +26,7 @@ export function seed(script: string, ...args: string[]): string {
   // `pnpm seed` 会删光当前库里的全部项目（本地版只有一个用户，种子数据就是全量重置）。
   // 每个 e2e 套件在模块顶层就调它，所以「只想看看脚本能不能跑」也会清库——实测清掉过开发库里的真实项目。
   // 因此除非 DATABASE_URL 指向测试库，一律拒绝；要在开发库上重置，显式给 ALLOW_SEED_DEV=1。
-  if (script === 'seed' && !/quilt_test/.test(process.env.DATABASE_URL ?? '') && process.env.ALLOW_SEED_DEV !== '1') {
+  if (script === 'seed' && !/_test(\?|$)/.test(process.env.DATABASE_URL ?? '') && process.env.ALLOW_SEED_DEV !== '1') {
     throw new Error('拒绝执行 pnpm seed：它会删光当前库的全部项目。e2e 请对测试库跑（DATABASE_URL=postgres://quilt:quilt@127.0.0.1:5439/quilt_test），确实要重置开发库时设 ALLOW_SEED_DEV=1。');
   }
   const out = execFileSync('pnpm', ['-s', script, ...args], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });

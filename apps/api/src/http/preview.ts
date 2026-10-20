@@ -8,9 +8,10 @@ import { verifyPreview } from '../lib/signing.ts';
 import { storage } from '../lib/storage.ts';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { withCurrentRuntime, withPaletteDarkMode, withOverlayStyle, withLocalVendor, buildPrelude, SCREEN_CSP, VENDOR, type Tokens } from '@quilt/core';
+import { withCurrentRuntime, withPaletteDarkMode, withOverlayStyle, withDraftComponentStyle, withLocalVendor, buildPrelude, SCREEN_CSP, VENDOR, type Tokens } from '@quilt/core';
 import { readAsset } from '../services/assets.ts';
 import { componentPreviewDocument } from '../services/components.ts';
+import { DRAFT_ROOT_JS } from '../lib/screenshot.ts';
 
 // 预览域服务（ADR-004 / API-CORE-016）：独立 origin、无 cookie、HMAC 签名。
 // CSP 在 v0.43 放开到任意 https: 源——屏里允许用 Chart.js 这类开源库（REQ-CORE-022）；v0.75 补 form-action 'none'（SCREEN_CSP）。
@@ -48,13 +49,18 @@ previewApp.get('/p/:projectId/:screenId', async (c) => {
   const rev = c.req.query('rev') ?? '';
   const token = c.req.query('t') ?? '';
   if (!verifyPreview(token, projectId)) return problem(c, 403, '/errors/preview-token-invalid', '预览签名无效或过期');
-  const [row] = await db.select({ htmlKey: schema.screenRevisions.htmlKey, presentation: schema.screens.presentation })
+  const [row] = await db.select({ htmlKey: schema.screenRevisions.htmlKey, presentation: schema.screens.presentation, frame: schema.screens.frame, kind: schema.projects.kind })
     .from(schema.screenRevisions).innerJoin(schema.screens, eq(schema.screens.id, schema.screenRevisions.screenId))
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.screens.projectId))
     .where(and(eq(schema.screenRevisions.id, rev), eq(schema.screenRevisions.screenId, screenId), eq(schema.screens.projectId, projectId)));
   if (!row) return problem(c, 404, '/errors/not-found', '修订不存在');
   // 叠层屏（v0.63）：呈现方式是元数据，下发时临时注入透明背景，压在别的屏上时露出底下那一屏
   const raw = withLocalVendor(withPaletteDarkMode(withCurrentRuntime((await storage.get(row.htmlKey)).toString('utf8'))));
-  const html = row.presentation === 'overlay' ? withOverlayStyle(raw) : raw;
+  // 组件画框的草稿（REQ-CORE-040）：看板按根元素的大小摆它；画框还没定（null）的按组件量。手机页 / 桌面页由父页按画框给视口，不报。
+  // 它同样注入透明背景：看板上组件四周露出看板底色，而不是草稿本设计系统的背景色
+  const draftComponent = row.kind === 'sketchbook' && (row.frame === 'component' || row.frame === null);
+  const shown = draftComponent ? withDraftComponentStyle(raw) : row.presentation === 'overlay' ? withOverlayStyle(raw) : raw;
+  const html = draftComponent ? withDraftMeasure(shown, screenId) : shown;
   c.header('Content-Type', 'text/html; charset=utf-8');
   // 修订本身不可变，但这份响应不是：运行时每次下发都换成当前版本（上一行）。标成 immutable 时浏览器 10 分钟内
   // 连条件请求都不发，运行时修复到不了已经开着的会话，而 iframe 是聚焦时才建的、硬刷新页面也绕不过这层缓存。
@@ -96,6 +102,15 @@ previewApp.get('/a/:projectId/:assetId', async (c) => {
   c.header('Access-Control-Allow-Origin', '*');
   return c.body(new Uint8Array(found.body));
 });
+
+// 草稿尺寸上报（API-CORE-016 草稿条目），与共享组件预览的测量脚本同一机制：load 后报一次草稿根的框（向上取整），之后 ResizeObserver 盯着、
+// 尺寸变了再报。运行时换 body（quilt:swap）时会重跑 body 里的脚本，那时 load 早已过去，按 readyState 直接开始、盯住新的根；
+// 旧根离开文档时 ResizeObserver 还会回调一次 0×0，isConnected 把它挡掉。内联脚本由 SCREEN_CSP 的 'unsafe-inline' 放行
+function withDraftMeasure(html: string, screenId: string): string {
+  const script = `<script>(function(){function start(){var r=${DRAFT_ROOT_JS};if(!r)return;var send=function(){if(!r.isConnected)return;var b=r.getBoundingClientRect();parent.postMessage({type:'quilt:draft-size',screenId:${JSON.stringify(screenId)},w:Math.ceil(b.width),h:Math.ceil(b.height)},'*');};if(window.ResizeObserver)new ResizeObserver(send).observe(r,{box:'border-box'});else send();}if(document.readyState==='complete')start();else window.addEventListener('load',start);})();</script>`;
+  const at = html.lastIndexOf('</body>');
+  return at < 0 ? `${html}${script}` : `${html.slice(0, at)}${script}\n${html.slice(at)}`;
+}
 
 function problem(c: Context, status: 403 | 404, type: string, title: string) {
   c.header('Content-Type', 'application/problem+json');

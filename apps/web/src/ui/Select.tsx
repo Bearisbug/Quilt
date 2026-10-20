@@ -27,7 +27,7 @@ export function Select({ id, value, onChange, options, placeholder, disabled, cl
       <RxSelect.Trigger
         id={id} aria-label={ariaLabel} data-testid={testId} data-value={value}
         className={cn(
-          'state-layer focus-ring group flex h-9 w-full items-center justify-between gap-2 rounded-sm border border-border-strong bg-(--semantic-color-surface-sunken) px-2.5 type-body text-text-primary',
+          'state-layer focus-ring fill group flex h-9 w-full items-center justify-between gap-2 rounded-md border border-transparent px-3 type-body text-text-primary',
           'disabled:cursor-not-allowed aria-invalid:border-error',
           className,
         )}
@@ -51,7 +51,7 @@ export function Select({ id, value, onChange, options, placeholder, disabled, cl
             {options.map((o) => (
               <RxSelect.Item
                 key={o.value} value={o.value} disabled={o.disabled} textValue={o.label}
-                className="relative flex cursor-pointer select-none items-center gap-2 rounded-sm px-2.5 py-2 type-body text-text-secondary outline-none data-[highlighted]:bg-(--semantic-color-surface-selected) data-[highlighted]:text-text-primary data-[state=checked]:text-text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-(--semantic-state-disabled-opacity)"
+                className="state-layer relative flex cursor-pointer select-none items-center gap-2 rounded-sm px-2.5 py-2 type-body text-text-secondary outline-none data-[highlighted]:text-text-primary data-[state=checked]:bg-(--semantic-color-surface-selected) data-[state=checked]:text-text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-(--semantic-state-disabled-opacity)"
               >
                 {o.icon}
                 <span className="min-w-0 flex-1">

@@ -4,8 +4,8 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
-// 界面视觉接线（v1.08，DESIGN §13.1 / ui-constraints THEME-006）：只经 brand/ 的三份文件（在 apps/web/src/brand/ 的副本）进来，组件里不写 hover 色、ring 焦点环、
-// 禁用透明度与 hex，外壳样式表不用渐变、背景模糊、文字阴影（brand meta.notUsed）
+// 界面视觉接线（DESIGN §13.1 / ui-constraints THEME-006）：只经 brand/ 的三份文件（在 apps/web/src/brand/ 的副本）进来，组件里不写 hover 色、ring 焦点环、
+// 禁用透明度与 hex，外壳样式表不用渐变、文字阴影（brand meta.notUsed）；背景模糊只经 brand 的毛玻璃材质与对话框遮罩（方向 E）
 const WEB = path.resolve(import.meta.dirname, '../../../apps/web');
 const SRC = path.join(WEB, 'src');
 const read = (p: string) => readFileSync(p, 'utf8');
@@ -30,11 +30,13 @@ test('apps/web/src/brand/ 的副本与本机 brand/ 一致（本机没有 brand/
   assert.equal(r.status, 0, r.stderr);
 });
 
-test('外壳样式表不用渐变、背景模糊、文字阴影', () => {
+test('外壳样式表不用渐变、文字阴影；背景模糊只取 brand 的毛玻璃材质，或对话框遮罩的 6 px', () => {
   const css = read(path.join(SRC, 'styles.css')).replace(/\/\*[\s\S]*?\*\//g, '');
   assert.doesNotMatch(css, /gradient\(/);
-  assert.doesNotMatch(css, /backdrop-filter/);
   assert.doesNotMatch(css, /text-shadow/);
+  const blurs = [...css.matchAll(/backdrop-filter:\s*([^;}]+)/g)].map((m) => m[1].trim());
+  assert.ok(blurs.length > 0, '浮层没有接毛玻璃');
+  for (const v of blurs) assert.match(v, /^(none|blur\(var\(--semantic-material-chrome-blur\)\) saturate\(var\(--semantic-material-chrome-saturate\)\)|blur\(6px\))$/, `不认识的背景模糊：${v}`);
 });
 
 test('组件里没有 hover 色、ring 焦点环、禁用透明度、背景模糊类，也没有 hex 颜色', () => {

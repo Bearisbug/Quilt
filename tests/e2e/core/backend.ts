@@ -333,7 +333,7 @@ await step('TC-CORE-091', async () => {
   } finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
 });
 
-// TC-CORE-092 同一功能一个名字（PAGE-CANVAS「同一功能一个名字」v1.04 UX-6）：修订面板的候选组与行；重生成这块的按钮、在跑作业行、对话描述、回执、修订来源
+// TC-CORE-092 同一功能一个名字（PAGE-CANVAS「同一功能一个名字」v1.04 UX-6）：修订面板的候选组与行；重生成这块的按钮、在跑的作业 chip、对话描述、回执、修订来源
 await step('TC-CORE-092', async () => {
   const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Names', '--device', 'mobile', '--screens', '1', '--no-shot');
   const S = softly();
@@ -352,7 +352,7 @@ await step('TC-CORE-092', async () => {
     const rows = await group.locator('[data-testid="revision"] span.font-medium').allInnerTexts();
     await S.check(() => expect(rows.length === 2 && rows[0].startsWith('候选 1') && rows[1].startsWith('候选 2') && !rows.join('').includes('seq'), `① 候选行不对：${rows.join(' | ')}`));
     // 2 /s1 选标题：检查器按钮叫「重生成这块」；经接口对这块建 regenerate_subtree（stub 通道，桩停 10 s——单跑时测试库里只有本机 agent 通道，界面默认选不到桩），
-    //   重开页面看在跑作业行「重生成「Screen 1」的一块」；跑完对话描述「重生成一块：…」、回执「已重生成「Screen 1」的一块」、修订来源「重生成一块」
+    //   重开页面看在跑的作业 chip「重生成「Screen 1」的一块」；跑完对话描述「重生成一块：…」、回执「已重生成「Screen 1」的一块」、修订来源「重生成一块」
     await page.goto(`${WEB}/p/${pid}`);
     await page.locator('[data-testid="screen-card"][data-route="/s1"]').waitFor({ timeout: 15000 });
     await page.keyboard.press('ControlOrMeta+e');
@@ -369,8 +369,8 @@ await step('TC-CORE-092', async () => {
     const sub = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ kind: 'regenerate_subtree', input: { screenId: s1.id, qid, prompt: '[stub-hold:10000] 换成一句标语', expectedRevisionId: s1.currentRevisionId, runner: { kind: 'model', driver: 'stub', model: 'stub' } } }) });
     expect(sub.status === 202, `重生成一块 ${sub.status} ${JSON.stringify(sub.body).slice(0, 160)}`);
     await page.reload();
-    const row = page.getByTestId('running-job').filter({ hasText: '重生成「Screen 1」的一块' });
-    await S.check(() => row.waitFor({ timeout: 6000 }).catch(async () => { throw new Error(`② 在跑作业行不对：${(await page.getByTestId('running-job').allInnerTexts()).join(' | ') || '没有作业行'}`); }));
+    const chip = page.getByTestId('job-chip').filter({ hasText: '重生成「Screen 1」的一块' });
+    await S.check(() => chip.waitFor({ timeout: 6000 }).catch(async () => { throw new Error(`② 在跑的作业 chip 不对：${(await page.getByTestId('job-chip').allInnerTexts()).join(' | ') || '没有作业 chip'}`); }));
     await waitJob(sub.body.job.id, 60);
     const msgs = async () => (await apiJson<{ items: { role: string; content: string }[] }>(`/v1/projects/${pid}/messages`)).body.items;
     await eventually(async () => expect((await msgs()).some((m) => m.role === 'assistant' && m.content.startsWith('已重生成')), 'receipt'), 60000);
@@ -384,11 +384,11 @@ await step('TC-CORE-092', async () => {
   } catch (e) { S.fail(e); }
   finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
   S.done();
-  return '候选组「候选 · 2 版 · 待采用」、行「候选 n」；重生成这块的按钮、作业行、对话描述、回执、修订来源各用定名';
+  return '候选组「候选 · 2 版 · 待采用」、行「候选 n」；重生成这块的按钮、作业 chip、对话描述、回执、修订来源各用定名';
 });
 
 // TC-CORE-093 输入框打字不重量工具条（v1.04 PERF-2）：量宽要强制布局，只在工具条内容变了时量。第一个字会让发送键的不可用说明消失（内容变了、量一次），
-// 之后再打 19 个字，工具条上的 getBoundingClientRect 调用为 0；切到「聊天」（档位收起，内容变了）照常量
+// 之后再打 19 个字，工具条上的 getBoundingClientRect 调用为 0；点选一屏（动词从造变改、屏数档位收起，内容变了）照常量
 await step('TC-CORE-093', async () => {
   const { projectId: pid } = seedJson<{ projectId: string }>('seed:project', '--name', 'TypeFast', '--device', 'mobile', '--screens', '1', '--no-shot');
   try {
@@ -408,13 +408,13 @@ await step('TC-CORE-093', async () => {
     await page.evaluate('window.__barReads = 0');
     await page.keyboard.type('字的时候工具条不该被反复量宽度呀呀呀呀', { delay: 30 });
     const typed = await page.evaluate('window.__barReads') as number;
-    await page.getByTestId('mode-chat').click();
+    await page.locator('[data-testid="screen-card"]').first().locator('.gesture').click();
+    await page.getByTestId('target-chip').first().waitFor({ timeout: 5000 });
     await page.waitForTimeout(300);
     const switched = (await page.evaluate('window.__barReads') as number) - typed;
-    await page.getByTestId('mode-design').click();
     expect(typed === 0, `再打 19 个字量了 ${typed} 次工具条`);
-    expect(switched > 0, '切到聊天后工具条没重量');
-    return `打字 0 次；切到聊天后量 ${switched} 次`;
+    expect(switched > 0, '点选一屏、屏数档位收起后工具条没重量');
+    return `打字 0 次；点选一屏后量 ${switched} 次`;
   } finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
 });
 

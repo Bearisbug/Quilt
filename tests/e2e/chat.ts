@@ -1,17 +1,10 @@
-import { mkdir } from 'node:fs/promises';
-import path from 'node:path';
-import { launch, openApp, seed, seedJson, apiJson, EVIDENCE, WEB } from './lib.ts';
+import { seed, seedJson, apiJson } from './lib.ts';
 import { suite, expect, waitJob, LIVE_LLM } from './harness.ts';
 
-// docs/TEST.md TC-CORE-039（聊天模式，REQ-CORE-023）AI 执行脚本。
+// docs/TEST.md TC-CORE-039（聊天作业接口，REQ-CORE-023）AI 执行脚本：界面不提供聊天（v1.17），这条只走接口。
 // 真实回合走「本机 Claude 订阅」通道（Agent SDK），要本机 claude 已登录；LIVE_LLM=0 只跑校验与串行守卫。
 const CHAT_MODEL = process.env.CHAT_MODEL ?? 'claude-sonnet-5';
-await mkdir(EVIDENCE, { recursive: true });
-let page: import('playwright').Page;
-const { RUN, step, summary } = suite('CHAT', {
-  page: () => page,
-  onTimeout: async () => { await page.close().catch(() => {}); page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }); await openApp(page); },
-});
+const { step, summary } = suite('CHAT');
 type Job = { id: string; kind: string; status: string; output: Record<string, unknown> | null };
 type Detail = { screens: { id: string; name: string; route: string; currentRevisionId: string }[]; activeJobs: { id: string; kind: string }[] };
 const detail = (id: string) => apiJson<Detail>(`/v1/projects/${id}`).then((r) => r.body);
@@ -21,9 +14,6 @@ const revision = async (screenId: string, revId: string) => { const r = await ap
 const send = (pid: string, body: Record<string, unknown>) => apiJson<{ job: Job; type?: string }>(`/v1/projects/${pid}/messages`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(body) });
 
 seed('seed');
-const browser = await launch();
-page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-await openApp(page);
 
 await step('TC-CORE-039', async () => {
   const r = seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', 'Chat', '--device', 'mobile', '--screens', '2', '--no-shot');
@@ -74,35 +64,8 @@ await step('TC-CORE-039', async () => {
   const m2 = (await messages(pid)).find((m) => m.jobId === q2.body.job.id && m.role === 'assistant');
   expect(m2?.content && JSON.stringify(m2.affectedScreenIds) === JSON.stringify([s1.id]), `第二轮回执 / 受影响屏不对：${m2?.content?.slice(0, 120)} ${JSON.stringify(m2?.affectedScreenIds)}`);
 
-  // 5. 画布：段控切聊天 → 档位隐藏、动词行、通道只列本机 Claude 订阅；发一句看在跑作业行与回执；刷新后模式记忆
-  await page.goto(`${WEB}/p/${pid}`);
-  await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
-  await page.getByTestId('mode-chat').click();
-  expect((await page.getByTestId('count-group').count()) === 0 && (await page.getByTestId('versions-group').count()) === 0, '聊天模式不该显示屏数 / 版数档位');
-  expect((await page.getByTestId('verb-line').innerText()).includes('聊 · 整个项目'), `动词行不对：${await page.getByTestId('verb-line').innerText()}`);
-  expect((await page.getByTestId('runner-select').getAttribute('data-value')) === `channel:${ch.body.channel.id}`, `聊天模式没自动落到本机 Claude 订阅通道：${await page.getByTestId('runner-select').getAttribute('data-value')}`);
-  await page.getByTestId('runner-select').click();
-  const list = page.getByRole('listbox'); await list.waitFor({ timeout: 5000 });
-  const opts = await list.getByRole('option').count();
-  await page.keyboard.press('Escape'); await list.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {});
-  expect(opts === 2, `聊天模式下拉应只列 1 条通道 + 管理入口，实际 ${opts} 项`);
-  await page.locator('#chat-input').fill('第二张屏（/s2）是做什么的？只回答，别改。');
-  await page.keyboard.press('Enter');
-  const row = page.locator('[data-testid="running-job"]').first();
-  await row.waitFor({ timeout: 10000 });
-  expect((await row.innerText()).includes('聊「'), `在跑作业行没按聊天口径写：${await row.innerText()}`);
-  const { body: jobs } = await apiJson<{ items: Job[] }>(`/v1/projects/${pid}/jobs?limit=1`);
-  const j3 = await waitJob(jobs.items[0].id, 420);
-  expect(j3.status === 'succeeded', `画布发的回合 ${j3.status}：${JSON.stringify(j3.output).slice(0, 300)}`);
-  const m3 = (await messages(pid)).find((m) => m.jobId === j3.id && m.role === 'assistant');
-  const head = (m3?.content ?? '').slice(0, 12);
-  await page.locator('[data-testid="chat-dock"] [role="log"]').getByText(head, { exact: false }).first().waitFor({ timeout: 10000 });
-  await page.reload();
-  await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
-  expect((await page.getByTestId('mode-chat').getAttribute('aria-checked')) === 'true', '刷新后聊天模式没记住');
   const tok = (j: Job) => `${j.output?.tokensIn ?? '?'}/${j.output?.tokensOut ?? '?'}`;
-  return `三轮回合成功，token 进/出：${tok(j1)}、${tok(j2)}、${tok(j3)}；回执「${(m2?.content ?? '').slice(0, 60).replace(/\n/g, ' ')}」`;
+  return `两轮回合成功，token 进/出：${tok(j1)}、${tok(j2)}；回执「${(m2?.content ?? '').slice(0, 60).replace(/\n/g, ' ')}」`;
 });
 
-await browser.close();
 summary();

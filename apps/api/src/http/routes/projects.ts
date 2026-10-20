@@ -10,6 +10,7 @@ import { createUpload, dtos as attachmentDtos, resolveForMessage, type StoredAtt
 import { createAsset, deleteAsset, listAssets } from '../../services/assets.ts';
 import { applyPreset, createPreset, deletePreset, listPresets } from '../../services/presets.ts';
 import { listChannels } from '../../services/channels.ts';
+import { assertSketchbookMessage, isSketchbook } from '../../services/sketchbook.ts';
 // 聊天通道（REQ-CORE-023）：Agent SDK 只认 Claude——必须是 agent-sdk 通道；缺省取第一条已验证的，一条都没有就点名去设置页加
 const CHAT_CHANNEL_HINT = '聊天需要「本机 Claude 订阅」通道：去设置页添加并验证一条';
 async function chatRunner(userId: string, runner: Runner | undefined): Promise<Runner> {
@@ -93,6 +94,9 @@ projectRoutes.post('/v1/projects/:projectId/jobs', async (c) => {
   const user = requireUser(c);
   const project = await ownedProject(user.id, c.req.param('projectId'));
   const input = await parseBody(c, createJobSchema);
+  // 新草稿的参照项目（REQ-CORE-042）：同 API-CORE-010，得是本人的普通项目
+  const ref = input.kind === 'generate' ? input.input.refProjectId : undefined;
+  if (ref && (await ownedProject(user.id, ref)).kind !== 'app') throw problems.notFound();
   const content = describeJob(input);
   // 输入里带的通道决定执行者：本机 agent（如检查器里选了会话的子树重生成）投递到会话，其余入 worker 队列
   const jobRunner = (input.input as { runner?: { kind?: string; tool?: string; sessionId?: string } }).runner;
@@ -109,6 +113,10 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
   const user = requireUser(c);
   const project = await ownedProject(user.id, c.req.param('projectId'));
   const body = await parseBody(c, createMessageSchema);
+  // 草稿本只受理单屏单版的造与改，画框只给草稿本（REQ-CORE-040）：在拼作业之前按请求字段点名
+  assertSketchbookMessage(project, body);
+  // 新草稿的参照项目（REQ-CORE-042）：规则同 API-CORE-012，得是本人的普通项目
+  if (body.refProjectId && (await ownedProject(user.id, body.refProjectId)).kind !== 'app') throw problems.notFound();
   const screenCount = (await db.select({ id: schema.screens.id }).from(schema.screens).where(eq(schema.screens.projectId, project.id))).length;
   const targets = body.targetScreenIds?.length ? body.targetScreenIds : null;
   // 共享组件目标（REQ-EDIT-006）：只有组件、没有屏也没有锚点 = 改这个组件（恰好 1 个）；其余情况它们的完整 HTML 进上下文
@@ -142,7 +150,7 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
     ? { kind: 'generate', input: { prompt: body.content || variantPrompt(body.variantName!), count: 1, versions, variantOf: body.variantOf, variantName: body.variantName, runner, imageKeys, componentIds } }
     : body.route
     ? { kind: 'generate', input: { prompt: presetPrompt(missingPagePrompt(body.route), body.content), count: 1, versions, route: body.route, fromScreenId: body.fromScreenId, runner, imageKeys, componentIds } }
-    : { kind: 'generate', input: { prompt: body.content, count: body.count ?? (screenCount === 0 ? 'auto' : 1), versions, anchor: body.anchor, runner, imageKeys, componentIds } };
+    : { kind: 'generate', input: { prompt: body.content, count: body.count ?? (screenCount === 0 && !isSketchbook(project) ? 'auto' : 1), versions, anchor: body.anchor, runner, imageKeys, componentIds, frame: body.frame, refProjectId: body.refProjectId } };
   // 带隐藏参数的轮次，消息正文按 API-CORE-006 的口径写成描述（正文是提示词还是附加要求，由作业输入反解）
   const content = pinned || preset ? describeJob(input)! : body.content;
   // 通道选「交给本机 Claude Code」（REQ-CORE-011 / ADR-015 v0.34）：同样是作业（runner=agent），由 agentDelivery 投递到选中的会话，

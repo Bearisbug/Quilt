@@ -1,22 +1,22 @@
-import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type FormEvent, type KeyboardEvent, type Ref } from 'react';
-import { useNavigate } from 'react-router';
-import { Select } from 'radix-ui';
-import { ArrowUp, Check, ChevronDown, ChevronUp, ImagePlus, MapPin, Settings2, Square, X } from 'lucide-react';
+import { useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from 'react';
+import { useSearchParams } from 'react-router';
+import { DropdownMenu, Select } from 'radix-ui';
+import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, GripVertical, ImagePlus, MapPin, PenLine, Settings2, X } from 'lucide-react';
 import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MAX_VERSIONS, SCREEN_COUNT_OPTIONS, estimateJob, type ScreenDto, type ComponentDto, type RunnerOptionDto, type AgentSessionDto, type AgentTool, type ScreenCount } from '@quilt/core/browser';
-import { IconButton } from '@/ui/ui';
+import { cn, IconButton } from '@/ui/ui';
 import { VendorIcon } from '@/ui/VendorIcon';
+import type { ComposerDock, DockEdge } from './useComposerDock';
+import { JobChips, type JobChip } from './JobChips';
 
-/** load（REQ-CORE-026「修改」）：把一轮的文字与参考图填回来、替换现有草稿；参考图已上传过，直接带 id */
-export type ComposerHandle = { focus: () => void; load: (draft: { text: string; images: { id: string; url: string }[] }) => void };
-/** 一行在跑作业（REQ-CORE-020）：label = 它在做什么，progress = 当前阶段 */
-type RunningJob = { id: string; label: string; progress: string };
-/** 输入框的动词模式（REQ-CORE-023）：design = 造 / 改（动词由目标决定）；chat = 交给助手定范围 */
-export type ComposerMode = 'design' | 'chat';
+/** fill（草稿本空看板的示例，REQ-CORE-040）：只换文字、参考图留着，并聚焦输入框 */
+export type ComposerHandle = { focus: () => void; fill: (text: string) => void };
 type ComposerProps = {
-  mode: ComposerMode;
-  onMode: (m: ComposerMode) => void;
-  /** 在跑的作业，按创建时间倒序（最新在最前）；只含非 agent 的，agent 作业在本机 agent 面板 */
-  running: RunningJob[];
+  /** 作业 chip（PAGE-CANVAS「作业 chip」v1.17），按创建时间倒序（最新在最前）；叠在输入框（收起时是胶囊）上方，不占输入框的高度 */
+  jobs: JobChip[];
+  onCancelJob: (jobId: string) => void;
+  /** 失败 chip 的「重试」（API-CORE-034）与 ×；重试的 Promise 落定前按钮转圈 */
+  onRetryJob: (jobId: string) => Promise<void>;
+  onDismissJob: (jobId: string) => void;
   /** 这一轮与在跑作业冲突时的理由；非 null 就挡住发送，但不锁输入（REQ-CORE-020） */
   blockedReason: string | null;
   /** 目标屏 = 改；为空 = 造（REQ-CORE-006 三条原则之一） */
@@ -37,16 +37,11 @@ type ComposerProps = {
   onSend: (content: string, attachmentIds: string[]) => Promise<boolean>;
   /** 参考图上传（REQ-CORE-012）：返回 attachmentId */
   onUploadImage: (file: File) => Promise<string>;
-  onCancelJob: (jobId: string) => void;
   onError: (msg: string) => void;
   onRemoveTarget: (id: string) => void;
   onRemoveAnchor: () => void;
   onClearTargets: () => void;
-  /** 「修改」还原的隐藏参数（REQ-CORE-026 v0.74）：出变体 / 补缺失页 / 补链 / 按新约定重生成，显示成目标区里一枚可移除的胶囊；
-   *  有它时动词行与占位由它给、屏数档位不显示、正文可以留空 */
-  preset: { label: string; verb: string; hint: string } | null;
-  onRemovePreset: () => void;
-  /** 生成通道（REQ-CORE-011）：这一轮由谁来做；聊天模式下父组件只传 agent-sdk 通道（REQ-CORE-023） */
+  /** 生成通道（REQ-CORE-011）：这一轮由谁来做 */
   runners: RunnerOptionDto[];
   /** 通道清单没取到（v0.76）：通道位写明并给重试，不当成空 */
   runnersFailed?: boolean;
@@ -61,13 +56,18 @@ type ComposerProps = {
   sessionId: string;
   onSessionChange: (id: string) => void;
   onSessionsOpen: () => void;
-  /** 收起（⌘/ / 聚焦某屏时自动）：只是不显示，草稿与参考图都留着，所以不卸载 */
+  /** 收起（⌘/ / 右上角「收起」/ 聚焦某屏时自动）：只是不显示，草稿与参考图都留着，所以不卸载；收起期间同一条边、同一位置留一枚胶囊 */
   hidden: boolean;
-  /** 实际高度（px）：外壳用它算画布安全区的底部占位与对话记录的落点——输入框随内容增高、窄视口下工具条折行，写死一个数会压住别的浮层 */
-  onResize?: (heightPx: number) => void;
+  /** 停靠（PAGE-CANVAS「停靠与收起」v1.16）：停在哪条边、沿边的位置、拖动与按键之后的提交、收起开关；
+   *  量到的大小经 onMeasure 报给外壳——它据此定实际停的边、让位与 toast 的落点（输入框随内容增高、窄视口下工具条折行，写死一个数会压住别的浮层） */
+  dock: ComposerDock;
   /** 输入框这一条横带的探针（画布提供）：让开左右浮层之后输入框还能有多宽——通道名要不要截短、工具条要不要折行按它判 */
   laneRef?: { current: HTMLElement | null };
   handle?: Ref<ComposerHandle>;
+  /** 草稿本（REQ-CORE-040）：不显示目标标签、屏数与版数；动词行与占位示例由草稿本页给，extra 插在工具条右组（新草稿的画框选择）。
+   *  onEmptyEscape：输入框空着时按 Esc 交给页面（收起看板），不失焦。
+   *  chip：草稿里点选的那一块（REQ-CORE-045），与目标标签同形、可移除；top：目标区上方的一行（「N 条批注 · 发送」），要在 form 里才算进输入框高度 */
+  sketch?: { verb: string; phrases: string[]; extra?: ReactNode; onEmptyEscape?: () => void; chip?: { label: string; onRemove: () => void }; top?: ReactNode };
 };
 
 // 空闲且没有目标时轮播的示例：让第一次进来的人知道能说什么
@@ -77,17 +77,14 @@ const IDLE_PHRASES = [
   '例如：结账流程：购物车、填地址、支付、完成',
   '例如：给列表页加下拉刷新和空态',
 ];
-// 聊天模式的示例（REQ-CORE-023）：说清楚既能问也能改，范围由助手定
-const CHAT_PHRASES = [
-  '问点什么，或直接说要改什么：例如 整体更活泼一点',
-  '例如：导航放底部还是顶部更合适？',
-  '例如：把刚才那个改回去',
-];
 const ROTATE_MS = 3200;
-/** 在跑作业最多摆几行，其余折成一条「+N」（REQ-CORE-020）：最新那行永不被折进去 */
-const MAX_ROWS = 3;
 /** 可用宽度差一点时通道触发器最多截到多窄（rem）：再窄连通道名的头几个字都看不出（v0.78） */
 const RUNNER_MIN_REM = 6;
+/** 拖输入框：按下后移动超过这么远才算拖（MOTION-017），之前仍是普通点按 */
+const DRAG_SLOP = 10;
+const EDGE_NAME: Record<DockEdge, string> = { bottom: '底边', left: '左边', right: '右边' };
+const CMD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl+';
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 /** 待发的参考图：key 是本地身份，id 是上传完成后服务端给的；id 为 null 表示还在传 */
 type Shot = { key: string; url: string; name: string; id: string | null };
@@ -95,9 +92,8 @@ type Shot = { key: string; url: string; name: string; id: string | null };
 // 底部输入框（REQ-CORE-003 / REQ-CORE-006）：动词由目标决定——有目标标签是改、没有是造。
 // 有作业在跑不锁输入（REQ-CORE-020）：只有这一轮与在跑作业真冲突时才挡住发送键并就地写出理由。
 // 不自动聚焦——焦点默认留在画布上，单键快捷键（F/L…）才可用；放锚点时由父组件显式聚焦。
-// 结构：在跑作业行 → 目标区（标签 + 动词行 + 清空）→ 输入区 → 工具条（通道 ｜ 参考图 ｜ 屏数 · 版数 ｜ 发送）。外壳的材质与投影在 styles.css 的 .composer。
+// 结构：目标区（标签 + 动词行 + 清空）→ 输入区 → 工具条（通道 ｜ 参考图 ｜ 屏数 · 版数 ｜ 发送）；作业 chip 叠在它上方。外壳的材质与投影在 styles.css 的 .composer。
 export function Composer(p: ComposerProps) {
-  const navigate = useNavigate();
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -107,31 +103,172 @@ export function Composer(p: ComposerProps) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const pillRef = useRef<HTMLButtonElement>(null);
+  // 收起时焦点给胶囊：输入区 display:none 了，focus() 会静默落空（A11Y-011）
+  const hiddenRef = useRef(p.hidden);
+  hiddenRef.current = p.hidden;
   useImperativeHandle(p.handle, () => ({
-    focus: () => taRef.current?.focus(),
-    load: ({ text, images }) => {
-      setText(text);
-      setShots((prev) => { prev.forEach((s) => URL.revokeObjectURL(s.url)); return images.map((im, n) => ({ key: im.id, url: im.url, name: `参考图 ${n + 1}`, id: im.id })); });
-    },
+    focus: () => (hiddenRef.current ? pillRef.current : taRef.current)?.focus(),
+    fill: (next) => { setText(next); taRef.current?.focus(); },
   }), []);
-  // 把实际高度报给外壳（收起时 display:none 量到 0，不报）
-  const onResize = p.onResize;
-  useEffect(() => {
-    const el = formRef.current;
-    if (!el || !onResize) return;
-    const ro = new ResizeObserver(() => { const h = el.getBoundingClientRect().height; if (h > 0) onResize(h); });
-    ro.observe(el);
+
+  // ---- 停靠（PAGE-CANVAS「停靠与收起」v1.16） ----
+  const { edge, at, narrow } = p.dock;
+  // 左右两条可用段与底边可用段的探针（styles.css 的 .composer-seg，位置全由外壳的 --seg-* / --side-* 给）：
+  // 量长度判放不放得下，松手时沿边位置也按它们算
+  const segLeftRef = useRef<HTMLSpanElement>(null);
+  const segRightRef = useRef<HTMLSpanElement>(null);
+  const segBottomRef = useRef<HTMLSpanElement>(null);
+  // 外层（styles.css 的 .composer-dock）按停的边落位，里面是输入框或胶囊，上方叠着作业 chip：拖动跟手与落位动画都只动外层，chip 跟着卡片一起走
+  const dockRef = useRef<HTMLDivElement>(null);
+  const stackRef = useRef<HTMLDivElement>(null);
+  // 收起 / 展开就地换形：停在底边时 left 按卡片宽重算，样式表里的 left 过渡会让胶囊从输入框左缘滑到正中（展开时反过来）。
+  // 换形这一帧关掉外层的过渡，下一帧恢复；必须写在下面量尺寸的 effect 前面——它一读布局，过渡就按旧值起跑了
+  const shapeShown = useRef(p.hidden);
+  useLayoutEffect(() => {
+    const box = dockRef.current;
+    if (!box || shapeShown.current === p.hidden) return;
+    shapeShown.current = p.hidden;
+    box.style.transition = 'none';
+    const raf = requestAnimationFrame(() => { void box.offsetWidth; box.style.transition = ''; });
+    return () => { cancelAnimationFrame(raf); box.style.transition = ''; };
+  }, [p.hidden]);
+  // 把正显示的那一个（输入框或胶囊）的大小、上方 chip 叠的高与两条可用段的长度报给外壳。首次在 layout effect 里量，首帧就按实际停的边画（INT-021）；之后靠 ResizeObserver。
+  // 胶囊的宽顺手写进外层的 --pill-w：收起停在底边时横向 clamp 要用
+  const onMeasure = p.dock.onMeasure;
+  useLayoutEffect(() => {
+    const el: HTMLElement | null = p.hidden ? pillRef.current : formRef.current;
+    const box = dockRef.current; const stack = stackRef.current;
+    const l = segLeftRef.current; const r = segRightRef.current;
+    if (!el || !box || !stack || !l || !r) return;
+    const measure = () => {
+      if (!el.offsetWidth) return;
+      if (el === pillRef.current) box.style.setProperty('--pill-w', `${el.offsetWidth}px`);
+      onMeasure({ w: el.offsetWidth, h: el.offsetHeight, stack: stack.offsetHeight, left: l.offsetHeight, right: r.offsetHeight });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    for (const x of [el, stack, l, r]) ro.observe(x);
     return () => ro.disconnect();
-  }, [onResize]);
+  }, [p.hidden, onMeasure]);
+  // 收起时焦点若在输入框里（按 ⌘/、点了右上角「收起」），交给胶囊，不掉到 body（A11Y-013）
+  useLayoutEffect(() => {
+    if (p.hidden && formRef.current?.contains(document.activeElement)) pillRef.current?.focus();
+  }, [p.hidden]);
+
+  // 读屏播报：换了停靠位置说一声（把手的说明里另有「现在停在哪条边」）
+  const [said, setSaid] = useState('');
+  // 落位动画（200 ms，减少动态效果时直接到位）：提交新位置前记下画面上的框，提交后从那里滑到新位置——FLIP，只动 transform。
+  // 动画期间内联的 transition 顶掉样式表里的 width / left / top 过渡，位置只走这一条
+  const flipFrom = useRef<DOMRect | null>(null);
+  useLayoutEffect(() => {
+    const from = flipFrom.current;
+    const el = dockRef.current;
+    if (!from || !el) return;
+    flipFrom.current = null;
+    el.style.transition = 'none';
+    el.style.transform = '';
+    const to = el.getBoundingClientRect();
+    const dx = from.left - to.left; const dy = from.top - to.top;
+    if ((Math.abs(dx) < 1 && Math.abs(dy) < 1) || matchMedia('(prefers-reduced-motion: reduce)').matches) { el.style.transition = ''; return; }
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    void el.offsetWidth;  // 先把起点画上，过渡才有起点
+    el.style.transition = 'transform var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard)';
+    el.style.transform = '';
+    const done = (e: TransitionEvent) => {
+      if (e.target !== el || e.propertyName !== 'transform') return;
+      el.style.transition = '';
+      el.removeEventListener('transitionend', done);
+    };
+    el.addEventListener('transitionend', done);
+  });
+  // 定位置并提交：侧边放不下（卡片比可用段高）就落到底边。from = 松手时卡片在画面上的框（拖动），null = 按键 / 菜单，停在那条边的正中
+  const place = (to: DockEdge, from: DOMRect | null) => {
+    const el = dockRef.current;
+    const shell = el?.offsetParent?.getBoundingClientRect();
+    if (!el || !shell) return;
+    if (narrow && to !== 'bottom') { setSaid('窄屏只能停在底边'); return; }
+    let next = to;
+    let pos = 0.5;
+    if (next !== 'bottom') {
+      const seg = (next === 'left' ? segLeftRef : segRightRef).current?.getBoundingClientRect();
+      const room = seg ? seg.height - el.offsetHeight : -1;
+      if (room < 0) next = 'bottom';
+      else if (from && seg && room > 0) pos = clamp01((from.top - seg.top) / room);
+    }
+    // 底边的 at 按整条底边算（at = 0.5 是视口正中），松手位置先夹进两侧浮层之间——与 styles.css 里那条 clamp 同一算法
+    if (next === 'bottom' && from) {
+      const seg = segBottomRef.current?.getBoundingClientRect();
+      const w = el.offsetWidth;
+      const x = seg ? Math.max(seg.left, Math.min(from.left, seg.right - w)) : from.left;
+      pos = shell.width > w ? clamp01((x - shell.left) / (shell.width - w)) : 0.5;
+    }
+    flipFrom.current = from ?? el.getBoundingClientRect();
+    p.dock.onMove(next, pos);
+    setSaid(next === to ? `输入框停到${EDGE_NAME[next]}` : `${EDGE_NAME[to]}放不下，输入框停在${EDGE_NAME[next]}`);
+  };
+  // 拖动输入框 / 胶囊：按下时还不算拖，越过 DRAG_SLOP 才开始 1:1 跟手（从抓住的那一点算位移）并抓住指针（MOTION-017 / MOTION-028），
+  // 之前的点按照常是点按（胶囊照样展开、把手照样开菜单）。跟手只写这个元素的 transform（PERF-005），拖动中不吸附；
+  // 拖动期间页面里的 iframe 不接指针（styles.css 的 [data-composer-drag]），否则指针一进画布或看板里的预览，父页就收不到 move / up
+  const dragged = useRef(false);
+  const startDrag = (e: ReactPointerEvent<HTMLElement>) => {
+    const el = dockRef.current;
+    if (!el || e.button !== 0 || !e.isPrimary) return;
+    // 不选中文字、不把焦点从输入区挪走；把手上还顺带挡住菜单在按下时就打开
+    e.preventDefault();
+    dragged.current = false;
+    const id = e.pointerId; const sx = e.clientX; const sy = e.clientY;
+    // 从画面上此刻的位置起：上一次的落位动画可能还没走完
+    const shown = el.getBoundingClientRect();
+    el.style.transition = 'none';
+    el.style.transform = '';
+    const rest = el.getBoundingClientRect();
+    const ox = shown.left - rest.left; const oy = shown.top - rest.top;
+    const put = (x: number, y: number) => { el.style.transform = x || y ? `translate(${x}px, ${y}px)` : ''; };
+    put(ox, oy);
+    const root = document.documentElement;
+    const finish = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+      delete root.dataset.composerDrag;
+      const shell = el.offsetParent?.getBoundingClientRect();
+      if (!dragged.current || !shell) { el.style.transition = ''; put(0, 0); return; }
+      // 松手：吸到离指针最近的那条边（只在左、右、下里选；窄视口只停底边），沿边停在松手的位置
+      const px = ev.clientX - shell.left; const py = ev.clientY - shell.top;
+      const dist: [DockEdge, number][] = [['left', px], ['right', shell.width - px], ['bottom', shell.height - py]];
+      place(narrow ? 'bottom' : dist.reduce((a, b) => (b[1] < a[1] ? b : a))[0], el.getBoundingClientRect());
+    };
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return;
+      // 松开时的 up 没送到（在别处松的手）：没有按键按着就当结束（MOTION-028）
+      if (ev.buttons === 0) { finish(ev); return; }
+      const dx = ev.clientX - sx; const dy = ev.clientY - sy;
+      if (!dragged.current) {
+        if (Math.hypot(dx, dy) < DRAG_SLOP) return;
+        dragged.current = true;
+        root.dataset.composerDrag = '';
+        try { el.setPointerCapture(id); } catch { /* 指针已经抬起 */ }
+      }
+      // 窄视口只停底边：只在底边内左右挪
+      put(ox + dx, narrow ? oy : oy + dy);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+  };
+  // 动词行的空白处才是抓手：标签上的 ×、「清空」、「收起」这些按钮照常点
+  const onRowPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+    if ((e.target as Element).closest('button, a, input, textarea, select, [role="button"]')) return;
+    startDrag(e);
+  };
   const visionOk = p.runners.find((r) => r.id === p.runnerId)?.vision !== false;
   // 投给谁：通道是本机 agent 时必须选一个还活着的会话；记住的会话不在活列表里就当没选，不自动换人
   const agentRunner = p.runners.find((r) => r.id === p.runnerId)?.runner.kind === 'agent';
   const sessionOk = !agentRunner || !!p.sessions?.some((s) => s.sessionId === p.sessionId);
-  // 聊天（REQ-CORE-023）：动词不由目标决定，目标标签只是上下文提示；通道清单已由父组件收窄到 agent-sdk，一条都没有就挡住发送
-  const chat = p.mode === 'chat';
-  const chatChannelOk = !chat || p.runners.some((r) => r.available);
-  // 有作业在跑只影响两件事：工具条的亮度（data-busy）与在跑作业行的显示，不作为任何禁用条件（REQ-CORE-020）
-  const busy = p.running.length > 0;
+  // 有作业在跑只影响两件事：工具条的亮度（data-busy）与上方作业 chip 的显示，不作为任何禁用条件（REQ-CORE-020）
+  const busy = p.jobs.some((j) => j.state === 'running');
   const creating = p.targets.length === 0;
   const one = p.targets.length === 1 ? p.targets[0] : null;
   const over = p.targets.length > p.maxTargets;
@@ -139,8 +276,7 @@ export function Composer(p: ComposerProps) {
   // 共享组件目标（REQ-EDIT-006）：只有组件、没有屏也没有锚点 = 改组件（一次一个，多选由父组件的 blockedReason 挡）；否则只是上下文
   const comps = p.componentTargets;
   const compNames = comps.map((c) => c.name).join('、');
-  const preset = chat ? null : p.preset;
-  const compOnly = !chat && comps.length > 0 && creating && !p.anchor && !preset;
+  const compOnly = comps.length > 0 && creating && !p.anchor;
   const compSuffix = comps.length && !compOnly ? ` · ${creating ? '用' : '带'}组件 ${compNames}` : '';
 
   // 宽度跟着工具条走：这一行是输入框里最宽的东西，其余（动词行、占位、草稿）都比它短。
@@ -215,15 +351,6 @@ export function Composer(p: ComposerProps) {
     return () => ro.disconnect();
   }, [lane, measureBar]);
 
-  // 随内容增高；上限只有一个来源——styles.css 里 .composer textarea 的 max-height，到顶后内部滚动（INT-010）
-  // 收起期间 display:none 量不到高度，叫回时要重量一次
-  useLayoutEffect(() => {
-    const el = taRef.current;
-    if (!el || p.hidden) return;
-    el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
-  }, [text, p.hidden]);
-
   // 卸载时回收 objectURL，否则贴一次图泄一块内存
   useEffect(() => () => { shots.forEach((s) => URL.revokeObjectURL(s.url)); }, [shots]);
   // 剩余名额读这个 ref、不读渲染闭包：两批贴得很近时，第二批还看不到第一批的渲染结果（REQ-CORE-012 v0.74）
@@ -260,14 +387,14 @@ export function Composer(p: ComposerProps) {
 
   const uploading = shots.some((s) => !s.id);
   // 冲突之外挡住发送的本地原因：按 Enter 被它们挡住时写在冲突理由同一行，原因消失即撤（REQ-CORE-020 v0.74）
-  const localReason = uploading ? '参考图还在上传' : !sessionOk ? '先选要投递的会话' : !chatChannelOk ? (p.runnersFailed ? '通道清单没加载出来，先重试' : '先添加「本机 Claude 订阅」通道') : null;
+  const localReason = uploading ? '参考图还在上传' : !sessionOk ? '先选要投递的会话' : null;
   const [nudged, setNudged] = useState(false);
   useEffect(() => { if (!localReason) setNudged(false); }, [localReason]);
   const shownReason = p.blockedReason ?? (nudged ? localReason : null);
   const submit = async (e?: FormEvent) => {
     e?.preventDefault();
     const content = text.trim();
-    if ((!content && !preset) || sending || p.blockedReason) return;
+    if (!content || sending || p.blockedReason) return;
     if (localReason) { setNudged(true); return; }
     setSending(true);
     // 在途期间照样能打字、贴图（REQ-CORE-020）：发送成功只去掉发出去的那段文字与那几张图
@@ -294,8 +421,8 @@ export function Composer(p: ComposerProps) {
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); return; }
-    // 输入框内 Esc：有草稿清草稿、无草稿失焦；都不清目标标签（REQ-CORE-006）
-    if (e.key === 'Escape') { e.stopPropagation(); if (text) clearDraft(); else taRef.current?.blur(); }
+    // 输入框内 Esc：有草稿清草稿、无草稿失焦；都不清目标标签（REQ-CORE-006）。草稿本里无草稿时是收起看板，焦点留在输入框
+    if (e.key === 'Escape') { e.stopPropagation(); if (text) clearDraft(); else if (p.sketch?.onEmptyEscape) p.sketch.onEmptyEscape(); else taRef.current?.blur(); }
   };
   // 清草稿走浏览器的编辑命令：程序写 value（setText('')）会清掉原生撤销栈，⌘Z 就找不回来了（v0.74）
   const clearDraft = () => {
@@ -312,11 +439,8 @@ export function Composer(p: ComposerProps) {
     : estimateJob({ kind: 'edit_screens', input: { prompt: 'x', screenIds: p.targets.slice(0, p.maxTargets).map((t) => t.id), versions: p.versions } }, p.totalScreens);
   const many = p.versions > 1 || (creating && (p.count === 'auto' || p.count > 1));
   // 本机 agent 通道固定 1 版、屏数由会话自定：动词行只说去向，档位控件也不显示
-  // 聊天：范围由助手定，动词行只说这句话「关于」什么（选中的屏是上下文提示，不是目标锁）
-  const verb = chat
-    ? `聊 · ${one ? `关于「${one.name}」` : p.targets.length ? `关于 ${p.targets.length} 屏` : '整个项目'}`
-    : preset
-    ? preset.verb
+  const verb = p.sketch
+    ? p.sketch.verb
     : compOnly
     ? (comps.length === 1 ? `改组件「${comps[0].name}」 · 同步 ${comps[0].usedBy.length} 屏` : `改组件 · ${comps.length} 个`)
     : agentRunner
@@ -325,102 +449,109 @@ export function Composer(p: ComposerProps) {
       ? `造${p.count === 'auto' ? '一组屏' : ` ${n} 屏`}${p.versions > 1 ? ` × ${p.versions} 版` : ''} · ${p.anchor ? '此处' : '自动摆放'}${many ? ` = ${estimate.calls} 次调用` : ''}${compSuffix}`
       : `改${all ? '全部' : ''} ${n} 屏${p.versions > 1 ? ` × ${p.versions} 版` : ''}${many ? ` = ${estimate.calls} 次调用` : ''}${compSuffix}`;
 
-  const phrases = chat
-    ? (p.targets.length ? [`关于${one ? `「${one.name}」` : `选中的 ${p.targets.length} 屏`}问点什么，或说要怎么改`] : CHAT_PHRASES)
-    : preset ? [preset.hint]
+  const phrases = p.sketch
+    ? p.sketch.phrases
     : compOnly && comps.length === 1 ? [`修改组件「${comps[0].name}」：例如 tab 改成 3 个、图标换成描边`]
     : one ? [`修改「${one.name}」：例如 改成分组列表`]
     : p.targets.length ? [`修改选中的 ${p.targets.length} 屏：例如 统一把顶部导航改成标签栏`]
     : p.anchor ? ['描述要在这里造的屏：例如 订单详情页，顶部是状态时间线，下面是商品清单']
     : IDLE_PHRASES;
 
+  // 随内容增高；上限只有一个来源——styles.css 里 .composer textarea 的 max-height，到顶后内部滚动（INT-010）
+  // 收起期间 display:none 量不到高度，叫回时要重量一次；空着时高度由原生 placeholder 撑开，占位文案换了（草稿本里「改」换回「新草稿」）也要重量
+  const placeholder = phrases[0];
+  useLayoutEffect(() => {
+    const el = taRef.current;
+    if (!el || p.hidden) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [text, p.hidden, placeholder]);
+
+  const CollapseIcon = edge === 'left' ? ChevronLeft : edge === 'right' ? ChevronRight : ChevronDown;
+  const pillText = text.trim() ? '继续写' : '写一句';
+  // 收起时 chip 叠比胶囊宽：朝画面里面展开——停在右边或底边右半段时右缘对齐胶囊，否则左缘对齐
+  const stackEnd = edge === 'right' || (edge === 'bottom' && at > 0.5);
   return (
+    <>
+    <span ref={segLeftRef} aria-hidden="true" className="composer-seg" data-side="left" />
+    <span ref={segRightRef} aria-hidden="true" className="composer-seg" data-side="right" />
+    <span ref={segBottomRef} aria-hidden="true" className="composer-seg" data-side="bottom" />
+    <div
+      ref={dockRef} className="composer-dock z-20" data-dock={edge} data-collapsed={p.hidden ? '' : undefined} data-measured={measured ? '' : undefined}
+      style={{ '--at': at, ...(bar.need ? { '--composer-need': `${bar.need}px` } : null) } as CSSProperties}
+    >
+    {/* 作业 chip（v1.17）：叠在卡片上方、不进 form——外壳的 --chrome-bottom 只量 form，chip 不占输入框的高度。展开时与卡片同宽，收起时固定宽 */}
+    <div ref={stackRef} className={cn('pointer-events-none absolute bottom-full', p.jobs.length > 0 && 'pb-2', p.hidden ? cn('w-80 max-w-[calc(100dvw-1.5rem)]', stackEnd ? 'right-0' : 'left-0') : 'inset-x-0')}>
+      <JobChips chips={p.jobs} escCancels={!p.sketch} onCancel={p.onCancelJob} onRetry={p.onRetryJob} onDismiss={p.onDismissJob} />
+    </div>
     <form
-      ref={formRef} className="composer absolute bottom-4 z-20 p-3.5" onSubmit={submit} hidden={p.hidden}
-      style={bar.need ? ({ '--composer-need': `${bar.need}px` } as CSSProperties) : undefined}
-      data-measured={measured ? '' : undefined} data-bar={bar.wrap === 'bar' ? 'wrap' : bar.wrap === 'all' ? 'wrap-all' : undefined}
-      data-has-text={text ? '' : undefined} data-busy={busy ? '' : undefined} data-dropping={dropping ? '' : undefined} data-verb={chat ? 'chat' : compOnly ? 'component' : creating ? 'create' : 'edit'}
+      ref={formRef} className="composer p-3.5" onSubmit={submit} hidden={p.hidden} data-dock={edge}
+      data-bar={bar.wrap === 'bar' ? 'wrap' : bar.wrap === 'all' ? 'wrap-all' : undefined}
+      data-has-text={text ? '' : undefined} data-busy={busy ? '' : undefined} data-dropping={dropping ? '' : undefined} data-verb={compOnly ? 'component' : creating ? 'create' : 'edit'}
       onPaste={onPaste} onDrop={onDrop}
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropping(false); }}
     >
       <label htmlFor="chat-input" className="sr-only">对话输入</label>
-      {/* 在跑作业行（REQ-CORE-020）：每行 = 在做什么 + 进度 + 取消键，最新的在最上（Esc 取消的就是它）。
-          必须渲染在 form 内部——外壳的 --chrome-bottom 只量这个 form，另起一层浮层会压住画布底边与对话记录横条。
-          不挂 aria-live：N 个作业各自每几秒一次进度会把读屏刷爆，播报归对话记录的 role=log */}
-      {busy && (
-        <ul className="mb-2.5 space-y-1 px-0.5" aria-label="进行中的作业" data-testid="running-jobs">
-          {p.running.slice(0, MAX_ROWS).map((j, i) => (
-            <li key={j.id} data-testid="running-job" data-job-id={j.id} className="fade-up flex items-center gap-2 rounded-lg bg-(--semantic-color-surface-sunken) py-1 pl-2.5 pr-1 type-label">
-              <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate">
-                <span className="font-medium text-text-primary">{j.label}</span>
-                <span className="text-text-secondary"> · {j.progress}</span>
-              </span>
-              {/* 最新那行的取消键标出 Esc：优先级链里 Esc 取消的正是这一个 */}
-              <IconButton
-                size="xs" tip="top-end" label={`取消${j.label}`} hint={i === 0 ? 'Esc' : undefined}
-                data-testid="cancel-job" onClick={() => p.onCancelJob(j.id)}
-              ><Square size={11} fill="currentColor" /></IconButton>
-            </li>
-          ))}
-          {p.running.length > MAX_ROWS && (
-            <li className="px-2.5 type-label text-text-secondary">+{p.running.length - MAX_ROWS} 个作业在跑</li>
-          )}
-        </ul>
-      )}
-      {/* 目标区始终存在：标签（屏 / 锚点，可逐个移除）+ 动词行 + 清空。标签只被点屏 / × / 清空改变，点画布空白不动它 */}
-      <div className="mb-2.5 flex items-center gap-2 px-0.5">
+      {p.sketch?.top}
+      {/* 目标区始终存在：挪位置的把手 + 标签（屏 / 锚点，可逐个移除）+ 动词行 + 清空 + 收起。标签只被点屏 / × / 清空改变，点画布空白不动它。
+          这一行的空白处是拖动输入框的抓手（v1.16） */}
+      <div className="composer-grab mb-2.5 flex touch-none select-none items-center gap-2 px-0.5" onPointerDown={onRowPointerDown}>
+        <DockGrip edge={edge} narrow={narrow} onPointerDown={startDrag} dragged={dragged} onPlace={(to) => place(to, null)} />
         <ul className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" aria-label="本次的目标">
           {p.anchor && (
-            <li className="inline-flex items-center gap-1 rounded-sm bg-(--semantic-color-surface-sunken) py-1 pl-2.5 pr-1 type-label font-medium text-text-primary" data-testid="anchor-chip">
+            <li className="tint-link inline-flex items-center gap-1 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="anchor-chip">
               <MapPin size={12} aria-hidden="true" /><span>新屏 · 此处</span>
-              <button type="button" aria-label="取消锚点" onClick={p.onRemoveAnchor} className="grid size-5 place-items-center rounded-sm text-text-secondary transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring"><X size={12} /></button>
+              <button type="button" aria-label="取消锚点" onClick={p.onRemoveAnchor} className="grid size-5 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring"><X size={12} /></button>
             </li>
           )}
-          {preset && (
-            <li className="inline-flex items-center gap-1.5 rounded-sm bg-(--semantic-color-surface-sunken) py-1 pl-2.5 pr-1 type-label font-medium text-text-primary" data-testid="preset-chip">
-              <span className="max-w-48 truncate">{preset.label}</span>
-              <button type="button" aria-label={`去掉「${preset.label}」，改成普通的一轮`} onClick={p.onRemovePreset} className="grid size-5 place-items-center rounded-sm text-text-secondary transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
-                <X size={12} />
-              </button>
-            </li>
-          )}
-          {p.targets.map((t, i) => (
-            <li key={t.id} className={`inline-flex items-center gap-1.5 rounded-sm bg-(--semantic-color-surface-sunken) py-1 pl-2.5 pr-1 type-label font-medium ${i < p.maxTargets ? 'text-text-primary' : 'text-warning'}`} data-testid="target-chip">
+          {!p.sketch && p.targets.map((t, i) => (
+            <li key={t.id} className={`inline-flex items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium ${i < p.maxTargets ? 'tint-link' : 'tint-warning'}`} data-testid="target-chip">
               <span className="max-w-32 truncate">{t.name}</span>
-              <button type="button" aria-label={`不再以「${t.name}」为目标`} onClick={() => p.onRemoveTarget(t.id)} className="grid size-5 place-items-center rounded-sm text-text-secondary transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
+              <button type="button" aria-label={`不再以「${t.name}」为目标`} onClick={() => p.onRemoveTarget(t.id)} className="grid size-5 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
                 <X size={12} />
               </button>
             </li>
           ))}
+          {p.sketch?.chip && (
+            <li className="tint-link inline-flex min-w-0 items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="draft-pick-chip">
+              <span className="min-w-0 max-w-64 truncate">{p.sketch.chip.label}</span>
+              <button type="button" aria-label={`去掉${p.sketch.chip.label}，改回整张`} onClick={p.sketch.chip.onRemove} className="grid size-5 shrink-0 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
+                <X size={12} />
+              </button>
+            </li>
+          )}
           {/* 共享组件目标（REQ-EDIT-006）：与屏标签同一排、同一形状，前缀「组件 ·」区分 */}
           {p.componentTargets.map((c) => (
-            <li key={c.id} className="inline-flex items-center gap-1.5 rounded-sm bg-(--semantic-color-surface-sunken) py-1 pl-2.5 pr-1 type-label font-medium text-text-primary" data-testid="component-chip" data-name={c.name}>
+            <li key={c.id} className="tint-link inline-flex items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="component-chip" data-name={c.name}>
               <span className="max-w-40 truncate">组件 · {c.name}</span>
-              <button type="button" aria-label={`不再以组件「${c.name}」为目标`} onClick={() => p.onRemoveComponentTarget(c.id)} className="grid size-5 place-items-center rounded-sm text-text-secondary transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
+              <button type="button" aria-label={`不再以组件「${c.name}」为目标`} onClick={() => p.onRemoveComponentTarget(c.id)} className="grid size-5 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
                 <X size={12} />
               </button>
             </li>
           ))}
           {/* 动词行是变长文本：放在可截断的 flex 项里，改字不挤动旁边的按钮（RESP-010） */}
-          <li className={`min-w-0 truncate type-label ${over && !chat ? 'text-warning' : 'text-text-secondary'}`} data-testid="verb-line" aria-live="polite">
-            {over && !chat ? `已选 ${p.targets.length} 屏，一次最多改 ${p.maxTargets} 屏，只会发送前 ${p.maxTargets} 屏` : verb}
+          <li className={`min-w-0 truncate type-label ${over ? 'text-warning' : 'text-text-secondary'}`} data-testid="verb-line" aria-live="polite">
+            {over ? `已选 ${p.targets.length} 屏，一次最多改 ${p.maxTargets} 屏，只会发送前 ${p.maxTargets} 屏` : verb}
           </li>
         </ul>
-        {(p.targets.length > 0 || p.anchor || p.componentTargets.length > 0 || preset) && (
-          <button type="button" data-testid="clear-targets" onClick={p.onClearTargets} className="shrink-0 rounded-md px-1.5 py-0.5 type-label text-text-secondary transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">清空</button>
+        {!p.sketch && (p.targets.length > 0 || p.anchor || p.componentTargets.length > 0) && (
+          <button type="button" data-testid="clear-targets" onClick={p.onClearTargets} className="shrink-0 rounded-md px-1.5 py-0.5 type-label text-(--semantic-color-action-link) transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">清空</button>
         )}
+        {/* 收起：与 ⌘/、画布工具栏的「输入框」是同一开关；箭头朝着胶囊要贴的那条边 */}
+        <IconButton size="2xs" tip="bottom-end" label="收起输入框" hint={`${CMD}/`} desc="收成边上的一枚胶囊，草稿与参考图都留着；点胶囊再展开" data-testid="composer-collapse" onClick={p.dock.onToggle}>
+          <CollapseIcon size={14} aria-hidden="true" />
+        </IconButton>
       </div>
       {shots.length > 0 && (
         <ul className="mb-2.5 flex flex-wrap gap-2 px-0.5" aria-label="本次参考图">
           {shots.map((sh) => (
             <li key={sh.key} className="group relative">
-              <img src={sh.url} alt={sh.name} className="size-16 rounded-lg border border-border-subtle object-cover" />
+              <img src={sh.url} alt={sh.name} className="size-16 rounded-md border border-border-subtle object-cover" />
               {!sh.id && <span className="absolute inset-0 grid place-items-center"><span className="inverse rounded-sm px-1.5 type-caption">上传中…</span></span>}
               <button
                 type="button" aria-label={`移除参考图「${sh.name}」`} onClick={() => removeShot(sh.key)}
-                className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-sm border border-border-subtle bg-surface-bg text-text-secondary transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring"
+                className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-pill bg-surface-raised text-text-secondary shadow-(--semantic-elevation-raised) transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring"
               ><X size={11} /></button>
             </li>
           ))}
@@ -430,11 +561,11 @@ export function Composer(p: ComposerProps) {
         {/* 可见的占位文案是这层叠在上面的 span：能轮播、能带动效；原生 placeholder 仍在（透明），给读屏与测试用。聚焦后隐去，输入区只剩光标 */}
         <Placeholder phrases={phrases} active={text.length === 0 && !focused} />
         <textarea
-          id="chat-input" ref={taRef} name="content" rows={1} value={text}
+          id="chat-input" data-testid="composer-input" ref={taRef} name="content" rows={1} value={text}
           onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
           onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
           className="scroll relative z-10 block w-full resize-none bg-transparent px-1 type-heading3 leading-7 text-text-primary caret-text-primary placeholder:text-transparent outline-none"
-          placeholder={phrases[0]}
+          placeholder={placeholder}
         />
       </div>
       {/* 冲突理由就地写在发送键上方：发送键只是 aria-disabled，输入照旧可改——换个目标或等这一轮完事就能发（A11Y-007 / IA-009） */}
@@ -444,19 +575,12 @@ export function Composer(p: ComposerProps) {
         {/* 左组不能写 min-w-0：里面的控件都是 shrink-0，盒子缩了内容不缩，只会溢出去压在右边的档位上，
             而「放不下就换行」也因为左组总能缩到放得下而永远不触发（RESP-004） */}
         <div className="flex flex-1 items-center gap-2">
-          {/* 动词段控（REQ-CORE-023）：造 / 改（动词由目标决定）与聊天（范围由助手定）并列；选择是个人偏好，父组件跨会话记忆 */}
-          <Segmented label="动词：造 / 改，或聊天" testId="mode" value={p.mode} options={[{ value: 'design', label: '造 / 改' }, { value: 'chat', label: '聊天' }]} onChange={p.onMode} />
-          {/* 通道选择（REQ-CORE-011）。清单来自服务端，只含标识与显示名；聊天模式只列 agent-sdk 通道，一条都没有就就地写明去哪加（INT-013） */}
+          {/* 通道选择（REQ-CORE-011）。清单来自服务端，只含标识与显示名 */}
           {p.runnersFailed ? (
             <button type="button" data-testid="runners-failed" onClick={p.onReloadRunners} className="min-w-0 truncate rounded-md px-1.5 py-1 type-label text-warning transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
               通道清单没加载出来 · 重试
             </button>
           ) : p.runners.length > 0 && <RunnerSelect runners={p.runners} value={p.runnerId} onChange={p.onRunnerChange} maxWidth={bar.runnerMax} />}
-          {chat && !chatChannelOk && !p.runnersFailed && (
-            <button type="button" data-testid="chat-no-channel" onClick={() => navigate('?settings=runners')} className="min-w-0 truncate rounded-md px-1.5 py-1 type-label text-warning transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
-              聊天需要「本机 Claude 订阅」通道，去设置页添加
-            </button>
-          )}
           {/* 投递会话（REQ-AGENT-003 v0.34）：只在通道是本机 agent 时出现，与通道选择一样跨会话记忆 */}
           {agentRunner && <SessionSelect tool={p.sessionTool ?? 'claude-code'} sessions={p.sessions} reason={p.sessionsReason} value={p.sessionId} onChange={p.onSessionChange} onOpen={p.onSessionsOpen} />}
           {/* 参考图入口（REQ-CORE-012）。贴图与拖入同样可用，这个按钮是给不知道能贴的人看的 */}
@@ -473,23 +597,86 @@ export function Composer(p: ComposerProps) {
         {/* 档位（REQ-CORE-003 / REQ-CORE-006）：屏数只在造时出现（几张不同的屏）；版数造改都有（同一屏的几种画法）；两者以分隔线隔开，不做同形并排 */}
         {/* 档位组自身也能换行：≤ 48rem 视口里输入框只有约 240px 宽，屏数 + 版数 + 发送一行放不下时各自折行、靠右 */}
         <div className="ml-auto flex items-center justify-end gap-2">
-          {/* 本机 agent 通道没有档位（固定 1 版、屏数由会话自定），腾出的位置给会话下拉；聊天由助手定范围，同样没有档位；改组件一次一个也没有档位 */}
-          {!chat && creating && !agentRunner && !compOnly && !preset && (
+          {/* 本机 agent 通道没有档位（固定 1 版、屏数由会话自定），腾出的位置给会话下拉；改组件一次一个也没有档位 */}
+          {p.sketch?.extra}
+          {!p.sketch && creating && !agentRunner && !compOnly && (
             <Segmented label="屏数（几张不同的屏）" testId="count" value={p.count} options={SCREEN_COUNT_OPTIONS.map((o) => ({ value: o, label: o === 'auto' ? '自动' : String(o) }))} onChange={p.onCount} />
           )}
-          {!chat && creating && !agentRunner && !compOnly && !preset && <span className="h-5 w-px bg-border-subtle" aria-hidden="true" />}
-          {!chat && !agentRunner && !compOnly && <Segmented label="版数（同一屏的几种画法）" testId="versions" value={p.versions} options={Array.from({ length: MAX_VERSIONS }, (_, i) => ({ value: i + 1, label: `${i + 1} 版` }))} onChange={p.onVersions} compact />}
-          {/* 这个 40px 插槽永远是发送键（停止归在跑作业行上的取消键）；反色实心只给此刻唯一的主动作 */}
+          {!p.sketch && creating && !agentRunner && !compOnly && <span className="h-5 w-px bg-border-subtle" aria-hidden="true" />}
+          {!p.sketch && !agentRunner && !compOnly && <Segmented label="版数（同一屏的几种画法）" testId="versions" value={p.versions} options={Array.from({ length: MAX_VERSIONS }, (_, i) => ({ value: i + 1, label: `${i + 1} 版` }))} onChange={p.onVersions} compact />}
+          {/* 这个 40px 插槽永远是发送键（停止归作业 chip 上的 ×）；反色实心只给此刻唯一的主动作 */}
           <IconButton
-            type="submit" size="sm" tone={text.trim() || preset ? 'invert' : 'default'} label={chat ? '发送（聊）' : compOnly ? '发送（改组件）' : creating ? '发送（造）' : '发送（改）'} hint="Enter" tip="top-end"
-            className={text.trim() || preset ? undefined : 'bg-(--semantic-color-surface-sunken)'}
-            unavailable={p.blockedReason ?? localReason ?? (!text.trim() && !preset && (chat ? '先说点什么' : compOnly ? '先说要怎么改组件' : creating ? '先描述要造的屏' : '先说要怎么改'))}
+            type="submit" size="sm" tone={text.trim() ? 'invert' : 'default'} label={compOnly ? '发送（改组件）' : creating ? (p.sketch ? '发送（新草稿）' : '发送（造）') : '发送（改）'} hint="Enter" tip="top-end"
+            className={text.trim() ? 'rounded-pill' : 'fill rounded-pill'} data-testid="composer-send"
+            unavailable={p.blockedReason ?? localReason ?? (!text.trim() && (compOnly ? '先说要怎么改组件' : creating ? (p.sketch ? '先写一句要出什么' : '先描述要造的屏') : '先说要怎么改'))}
           >
             {sending ? <span className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" /> : <ArrowUp size={16} />}
           </IconButton>
         </div>
       </div>
     </form>
+    {/* 收起后的胶囊（v1.16）：同一条边、同一位置；点它或按 ⌘/ 展开、光标回输入区；也能像输入框一样拖。拖过之后松手的那次 click 不算点 */}
+    {p.hidden && (
+      <button
+        ref={pillRef} type="button" data-testid="composer-pill" data-dock={edge}
+        aria-label={`${pillText}：展开输入框（${CMD}/）`} onPointerDown={startDrag}
+        onClick={(e) => { const skip = dragged.current && e.detail > 0; dragged.current = false; if (!skip) p.dock.onToggle(); }}
+        className="composer-pill chrome state-layer focus-ring inline-flex h-9 cursor-grab touch-none select-none items-center gap-1.5 whitespace-nowrap rounded-pill px-3.5 type-label font-medium text-text-primary [@media(pointer:coarse)]:h-11"
+      ><PenLine size={14} aria-hidden="true" />{pillText}</button>
+    )}
+    </div>
+    <span role="status" className="sr-only">{said}</span>
+    </>
+  );
+}
+
+// 挪位置的把手（composer-grip，v1.16）：按住拖与拖动词行的空白处一样；聚焦后 ← / → / ↓ 停到左边 / 右边 / 底边的正中；
+// 点一下（或 Enter / 空格）开菜单选边——这是拖动的单指针替代（WCAG 2.5.7）。方向键先于菜单触发器处理：↓ 在那里本是「打开菜单」。
+// 窄视口只停底边：左右两项置灰并写明原因，← / → 只播报原因（在 place 里）
+function DockGrip({ edge, narrow, onPointerDown, dragged, onPlace }: { edge: DockEdge; narrow: boolean; onPointerDown: (e: ReactPointerEvent<HTMLElement>) => void; dragged: { current: boolean }; onPlace: (to: DockEdge) => void }) {
+  const [open, setOpen] = useState(false);
+  // 按下那一刻菜单开没开：开着时点把手是关菜单（菜单自己也可能在按下时因「点到外面」先关了，不能再按 click 把它翻回来）
+  const openAtDown = useRef(false);
+  const descId = useId();
+  const onKey = (e: KeyboardEvent<HTMLButtonElement>) => {
+    const to: DockEdge | null = e.key === 'ArrowLeft' ? 'left' : e.key === 'ArrowRight' ? 'right' : e.key === 'ArrowDown' ? 'bottom' : null;
+    if (!to) return;
+    e.preventDefault();
+    onPlace(to);
+  };
+  return (
+    <DropdownMenu.Root open={open} onOpenChange={setOpen} modal={false}>
+      <DropdownMenu.Trigger asChild>
+        <IconButton
+          size="2xs" tip="bottom-start" label="挪输入框位置" desc={narrow ? '窄屏只停底边：按住拖可沿底边左右挪' : '按住拖到左、右或下边；或按 ← → ↓，或点一下选'}
+          data-testid="composer-grip" aria-describedby={descId} className="cursor-grab touch-none"
+          onPointerDown={(e) => { openAtDown.current = open; onPointerDown(e); }} onKeyDown={onKey}
+          // 指针点按才在这里开关菜单（按下时已被拖动接管）；键盘的 Enter / 空格由菜单触发器自己处理，click 的 detail 为 0
+          onClick={(e) => { const skip = dragged.current; dragged.current = false; if (!skip && e.detail > 0) setOpen(!openAtDown.current); }}
+        ><GripVertical size={14} aria-hidden="true" /></IconButton>
+      </DropdownMenu.Trigger>
+      <span id={descId} className="sr-only">现在停在{EDGE_NAME[edge]}。{narrow ? '窄屏只停底边。' : '按左右方向键停到左边或右边，按下方向键回到底边，按回车选位置。'}</span>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          side="top" align="start" sideOffset={8} collisionPadding={12} data-testid="composer-dock-menu"
+          // 菜单开着时的 Esc / 方向键归它自己，不漏给画布快捷键
+          onKeyDown={(e) => e.stopPropagation()}
+          style={{ transformOrigin: 'var(--radix-dropdown-menu-content-transform-origin)' }}
+          className="menu z-50 min-w-44 p-1.5"
+        >
+          <DropdownMenu.Label className="px-2.5 pb-1 pt-1.5 type-overline font-semibold text-text-secondary">输入框停在</DropdownMenu.Label>
+          <DropdownMenu.RadioGroup value={edge} onValueChange={(v) => onPlace(v as DockEdge)}>
+            {(['left', 'right', 'bottom'] as const).map((d) => (
+              <DropdownMenu.RadioItem key={d} value={d} disabled={narrow && d !== 'bottom'} data-testid={`composer-dock-${d}`} className={`${ITEM_CLS} data-[disabled]:pointer-events-none data-[disabled]:opacity-(--semantic-state-disabled-opacity)`}>
+                <span className="min-w-0 flex-1">{EDGE_NAME[d]}</span>
+                <DropdownMenu.ItemIndicator className="flex shrink-0"><Check size={14} aria-hidden="true" /></DropdownMenu.ItemIndicator>
+              </DropdownMenu.RadioItem>
+            ))}
+          </DropdownMenu.RadioGroup>
+          {narrow && <p className="px-2.5 pb-1 pt-1.5 type-caption text-text-secondary">窄屏放不下侧停的输入框，只停底边</p>}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
 
@@ -506,12 +693,12 @@ function Segmented<T extends string | number>({ label, testId, value, options, o
     (ref.current?.querySelector(`[data-testid="${testId}-${String(options[next].value)}"]`) as HTMLButtonElement | null)?.focus();
   };
   return (
-    <div ref={ref} role="radiogroup" aria-label={label} title={label} data-testid={`${testId}-group`} className="inline-flex h-8 shrink-0 items-center rounded-md border border-border-subtle bg-(--semantic-color-surface-sunken) p-0.5">
+    <div ref={ref} role="radiogroup" aria-label={label} title={label} data-testid={`${testId}-group`} className="seg h-8 shrink-0">
       {options.map((o, i) => (
         <button
           key={String(o.value)} type="button" role="radio" aria-checked={i === idx} tabIndex={i === idx ? 0 : -1} data-testid={`${testId}-${String(o.value)}`}
           onClick={() => onChange(o.value)} onKeyDown={onKey}
-          className={`h-7 ${compact ? 'min-w-9 px-1' : 'min-w-7 px-1.5'} rounded-sm type-label tabular-nums ${i === idx ? 'bg-surface-raised text-text-primary shadow-(--semantic-elevation-raised)' : 'text-text-secondary state-layer'} focus-ring`}
+          className={`h-7 ${compact ? 'min-w-9 px-1' : 'min-w-7 px-1.5'} type-label tabular-nums ${i === idx ? '' : 'state-layer'} focus-ring`}
         >{o.label}</button>
       ))}
     </div>
@@ -541,17 +728,18 @@ function Placeholder({ phrases, active }: { phrases: string[]; active: boolean }
 // 云端模型与本机 agent 分两组。
 // maxWidth：输入框差一点放不下时截短触发器（px，由 Composer 量出来）
 export function RunnerSelect({ runners, value, onChange, disabled, testId = 'runner-select', maxWidth }: { runners: RunnerOptionDto[]; value: string; onChange: (id: string) => void; disabled?: boolean; testId?: string; maxWidth?: number | null }) {
-  const navigate = useNavigate();
+  // 「管理通道…」只加 ?settings=runners、不动地址里别的参数：草稿本页的 ?d=<草稿> 是看板上开着的那张，整体换掉会把它收起（PAGE-SKETCH）
+  const [, setParams] = useSearchParams();
   // 只列可用项（REQ-CORE-013）：不可用的去设置页看原因，这里不灰化陈列
   const usable = runners.filter((r) => r.available);
   const cloud = usable.filter((r) => r.runner.kind !== 'agent');
   const agents = usable.filter((r) => r.runner.kind === 'agent');
   const cur = usable.find((r) => r.id === value);
   return (
-    <Select.Root value={cur?.id} onValueChange={(v) => { if (v === MANAGE_ID) navigate('?settings=runners'); else onChange(v); }} disabled={disabled}>
+    <Select.Root value={cur?.id} onValueChange={(v) => { if (v === MANAGE_ID) setParams((q) => { q.set('settings', 'runners'); return q; }); else onChange(v); }} disabled={disabled}>
       <Select.Trigger
         aria-label="生成通道" data-testid={testId} data-value={value} style={maxWidth ? { maxWidth } : undefined}
-        className="group flex h-9 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2.5 type-label font-medium text-text-secondary transition-[color,background-color] duration-(--semantic-motion-duration-fast) data-[state=open]:bg-(--semantic-color-surface-selected) data-[state=open]:text-text-primary disabled:pointer-events-none sm:max-w-56 state-layer focus-ring"
+        className="fill group flex h-9 max-w-44 shrink-0 items-center gap-1.5 rounded-md px-2.5 type-label font-medium text-text-primary disabled:pointer-events-none sm:max-w-56 state-layer focus-ring"
       >
         {/* 当前通道名直接渲染（v0.78）：Radix 默认要等选项挂上后才把名字填进来，输入框首次量宽时触发器还是空的，宽度量小了 */}
         <span className="min-w-0 truncate"><Select.Value placeholder={usable.length ? '选择通道' : '没有可用通道'}>{cur ? <span className="flex min-w-0 items-center gap-2"><VendorIcon vendor={cur.vendor} size={14} className="shrink-0" /><span className="truncate">{cur.label}</span></span> : undefined}</Select.Value></span>
@@ -585,7 +773,7 @@ export function RunnerSelect({ runners, value, onChange, disabled, testId = 'run
 }
 
 const MANAGE_ID = '__manage_channels__';
-const ITEM_CLS = 'relative flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-2 type-body text-text-secondary outline-none data-[highlighted]:bg-(--semantic-color-surface-selected) data-[highlighted]:text-text-primary data-[state=checked]:text-text-primary';
+const ITEM_CLS = 'relative flex cursor-pointer select-none items-center gap-2 rounded-sm px-2.5 py-2 type-body text-text-secondary outline-none data-[highlighted]:bg-(--semantic-color-surface-selected) data-[highlighted]:text-text-primary data-[state=checked]:text-text-primary';
 
 // 投递会话下拉（REQ-AGENT-003 v0.34 / v0.68）。Claude Code：本机正在运行的交互式会话，起过名的显示名字、派生名（目录 + 后缀）显示会话 UUID，
 // 每项带目录名与 idle / busy。Codex：线程库里的用户线程，显示名字（没起过名就是标题），每项带目录名、开在哪个应用、已打开 / 未打开——
@@ -605,7 +793,7 @@ export function SessionSelect({ tool, sessions, reason, value, onChange, onOpen,
     <Select.Root value={current} onValueChange={onChange} disabled={disabled} onOpenChange={(open) => { if (open) onOpen(); }}>
       <Select.Trigger
         aria-label="投递到哪个会话" data-testid={testId} data-value={current ?? ''}
-        className="group flex h-9 min-w-0 max-w-44 items-center gap-1.5 rounded-lg px-2.5 type-label font-medium text-text-secondary transition-[color,background-color] duration-(--semantic-motion-duration-fast) data-[state=open]:bg-(--semantic-color-surface-selected) data-[state=open]:text-text-primary disabled:pointer-events-none sm:max-w-56 state-layer focus-ring"
+        className="fill group flex h-9 min-w-0 max-w-44 items-center gap-1.5 rounded-md px-2.5 type-label font-medium text-text-primary disabled:pointer-events-none sm:max-w-56 state-layer focus-ring"
       >
         <span className="min-w-0 truncate"><Select.Value placeholder="选择会话" /></span>
         <Select.Icon className="flex shrink-0 opacity-60 transition-transform duration-(--semantic-motion-duration-base) ease-(--semantic-motion-easing-standard) group-data-[state=open]:rotate-180">
@@ -618,7 +806,7 @@ export function SessionSelect({ tool, sessions, reason, value, onChange, onOpen,
           <Select.ScrollUpButton className="flex h-6 shrink-0 items-center justify-center text-text-secondary"><ChevronUp size={14} aria-hidden="true" /></Select.ScrollUpButton>
           <Select.Viewport className="min-h-0 flex-1">
             <Select.Group>
-              <Select.Label className="px-2.5 pb-1 pt-1.5 type-overline font-medium text-text-secondary">{SESSION_COPY[tool].group}</Select.Label>
+              <Select.Label className="px-2.5 pb-1 pt-1.5 type-overline font-semibold text-text-secondary">{SESSION_COPY[tool].group}</Select.Label>
               {sessions === null && <p className="px-2.5 py-2 type-label text-text-secondary">正在找会话…</p>}
               {sessions?.length === 0 && <p className="px-2.5 py-2 type-label text-text-secondary" data-testid="session-empty">{reason ?? SESSION_COPY[tool].empty}</p>}
               {items.map((s) => (
@@ -629,9 +817,9 @@ export function SessionSelect({ tool, sessions, reason, value, onChange, onOpen,
                       <span className="truncate">{basename(s.cwd)}</span>
                       {s.app && <span className="shrink-0">{APP_LABEL[s.app]}</span>}
                       {s.tool === 'codex'
-                        ? <span className={`shrink-0 rounded-sm border px-1.5 ${s.open ? 'border-border-subtle' : 'border-dashed border-border-subtle'}`}>{s.open ? '已打开' : '未打开'}</span>
-                        : <span className={`shrink-0 rounded-sm border px-1.5 ${s.status === 'busy' ? 'border-warning/60 text-warning' : 'border-border-subtle'}`}>{s.status === 'busy' ? '忙' : s.status === 'idle' ? '空闲' : '未知'}</span>}
-                      {s.unverifiedVersion !== undefined && <span className="shrink-0 rounded-sm border border-dashed border-warning/60 px-1.5 text-warning" data-testid="session-unverified">此版本未验证{s.unverifiedVersion && ` · ${s.unverifiedVersion}`}</span>}
+                        ? <span className="fill shrink-0 rounded-sm px-1.5">{s.open ? '已打开' : '未打开'}</span>
+                        : <span className={`shrink-0 rounded-sm px-1.5 ${s.status === 'busy' ? 'tint-warning' : 'fill'}`}>{s.status === 'busy' ? '忙' : s.status === 'idle' ? '空闲' : '未知'}</span>}
+                      {s.unverifiedVersion !== undefined && <span className="tint-warning shrink-0 rounded-sm px-1.5" data-testid="session-unverified">此版本未验证{s.unverifiedVersion && ` · ${s.unverifiedVersion}`}</span>}
                     </span>
                   </span>
                   <Select.ItemIndicator className="flex shrink-0"><Check size={14} aria-hidden="true" /></Select.ItemIndicator>
@@ -650,7 +838,7 @@ function RunnerGroup({ label, items }: { label: string; items: RunnerOptionDto[]
   if (!items.length) return null;
   return (
     <Select.Group>
-      <Select.Label className="px-2.5 pb-1 pt-1.5 type-overline font-medium text-text-secondary">{label}</Select.Label>
+      <Select.Label className="px-2.5 pb-1 pt-1.5 type-overline font-semibold text-text-secondary">{label}</Select.Label>
       {items.map((r) => (
         <Select.Item key={r.id} value={r.id} textValue={r.label} className={ITEM_CLS}>
           <span className="min-w-0 flex-1 truncate">

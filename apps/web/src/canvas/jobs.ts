@@ -1,4 +1,4 @@
-import { ROUND_PRESETS, ROUND_PRESET_PROMPTS, missingPagePrompt, presetNote, variantPrompt, type AnyJobInput, type JobDto, type ScreenDto, type ComponentDto, type RoundPresetKind } from '@quilt/core/browser';
+import { ROUND_PRESETS, ROUND_PRESET_PROMPTS, presetNote, type AnyJobInput, type JobDto, type ScreenDto, type ComponentDto } from '@quilt/core/browser';
 
 // 不分种类读作业输入的形状，从 core 的 schema 推出来（CH-2 v1.06）
 export type JobInput = AnyJobInput;
@@ -22,7 +22,7 @@ export function coveredScreens(job: JobDto, allIds: string[], components: Compon
     default: return [];
   }
 }
-// 在跑作业行的文案（REQ-CORE-020）：沿用输入框动词行的口径说「这个作业在做什么」
+// 作业 chip 的文案（REQ-CORE-020）：沿用输入框动词行的口径说「这个作业在做什么」
 export function jobLabel(job: JobDto, screens: Pick<ScreenDto, 'id' | 'name'>[], components: Pick<ComponentDto, 'id' | 'name'>[]): string {
   const i = job.input as JobInput;
   const name = (id: string | undefined) => screens.find((s) => s.id === id)?.name ?? '已删除的屏';
@@ -32,8 +32,8 @@ export function jobLabel(job: JobDto, screens: Pick<ScreenDto, 'id' | 'name'>[],
     case 'generate': return i.variantOf ? `出「${name(i.variantOf)}」的「${i.variantName}」变体${ver}` : `造${i.count === undefined || i.count === 'auto' ? '一组屏' : ` ${i.count} 屏`}${ver}`;
     case 'edit_screens': {
       const ids = coveredScreens(job, screens.map((s) => s.id));
-      // 系统代发的修复轮按它自己的名字说（PAGE-CANVAS「同一功能一个名字」）
-      const preset = roundPreset(job)?.preset.kind;
+      // 系统代发的修复轮按它自己的名字说（PAGE-CANVAS「同一功能一个名字」）：提示词是固定指令（加附加要求）的就是它
+      const preset = ROUND_PRESETS.find((kind) => presetNote(i.prompt ?? '', ROUND_PRESET_PROMPTS[kind]) !== null);
       if (preset === 'link_repair') return `接上跳转 ${ids.length} 屏${ver}`;
       if (preset === 'conventions') return `按新约定重生成 ${ids.length} 屏${ver}`;
       return `改${ids.length === 1 ? `「${name(ids[0])}」` : screens.length > 0 && ids.length >= screens.length ? `全部 ${ids.length} 屏` : ` ${ids.length} 屏`}${ver}`;
@@ -47,31 +47,4 @@ export function jobLabel(job: JobDto, screens: Pick<ScreenDto, 'id' | 'name'>[],
     case 'chat': { const q = i.prompt ?? ''; return `聊「${q.length > 20 ? `${q.slice(0, 20)}…` : q}」`; }
     case 'edit_component': return `改组件「${components.find((c) => c.id === i.componentId)?.name ?? '已删除的组件'}」`;
   }
-}
-
-// 系统代发轮次的隐藏参数（REQ-CORE-026 v0.74）：出变体、补缺失页、补链、按新约定重生成的消息正文是描述，
-// 「修改」按作业输入把它们还原成同一类作业；text 是填回输入框的正文（变体是提示词本身，其余是附加要求）
-export type RoundPreset = { kind: 'variant'; variantOf: string; variantName: string } | { kind: 'missing'; route: string; fromScreenId?: string } | { kind: RoundPresetKind };
-export function roundPreset(job: JobDto): { preset: RoundPreset; text: string } | null {
-  const i = job.input as JobInput;
-  const prompt = i.prompt ?? '';
-  if (job.kind === 'generate' && i.variantOf && i.variantName) return { preset: { kind: 'variant', variantOf: i.variantOf, variantName: i.variantName }, text: prompt === variantPrompt(i.variantName) ? '' : prompt };
-  if (job.kind === 'generate' && i.route) return { preset: { kind: 'missing', route: i.route, fromScreenId: i.fromScreenId }, text: presetNote(prompt, missingPagePrompt(i.route)) ?? prompt };
-  if (job.kind === 'edit_screens') for (const kind of ROUND_PRESETS) { const note = presetNote(prompt, ROUND_PRESET_PROMPTS[kind]); if (note !== null) return { preset: { kind }, text: note }; }
-  return null;
-}
-// 胶囊文字、动词行与占位：出变体 / 补缺失页固定造 1 屏，补链 / 按新约定重生成改目标屏；版数照常
-const NOTE_HINT = '可以留空直接发；写了就作为附加要求';
-export function presetView(p: RoundPreset, screens: ScreenDto[], targets: number, versions: number): { label: string; verb: string; hint: string } {
-  const ver = versions > 1 ? ` × ${versions} 版` : '';
-  switch (p.kind) {
-    case 'variant': return { label: `「${screens.find((s) => s.id === p.variantOf)?.name ?? '已删除的屏'}」的 ${p.variantName} 变体`, verb: `出变体 1 屏${ver}`, hint: `描述这个状态长什么样；留空就按状态名「${p.variantName}」出` };
-    case 'missing': return { label: `缺失页 ${p.route}`, verb: `造 1 屏 · ${p.route}${ver}`, hint: NOTE_HINT };
-    case 'link_repair': return { label: '接上跳转', verb: `接上跳转 ${targets} 屏${ver}`, hint: NOTE_HINT };
-    case 'conventions': return { label: '按新约定重生成', verb: `按新约定重生成 ${targets} 屏${ver}`, hint: NOTE_HINT };
-  }
-}
-// 发送时随 API-CORE-010 带上的字段
-export function presetBody(p: RoundPreset): Record<string, string | undefined> {
-  return p.kind === 'variant' ? { variantOf: p.variantOf, variantName: p.variantName } : p.kind === 'missing' ? { route: p.route, fromScreenId: p.fromScreenId } : { preset: p.kind };
 }

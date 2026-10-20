@@ -2,6 +2,7 @@ import { COLOR_CLASS_NAMES, NEUTRAL_PALETTE, tokensFromSeed, type Tokens } from 
 import { EDIT_BLOCK } from './edits.ts';
 import { DEVICE_SIZE, type DeviceType, type Presentation } from './device.ts';
 import { componentPlacement, sharedComponentsSection, type SharedComponentCard } from './component-meta.ts';
+import type { DraftFrameChoice } from './schemas.ts';
 
 // 设计契约（ADR-005 / ADR-012）：每次生成都带，体积与屏幕数无关。组件配方来自设计系统 components。
 export type ComponentRecipe = { name: string; html: string; note?: string };
@@ -83,7 +84,14 @@ export function craftRules(device: DeviceType): string {
 // 图片（ADR-027 ④）：picsum 只给随机照片，种子只保证稳定——照片不能承载含义，头像与 logo 另有来源。
 // 出屏提示词与 get_design_contract 共用这一句
 export const PICSUM_PHOTO_NOTE = 'picsum returns a RANDOM photo: the seed keeps it stable (reuse it for the same item on every screen) but never picks the subject, so a photo must not carry meaning. Use photos where any real-world photo fits (feed media, covers, places), with titles beside or below, never on top.';
-const IMAGES_RULE = `- Images: <img src="https://picsum.photos/seed/ITEM-ID/W/H" class="... object-cover" alt="..."> in a fixed frame (w-*/h-*, aspect-square, aspect-video, or w-full with a fixed h-* for other ratios), W/H about 2× the frame and at most 1600. ${PICSUM_PHOTO_NOTE} Avatars are initials (bg-surface-variant text-on-surface-variant) unless PROJECT ASSETS has the photo; logos come only from PROJECT ASSETS, else the app name alone as a text wordmark (no letter tile).`;
+// 图片写法出屏与草稿共用；头像与 logo 那半句各写各的——草稿没有素材清单，也没有 token 类
+const IMAGE_MARKUP = '<img src="https://picsum.photos/seed/ITEM-ID/W/H" class="... object-cover" alt="..."> in a fixed frame (w-*/h-*, aspect-square, aspect-video, or w-full with a fixed h-* for other ratios), W/H about 2× the frame and at most 1600.';
+const IMAGES_RULE = `- Images: ${IMAGE_MARKUP} ${PICSUM_PHOTO_NOTE} Avatars are initials (bg-surface-variant text-on-surface-variant) unless PROJECT ASSETS has the photo; logos come only from PROJECT ASSETS, else the app name alone as a text wordmark (no letter tile).`;
+
+// 出屏与带参照项目的草稿（sketchSystemPrompt）共用的三段：配方、路由表、预载字体
+const recipeLines = (components: ComponentRecipe[]) => components.map((c) => `  - ${c.name}: ${c.html}${c.note ? ` — ${c.note}` : ''}`).join('\n');
+const routeList = (registry: RegistryEntry[]) => registry.map((r) => `${r.route} (${r.name}${r.purpose ? `: ${r.purpose}` : ''})`).join(', ');
+const fontNote = (tokens: Tokens) => `${tokens.typography.fontFamily} is ${tokens.typography.fontSource === 'system' ? 'the device font (installed locally, no webfont to load)' : 'preloaded'}`;
 
 // shared（REQ-EDIT-006）：项目的共享组件卡——每张都进前缀（名字 / 摘要 / 占位写法），与本次相关的附完整 HTML
 export function screenSystemPrompt(app: AppContext, device: DeviceType, tokens: Tokens, designMd: string, components: ComponentRecipe[], registry: RegistryEntry[], refs: ReferenceScreen[], assets: ProjectAsset[] = [], shared: SharedComponentCard[] = []): string {
@@ -91,9 +99,9 @@ export function screenSystemPrompt(app: AppContext, device: DeviceType, tokens: 
   const deviceRules = device === 'mobile'
     ? `- Device: mobile, viewport ${size.w}×${size.h}. No device status bar. Main screens have a top AppBar and a bottom TabBar linking to the 4 main routes. Detail/flow screens have a back-arrow AppBar (<a href="/previous-route">) and no TabBar.`
     : `- Device: desktop web app, viewport ${size.w}×${size.h}. Layout: the Sidebar recipe on the left with nav links (<a href="/route">) and a main content area with a page header. No bottom tab bar.`;
-  const recipes = components.map((c) => `  - ${c.name}: ${c.html}${c.note ? ` — ${c.note}` : ''}`).join('\n');
+  const recipes = recipeLines(components);
   const brief = app.brief?.trim() ? `\nAPP BRIEF\n${app.brief.trim()}\n` : '';
-  const routes = registry.map((r) => `${r.route} (${r.name}${r.purpose ? `: ${r.purpose}` : ''})`).join(', ');
+  const routes = routeList(registry);
   // 项目素材（v0.35 `REQ-CORE-019`）：给出真实可用的 URL，模型才不会拿占位图糊弄品牌位
   const assetList = assets.length
     ? `\nPROJECT ASSETS (real files; use these exact URLs in <img src>, never invent asset URLs):\n${assets.map((x) => `  - ${x.name} → ${x.url}${x.width && x.height ? ` (${x.width}×${x.height})` : ''}`).join('\n')}\nUse the brand mark asset wherever a logo belongs (app bar, splash, empty states). Size it with w-*/h-* classes; SVG assets scale cleanly.\n`
@@ -110,7 +118,7 @@ OUTPUT RULES (structure is required; the rest is the house vocabulary — see WH
 - Semantic colors: bg-success/text-success for completed & confirmed states, bg-warning/text-warning for caution, bg-error/text-error for failure — never repurpose primary for these. Pair each with its on-* class for text on top.
 - Radius: small and set by role (see AESTHETIC BASELINE): the recipes' radius for controls, rounded-lg for containers, rounded-full only for avatars, dots, count badges, toggles and progress tracks. Shadows: none on in-flow content; shadow-sm only on layers that float over it (sheets, menus, FABs) unless the DESIGN SYSTEM's Elevation says otherwise.
 - Simple progress bars: the ProgressBar recipe (fraction widths) needs no script. Real data visualisation may pull in a charting library — see LIBRARIES.
-- Typography: text-xs … text-3xl, font-medium / font-semibold / font-bold. ${tokens.typography.fontFamily} is ${tokens.typography.fontSource === 'system' ? 'the device font (installed locally, no webfont to load)' : 'preloaded'}.
+- Typography: text-xs … text-3xl, font-medium / font-semibold / font-bold. ${fontNote(tokens)}.
 - Icons: <i data-lucide="icon-name" class="w-5 h-5"></i> using any lucide icon name that fits the meaning (e.g. home, search, bell, settings, user, users, calendar, clock, map-pin, message-circle, wallet, receipt, credit-card, shopping-cart, utensils, car, book-open, chart-line, wind, moon, heart, star, plus, check, x, chevron-left, chevron-right, more-horizontal).
 ${IMAGES_RULE}
 - Navigation: every tappable element that leads to another screen MUST navigate to a route from ALLOWED ROUTES only. Links, cards and button-like actions are <a href="/route"> (style them with the button recipes). Every <form> MUST have action="/route" (the screen shown after submitting) and its primary action MUST be <button type="submit"> — never type="button" for Log in / Sign up / Send / Save / Continue. A button that must stay a <button> but leads somewhere carries data-href="/route". If the destination screen is NOT in ALLOWED ROUTES (a tab or action that has no screen yet), write href="#" — a dead link the prototype explains to the user — and NEVER point it at an unrelated existing screen. Only buttons that truly do nothing (toggles, steppers) are <button type="button"> without data-href.
@@ -156,6 +164,68 @@ export function planUserPrompt(app: AppContext, description: string, existing: R
 // 图里的具体文案和品牌色，产出既违反设计契约、又不是用户这个 APP 的内容。
 export const REFERENCE_IMAGE_NOTE = `The user attached reference image(s) with this request. Treat them as a visual reference for layout, density, spacing rhythm and component style only. Do NOT copy their text content, brand colours or logos: colours must still come from the token classes of THIS project's design system, and the copy must be about this app. If a reference conflicts with the design system or the output rules, the design system and the output rules win.`;
 
+// ---- 草稿本（REQ-CORE-040 / ADR-030）：一句话出一张组件或页面，风格只听这句话 ----
+// 不带设计系统、屏注册表、参考屏、组件卡与素材清单：草稿是随手试的地方，套上项目的词汇就试不出新方向。
+// 草稿选了参照项目时（REQ-CORE-042 / ADR-033）改带那个项目的 DESIGN.md、token 类、组件配方与路由表，风格与链接两条换成按它写。
+// 模型通道（sketchSystemPrompt）与本机会话投递（agentDelivery）共用 sketchRules 与 sketchFrameRule，规则只写这一份
+export const SKETCH_GENERATOR_MARK = "You are Quilt's sketch generator";
+const SKETCH_STYLE = {
+  free: `- Style: follow the user's request and nothing else. There is no design system, no token palette and no house style here: choose every colour, font, size, radius, shadow and effect the request implies and write it directly — Tailwind utility classes (the default palette such as bg-zinc-900 or text-emerald-400, arbitrary values such as bg-[#0b1020] or rounded-[28px]), inline style attributes, or your own CSS in a <style> element inside the root. Gradients, glass, glows and illustrations are fine when the request calls for them.`,
+  referenced: `- Style: the draft is made for the REFERENCE PROJECT and must look like part of that app: colours through its token classes (bg-X / text-X / border-X / ring-X), typography, radius and elevation as its design system says, its component recipes verbatim where they fit. The request decides the content and layout; write a hardcoded colour, an arbitrary value or your own <style> only where the request asks for something its design system cannot express.`,
+};
+const SKETCH_LINKS = {
+  free: `- Links: every link and link-like action is href="#" — a draft is one standalone piece, not a screen of an app. Forms have no action and their buttons are type="button".`,
+  referenced: `- Links: a link or action that leads to one of the reference project's existing screens is <a href="/route"> with that screen's route (a <button> that must stay a button carries data-href="/route"); a form that submits into one has action="/route" and a type="submit" button; anything else is href="#", and other forms have no action and type="button" buttons.`,
+};
+/** 草稿规则；referenced = 草稿有参照项目，风格按它的设计系统、链接可写它的路由 */
+export function sketchRules(referenced = false): string {
+  const k = referenced ? 'referenced' : 'free';
+  return `DRAFT RULES
+- Structure: the draft is the HTML of ONE root element with everything inside it (no <html>, <head> or <body>). The root carries data-frame (see FRAME).
+${SKETCH_STYLE[k]}
+- Fonts and libraries: a webfont is a <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=…"> inside the root, used through font-['Family_Name'] or your CSS; any other https: stylesheet or script (Chart.js, GSAP…) also loads inside the root. Scripts bind listeners only to elements inside the root, never to document or window: Quilt re-runs them every time the draft is shown in the same page. The draft must still show something sensible before a CDN answers.
+- Tailwind (Play CDN) and lucide are preloaded: icons are <i data-lucide="icon-name" class="w-5 h-5"></i> with any lucide icon name that fits.
+- Images: ${IMAGE_MARKUP} ${PICSUM_PHOTO_NOTE} Avatars are initials on a tinted circle; a logo is the product name as a text wordmark.
+${SKETCH_LINKS[k]}
+- Content: real and specific to the request (real-sounding names, prices, dates and counts that agree with each other); no lorem ipsum, no placeholder labels.
+- Language: write every visible text in the language of the user's request.`;
+}
+/** 参照项目（REQ-CORE-042 / ADR-033）：草稿按它的设计系统写，提示词带它的 DESIGN.md、token 类、组件配方与路由表 */
+export type SketchReference = { app: AppContext; tokens: Tokens; designMd: string; components: ComponentRecipe[]; registry: RegistryEntry[] };
+// 画框（API-CORE-010 草稿本规则）：component 由 Quilt 按根元素的框居中摆在看板上，所以根不能铺满整页；mobile / desktop 给对应视口
+const SKETCH_FRAMES = {
+  component: 'component — one component, card, widget or control, not a whole page. The root sizes itself to the component: a fixed width such as w-[360px] or a max-w-* class, natural height. No min-h-dvh or any other viewport-tall height, no page background, no outer margin: Quilt centres the root on an empty board and sizes the view to it.',
+  mobile: 'mobile — a complete phone screen in a 390×844 viewport. The root is the whole page: min-h-dvh with its own page background; no device status bar or phone bezel.',
+  desktop: 'desktop — a complete web page or desktop app page in a 1280×800 viewport. The root is the whole page: min-h-dvh with its own page background; no browser chrome or window frame.',
+} as const;
+/** 画框一节：给定画框时直接写明；auto 时让模型按内容自选并写进根元素的 data-frame（第一版落库时据此定 screens.frame） */
+export function sketchFrameRule(frame: DraftFrameChoice): string {
+  if (frame !== 'auto') return `FRAME: ${frame}\nThe root element carries data-frame="${frame}". This draft's frame is ${SKETCH_FRAMES[frame]}`;
+  return `FRAME: auto\nChoose the frame that fits the request and declare it on the root element as data-frame="component", data-frame="mobile" or data-frame="desktop": a single component, card, widget or control is component; a complete phone app screen is mobile; a complete website or desktop app page is desktop. Then follow that frame:\n${Object.values(SKETCH_FRAMES).map((f) => `- ${f}`).join('\n')}`;
+}
+export function sketchSystemPrompt(frame: DraftFrameChoice, ref?: SketchReference): string {
+  const reference = ref ? `
+
+REFERENCE PROJECT: ${ref.app.name}${ref.app.brief?.trim() ? ` — ${ref.app.brief.trim()}` : ''}
+- Token classes: bg-X / text-X / border-X / ring-X where X is one of: ${COLOR_CLASS_NAMES.join(', ')}. ${fontNote(ref.tokens)}.
+- Routes: ${routeList(ref.registry) || '(none yet)'}
+
+DESIGN SYSTEM
+${ref.designMd.trim()}
+
+COMPONENT RECIPES (reuse verbatim for consistency)
+${recipeLines(ref.components)}` : '';
+  return `${SKETCH_GENERATOR_MARK}. You turn the user's request into ONE ${ref ? `UI draft for the app "${ref.app.name}"` : 'free-form UI draft'} — a component or a page — as HTML that renders inside a preloaded document.
+
+OUTPUT: only the root element's HTML. No markdown fences, no explanation.
+
+${sketchRules(!!ref)}
+
+${sketchFrameRule(frame)}${reference}`;
+}
+// 草稿的参考图（REQ-CORE-012 在草稿本里）：没有设计系统要守，参考图就是观感本身，可以照着取色；与 REFERENCE_IMAGE_NOTE 相反
+export const SKETCH_REFERENCE_IMAGE_NOTE = `The user attached reference image(s) with this request. Use them as the reference for look and layout — palette, typography, shapes, density and mood; you may sample colours from them. Do not copy their text, logos or brand marks unless the request asks for it: the content follows the request.`;
+
 // 单屏规划（REQ-CORE-003 屏数=1）：用户只给一句描述，先把它规划成与整组生成同形的 PlannedScreen，
 // 再走同一条出屏路径。路由不许撞现有的；链接只许指向现有的、且可以为空——交互还没想好时先把屏设计出来，不强迫它连到谁。
 export function planOneScreenSystemPrompt(): string {
@@ -195,6 +265,8 @@ export function linkRepairPrompt(newRoutes: string[]): string {
 }
 // 「按新约定重生成」（REQ-EDIT-003）：约定写进 DESIGN.md 之后对全部屏跑一轮的固定指令
 export const CONVENTIONS_REGENERATE_PROMPT = 'Rework this screen so it follows every rule in the DESIGN SYSTEM section named "约定" (conventions). Keep the screen\'s purpose, content, links and overall layout; change only what the conventions require.';
+// 草稿放进项目后的改写（REQ-CORE-041 / ADR-031）：草稿的风格只听那一句话，色值、字体、圆角多是写死的；这一轮把它换成本项目的词汇
+export const RESTYLE_PROMPT = 'This screen was copied in from a free-form sketch that ignored this project\'s design system. Restyle it to THIS project\'s design system: replace hardcoded colours (hex, rgb, arbitrary values, inline styles) with the token classes, use the project\'s typography, radius and elevation rules, and swap hand-made controls for the matching COMPONENT RECIPES. Keep the layout, content, copy, images, links and interactions as they are; do not add or remove sections.';
 // 懒生成补屏（REQ-PROTO-003）与出变体（REQ-CORE-025）的提示词：画布发起与「修改」重发共用
 export const missingPagePrompt = (route: string): string => `Screen for route ${route}`;
 export const variantPrompt = (name: string): string => `The ${name} state`;

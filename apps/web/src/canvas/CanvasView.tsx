@@ -6,6 +6,7 @@ import { Minimap, type MiniRect } from '@/canvas/Minimap';
 import { EDGE_LIMIT, mergeEdges, shownEdges, edgeCurves, drawEdges, type Curve, type EdgeColors } from '@/canvas/edges';
 import { toWorld, wantsThumb, fullShotIds, inMarquee, fitViewport, focusViewport, revealViewport, panToViewport, ensureVisibleViewport, zoomAround } from '@/canvas/geometry';
 import { useViewport, WHEEL_PAN_SPEED } from '@/canvas/useViewport';
+import { frameSide } from '@/lib/frameZoom';
 import { useFocusedFrame } from '@/canvas/useFocusedFrame';
 import { ScreenCard, ComponentCard, keepPointerFocus, type CardActions, type CardKind } from '@/canvas/cards';
 import { keyAction, toSelection, type ElementSelection } from '@/canvas/frameMessages';
@@ -76,7 +77,7 @@ export type CanvasProps = {
   /** 正在交互的共享组件卡（REQ-EDIT-006）：与屏的聚焦互斥，但不动镜头 */
   focusedComponentId?: string | null;
   onFocusComponent?: (id: string | null) => void;
-  /** 未被浮层遮住的那块画布：适配视图与聚焦都以它为准，否则内容会被推到对话面板/工具栏底下 */
+  /** 未被浮层遮住的那块画布：适配视图与聚焦都以它为准，否则内容会被推到输入框/工具栏底下 */
   safeAreaRef?: { current: HTMLElement | null };
   registerApi?: (api: CanvasApi) => void;
   /** 小地图（REQ-CORE-024）：画在视口左上、跟着视图流重画 */
@@ -119,6 +120,17 @@ function readCompSizes(key: string): Record<string, CompBox> {
 }
 const omit = <T,>(m: Record<string, T>, ids: string[]) => { const rest = { ...m }; for (const id of ids) delete rest[id]; return rest; };
 const dpr = () => window.devicePixelRatio || 1;
+// 聚焦屏的 iframe 不跟着世界层的缩放变换走：包它的那层（.frame-box）按镜头倍率 zoom、再 scale(1/倍率) 抵消，iframe 上的总变换是 1:1，看上去大小不变。
+// Chromium 在带缩放变换的跨域 iframe 里用 GPU 合成时，会把同时带 backdrop-filter 与 box-shadow 的元素画错——一片灰色渐变盖住邻近的内容
+// （2026-10-20 有头 Edge 实测，无头复现不出）；zoom 让 iframe 按目标倍率原生绘制，里面仍按设备宽度排版。
+// zoom 不放大百分比宽高，所以外层宽高写成卡片的像素，并取到刚好不少于它的整设备像素（frameSide）
+function unscaleFrame(el: HTMLElement | null, zoom: number) {
+  const box = el?.parentElement;
+  if (!el || !box || !(zoom > 0)) return;
+  const want = { zoom: String(zoom), width: `${frameSide(box.offsetWidth, zoom)}px`, height: `${frameSide(box.offsetHeight, zoom)}px`, transform: `scale(${1 / zoom})` };
+  if (el.style.zoom === want.zoom && el.style.width === want.width && el.style.height === want.height) return;
+  Object.assign(el.style, want, { transformOrigin: '0 0' });
+}
 
 // 引用不变的方法表：每个方法转调最近一次渲染给的实现。卡片是 memo 的，动作表一换引用就整片画布重渲染
 function useStableActions<T extends Record<string, (...args: any[]) => any>>(impl: T): T {
@@ -143,7 +155,7 @@ export function CanvasView(p: CanvasProps) {
       paintEdges();
       if (fullRef.current.size && wantsThumb(v.zoom, dpr())) settleShots(v);
     },
-    onStop: (v) => settleShots(v),
+    onStop: (v) => { settleShots(v); unscaleFrame(frameBoxRef.current, v.zoom); },
   });
   const { viewportRef, worldRef, vp, spaceDown, panReady, moveTo, safeArea, onView, isMoving, touched, autoMove, placeFirstFrame, savedView } = view;
   const [dragPos, setDragPos] = useState<Record<string, { x: number; y: number }>>({});
@@ -192,6 +204,9 @@ export function CanvasView(p: CanvasProps) {
   const byId = useMemo(() => Object.fromEntries(p.screens.map((s) => [s.id, s])), [p.screens]);
   const frame = useFocusedFrame(p, propsRef, byId);
   const { iframeRef, iframeReady, goBack, beginFocus } = frame;
+  // iframe 挂上（聚焦、重载、退出后留着的那一张）时按此刻的倍率摆一次，镜头停下时 onStop 再摆
+  const frameBoxRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => unscaleFrame(frameBoxRef.current, vp.current.zoom));
   const selectedCompSet = useMemo(() => new Set(p.selectedComponentIds), [p.selectedComponentIds]);
   const selectedSet = useMemo(() => new Set(p.selectedIds), [p.selectedIds]);
   // 每个默认屏有几个变体（v0.62）：卡片标签用
@@ -676,7 +691,7 @@ export function CanvasView(p: CanvasProps) {
         </div>
         {/* 锚点（REQ-CORE-014）：新屏落点的幽灵框，尺寸 = 设备形态；只是标记，不可拖不可点 */}
         {p.anchor && (
-          <div className="anchor" data-testid="anchor" aria-hidden="true" style={{ width: p.screenSize.w, height: p.screenSize.h, transform: `translate(${p.anchor.x - p.screenSize.w / 2}px, ${p.anchor.y - p.screenSize.h / 2}px)` }}>
+          <div className={`anchor${p.screenSize.w > 600 ? ' desktop' : ''}`} data-testid="anchor" aria-hidden="true" style={{ width: p.screenSize.w, height: p.screenSize.h, transform: `translate(${p.anchor.x - p.screenSize.w / 2}px, ${p.anchor.y - p.screenSize.h / 2}px)` }}>
             <span className="anchor-label">新屏落点 · 在下方输入框描述它</span>
           </div>
         )}
@@ -696,13 +711,13 @@ export function CanvasView(p: CanvasProps) {
               // 有候选未采用的卡片：后面叠两张错位底板示意「还有几版」；展开时底板让位给展开层
               stacked={!!s.pendingCandidates && !isFocused && p.candidateStack?.screenId !== s.id} candExpanded={p.candidateStack?.screenId === s.id}
               // 退出聚焦后留下的那个（v0.94）：同一个元素、src 不变，不重载；inert，手势层照常在上面
-              frame={(live || lingering) && <iframe key={frame.reloadKey} ref={iframeRef} className={`nowheel nopan${iframeReady || lingering ? '' : ' loading'}`} src={lingering ? lingerOn.src : frame.focusedSrc ?? s.previewUrl!} title={s.name} sandbox="allow-scripts allow-same-origin allow-forms" inert={lingering} tabIndex={lingering ? -1 : undefined} onLoad={frame.onFrameLoad} />}
+              frame={(live || lingering) && <div ref={frameBoxRef} className="frame-box"><iframe key={frame.reloadKey} ref={iframeRef} className={`nowheel nopan${iframeReady || lingering ? '' : ' loading'}`} src={lingering ? lingerOn.src : frame.focusedSrc ?? s.previewUrl!} title={s.name} sandbox="allow-scripts allow-same-origin allow-forms" inert={lingering} tabIndex={lingering ? -1 : undefined} onLoad={frame.onFrameLoad} /></div>}
               chrome={isFocused && (
                 <>
                   {/* 状态变体（REQ-CORE-025 v0.62）：聚焦的屏所在家族 ≥ 2 时卡内顶部中央出一排胶囊，点即同 iframe 换成那一份。
                       放卡内而不是卡上方：聚焦把卡顶贴到可用区上沿，卡上方那 32 px 正压在顶栏底下（RUN-112 实测点不到） */}
                   {iframeReady && family.length >= 2 && (
-                    <div className="variant-chips nopan" role="group" aria-label="状态变体" data-testid="variant-chips">
+                    <div className="variant-chips chrome nopan" role="group" aria-label="状态变体" data-testid="variant-chips">
                       {family.map((v) => (
                         <button key={v.id} type="button" className="variant-chip state-layer focus-ring" aria-pressed={shownId === v.id} data-testid="variant-chip" data-id={v.id}
                           onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); void frame.swapVariant(v.id); }}>{v.variantOf ? v.variantName : '默认'}</button>

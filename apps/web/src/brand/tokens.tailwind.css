@@ -35,9 +35,11 @@
   --radius-lg: var(--semantic-radius-lg);
   --radius-pill: var(--semantic-radius-pill);
   --radius-inner-min: var(--semantic-radius-inner-min);
+  --radius-xl: var(--semantic-radius-xl);
   --font-sans: var(--primitive-font-family-sans);
   --font-cjk: var(--primitive-font-family-cjk);
   --font-mono: var(--primitive-font-family-mono);
+  --font-brand: var(--primitive-font-family-brand);
   --text-caption: var(--semantic-typography-caption-font-size);
   --text-overline: var(--semantic-typography-overline-font-size);
   --text-label: var(--semantic-typography-label-font-size);

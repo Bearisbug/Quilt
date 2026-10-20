@@ -26,6 +26,8 @@ export const previewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('quilt:deselect'), qid: z.string() }),
   // 组件预览页（/c/，REQ-EDIT-006）量到的根元素框，由 componentPreviewDocument 里的测量脚本发出，不经运行时
   z.object({ type: z.literal('quilt:component-size'), componentId: z.string(), x: z.number(), y: z.number(), w: z.number(), h: z.number() }),
+  // 组件画框的草稿（REQ-CORE-040）：预览域下发时附的测量脚本报根元素的框，同组件预览，不经运行时
+  z.object({ type: z.literal('quilt:draft-size'), screenId: z.string(), w: z.number(), h: z.number() }),
 ]);
 export type PreviewToParent = z.infer<typeof previewMessageSchema>;
 

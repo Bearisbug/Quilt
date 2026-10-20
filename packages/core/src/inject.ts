@@ -61,6 +61,26 @@ export function replaceSubtree(bodyHtml: string, qid: string, newHtml: string): 
   return { body: document.body.innerHTML, newQids };
 }
 
+// 从屏建草稿（API-CORE-048，REQ-CORE-043）：有 qid 时取那个元素连同子树，没有时取整个 body；来源屏的 data-qid 不带走，按草稿从 q1 重新编号。
+// text 是这一块的可见文字（去掉脚本与样式；相邻元素的字之间补空格，「Address」「Follow」不连成一个词；合并空白），草稿名用它。qid 不在 body 里返回 null
+export function forkBody(bodyHtml: string, qid?: string): { html: string; text: string } | null {
+  const { document } = parseHTML(`<!doctype html><html><body>${bodyHtml}</body></html>`);
+  const el = qid ? document.querySelector(`[data-qid="${qid}"]`) : document.body;
+  if (!el) return null;
+  const html = injectQids(qid ? el.outerHTML : el.innerHTML);
+  for (const n of Array.from(el.querySelectorAll('script, style, template, noscript'))) n.remove();
+  for (const n of Array.from(el.querySelectorAll('*'))) n.after(' ');
+  return { html, text: (el.textContent ?? '').replace(/\s+/g, ' ').trim() };
+}
+
+// 草稿覆盖写回（API-CORE-047 as=overwrite，ADR-032）：没有 qid 时整个 body 换成草稿的；有 qid 时只把那个元素连同子树换成草稿根，
+// 替换法同子树重生成——换进去的根沿用被换元素的 qid，所以写回目标记的仍是这个编号（rootQid）。qid 不在 body 里返回 null
+export function overwriteBody(targetBody: string, draftBody: string, qid?: string): { body: string; rootQid: string | null } | null {
+  if (!qid) return { body: draftBody, rootQid: null };
+  const replaced = replaceSubtree(targetBody, qid, draftBody);
+  return replaced && { body: replaced.body, rootQid: qid };
+}
+
 // 导航属性按元素类型落位：<a> 用 href、<form> 用 action、其他元素用 data-href（运行时三者同劫持）
 const navAttrOf = (el: Element): string => (el.tagName === 'A' ? 'href' : el.tagName === 'FORM' ? 'action' : 'data-href');
 

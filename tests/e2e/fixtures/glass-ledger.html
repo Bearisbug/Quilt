@@ -1,0 +1,224 @@
+
+<div data-frame="mobile" class="min-h-dvh bg-[#f4f6f3] font-['Noto_Sans_SC'] text-zinc-800 pb-28 relative">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=DM+Mono:wght@500&display=swap">
+  <style>
+    .num { font-family: 'DM Mono', ui-monospace, monospace; font-feature-settings: "tnum"; }
+  </style>
+
+  <!-- 顶部 -->
+  <header class="px-5 pt-6 flex items-center justify-between">
+    <div>
+      <p class="text-xs text-zinc-500">2026年10月20日 · 周二</p>
+      <h1 class="text-lg font-bold mt-0.5">早上好，林晓</h1>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="#" class="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-sm">
+        <i data-lucide="search" class="w-5 h-5 text-zinc-600"></i>
+      </a>
+      <a href="#" class="w-10 h-10 rounded-full bg-red-500 text-white flex items-center justify-center font-bold text-sm">林</a>
+    </div>
+  </header>
+
+  <!-- 本月结余 -->
+  <section class="px-5 mt-5">
+    <div class="aspect-square rounded-xl p-5 text-white bg-gradient-to-br from-[#b91c1c] via-[#dc2626] to-[#fb7185] shadow-[0_18px_40px_-16px_rgba(185,28,28,0.65)] border border-white/25 ring-1 ring-inset ring-white/10 backdrop-blur-xl relative overflow-hidden flex flex-col justify-between">
+      <div class="absolute -right-10 -top-10 w-44 h-44 rounded-full bg-[#fda4af]/50 blur-2xl"></div>
+      <div class="absolute -left-12 bottom-10 w-40 h-40 rounded-full bg-[#7f1d1d]/60 blur-2xl"></div>
+      <div class="absolute right-6 top-24 w-16 h-16 rounded-full bg-white/20 backdrop-blur-md border border-white/30"></div>
+      <div class="absolute inset-0 bg-gradient-to-b from-white/15 via-transparent to-black/10 pointer-events-none"></div>
+
+      <div class="relative">
+        <div class="flex items-center justify-between">
+          <a href="#" class="flex items-center gap-1 text-sm text-white/90">
+            10月结余 <i data-lucide="chevron-down" class="w-4 h-4"></i>
+          </a>
+          <a href="#" class="text-white/85"><i data-lucide="eye" class="w-5 h-5"></i></a>
+        </div>
+        <p class="mt-2"><span class="text-xl align-top mr-0.5">¥</span><span class="num text-[40px] leading-none">8,757.50</span></p>
+        <p class="text-xs text-white/85 mt-2 flex items-center gap-1">
+          <i data-lucide="trending-up" class="w-3.5 h-3.5"></i> 比9月同期多结余 ¥1,214.30
+        </p>
+      </div>
+
+      <div class="relative">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-white/15 backdrop-blur-xl border border-white/30 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)] rounded-lg px-3.5 py-3">
+            <p class="text-xs text-white/85 flex items-center gap-1"><i data-lucide="arrow-down-left" class="w-3.5 h-3.5"></i>本月收入</p>
+            <p class="num text-lg mt-1 whitespace-nowrap"><span class="text-sm opacity-70 mr-1">+ ¥</span>18,600.00<span class="text-xs opacity-60 ml-1.5">元 / 本月</span></p>
+          </div>
+          <div class="bg-white/15 backdrop-blur-xl border border-white/30 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)] rounded-lg px-3.5 py-3">
+            <p class="text-xs text-white/85 flex items-center gap-1"><i data-lucide="arrow-up-right" class="w-3.5 h-3.5"></i>本月支出</p>
+            <p class="num text-lg mt-1">9,842.50</p>
+          </div>
+        </div>
+
+        <div class="mt-4">
+          <div class="flex justify-between text-xs text-white/90">
+            <span>预算 ¥12,000 · 已用 82%</span>
+            <span>剩余 ¥2,157.50 · 11天</span>
+          </div>
+          <div class="h-2 bg-black/15 border border-white/25 backdrop-blur-md rounded-sm mt-2 overflow-hidden">
+            <div class="h-full w-[82%] bg-gradient-to-r from-[#fde68a] to-[#fbbf24] rounded-sm shadow-[0_0_10px_rgba(253,230,138,0.8)]"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 快捷入口 -->
+  <section class="px-5 mt-5 grid grid-cols-4 gap-2">
+    <a href="#" class="flex flex-col items-center gap-1.5">
+      <span class="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center"><i data-lucide="pie-chart" class="w-5 h-5 text-emerald-600"></i></span>
+      <span class="text-xs text-zinc-600">报表</span>
+    </a>
+    <a href="#" class="flex flex-col items-center gap-1.5">
+      <span class="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center"><i data-lucide="wallet" class="w-5 h-5 text-amber-500"></i></span>
+      <span class="text-xs text-zinc-600">预算</span>
+    </a>
+    <a href="#" class="flex flex-col items-center gap-1.5">
+      <span class="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center"><i data-lucide="credit-card" class="w-5 h-5 text-sky-500"></i></span>
+      <span class="text-xs text-zinc-600">账户</span>
+    </a>
+    <a href="#" class="flex flex-col items-center gap-1.5">
+      <span class="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center"><i data-lucide="repeat" class="w-5 h-5 text-rose-500"></i></span>
+      <span class="text-xs text-zinc-600">周期账单</span>
+    </a>
+  </section>
+
+  <!-- 支出构成 -->
+  <section class="px-5 mt-6">
+    <div class="bg-white rounded-3xl p-4 shadow-sm">
+      <div class="flex items-center justify-between">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;700;900&display=swap">
+        <h2 class="font-['Noto_Serif_SC',serif] font-black text-[17px] tracking-[0.08em] text-zinc-900">支出构成</h2>
+        <a href="#" class="font-['Noto_Serif_SC',serif] font-medium text-xs tracking-wider text-zinc-400 flex items-center">详情<i data-lucide="chevron-right" class="w-4 h-4"></i></a>
+      </div>
+
+      <div class="flex items-baseline justify-between mt-3">
+        <span class="text-xs text-zinc-400">本月共支出</span>
+        <span class="num text-sm font-bold text-zinc-800">¥9,842.50</span>
+      </div>
+
+      <div class="flex h-7 rounded-[4px] overflow-hidden mt-2 gap-[2px] bg-zinc-100 p-[2px]">
+        <div class="flex items-center justify-center text-[10px] font-semibold text-white rounded-[2px]" style="width:38.6%;background:linear-gradient(180deg,#14998c,#0f766e);box-shadow:inset 0 1px 0 rgba(255,255,255,.25)">38.6%</div>
+        <div class="flex items-center justify-center text-[10px] font-semibold text-amber-950 rounded-[2px]" style="width:24.1%;background:linear-gradient(180deg,#fbbf24,#f59e0b);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)">24.1%</div>
+        <div class="flex items-center justify-center text-[10px] font-semibold text-sky-950 rounded-[2px]" style="width:19.9%;background:linear-gradient(180deg,#7dd3fc,#38bdf8);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)">19.9%</div>
+        <div class="rounded-[2px]" style="width:6.2%;background:linear-gradient(180deg,#f9a8d4,#f472b6);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)"></div>
+        <div class="rounded-[2px]" style="width:4.9%;background:linear-gradient(180deg,#c4b5fd,#a78bfa);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)"></div>
+        <div class="rounded-[2px]" style="width:6.3%;background:linear-gradient(180deg,#e4e4e7,#d4d4d8);box-shadow:inset 0 1px 0 rgba(255,255,255,.5)"></div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-x-4 gap-y-3 mt-4 text-sm">
+        <div>
+          <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-[2px] bg-[#0f766e]"></span><span>住房</span><span class="num text-[11px] text-zinc-400 ml-auto">38.6%</span></div>
+          <div class="num text-xs text-zinc-500 mt-0.5 pl-[18px]">¥3,800.00</div>
+        </div>
+        <div>
+          <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-[2px] bg-[#f59e0b]"></span><span>餐饮</span><span class="num text-[11px] text-zinc-400 ml-auto">24.1%</span></div>
+          <div class="num text-xs text-zinc-500 mt-0.5 pl-[18px]">¥2,368.40</div>
+        </div>
+        <div>
+          <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-[2px] bg-[#38bdf8]"></span><span>购物</span><span class="num text-[11px] text-zinc-400 ml-auto">19.9%</span></div>
+          <div class="num text-xs text-zinc-500 mt-0.5 pl-[18px]">¥1,956.00</div>
+        </div>
+        <div>
+          <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-[2px] bg-[#f472b6]"></span><span>娱乐</span><span class="num text-[11px] text-zinc-400 ml-auto">6.2%</span></div>
+          <div class="num text-xs text-zinc-500 mt-0.5 pl-[18px]">¥612.00</div>
+        </div>
+        <div>
+          <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-[2px] bg-[#a78bfa]"></span><span>交通</span><span class="num text-[11px] text-zinc-400 ml-auto">4.9%</span></div>
+          <div class="num text-xs text-zinc-500 mt-0.5 pl-[18px]">¥486.10</div>
+        </div>
+        <div>
+          <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-[2px] bg-zinc-300"></span><span>其他</span><span class="num text-[11px] text-zinc-400 ml-auto">6.3%</span></div>
+          <div class="num text-xs text-zinc-500 mt-0.5 pl-[18px]">¥620.00</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 最近账单 -->
+  <section class="px-5 mt-6">
+    <div class="flex items-center justify-between">
+      <h2 class="font-bold">最近账单</h2>
+      <a href="#" class="text-xs text-zinc-400 flex items-center">全部<i data-lucide="chevron-right" class="w-4 h-4"></i></a>
+    </div>
+
+    <div class="mt-3 bg-white rounded-3xl shadow-sm divide-y divide-zinc-100">
+      <div class="px-4 pt-3 pb-2 flex justify-between text-xs text-zinc-400">
+        <span>今天 10月20日</span><span>支出 ¥86.50</span>
+      </div>
+      <a href="#" class="flex items-center gap-3 px-4 py-3">
+        <span class="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center"><i data-lucide="utensils" class="w-5 h-5 text-amber-600"></i></span>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium">午餐 · 和府捞面</p>
+          <p class="text-xs text-zinc-400 mt-0.5">12:36 · 招商银行信用卡</p>
+        </div>
+        <span class="num text-sm">-48.00</span>
+      </a>
+      <a href="#" class="flex items-center gap-3 px-4 py-3">
+        <span class="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center"><i data-lucide="coffee" class="w-5 h-5 text-amber-600"></i></span>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium">咖啡 · 瑞幸</p>
+          <p class="text-xs text-zinc-400 mt-0.5">09:12 · 微信支付</p>
+        </div>
+        <span class="num text-sm">-16.90</span>
+      </a>
+      <a href="#" class="flex items-center gap-3 px-4 py-3">
+        <span class="w-10 h-10 rounded-2xl bg-violet-100 flex items-center justify-center"><i data-lucide="train-front" class="w-5 h-5 text-violet-600"></i></span>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium">地铁通勤</p>
+          <p class="text-xs text-zinc-400 mt-0.5">08:40 · 支付宝</p>
+        </div>
+        <span class="num text-sm">-21.60</span>
+      </a>
+
+      <div class="px-4 pt-3 pb-2 flex justify-between text-xs text-zinc-400">
+        <span>昨天 10月19日</span><span>收入 ¥2,100.00 · 支出 ¥329.00</span>
+      </div>
+      <a href="#" class="flex items-center gap-3 px-4 py-3">
+        <span class="w-10 h-10 rounded-2xl bg-emerald-100 flex items-center justify-center"><i data-lucide="briefcase" class="w-5 h-5 text-emerald-600"></i></span>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium">兼职收入 · 插画稿费</p>
+          <p class="text-xs text-zinc-400 mt-0.5">18:05 · 工商银行</p>
+        </div>
+        <span class="num text-sm text-emerald-600">+2,100.00</span>
+      </a>
+      <a href="#" class="flex items-center gap-3 px-4 py-3">
+        <span class="w-10 h-10 rounded-2xl bg-sky-100 flex items-center justify-center"><i data-lucide="shopping-bag" class="w-5 h-5 text-sky-600"></i></span>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium">优衣库 · 摇粒绒外套</p>
+          <p class="text-xs text-zinc-400 mt-0.5">15:22 · 招商银行信用卡</p>
+        </div>
+        <span class="num text-sm">-299.00</span>
+      </a>
+      <a href="#" class="flex items-center gap-3 px-4 py-3">
+        <span class="w-10 h-10 rounded-2xl bg-pink-100 flex items-center justify-center"><i data-lucide="music" class="w-5 h-5 text-pink-600"></i></span>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium">QQ音乐 会员续费</p>
+          <p class="text-xs text-zinc-400 mt-0.5">00:00 · 自动扣款</p>
+        </div>
+        <span class="num text-sm">-30.00</span>
+      </a>
+    </div>
+  </section>
+
+  <!-- 底部导航 -->
+  <nav class="fixed bottom-0 left-0 right-0 max-w-[390px] mx-auto bg-white/95 backdrop-blur border-t border-zinc-100 px-6 pt-2 pb-6 flex items-end justify-between">
+    <a href="#" class="flex flex-col items-center gap-1 text-emerald-700">
+      <i data-lucide="home" class="w-6 h-6"></i><span class="text-[11px] font-medium">首页</span>
+    </a>
+    <a href="#" class="flex flex-col items-center gap-1 text-zinc-400">
+      <i data-lucide="list" class="w-6 h-6"></i><span class="text-[11px]">明细</span>
+    </a>
+    <a href="#" class="-mt-8 w-14 h-14 rounded-full bg-[#0f766e] text-white flex items-center justify-center shadow-[0_10px_24px_-6px_rgba(15,118,110,0.7)] ring-4 ring-[#f4f6f3]">
+      <i data-lucide="plus" class="w-7 h-7"></i>
+    </a>
+    <a href="#" class="flex flex-col items-center gap-1 text-zinc-400">
+      <i data-lucide="bar-chart-3" class="w-6 h-6"></i><span class="text-[11px]">统计</span>
+    </a>
+    <a href="#" class="flex flex-col items-center gap-1 text-zinc-400">
+      <i data-lucide="user" class="w-6 h-6"></i><span class="text-[11px]">我的</span>
+    </a>
+  </nav>
+</div>

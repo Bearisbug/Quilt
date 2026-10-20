@@ -6,21 +6,23 @@ import { emitProjectEvent, notifyCanvas } from '../lib/events.ts';
 import { storage } from '../lib/storage.ts';
 import { storeRevisionShot, storeThumb } from '../services/screens.ts';
 import { screenshotHtml } from '../lib/screenshot.ts';
-import { DEVICE_SIZE, type DeviceType, type Presentation } from '@quilt/core';
+import { shotSpecFor, type Presentation } from '@quilt/core';
 import { runJob } from './pipeline.ts';
 import { startAgentDelivery, deliverAgentJob } from './agentDelivery.ts';
 import { finishFailed } from './failJob.ts';
 
 export async function renderRevisionScreenshot(revisionId: string): Promise<boolean> {
-  const [r] = await db.select({ id: schema.screenRevisions.id, htmlKey: schema.screenRevisions.htmlKey, screenshotKey: schema.screenRevisions.screenshotKey, screenId: schema.screens.id, presentation: schema.screens.presentation, projectId: schema.projects.id, deviceType: schema.projects.deviceType })
+  const [r] = await db.select({ id: schema.screenRevisions.id, htmlKey: schema.screenRevisions.htmlKey, screenshotKey: schema.screenRevisions.screenshotKey, screenId: schema.screens.id, presentation: schema.screens.presentation, frame: schema.screens.frame, projectId: schema.projects.id, deviceType: schema.projects.deviceType, kind: schema.projects.kind })
     .from(schema.screenRevisions)
     .innerJoin(schema.screens, eq(schema.screens.id, schema.screenRevisions.screenId))
     .innerJoin(schema.projects, eq(schema.projects.id, schema.screens.projectId))
     .where(eq(schema.screenRevisions.id, revisionId));
   if (!r || r.screenshotKey) return false;
   const html = (await storage.get(r.htmlKey)).toString('utf8');
-  const png = await screenshotHtml(html, DEVICE_SIZE[r.deviceType as DeviceType], { overlay: r.presentation === 'overlay' });
-  if (!(await storeRevisionShot(r.projectId, r.screenId, r.id, png, r.presentation as Presentation))) return false;
+  // 尺寸同出屏时（REQ-CORE-040）：草稿按画框拍，组件画框只拍根元素的框
+  const shot = shotSpecFor({ kind: r.kind, deviceType: r.deviceType }, { frame: r.frame });
+  const png = await screenshotHtml(html, shot.size, { overlay: r.presentation === 'overlay', rootOnly: shot.rootOnly });
+  if (!(await storeRevisionShot(r.projectId, r.screenId, r.id, png, r.presentation as Presentation, r.frame))) return false;
   // 截图就绪：非作业路径（MCP 回写、直改）没有 screen_screenshot_ready 事件，项目频道补一条让卡片换图
   await emitProjectEvent(r.projectId, 'screen_changed', { screenId: r.screenId, revisionId: r.id, screenshot: true }).catch(() => {});
   return true;
@@ -74,8 +76,9 @@ async function backfillThumbs() {
   let n = 0;
   for (const r of rows) {
     try {
-      // 呈现方式按截图键认：键里带 .overlay 的就是按叠层拍的（§16 v1.03；之前的叠层截图键不带，按整屏命名缩略图）
-      const thumbKey = await storeThumb(r.projectId, r.screenId, r.id, await storage.get(r.screenshotKey!), r.screenshotKey!.endsWith('.overlay.png') ? 'overlay' : 'push');
+      // 呈现方式与画框按截图键认：键里带 .overlay 的就是按叠层拍的（§16 v1.03；之前的叠层截图键不带，按整屏命名缩略图），草稿的键带画框（REQ-CORE-040）
+      const [, overlay, frame] = r.screenshotKey!.match(/(\.overlay)?(?:\.(component|mobile|desktop))?\.png$/) ?? [];
+      const thumbKey = await storeThumb(r.projectId, r.screenId, r.id, await storage.get(r.screenshotKey!), overlay ? 'overlay' : 'push', frame ?? null);
       const done = await db.update(schema.screenRevisions).set({ thumbKey })
         .where(and(eq(schema.screenRevisions.id, r.id), eq(schema.screenRevisions.screenshotKey, r.screenshotKey!))).returning({ id: schema.screenRevisions.id });
       if (done.length) { touched.add(r.projectId); n++; }

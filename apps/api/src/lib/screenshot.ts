@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { chromium, type Browser, type BrowserContext, type BrowserContextOptions, type Page, type Request } from 'playwright';
-import { withOverlayStyle, withPaletteDarkMode, withScreenCsp, vendorFileFor } from '@quilt/core';
+import { withOverlayStyle, withDraftComponentStyle, DRAFT_PAD, withPaletteDarkMode, withScreenCsp, vendorFileFor } from '@quilt/core';
 import { config } from '../config.ts';
 
 // 服务端截图（ADR-002）：单浏览器实例复用，按屏开 page。
@@ -168,9 +168,16 @@ async function settle(page: import('playwright').Page, timeoutMs: number) {
   await page.waitForTimeout(120);
 }
 
-// overlay（v0.63 REQ-PROTO-005）：叠层屏拍成带 alpha 的 PNG——注入透明背景、omitBackground，卡片再铺暗底
-export async function screenshotHtml(html: string, size: { w: number; h: number }, opts: { timeoutMs?: number; overlay?: boolean } = {}): Promise<Buffer> {
+// 草稿根（REQ-CORE-040）：body 下第一个会渲染的元素。截图（rootOnly）与预览域的 quilt:draft-size 测量脚本共用这一段，
+// 跳过模型偶尔放在根前面的 <link> / <style> / <script>，两边才量的是同一个框
+export const DRAFT_ROOT_JS = `(function(){var r=document.body&&document.body.firstElementChild;while(r&&/^(SCRIPT|STYLE|LINK|META|TEMPLATE|NOSCRIPT)$/.test(r.tagName))r=r.nextElementSibling;return r||null;})()`;
+
+// overlay（v0.63 REQ-PROTO-005）：叠层屏拍成带 alpha 的 PNG——注入透明背景、omitBackground，卡片再铺暗底。
+// rootOnly（REQ-CORE-040）：组件画框的草稿在给定视口里渲染、只拍草稿根的框；量不出框（没有根、宽或高为 0）时退回整视口。
+// 它与叠层屏一样拍透明底：圆角根的四角露出看板底色，而不是草稿本设计系统的背景色
+export async function screenshotHtml(html: string, size: { w: number; h: number }, opts: { timeoutMs?: number; overlay?: boolean; rootOnly?: boolean } = {}): Promise<Buffer> {
   const timeoutMs = opts.timeoutMs ?? 15_000;
+  const transparent = !!(opts.overlay || opts.rootOnly);
   return inPage({ viewport: { width: size.w, height: size.h }, deviceScaleFactor: 2 }, timeoutMs * 2, async (page) => {
     // 预览域外链（Tailwind CDN / 字体 / 图片）需要网络；等 networkidle 但不超过超时。
     // 屏的脚本在这里同样会执行，带上与预览域同一份 CSP（§15）：不带的话它一入库就能往本机 API 发写请求。
@@ -178,9 +185,20 @@ export async function screenshotHtml(html: string, size: { w: number; h: number 
     // 本地网络访问限制会把屏里引用的预览域素材（回环地址）整张拦掉
     // dark: 按配色判（v0.89）：v0.89 之前写入的修订补上，截图与交互态才是同一个样子
     const doc = withPaletteDarkMode(html);
-    await page.setContent(withScreenCsp(opts.overlay ? withOverlayStyle(doc) : doc), { waitUntil: 'networkidle', timeout: timeoutMs }).catch(() => {});
+    await page.setContent(withScreenCsp(opts.rootOnly ? withDraftComponentStyle(doc) : transparent ? withOverlayStyle(doc) : doc), { waitUntil: 'networkidle', timeout: timeoutMs }).catch(() => {});
     await settle(page, timeoutMs);
-    return await page.screenshot({ type: 'png', fullPage: false, omitBackground: !!opts.overlay });
+    if (opts.rootOnly) {
+      // 根自己带无限动画（漂浮、转圈）时元素截图要等「连续两帧边框不变」，永远等不到——先停掉动画与过渡，按静止时的框裁整页截图，不经元素截图的稳定性等待
+      await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important}' }).catch(() => {});
+      const root = (await page.evaluateHandle<Element | null>(DRAFT_ROOT_JS)).asElement();
+      const box = await root?.boundingBox();
+      // 连同四周那圈透明边一起拍（DRAFT_PAD），根的阴影不被裁掉
+      if (box && box.width >= 1 && box.height >= 1) {
+        const x = Math.max(0, box.x - DRAFT_PAD); const y = Math.max(0, box.y - DRAFT_PAD);
+        return await page.screenshot({ type: 'png', fullPage: true, clip: { x, y, width: box.x + box.width + DRAFT_PAD - x, height: box.y + box.height + DRAFT_PAD - y }, omitBackground: true, timeout: timeoutMs });
+      }
+    }
+    return await page.screenshot({ type: 'png', fullPage: false, omitBackground: transparent });
   });
 }
 

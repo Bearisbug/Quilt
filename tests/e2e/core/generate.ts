@@ -55,7 +55,8 @@ await step('TC-CORE-005', async () => {
   await page.keyboard.press('Enter');
   const t0 = Date.now();
   await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 40000 });
-  await page.locator('[data-testid="message"]:not([data-role="user"])', { hasText: '已生成' }).waitFor({ timeout: 150000 });
+  // 这一批造完 = 它的作业 chip 撤掉（成功的写「完成」停 1 s 再淡出）
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="job-chip"]').length === 0, null, { timeout: 150000 });
   await page.waitForFunction(() => { const cards = document.querySelectorAll('[data-testid="screen-card"]'); return cards.length >= 5 && document.querySelectorAll('[data-testid="screen-card"] img').length === cards.length; }, null, { timeout: 60000 });
   const secs = Math.round((Date.now() - t0) / 1000);
   const { body } = await apiJson<{ screens: { id: string; route: string; name: string; lintPassed: boolean; screenshotUrl: string | null; currentRevisionId: string }[] }>(`/v1/projects/${petProjectId}`);
@@ -426,7 +427,7 @@ await step('TC-CORE-086', async () => {
 });
 
 // TC-CORE-082 事件流假死时作业照样收尾（v0.88）：经 Vite 代理时 API 重启，代理不关浏览器这一侧，EventSource 停在 open、
-// 再也收不到任何事件（连 ping 都没有）；作业在服务端早结束了，行还挂着「排队中…」。无头下用包一层 EventSource 的探针
+// 再也收不到任何事件（连 ping 都没有）；作业在服务端早结束了，chip 还挂着「排队中…」。无头下用包一层 EventSource 的探针
 // 把当前这条流冻住（只丢事件、不断开），模拟代理那一侧的假死
 await step('TC-CORE-082', async () => {
   const { projectId } = seedJson<{ projectId: string }>('seed:project', '--name', 'Frozen', '--device', 'mobile', '--screens', '1', '--no-shot');
@@ -445,19 +446,18 @@ await step('TC-CORE-082', async () => {
     const created = fp.waitForResponse((r) => r.request().method() === 'POST' && /\/v1\/projects\/[^/]+\/messages$/.test(r.url()));
     await fp.keyboard.press('Enter');
     const jobId = ((await (await created).json()) as { job: { id: string } }).job.id;
-    const row = fp.locator(`[data-testid="running-job"][data-job-id="${jobId}"]`);
-    await row.waitFor({ timeout: 5000 });
+    const chip = fp.locator(`[data-testid="job-chip"][data-job-id="${jobId}"]`);
+    await chip.waitFor({ timeout: 5000 });
     const t0 = Date.now();
     await eventually(async () => expect((await apiJson<{ job: { status: string } }>(`/v1/jobs/${jobId}`)).body.job.status === 'succeeded', '作业没在服务端跑完'), 30_000);
     // 流冻住时画布收不到终态：要靠自己发现这条流死了、重连后对账把行撤掉
-    await row.waitFor({ state: 'detached', timeout: 60_000 }).catch(() => {});
+    await chip.waitFor({ state: 'detached', timeout: 60_000 }).catch(() => {});
     const secs = Math.round((Date.now() - t0) / 1000);
     const after = (await fp.evaluate('window.__sseCount')) as number;
-    const stuck = (await row.count()) ? (await row.innerText()).replace(/\s+/g, ' ') : '';
-    expect(!stuck, `作业在服务端早已 succeeded，${secs} s 后行还挂着「${stuck}」（流冻住后开流 ${before} → ${after} 次）`);
-    expect(after > before, '行撤掉了，但冻住的事件流没有重建');
-    await eventually(async () => expect(!(await fp.locator('aside[aria-label="对话记录"]').innerText()).includes('排队中'), '对话记录这一轮还停在「排队中…」'), 10_000);
-    return `流冻住后 ${secs} s 撤掉作业行（开流 ${before} → ${after} 次），对话记录这一轮补上回执`;
+    const stuck = (await chip.count()) ? (await chip.innerText()).replace(/\s+/g, ' ') : '';
+    expect(!stuck, `作业在服务端早已 succeeded，${secs} s 后 chip 还挂着「${stuck}」（流冻住后开流 ${before} → ${after} 次）`);
+    expect(after > before, 'chip 撤掉了，但冻住的事件流没有重建');
+    return `流冻住后 ${secs} s 撤掉作业 chip（开流 ${before} → ${after} 次）`;
   } finally { await fctx.close(); }
 });
 
@@ -470,9 +470,9 @@ await step('TC-CORE-023', async () => {
   await useStubChannel(page, { port: 3986, label: 'Stub 输入框 23' });
   await page.waitForTimeout(800);
 
-  // 1 四处 chrome 两两不重叠
+  // 1 三处 chrome 两两不重叠（v1.17 去掉对话记录）
   const boxes: Record<string, { x: number; y: number; width: number; height: number }> = {};
-  for (const [name, sel] of [['顶栏', 'header'], ['对话记录', 'aside[aria-label="对话记录"]'], ['输入框', 'form.composer'], ['工具栏', '[role="toolbar"]']] as const) {
+  for (const [name, sel] of [['顶栏', 'header'], ['输入框', 'form.composer'], ['工具栏', '[role="toolbar"]']] as const) {
     const b = await page.locator(sel).first().boundingBox();
     expect(b, `${name}未渲染`); boxes[name] = b!;
   }
@@ -481,19 +481,19 @@ await step('TC-CORE-023', async () => {
     expect(!(a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height), `${an} 与 ${bn} 重叠`);
   }
 
-  // 2 顶栏不铺底（v1.10，§13.1）：没有底色、边线与模糊，盒子只包住左上角的项目切换器 chip；chip 自带面板色实底，左缘与小地图对齐；
+  // 2 顶栏不铺底（v1.10，§13.1）：没有底色、边线与模糊，盒子只包住左上角的项目切换器 chip；chip 是毛玻璃（v1.15），左缘与小地图对齐；
   //   chip 右边同一高度的位置指针落到画布上，不被顶栏拦住
   const hd = await page.locator('header').first().evaluate((el) => {
     const cs = getComputedStyle(el); const r = el.getBoundingClientRect();
     const chip = document.querySelector('[data-testid="project-switcher"]')!; const c = chip.getBoundingClientRect();
-    const probe = document.createElement('div'); probe.style.color = 'var(--semantic-color-surface-background)'; document.body.appendChild(probe);
+    const probe = document.createElement('div'); probe.style.color = 'var(--semantic-material-chrome-tint)'; document.body.appendChild(probe);
     const panel = getComputedStyle(probe).color; probe.remove();
     const mini = document.querySelector('[data-testid="minimap"]')?.getBoundingClientRect();
     const right = document.elementFromPoint(c.right + 120, c.top + c.height / 2);
-    return { bg: cs.backgroundColor, filter: cs.backdropFilter, border: cs.borderBottomWidth, width: r.width, chipBg: getComputedStyle(chip).backgroundColor, panel, chipLeft: c.left, miniLeft: mini?.left ?? null, rightIsHeader: !!right?.closest('header') };
+    return { bg: cs.backgroundColor, filter: cs.backdropFilter, border: cs.borderBottomWidth, width: r.width, chipBg: getComputedStyle(chip).backgroundColor, chipFilter: getComputedStyle(chip).backdropFilter, panel, chipLeft: c.left, miniLeft: mini?.left ?? null, rightIsHeader: !!right?.closest('header') };
   });
   expect(/rgba\(0, 0, 0, 0\)|transparent/.test(hd.bg) && hd.filter === 'none' && hd.border === '0px', `顶栏应不铺底、无边线、不模糊：${JSON.stringify(hd)}`);
-  expect(hd.chipBg === hd.panel && !hd.rightIsHeader && hd.width < 400, `项目切换器应是带面板色实底的 chip、顶栏只包住它：${JSON.stringify(hd)}`);
+  expect(hd.chipBg === hd.panel && hd.chipFilter.includes('blur') && !hd.rightIsHeader && hd.width < 400, `项目切换器应是毛玻璃 chip、顶栏只包住它：${JSON.stringify(hd)}`);
   expect(hd.miniLeft === null || Math.abs(hd.miniLeft - hd.chipLeft) <= 0.5, `项目切换器 chip 与小地图左缘没对齐：${hd.chipLeft} vs ${hd.miniLeft}`);
 
   // 3 工具栏命中区与 roving tabindex
@@ -576,7 +576,7 @@ await step('TC-CORE-023', async () => {
   expect(g.h > h0 && g.h <= g.max + 1 && g.s > g.h, `增高/封顶不符：${JSON.stringify(g)} 起始 ${h0}`);
   await page.fill('#chat-input', '');
 
-  // 6b ⌘/ 收起 / 叫回输入框（v0.33）：焦点在输入框里也生效；草稿留着、光标落回输入区、安全区底部随之放开；收起后底部中央留一个回来的入口
+  // 6b ⌘/ 收起 / 叫回输入框（v0.33）：焦点在输入框里也生效；草稿留着、光标落回输入区、安全区底部随之放开；收起后底边正中留一枚贴边胶囊（v1.16）
   const safeBottom = () => page.getByTestId('safe-area').evaluate((el) => el.getBoundingClientRect().bottom);
   const composerShown = () => page.locator('form.composer').isVisible();
   const sb0 = await safeBottom();
@@ -584,8 +584,9 @@ await step('TC-CORE-023', async () => {
   await page.keyboard.press('ControlOrMeta+Slash');
 
   await eventually(async () => expect(!(await composerShown()), '⌘/ 未收起输入框（焦点在输入框内）'));
-  expect(await page.evaluate(() => document.elementFromPoint(window.innerWidth / 2, window.innerHeight - 20)?.closest('[data-testid="canvas"]') !== null), '收起后底部还留着浮层');
-  expect((await safeBottom()) - sb0 > 100, `收起后安全区底部未放开：${sb0} → ${await safeBottom()}`);
+  const pill = page.getByTestId('composer-pill');
+  expect((await pill.isVisible()) && (await pill.getAttribute('data-dock')) === 'bottom' && (await pill.innerText()).includes('继续写'), `收起后底边应留一枚「继续写」胶囊：${await pill.count()}`);
+  expect((await safeBottom()) - sb0 > 60, `收起后安全区底部未放开：${sb0} → ${await safeBottom()}`);
   await page.keyboard.press('ControlOrMeta+Slash');
 
   await eventually(async () => expect(await composerShown(), '⌘/ 未叫回输入框'));
@@ -598,6 +599,11 @@ await step('TC-CORE-023', async () => {
   await eventually(async () => expect(!(await composerShown()) && (await page.getByTestId('toggle-composer').getAttribute('aria-pressed')) === 'false', '工具栏「收起输入框」未收起或 aria-pressed 未翻转'));
   await page.getByTestId('toggle-composer').click();
   await eventually(async () => expect((await composerShown()) && (await page.locator('#chat-input').inputValue()) === '草稿', '工具栏「显示输入框」未叫回或草稿丢了'));
+  // 输入框右上角自己的「收起」也是同一开关，点胶囊展开（v1.16）
+  await page.getByTestId('composer-collapse').click();
+  await eventually(async () => expect(!(await composerShown()) && (await pill.isVisible()), '输入框的「收起」没收成胶囊'));
+  await pill.click();
+  await eventually(async () => expect((await composerShown()) && (await page.locator('#chat-input').inputValue()) === '草稿', '点胶囊没展开或草稿丢了'));
   await page.fill('#chat-input', '');
   // 6d 聚焦某屏自动收起；聚焦期间 ⌘/ 可临时叫出、再按收回；退出后回到进入前的状态
   await page.locator('[data-testid="screen-card"]').first().locator('.gesture').dblclick();
@@ -613,26 +619,9 @@ await step('TC-CORE-023', async () => {
   await eventually(async () => expect((await page.locator('.card.focused').count()) === 0, 'Esc 未退出聚焦'));
   expect(await composerShown(), '退出聚焦后输入框没回来');
 
-  // 7 折叠对话记录并刷新保持；输入框的横向落点不得被侧边浮层的开合搬走
+  // 7 输入框的横向落点不得被侧边浮层的开合搬走：右侧面板滑出时允许让位，但只让到刚好不被压住为止，不多挪一像素
   const composerBox = async () => (await page.locator('form.composer').boundingBox())!;
   const cx = (await composerBox()).x;
-  await page.getByRole('button', { name: '折叠对话记录' }).click();
-
-  await eventually(async () => expect((await page.locator('[data-testid="chat-dock"][data-state="collapsed"]').count()) === 1 && (await page.locator('aside[aria-label="对话记录"] [role="log"]').count()) === 0, '对话记录未折叠（应只剩左下角横条）'));
-  expect(Math.abs((await composerBox()).x - cx) < 1, `折叠对话记录把输入框搬走了 ${((await composerBox()).x - cx).toFixed(1)}px`);
-  await page.reload();
-  await page.locator('[data-testid="screen-card"]').first().waitFor();
-  // 与开头同样等 800 ms：输入框宽度按工具条量（v0.50），通道名要等通道目录取回才定，刚加载完那几百毫秒里它还在变宽、x 还没落定
-
-  await eventually(async () => expect(await page.evaluate(() => document.querySelector('[data-testid="chat-dock"]')?.getAttribute('data-state') === 'collapsed'), '刷新后折叠态丢失'));
-  await page.getByRole('button', { name: '展开对话记录' }).click();
-
-  await eventually(async () => expect(await page.locator('aside[aria-label="对话记录"] [role="log"]').isVisible(), '无法重新展开'));
-  // 左下角、底部对齐：横条与展开面板的底边都贴在输入框同一水平线附近，不再从顶栏下方垂下来
-  const dockBox = (await page.getByTestId('chat-dock').boundingBox())!;
-  expect(dockBox.y > 300 && dockBox.x < 40, `对话记录不在左下角：${JSON.stringify(dockBox)}`);
-  expect(Math.abs((await composerBox()).x - cx) < 1, '重新展开后输入框没回到原位');
-  // 右侧面板滑出时允许让位，但只让到刚好不被压住为止，不多挪一像素
   const before = await composerBox();
   await page.keyboard.press('Alt+d');
 
@@ -658,7 +647,7 @@ await step('TC-CORE-023', async () => {
   await page.locator('[data-testid="screen-card"]').first().waitFor();
   await page.waitForTimeout(600);
   expect(!(await page.locator('#chat-input').isDisabled()), '有进行中作业时输入框被禁用了（v0.36 起不锁）');
-  await page.locator(`[data-testid="running-job"][data-job-id="${seedJob.jobId}"]`).getByTestId('cancel-job').waitFor({ timeout: 10000 });
+  await page.locator(`[data-testid="job-chip"][data-job-id="${seedJob.jobId}"]`).getByTestId('cancel-job').waitFor({ timeout: 10000 });
   await page.keyboard.press('Escape');
   await page.waitForTimeout(1500);
   const jb = await apiJson<{ job: { status: string } }>(`/v1/jobs/${seedJob.jobId}`);
@@ -673,11 +662,8 @@ await step('TC-CORE-023', async () => {
   }));
   expect(mob.over <= 0, `390px 下横向溢出 ${mob.over}px`);
   expect(mob.railIn, '390px 下工具栏底部超出视口');
-  // 窄视口下输入框工具条折行、变高：对话记录必须停在它上方（安全区底部占位跟着实际高度走）
-  const dockM = (await page.getByTestId('chat-dock').boundingBox())!; const compM = (await page.locator('form.composer').boundingBox())!;
-  expect(dockM.y + dockM.height <= compM.y + 1, `390px 下对话记录压住了输入框：dock 底 ${dockM.y + dockM.height} > 输入框顶 ${compM.y}`);
   await page.setViewportSize({ width: 1440, height: 900 });
-  return `四处浮层不重叠；工具栏 ${hits.length} 键命中区 ≥44、Tab 停靠 1 个；单键 F/L 生效、d/t/r 不误触、Alt 组合开面板`;
+  return `三处浮层不重叠；工具栏 ${hits.length} 键命中区 ≥44、Tab 停靠 1 个；单键 F/L 生效、d/t/r 不误触、Alt 组合开面板`;
 });
 
 await step('TC-CORE-024', async () => {
@@ -993,7 +979,7 @@ await step('TC-CORE-027', async () => {
 
   await eventually(async () => expect((await thumbs.count()) === 3, '移除参考图无效'));
 
-  // 5 发送：请求带 attachmentIds，作业输入带 imageKeys，对话里能看到发过的图
+  // 5 发送：请求带 attachmentIds，作业输入带 imageKeys
   const req = page.waitForRequest((r) => r.url().includes('/messages') && r.method() === 'POST');
   const res = page.waitForResponse((r) => r.url().includes('/messages') && r.request().method() === 'POST');
   await page.fill('#chat-input', '参考这张图的排版');
@@ -1002,7 +988,6 @@ await step('TC-CORE-027', async () => {
   expect(sent.attachmentIds?.length === 3, `请求未带 3 个 attachmentIds：${JSON.stringify(sent.attachmentIds)}`);
   const created = await (await res).json() as { job: { id: string } | null };
 
-  await eventually(async () => expect((await page.getByTestId('message-attachment').count()) === 3, '对话记录里看不到发过的参考图'));
   const job = (await apiJson<{ job: { input: { imageKeys?: string[] } } }>(`/v1/jobs/${created.job!.id}`)).body.job;
   expect(job.input.imageKeys?.length === 3, `作业输入未带 imageKeys：${JSON.stringify(job.input)}`);
   // 图已经进作业了，别真跑生成——这条用例验通道，不验模型
@@ -1307,10 +1292,10 @@ await step('TC-CORE-029', async () => {
     await page.fill('#chat-input', keepDraft);
     const grp = await apiJson<{ job: { id: string } }>(`/v1/projects/${projectId}/messages`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ content: '结账流程', count: 2, versions: 1, anchor: { x: 2600, y: 400 }, runner: { kind: 'channel', channelId: cid } }) });
     expect(grp.status === 202, `造一组返回 ${grp.status} ${JSON.stringify(grp.body)}`);
-    // 页面要真认领这个作业，「收口不顶目标」才是被验到的（认领来的作业没有进度事件，行上兜底写「排队中…」）
-    const bgRow = page.locator(`[data-testid="running-job"][data-job-id="${grp.body.job.id}"]`);
-    await bgRow.waitFor({ timeout: 15000 });
-    expect((await bgRow.innerText()).includes('排队中…') || /正在/.test(await bgRow.innerText()), `在跑作业行没有进度文案：${(await bgRow.innerText()).replace(/\s+/g, ' ')}`);
+    // 页面要真认领这个作业，「收口不顶目标」才是被验到的（认领来的作业没有进度事件，chip 上兜底写「排队中…」）
+    const bgChip = page.locator(`[data-testid="job-chip"][data-job-id="${grp.body.job.id}"]`);
+    await bgChip.waitFor({ timeout: 15000 });
+    expect((await bgChip.innerText()).includes('排队中…') || /正在/.test(await bgChip.innerText()), `在跑的作业 chip 没有进度文案：${(await bgChip.innerText()).replace(/\s+/g, ' ')}`);
     const jg = await waitJob(grp.body.job.id, 120) as { status: string; output?: { message?: string } };
     expect(jg.status === 'succeeded', `造一组未成功：${jg.status} ${jg.output?.message ?? ''}`);
     d = await detail();
@@ -1358,11 +1343,13 @@ await step('TC-CORE-030', async () => {
     expect((await verbLine(page)).includes('改全部 3 屏 × 2 版 = 6 次调用'), `动词行：${await verbLine(page)}`);
     expect((await page.getByTestId('count-group').count()) === 0, '改的时候不该出现屏数控件');
     const req = page.waitForRequest((r) => r.url().includes('/messages') && r.method() === 'POST');
+    const res = page.waitForResponse((r) => r.url().includes('/messages') && r.request().method() === 'POST');
     await page.fill('#chat-input', '顶部导航改成标签栏');
     await page.keyboard.press('Enter');
     const sent = JSON.parse((await req).postData() ?? '{}') as { targetScreenIds?: string[]; versions?: number };
     expect(sent.targetScreenIds?.length === 3 && sent.versions === 2, `请求体不对：${JSON.stringify(sent)}`);
-    await page.locator('[data-testid="message"]:not([data-role="user"])', { hasText: '已更新 3 屏' }).waitFor({ timeout: 120000 });
+    const editJob = ((await (await res).json()) as { job: { id: string } }).job.id;
+    expect((await waitJob(editJob, 120)).status === 'succeeded', '改 3 屏 × 2 版的作业没成功');
     // 2 每屏各得 2 条候选、current 为第 0 版；任一屏的角标打开的都是同一个覆盖层：2 列 × 3 行
     type Detail = { screens: { id: string; route: string; currentRevisionId: string | null; pendingCandidates: { jobId: string; count: number } | null }[] };
     let d = (await apiJson<Detail>(`/v1/projects/${projectId}`)).body;

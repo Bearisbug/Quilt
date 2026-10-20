@@ -1,6 +1,7 @@
+import type { ReactNode } from 'react';
 import { useLocation, useNavigate, useRouteError } from 'react-router';
 import { ApiError } from '@/lib/api';
-import { Button, EmptyState } from '@/ui/ui';
+import { Button } from '@/ui/ui';
 import { TopNav } from '@/project/TopNav';
 import { BrandSymbol } from '@/ui/BrandMark';
 import { CreateProjectDialog } from '@/project/CreateProjectDialog';
@@ -12,9 +13,9 @@ export function FirstProjectPage() {
   return (
     <div className="flex h-full flex-col">
       <TopNav />
-      <main className="flex flex-1 flex-col items-center justify-center gap-2 p-6">
+      <main className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
         <BrandSymbol size={96} label="Quilt" />
-        <EmptyState title="还没有项目" hint="新建一个项目，用一句话描述你的 APP，Quilt 会生成整套屏幕摆到画布上。" />
+        <PageMessage title="还没有项目" hint="新建一个项目，用一句话描述你的 APP，Quilt 会生成整套屏幕摆到画布上。" />
       </main>
       <CreateProjectDialog />
     </div>
@@ -32,9 +33,9 @@ export function RouteError() {
       <TopNav />
       <main className="flex flex-1 flex-col items-center justify-center p-6">
         {offline
-          ? <EmptyState title="没连上 Quilt 服务" hint={`取项目列表失败${detail ? `（${detail}）` : ''}。确认 Quilt 还在运行（启动它的终端没有关掉），然后重试。`}
+          ? <PageMessage title="没连上 Quilt 服务" hint={`取项目列表失败${detail ? `（${detail}）` : ''}。确认 Quilt 还在运行（启动它的终端没有关掉），然后重试。`}
               action={<Button variant="primary" onClick={() => window.location.reload()}>重试</Button>} />
-          : <EmptyState title="页面出错了" hint={`这一页在显示时出了错${detail ? `（${detail}）` : ''}。重新加载一次；还是这样的话，看启动 Quilt 的终端里有没有报错。`}
+          : <PageMessage title="页面出错了" hint={`这一页在显示时出了错${detail ? `（${detail}）` : ''}。重新加载一次；还是这样的话，看启动 Quilt 的终端里有没有报错。`}
               action={<Button variant="primary" onClick={() => window.location.reload()}>重新加载</Button>} />}
       </main>
     </div>
@@ -49,9 +50,20 @@ export function NotFoundPage() {
     <div className="flex h-full flex-col">
       <TopNav />
       <main className="flex flex-1 flex-col items-center justify-center p-6">
-        <EmptyState title="没有这个页面" hint={`Quilt 里没有「${pathname}」这个地址，可能是链接写错了。`}
+        <PageMessage title="没有这个页面" hint={`Quilt 里没有「${pathname}」这个地址，可能是链接写错了。`}
           action={<Button variant="primary" onClick={() => navigate('/')}>回到最近的项目</Button>} />
       </main>
+    </div>
+  );
+}
+
+// 整页说明（PAGE-FIRST 与错误页）：这几页只有一件事，大标题、一段说明、一个主动作，整页居中
+function PageMessage({ title, hint, action }: { title: string; hint: string; action?: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center gap-2 text-center fade-up">
+      <h1 className="type-heading1 font-semibold text-balance">{title}</h1>
+      <p className="max-w-md type-body text-text-secondary text-pretty break-words">{hint}</p>
+      {action && <div className="mt-4">{action}</div>}
     </div>
   );
 }

@@ -49,9 +49,9 @@ export const ScreenCard = memo(function ScreenCard({ s, idx, x, y, selected, foc
   const onShown = useCallback((src: string) => act.shotShown(s.id, src), [act, s.id]);
   return (
     <>
-      {stacked && [2, 1].map((k) => <div key={k} className="cand-ghost" aria-hidden="true" style={{ width: s.width, height: s.height, transform: `translate(${x + 14 * k}px, ${y + 10 * k}px)`, opacity: 1 - 0.25 * k }} />)}
-      <div ref={act.watchOnscreen} data-testid="screen-card" data-route={s.route} data-variant={s.variantOf ? 'true' : undefined} data-presentation={s.presentation} className={`card${s.presentation === 'overlay' ? ' overlay' : ''}${selected ? ' selected' : ''}${focused ? ' focused' : ''}${live ? ' live' : ''}${dragging ? ' dragging' : ''}`} style={{ width: s.width, height: s.height, transform: `translate(${x}px, ${y}px)` }}>
-        <div className="label">{s.variantOf && <span className="chip">变体</span>}{s.presentation === 'overlay' && <span className="chip">叠层</span>}<b>{s.name}</b> {s.route}{exemplar ? ' · 样板' : ''}{variants ? ` · ${variants} 个变体` : ''}{s.deviations ? ` · ${s.deviations} 处偏离` : ''}</div>
+      {stacked && [2, 1].map((k) => <div key={k} className={`cand-ghost${desktop ? ' desktop' : ''}`} aria-hidden="true" style={{ width: s.width, height: s.height, transform: `translate(${x + 14 * k}px, ${y + 10 * k}px)`, opacity: 1 - 0.25 * k }} />)}
+      <div ref={act.watchOnscreen} data-testid="screen-card" data-route={s.route} data-variant={s.variantOf ? 'true' : undefined} data-presentation={s.presentation} className={`card${desktop ? ' desktop' : ''}${s.presentation === 'overlay' ? ' overlay' : ''}${selected ? ' selected' : ''}${focused ? ' focused' : ''}${live ? ' live' : ''}${dragging ? ' dragging' : ''}`} style={{ width: s.width, height: s.height, transform: `translate(${x}px, ${y}px)` }}>
+        <div className="label">{s.variantOf && <span className="chip fill">变体</span>}{s.presentation === 'overlay' && <span className="chip fill">叠层</span>}<b>{s.name}</b> {s.route}{exemplar ? ' · 样板' : ''}{variants ? ` · ${variants} 个变体` : ''}{s.deviations ? ` · ${s.deviations} 处偏离` : ''}</div>
         {/* 圆角裁切只包截图 / 骨架 / iframe 这一层（v0.80）：裁整张卡的话，画在卡片上方的标签一起被裁掉 */}
         <div className="card-clip">
           {/* 截图（或骨架）始终垫在底下（v0.76）：聚焦时 iframe 盖在上面、收到 quilt:ready 前透明，就绪才接班（卡片加 live，底层藏起）——

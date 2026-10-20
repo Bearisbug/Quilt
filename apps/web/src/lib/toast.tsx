@@ -20,7 +20,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={push}>
       {children}
-      {/* 画布页的输入框在底部正中：底边让到它上方、落在这一列底下的对话记录折叠横条也让开（--toast-bottom 由画布页写在 <html> 上，见 useComposerChrome），单条限宽、长文案换行 */}
+      {/* 输入框（或收起后的胶囊）停在底边时底边让到它与上方作业 chip 的上方、停在左右边时距底 1.5rem（--toast-bottom 由画布页与草稿本页写在 <html> 上，见 useComposerDock / useComposerChrome），单条限宽、长文案换行 */}
       <div className="pointer-events-none fixed inset-x-0 bottom-[var(--toast-bottom,1.5rem)] z-50 flex flex-col items-center gap-2 px-4" aria-live="polite">
         {items.map((t) => <ToastItem key={t.id} toast={t} onDismiss={dismiss} />)}
       </div>

@@ -50,24 +50,26 @@ export function CandidateStack({ jobId, screen, onClose, onAdopted }: { jobId: s
   const versions = data?.versions ?? 1;
   const w = screen.width; const h = screen.height;
   const cellStyle = (i: number) => ({ width: w, height: h, left: i * (w + GAP), top: 0 });
+  // 格子与卡片同一档圆角：桌面屏比手机屏小一档（styles.css 的 .card.desktop）
+  const cellCls = w > 600 ? 'cand-cell desktop' : 'cand-cell';
   const collapse = <IconButton size="xs" label="收起" hint="Esc" data-testid="candidate-collapse" onClick={onClose}><X size={16} aria-hidden="true" /></IconButton>;
 
   return (
     <div data-testid="candidate-stack" data-screen={screen.id} role="group" aria-label={`「${screen.name}」的候选`} style={{ position: 'absolute', left: 0, top: 0, width: versions * w + (versions - 1) * GAP, height: h }}>
       {!data || !row ? (
-        <div className="cand-cell" style={cellStyle(0)}>
-          <div className="cand-actions"><span className="cand-tag" role={loadError ? 'alert' : undefined}>{data ? '这个作业没有这一屏的候选' : loadError ? '候选没取到' : '加载候选…'}</span><span className="cand-btns">{loadError && <IconButton size="xs" label="重试" data-testid="candidate-retry" onClick={load}><RotateCw size={16} aria-hidden="true" /></IconButton>}{collapse}</span></div>
+        <div className={cellCls} style={cellStyle(0)}>
+          <div className="cand-actions chrome"><span className="cand-tag" role={loadError ? 'alert' : undefined}>{data ? '这个作业没有这一屏的候选' : loadError ? '候选没取到' : '加载候选…'}</span><span className="cand-btns">{loadError && <IconButton size="xs" label="重试" data-testid="candidate-retry" onClick={load}><RotateCw size={16} aria-hidden="true" /></IconButton>}{collapse}</span></div>
         </div>
       ) : Array.from({ length: versions }, (_, i) => {
         const r = row.revisions.find((x) => x.index === i);
         const isCurrent = !!r && r.id === row.currentRevisionId; const shot = r?.thumbUrl ?? r?.screenshotUrl;
         return (
-          <div key={i} className="cand-cell" data-testid="candidate-cell" data-current={isCurrent ? '' : undefined} style={cellStyle(i)}>
+          <div key={i} className={cellCls} data-testid="candidate-cell" data-current={isCurrent ? '' : undefined} style={cellStyle(i)}>
             {/* 截图垫底、活 iframe 盖上（与卡片同尺寸）；没产出时占位不跳版（VIS-006 / PERF-003） */}
             {/* 垫底图只在 iframe 就绪前露出，用缩略图就够（v1.03） */}
             {shot && <img src={shot} alt="" width={w} height={h} decoding="async" draggable={false} />}
             {r ? <iframe className="nowheel nopan" src={r.previewUrl} title={`${screen.name} 第 ${i + 1} 版`} sandbox="allow-scripts allow-same-origin allow-forms" /> : <div className="grid size-full place-items-center type-body text-neutral-600">这一版没有产出</div>}
-            <div className="cand-actions">
+            <div className="cand-actions chrome">
               <span className="cand-tag">第 {i + 1} 版{isCurrent && <> · {row.settled ? '已采用' : '当前'}</>}</span>
               {/* 图标成组：胶囊放不下时整组折到第二行，不会把最后一个图标单独甩下去 */}
               <span className="cand-btns">

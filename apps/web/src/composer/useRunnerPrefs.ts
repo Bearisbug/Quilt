@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { RunnerOptionDto, AgentSessionDto, AgentTool } from '@quilt/core/browser';
 import { api } from '@/lib/api';
 import { useToast } from '@/lib/toast';
-import type { ComposerMode } from './Composer';
 
 const RUNNER_KEY = 'quilt:runner';
 // 投递会话按工具分开记：Claude Code 的会话 id 与 Codex 的线程 id 互不相干，混在一个键里切工具就会带着错的 id（v0.68）
 const SESSION_KEY: Record<AgentTool, string> = { 'claude-code': 'quilt:agent-session', codex: 'quilt:agent-session:codex' };
-const MODE_KEY = 'quilt:composer-mode';
 const read = (key: string) => { try { return localStorage.getItem(key) ?? ''; } catch { return ''; } };
 // 通道清单在本机留底（v0.81）：外壳常驻（v0.76）后输入框比清单先画出来，通道位空着时量出的宽度偏窄、清单一到就变宽；
 // 首帧先按上一次取到的那份画（INT-021），取到新的就换成新的
@@ -22,7 +20,7 @@ const resolve = (id: string, c: Catalog) => (id && c.items.some((x) => x.id === 
 
 export type SessionList = { items: AgentSessionDto[] | null; reason?: string };
 
-// 输入框的三个跨会话偏好：生成通道、投递会话、动词模式（造 / 改 ｜ 聊天）。清单来自服务端，选择记在本机。
+// 输入框的两个跨会话偏好：生成通道、投递会话。清单来自服务端，选择记在本机。
 export function useRunnerPrefs() {
   const toast = useToast();
   // 生成通道（REQ-CORE-011）：清单来自服务端，选择作为跨会话偏好记在本机（INT-007 / INT-021）
@@ -42,7 +40,7 @@ export function useRunnerPrefs() {
   const [runnersFailed, setRunnersFailed] = useState(false);
   const loadRunners = useCallback(() => api.runners().then((r) => { setRunnersFailed(false); applyCatalog(r.items, r.default); }).catch(() => { setCatalog(NO_CATALOG); setRunnersFailed(true); }), [applyCatalog]);
   useEffect(() => { void loadRunners(); }, [loadRunners]);
-  // 空值不落（同 onSessionChange）：切「聊天」再切回「造 / 改」时通道清单换批，Radix Select 隐藏的原生 <select> 在那一帧回报 ''，
+  // 空值不落（同 onSessionChange）：受控值暂时不在选项里时 Radix Select 隐藏的原生 <select> 回报 ''，
   // 照写会把选中的通道清掉、下一轮静默走默认通道（v0.74）
   const onRunnerChange = (id: string) => { if (!id) return; setPicked(id); try { localStorage.setItem(RUNNER_KEY, id); } catch { /* 无痕模式写不了 */ } };
   const runner = runners.find((r) => r.id === runnerId)?.runner;
@@ -69,12 +67,5 @@ export function useRunnerPrefs() {
   // 发送时把选中的会话填进通道；造缺屏 / 提炼约定这类辅助作业只走模型通道
   const sendRunner = runner?.kind === 'agent' ? { ...runner, sessionId } : runner;
   const modelRunner = runner?.kind === 'agent' ? undefined : runner;
-  // 聊天模式（REQ-CORE-023）：动词段控的选择是个人偏好，跨会话记忆（INT-007 / INT-021）；
-  // 聊天只能走 agent-sdk 通道——清单收窄到它们，当前通道不是就自动落到第一条可用的，用户没在聊天里换过通道时切回造 / 改还是原来那条
-  const [mode, setMode] = useState<ComposerMode>(() => (read(MODE_KEY) === 'chat' ? 'chat' : 'design'));
-  const onMode = (m: ComposerMode) => { setMode(m); try { localStorage.setItem(MODE_KEY, m); } catch { /* 无痕模式写不了 */ } };
-  const chatRunners = useMemo(() => runners.filter((r) => r.channelKind === 'agent-sdk'), [runners]);
-  const chatRunnerId = chatRunners.some((r) => r.id === runnerId && r.available) ? runnerId : chatRunners.find((r) => r.available)?.id ?? '';
-  const chatRunner = chatRunners.find((r) => r.id === chatRunnerId)?.runner;
-  return { runners, runnersFailed, loadRunners, runnerId, applyCatalog, onRunnerChange, agentTool, sessionList, sessionId, loadSessions, lists, loadSessionsFor, onSessionChange, sendRunner, modelRunner, mode, onMode, chatRunners, chatRunnerId, chatRunner };
+  return { runners, runnersFailed, loadRunners, runnerId, applyCatalog, onRunnerChange, agentTool, sessionList, sessionId, loadSessions, lists, loadSessionsFor, onSessionChange, sendRunner, modelRunner };
 }

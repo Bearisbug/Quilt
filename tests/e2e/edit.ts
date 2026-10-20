@@ -19,6 +19,18 @@ const qidOf = (html: string, attrSnippet: string) => {
   const tag = html.match(new RegExp(`<[a-z]+[^>]*${attrSnippet}[^>]*>`))?.[0] ?? '';
   return tag.match(/data-qid="(q\d+)"/)?.[1] ?? null;
 };
+// 画布上发出去的一轮做完了没有：等项目最新那个作业到终态（界面上只有作业 chip，成功的 1 s 后就淡出，不作判据）
+const waitLatestJob = async (pid: string, kind: string, maxSec = 180) => {
+  let id = '';
+  await eventually(async () => {
+    const j = (await apiJson<{ items: { id: string; kind: string }[] }>(`/v1/projects/${pid}/jobs?limit=1`)).body.items[0];
+    expect(j?.kind === kind, `没等到 ${kind} 作业，最新的是 ${j?.kind ?? '没有作业'}`);
+    id = j.id;
+  }, 15000, 300);
+  const job = await waitJob(id, maxSec);
+  expect(job.status === 'succeeded', `${kind} 作业 ${job.status}：${JSON.stringify(job.output).slice(0, 200)}`);
+  return job;
+};
 
 seed('seed');
 const browser = await launch();
@@ -213,7 +225,7 @@ await step('TC-EDIT-005', async () => {
   expect(rgb[0] > rgb[2], `primary 不是暖色: ${primary}`);
   // 保存成功即弹「回刷所有屏？」（v0.38）：面板那颗同名键此刻被 inert 挡着，要点弹层里的确认键
   await page.getByTestId('ds-apply-confirm').click();
-  await page.locator('[data-testid="message"]:not([data-role="user"])', { hasText: '设计系统已回刷 10 屏' }).waitFor({ timeout: 120000 });
+  await waitLatestJob(dsProject, 'apply_design_system', 120);
   const after = await detail(dsProject);
   for (const s of after.screens) {
     const prev = before.screens.find((x) => x.id === s.id)!;
@@ -382,7 +394,7 @@ await step('TC-EDIT-008', async () => {
   return '2 条批注合成 1 个作业；成功后收口为已处理、气泡收起';
 });
 
-// v0.31 REQ-EDIT-003：设计系统只显式改——⌘A + 发送不碰设计系统；回执「记为约定」→ 提炼 → 预览 → 写入约定节
+// v0.31 REQ-EDIT-003：设计系统只显式改——⌘A + 发送不碰设计系统；设计系统面板的一句话指令 → 提炼 → 预览 → 写入约定节
 await step('TC-EDIT-009', async () => {
   const { startOpenAiStub } = await import('./openai-stub.ts');
   const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Conv', '--device', 'mobile', '--screens', '2', '--no-shot');
@@ -404,15 +416,17 @@ await step('TC-EDIT-009', async () => {
     await page.keyboard.press('ControlOrMeta+a');
     await page.fill('#chat-input', '所有页面正文字再大一点');
     await page.keyboard.press('Enter');
-    await page.locator('[data-testid="message"]:not([data-role="user"])', { hasText: '已更新 2 屏' }).waitFor({ timeout: 120000 });
+    await waitLatestJob(r.projectId, 'edit_screens', 120);
     expect((await detail(r.projectId)).designSystem.version === version0, '⌘A + 发送不该改设计系统');
-    // 2 回执「记为约定」→ propose_design_system 作业（instruction = 原指令、screenId = 一张改后的屏）→ 预览对话框列出绝对规则
-    const remember = page.getByTestId('remember-convention').last();
-    await remember.waitFor({ timeout: 5000 });
+    // 2 设计系统面板的一句话指令（v1.17 起「记为约定」只有这一条路）→ propose_design_system 作业（instruction = 原指令）→ 预览对话框列出绝对规则
+    await page.locator('#chat-input').blur();   // 快捷键在输入框里不生效
+    await page.keyboard.press('Alt+d');
+    await page.getByTestId('ds-instruction').waitFor({ timeout: 10000 });
+    await page.getByTestId('ds-instruction').fill('所有页面正文字再大一点');
     const req = page.waitForRequest((x) => x.url().includes('/jobs') && x.method() === 'POST');
-    await remember.click();
-    const job = JSON.parse((await req).postData() ?? '{}') as { kind: string; input: { instruction: string; screenId?: string } };
-    expect(job.kind === 'propose_design_system' && job.input.instruction === '所有页面正文字再大一点' && !!job.input.screenId, `提炼作业不对：${JSON.stringify(job)}`);
+    await page.getByTestId('ds-propose').click();
+    const job = JSON.parse((await req).postData() ?? '{}') as { kind: string; input: { instruction: string } };
+    expect(job.kind === 'propose_design_system' && job.input.instruction === '所有页面正文字再大一点', `提炼作业不对：${JSON.stringify(job)}`);
     const dlg = page.getByTestId('ds-proposal');
     await dlg.waitFor({ timeout: 60000 });
     const items = await dlg.locator('input[type="checkbox"]').count();
@@ -435,7 +449,7 @@ await step('TC-EDIT-009', async () => {
     await page.getByRole('alertdialog').getByRole('button', { name: '删除' }).click();
     await page.waitForFunction(() => document.querySelectorAll('[data-testid="ds-conventions"] li').length === 1, null, { timeout: 10000 });
     expect((await detail(r.projectId)).designSystem.version === version0 + 2, '删除约定后 version 未 +1');
-    return '⌘A 不改设计系统；记为约定 → 提炼作业 → 预览 2 条绝对规则 → 确认写入、不重生成 → 约定节 + version+1；面板可删';
+    return '⌘A 不改设计系统；面板一句话指令 → 提炼作业 → 预览 2 条绝对规则 → 确认写入、不重生成 → 约定节 + version+1；面板可删';
   } finally { await stub.close(); if (cid) await apiJson(`/v1/channels/${cid}`, { method: 'DELETE' }).catch(() => {}); }
 });
 
@@ -1290,7 +1304,7 @@ await step('TC-EDIT-029', async () => {
     const headerQid = qidOf(await htmlNow(), 'class="h-14 flex')!;
     const c = await apiJson<{ component: { id: string } }>(`/v1/projects/${pid}/components`, { method: 'POST', body: JSON.stringify({ name: 'AppBar', fromScreenId: sid, qid: headerQid, applyToScreens: false }) });
     expect(c.status === 201, `建组件 ${c.status}`);
-    // 新组件卡默认落在左下，压在对话记录与输入框底下；挪到屏的右侧再进
+    // 新组件卡默认落在左下，可能被输入框压住；挪到屏的右侧再进
     await apiJson(`/v1/components/${c.body.component.id}`, { method: 'PATCH', body: JSON.stringify({ x: 460, y: 0 }) });
     // 不用 reload：选择元素态记在地址里，reload 后仍在该模式，再按 ⌘E 就成了退出
     await page.goto(`${WEB}/p/${pid}`);
@@ -1424,7 +1438,7 @@ await step('TC-EDIT-031', async () => {
   try {
     const comp = await apiJson<{ component: { id: string } }>(`/v1/projects/${pid}/components`, { method: 'POST', body: JSON.stringify({ name: 'Box', html: '<section class="p-4"><div><p><span>x</span></p></div></section>' }) });
     expect(comp.status === 201, `建组件 Box ${comp.status}`);
-    // 组件卡默认落在左下会被对话面板盖住，摆在右边又会被检查器盖住：摆到风格指南左边、竖向居中
+    // 组件卡默认落在左下可能被输入框压住，摆在右边又会被检查器盖住：摆到风格指南左边、竖向居中
     await apiJson(`/v1/components/${comp.body.component.id}`, { method: 'PATCH', body: JSON.stringify({ x: -1000, y: 300 }) });
     await page.goto(`${WEB}/p/${pid}`);
     const card = page.locator('[data-testid="screen-card"][data-route="/s1"]');
@@ -1530,7 +1544,7 @@ await step('TC-EDIT-032', async () => {
     const comp = async () => ((await detail(pid)) as unknown as { components: CompRow[] }).components.find((x) => x.id === compId)!;
     const used = (await comp()).usedBy.length;
     expect(used >= 1, '前置不成立：组件没用在任何屏上');
-    // 组件卡挪到屏的右侧，别压在对话记录与检查器底下
+    // 组件卡挪到屏的右侧，别压在检查器底下
     await apiJson(`/v1/components/${compId}`, { method: 'PATCH', body: JSON.stringify({ x: 900, y: 0 }) });
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto(`${WEB}/p/${pid}`);
@@ -1708,19 +1722,16 @@ await step('TC-EDIT-034', async () => {
   return '直改、删元素、对齐的提示带「撤销（⌘Z）」且点了即撤销；删元素写「已删除元素」；悬停不计时；错误提示 5 s 时仍在、可手动关';
 });
 
-// TC-EDIT-035 作业进行中时的面板（PAGE-CANVAS「作业进行中时的面板」v1.04 UX-3）：别的屏有作业在跑时，删约定、一句话改设计系统、记为约定照常可点；
+// TC-EDIT-035 作业进行中时的面板（PAGE-CANVAS「作业进行中时的面板」v1.04 UX-3）：别的屏有作业在跑时，删约定、一句话改设计系统照常可点；
 // 回刷所有屏不可点、就地写是哪个作业；检查器所在的屏正在改时写明原因，按 ⌘S 弹同样的提示；批注面板同样写明原因
 await step('TC-EDIT-035', async () => {
   const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'BusyPanels', '--device', 'mobile', '--screens', '2', '--no-shot');
-  const pid = r.projectId; const [s1, s2] = r.screens.map((s) => s.id);
+  const pid = r.projectId; const s1 = r.screens[0].id;
   const S = softly();
   const idem = () => ({ 'Idempotency-Key': crypto.randomUUID() });
   let held = '';
   try {
-    // 前置：s2 先改一轮（对话里有可「记为约定」的回执）、写一条约定；再对 s1 起一个停 60 s 的改屏
-    const m = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/messages`, { method: 'POST', headers: idem(), body: JSON.stringify({ content: '标题加粗', targetScreenIds: [s2], runner: STUB_RUNNER }) });
-    expect(m.status === 202, `改 s2 ${m.status}`);
-    expect((await waitJob(m.body.job.id, 90)).status === 'succeeded', '前置改屏没成功');
+    // 前置：写一条约定；再对 s1 起一个停 60 s 的改屏
     const ds = (await detail(pid)).designSystem;
     expect((await apiJson(`/v1/projects/${pid}/design-system`, { method: 'PUT', body: JSON.stringify({ conventions: ['按钮一律用主色'], expectedVersion: ds.version }) })).status === 200, '写约定失败');
     const h = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: idem(), body: JSON.stringify({ kind: 'edit_screens', input: { prompt: '[stub-hold:60000] 改标题', screenIds: [s1], versions: 1, runner: STUB_RUNNER } }) });
@@ -1738,11 +1749,9 @@ await step('TC-EDIT-035', async () => {
     await S.check(async () => expect(!(await page.getByRole('button', { name: '删除约定：按钮一律用主色' }).isDisabled()), '① 删约定不该被作业挡住'));
     await page.getByTestId('ds-instruction').fill('正文大一号');
     await S.check(async () => expect(!(await page.getByTestId('ds-propose').isDisabled()), '① 提炼并预览不该被作业挡住'));
-    // 2 对话记录的「记为约定」照常可点（先让说明框失焦，快捷键在输入框里不生效）
+    // 2 检查器在正改的 s1 上：写明原因，按 ⌘S 弹同样的提示（先让指令框失焦再按 ⌥D 关掉设计系统面板，快捷键在输入框里不生效）
     await blurActive();
     await page.keyboard.press('Alt+d');
-    await S.check(async () => { const b = page.getByTestId('remember-convention').last(); await b.waitFor({ timeout: 5000 }); expect(!(await b.isDisabled()), '② 记为约定不该被作业挡住'); });
-    // 3 检查器在正改的 s1 上：写明原因，按 ⌘S 弹同样的提示
     await page.keyboard.press('ControlOrMeta+e');
     await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
     await page.locator('.card.focused .badge', { hasText: '选择元素中' }).waitFor({ timeout: 20000 });
@@ -1752,24 +1761,24 @@ await step('TC-EDIT-035', async () => {
     await fl.locator('h1').click();
     const note = page.getByTestId('el-busy');
     await note.waitFor({ timeout: 5000 });
-    await S.check(async () => expect((await note.innerText()) === '这一屏正在改，等这一轮完事', `③ 检查器的原因不对：${await note.innerText()}`));
+    await S.check(async () => expect((await note.innerText()) === '这一屏正在改，等这一轮完事', `② 检查器的原因不对：${await note.innerText()}`));
     await page.keyboard.press('ControlOrMeta+s');
-    await S.check(() => page.getByTestId('toast').filter({ hasText: '这一屏正在改，等这一轮完事' }).waitFor({ timeout: 3000 }).catch(() => { throw new Error('③ 屏忙时按 ⌘S 没有提示'); }));
-    // 4 批注面板在正改的 s1 上：发送类按钮不可点并写明原因，「记下（不发送）」照常
+    await S.check(() => page.getByTestId('toast').filter({ hasText: '这一屏正在改，等这一轮完事' }).waitFor({ timeout: 3000 }).catch(() => { throw new Error('② 屏忙时按 ⌘S 没有提示'); }));
+    // 3 批注面板在正改的 s1 上：发送类按钮不可点并写明原因，「记下（不发送）」照常
     await page.goto(`${WEB}/p/${pid}`);
     await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
     await page.keyboard.press('Alt+n');
     await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
     await page.locator('.card.focused .badge', { hasText: '批注中' }).waitFor({ timeout: 20000 });
     const anno = page.getByTestId('anno-busy');
-    await S.check(() => anno.waitFor({ timeout: 5000 }).then(async () => expect((await anno.innerText()) === '这一屏正在改，等这一轮完事再发', `④ 批注面板的原因不对：${await anno.innerText()}`)).catch((e) => { throw new Error(`④ 批注面板没写原因：${(e as Error).message.slice(0, 80)}`); }));
+    await S.check(() => anno.waitFor({ timeout: 5000 }).then(async () => expect((await anno.innerText()) === '这一屏正在改，等这一轮完事再发', `③ 批注面板的原因不对：${await anno.innerText()}`)).catch((e) => { throw new Error(`③ 批注面板没写原因：${(e as Error).message.slice(0, 80)}`); }));
   } catch (e) { S.fail(e); }
   finally {
     if (held) await apiJson(`/v1/jobs/${held}/cancel`, { method: 'POST' }).catch(() => {});
     await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});
   }
   S.done();
-  return '别的屏有作业在跑时删约定、一句话改设计系统、记为约定照常可点；回刷所有屏不可点并写明是哪个作业；检查器写明这一屏正在改，⌘S 弹同样的提示；批注面板写明原因';
+  return '别的屏有作业在跑时删约定、一句话改设计系统照常可点；回刷所有屏不可点并写明是哪个作业；检查器写明这一屏正在改，⌘S 弹同样的提示；批注面板写明原因';
 });
 
 // TC-EDIT-036 改屏走补丁（ADR-007 / ADR-012 v1.05）：OpenAI 兼容桩看到的是补丁提示词，回一块把第一个 <h1> 换掉的补丁——新修订里标题变了、

@@ -42,8 +42,8 @@ export function CreateProjectDialog({ onClose, returnTo }: { onClose?: () => voi
 
   return (
     <Overlay onClose={onClose ?? noop}>
-      <form ref={ref} role="dialog" aria-modal="true" aria-labelledby="np-title" tabIndex={-1} className="w-full max-w-sm rounded-lg border border-border-subtle bg-surface-overlay p-5 shadow-(--semantic-elevation-overlay) fade-up outline-none" onSubmit={submit} noValidate>
-        <h2 id="np-title" className="type-heading3 font-medium">新建项目</h2>
+      <form ref={ref} role="dialog" aria-modal="true" aria-labelledby="np-title" tabIndex={-1} className="sheet w-full max-w-sm p-5 fade-up outline-none" onSubmit={submit} noValidate>
+        <h2 id="np-title" className="type-heading3 font-semibold">新建项目</h2>
         <div className="mt-4 space-y-4">
           <Field label="项目名" htmlFor="np-name" error={error ?? undefined}>
             {/* 报过错后每次输入即时重验，填上即清；错误经 aria-describedby 关联到输入框（INT-003） */}
@@ -52,9 +52,10 @@ export function CreateProjectDialog({ onClose, returnTo }: { onClose?: () => voi
           </Field>
           <fieldset>
             <legend className="mb-1.5 block type-label font-medium text-text-secondary">设备形态（创建后不可改）</legend>
-            <div className="grid grid-cols-2 gap-2">
+            {/* 二选一用分段控件（.seg）：当前项靠 data-state=on 浮起滑块；单选框藏起来，键盘焦点环画在它所在的那一段上（is-field） */}
+            <div className="seg w-full">
               {(['mobile', 'desktop'] as const).map((d) => (
-                <label key={d} className={`flex h-9 cursor-pointer items-center justify-center rounded-md border type-body ${deviceType === d ? 'border-primary bg-(--semantic-color-surface-selected) text-text-primary' : 'border-border-subtle text-text-secondary state-layer'}`}>
+                <label key={d} data-state={deviceType === d ? 'on' : 'off'} className={`focus-ring is-field flex h-8 flex-1 cursor-pointer items-center justify-center type-body${deviceType === d ? '' : ' state-layer'}`}>
                   <input type="radio" name="deviceType" value={d} className="sr-only" checked={deviceType === d} onChange={() => setDeviceType(d)} />
                   {d === 'mobile' ? '手机 390×844' : '桌面 1280×800'}
                 </label>

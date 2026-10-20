@@ -1,6 +1,6 @@
 import type { ErrorClass, JobKind } from './schemas.ts';
 
-// 作业失败的对用户文案（DESIGN §14 v0.74）：助手回执与失败 toast 共用。开头按作业种类说什么失败了，
+// 作业失败的对用户文案（DESIGN §14 v0.74）：失败的作业 chip 上写它（v1.17 起作业失败不再弹提示条）。开头按作业种类说什么失败了，
 // 原因按失败类别说为什么，最后给下一步。供应商原始报文与英文内部原因不进文案，留在作业 output.message
 const WHAT: Record<JobKind, string> = {
   generate: '造屏失败', edit_screens: '改屏失败', edit_component: '改组件失败', regenerate_subtree: '重做这一块失败', apply_design_system: '回刷失败',
@@ -19,31 +19,37 @@ const KNOWN: [RegExp, string][] = [
   [/^screen html too large/, '生成的屏超过大小上限'],
 ];
 const CJK = /[\u3400-\u9fff]/;
-const RETRY = '稍后点「重试」，或在输入框换一个通道再发';
+// 下一步：能原样重试的四类（API-CORE-034）写「点「重试」」——失败的作业 chip 上有这个按钮；其余几类没有重试，写它们各自再发一次的入口
+const AGAIN: Partial<Record<JobKind, string>> = {
+  regenerate_subtree: '在检查器里再点一次「重生成这块」', apply_design_system: '到设计系统面板再回刷一次', propose_design_system: '到设计系统面板再发一次',
+  export_prototype: '再点一次工具栏的「导出原型」', ingest_screen: '让本机会话再写一次',
+};
 
 export function failureText(kind: JobKind | null | undefined, errorClass?: ErrorClass | string | null, message?: string | null, kept = 0): string {
   const msg = (message ?? '').trim();
   const known = KNOWN.find(([re]) => re.test(msg))?.[1];
-  let why = ''; let next = '点「重试」再来一次';
+  const again = (kind && AGAIN[kind]) || null;
+  const retry = again ?? '点「重试」';
+  let why = ''; let next = again ?? '点「重试」再来一次';
   if (errorClass === 'provider') {
     const status = Number(msg.match(/\b([45]\d\d)\b/)?.[1] ?? 0);
-    next = RETRY;
+    next = again ? `稍后${again}，或换一个通道` : '稍后点「重试」，或在输入框换一个通道再发';
     // 先于状态码判：本机 Claude 订阅的报文是「exceeded the 32000 output token maximum」，上限数字可能恰好是三位数
     if (/output hit the token limit|output token maximum/.test(msg)) { why = '模型这次要写的内容超过了单次输出上限，结果不完整，没有保存'; next = '把这次的要求拆成几次发'; }
-    else if (status === 401 || status === 403) { why = `通道的 Key 被拒绝（HTTP ${status}）`; next = '到「设置 → 生成通道」检查这条通道的 Key，或换一个通道再发'; }
+    else if (status === 401 || status === 403) { why = `通道的 Key 被拒绝（HTTP ${status}）`; next = again ? `到「设置 → 生成通道」检查这条通道的 Key 或换一个通道，然后${again}` : '到「设置 → 生成通道」检查这条通道的 Key，或换一个通道再发'; }
     else if (status === 429) why = '通道限流（HTTP 429）';
     else if (status >= 500) why = `模型服务暂时不可用（HTTP ${status}）`;
-    else if (status >= 400) { why = `通道拒绝了这次请求（HTTP ${status}）`; next = '换一个通道再发；到「设置 → 生成通道」重新验证这条通道可以看到具体原因'; }
+    else if (status >= 400) { why = `通道拒绝了这次请求（HTTP ${status}）`; next = `${again ? `换一个通道，然后${again}` : '换一个通道再发'}；到「设置 → 生成通道」重新验证这条通道可以看到具体原因`; }
     else why = CJK.test(msg) ? msg : '连不上模型通道或它没有回应';
   } else if (errorClass === 'timeout') {
     why = '超过时限没做完';
     if (kind === 'generate' || kind === 'edit_screens') next = '点「重试」；屏数或版数多时先减少再发';
   } else if (errorClass === 'agent') {
     why = CJK.test(msg) ? msg : '本机会话没有完成';
-    next = '在本机 agent 面板看详情，或换一个模型通道再发';
+    next = again ? `在本机 agent 面板看详情，或换一个模型通道，然后${again}` : '在本机 agent 面板看详情，或换一个模型通道再发';
   } else if (errorClass) {
     why = known ?? (CJK.test(msg) ? msg : errorClass === 'system' ? 'Quilt 内部出错' : '模型产出不合格');
-    next = errorClass === 'system' ? '点「重试」；反复出现时看 API 日志' : '点「重试」，或换个说法再发';
+    next = errorClass === 'system' ? `${retry}；反复出现时看 API 日志` : again ?? '点「重试」，或换个说法再发';
   }
   const keptNote = kept > 0 ? `，已保留 ${kept} 屏` : '';
   return `${kind ? WHAT[kind] : '作业失败'}${why ? `：${why.replace(/[。．.]$/, '')}` : ''}${keptNote}。${next}`;

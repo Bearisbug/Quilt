@@ -17,6 +17,7 @@
     "e2e:load": "tsx e2e/load.ts",
     "e2e:canvas": "tsx e2e/canvas.ts",
     "e2e:mcp": "tsx e2e/mcp.ts",
+    "e2e:sketch": "tsx e2e/sketch.ts",
     "mcp:call": "tsx e2e/mcp-call.ts"
   },
   "devDependencies": {

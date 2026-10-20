@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { parseConventions, type DesignSystemDto, type Tokens, type DesignProposalDto } from '@quilt/core/browser';
 import { Button } from '@/ui/ui';
 import { Overlay, useModal } from '@/ui/modal';
-import { RADIUS } from './designOptions';
+import { RADIUS, SWATCH_EDGE } from './designOptions';
 
 // 设计系统提案预览（REQ-EDIT-003）：提炼出来的绝对规则逐条可取消、token 变更前后对比；「确认写入」即落库，
 // 写成之后才按提案的 regenerate 问要不要按新约定重生成所有屏（只改 token 就直接回刷）。
@@ -55,23 +55,23 @@ export function ProposalDialog({ proposal, ds, busyReason, screenCount, batches,
   const ref = useModal<HTMLDivElement>(dismiss, undefined, undefined, { initialFocus: 'self' });
   return (
     <Overlay onClose={dismiss}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="dsp-title" data-testid="ds-proposal" tabIndex={-1} className="flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-border-subtle bg-surface-overlay shadow-(--semantic-elevation-overlay) fade-up outline-none">
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="dsp-title" data-testid="ds-proposal" tabIndex={-1} className="sheet flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden fade-up outline-none">
         <header className="shrink-0 border-b border-border-subtle px-4 py-3">
-          <h2 id="dsp-title" className="type-heading3 font-medium">{step === 'preview' ? '写入设计系统？' : '按新约定重生成所有屏？'}</h2>
+          <h2 id="dsp-title" className="type-heading3 font-semibold">{step === 'preview' ? '写入设计系统？' : '按新约定重生成所有屏？'}</h2>
           {proposal.summary && step === 'preview' && <p className="mt-1 type-label text-text-secondary">{proposal.summary}</p>}
         </header>
         {step === 'preview' ? (
           <div className="scroll min-h-0 flex-1 space-y-4 p-4">
             <div>
-              <div className="mb-1.5 type-label font-medium text-text-secondary">约定（写入后的完整清单，取消勾选的不写）</div>
+              <div className="mb-1.5 type-label font-semibold text-text-secondary">约定（写入后的完整清单，取消勾选的不写）</div>
               {proposal.conventions.length === 0 ? <p className="type-label text-text-secondary">这条指令没有提炼出跨屏规则。</p> : (
                 <ul className="flex flex-col gap-1">
                   {proposal.conventions.map((c, i) => {
                     const isNew = !existing.includes(c);
                     return (
                       <li key={i} className="flex items-start gap-2 type-label">
-                        <input id={`dsp-c-${i}`} type="checkbox" checked={keep[i]} onChange={(e) => setKeep((k) => k.map((v, j) => (j === i ? e.target.checked : v)))} className="mt-0.5 size-3.5 accent-primary" />
-                        <label htmlFor={`dsp-c-${i}`} className="min-w-0 flex-1 leading-(--semantic-typography-body-line-height) [overflow-wrap:anywhere]">{c}{isNew && <span className="ml-1 rounded-sm bg-(--semantic-color-surface-selected) px-1.5 type-caption text-primary">新</span>}</label>
+                        <input id={`dsp-c-${i}`} type="checkbox" checked={keep[i]} onChange={(e) => setKeep((k) => k.map((v, j) => (j === i ? e.target.checked : v)))} className="mt-0.5 size-3.5 accent-(--semantic-color-action-link)" />
+                        <label htmlFor={`dsp-c-${i}`} className="min-w-0 flex-1 leading-(--semantic-typography-body-line-height) [overflow-wrap:anywhere]">{c}{isNew && <span className="tint-link ml-1 rounded-sm px-1.5 type-caption">新</span>}</label>
                       </li>
                     );
                   })}
@@ -83,12 +83,12 @@ export function ProposalDialog({ proposal, ds, busyReason, screenCount, batches,
             </div>
             {tokenRows.length > 0 && (
               <div>
-                <div className="mb-1.5 type-label font-medium text-text-secondary">token 变更</div>
+                <div className="mb-1.5 type-label font-semibold text-text-secondary">token 变更</div>
                 <ul className="flex flex-col gap-1 type-label">
                   {tokenRows.map((r) => (
                     <li key={r.label} className="flex items-center gap-2">
                       <span className="w-12 text-text-secondary">{r.label}</span>
-                      {r.label === '种子色' ? <><span className="inline-block size-4 rounded-sm border border-border-subtle" style={{ background: r.from }} /><span>{r.from}</span><span className="text-text-secondary">→</span><span className="inline-block size-4 rounded-sm border border-border-subtle" style={{ background: r.to }} /><span>{r.to}</span></> : <><span>{r.from}</span><span className="text-text-secondary">→</span><span>{r.to}</span></>}
+                      {r.label === '种子色' ? <><span className={`inline-block size-4 rounded-sm ${SWATCH_EDGE}`} style={{ background: r.from }} /><span>{r.from}</span><span className="text-text-secondary">→</span><span className={`inline-block size-4 rounded-sm ${SWATCH_EDGE}`} style={{ background: r.to }} /><span>{r.to}</span></> : <><span>{r.from}</span><span className="text-text-secondary">→</span><span>{r.to}</span></>}
                     </li>
                   ))}
                 </ul>

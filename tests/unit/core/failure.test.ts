@@ -39,3 +39,18 @@ test('failureText：输出到上限被截断单列原因，报文里的上限数
   const b = failureText('edit_screens', 'provider', "agent-sdk: API Error: Claude's response exceeded the 500 output token maximum. To configure this behavior, set the CLAUDE_CODE_MAX_OUTPUT_TOKENS environment variable.");
   assert.ok(b.startsWith('改屏失败：模型这次要写的内容超过了单次输出上限'), b);
 });
+
+test('failureText：没有「重试」的作业写各自再发一次的入口（v1.17，作业 chip 上只有能原样重试的四类带「重试」）', () => {
+  for (const [kind, want] of [['export_prototype', '「导出原型」'], ['regenerate_subtree', '「重生成这块」'], ['apply_design_system', '设计系统面板'], ['propose_design_system', '设计系统面板']] as const) {
+    for (const cls of [undefined, 'system', 'quality', 'provider', 'agent'] as const) {
+      const t = failureText(kind, cls, 'HTTP 500 upstream');
+      assert.ok(t.includes(want) && !t.includes('重试'), `${kind}/${cls ?? '无类别'}：${t}`);
+    }
+    // Key 被拒、通道拒绝请求：下一步先修通道，再说从哪儿再发一次
+    for (const msg of ['HTTP 401 unauthorized', 'HTTP 403 forbidden', 'HTTP 400 bad request']) {
+      const t = failureText(kind, 'provider', msg);
+      assert.ok(t.includes(want) && !t.includes('重试'), `${kind}/${msg}：${t}`);
+    }
+  }
+  assert.ok(failureText('edit_screens', 'system', 'boom').includes('点「重试」'), '能重试的作业照旧写「点「重试」」');
+});
