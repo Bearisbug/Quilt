@@ -11,7 +11,24 @@
 </p>
 
 <p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Bearisbug/Quilt?color=blue" alt="License: Apache-2.0" /></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white" alt="Node.js 22 or newer" /></a>
+  <a href="https://github.com/Bearisbug/Quilt/stargazers"><img src="https://img.shields.io/github/stars/Bearisbug/Quilt?style=flat&logo=github" alt="GitHub stars" /></a>
+  <br/>
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19" />
+  <img src="https://img.shields.io/badge/Hono-E36002?logo=hono&logoColor=white" alt="Hono" />
+  <img src="https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white" alt="Tailwind CSS 4" />
+  <img src="https://img.shields.io/badge/PGlite-embedded_Postgres-336791?logo=postgresql&logoColor=white" alt="PGlite" />
+  <img src="https://img.shields.io/badge/MCP-Streamable_HTTP-6E56CF" alt="MCP over Streamable HTTP" />
+</p>
+
+<p align="center">
   English · <a href="README.zh-CN.md">中文</a>
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/1ea5205f-6e0c-42e3-bb31-c4633aa4a9ec" width="900" alt="One sentence in the composer becomes a multi-screen app on the canvas" />
 </p>
 
 ---
@@ -20,16 +37,20 @@ Quilt runs entirely on your machine: one process, no accounts, no cloud backend.
 
 ## What it does
 
-- **Generate** ("造"). Type what the app is. The planner lays out a 4–6 screen main flow (or exactly the number you pick, 1–4), each screen is generated as self-contained HTML against the project's design system, linted, screenshotted and placed on the canvas. Ask for up to 4 candidate versions per screen and adopt the one you like.
-- **Edit** ("改"). Select screens and describe the change. Edit at element level with zero tokens (text, style, link target), regenerate one subtree with AI, or pin annotations on elements and send them in a batch.
-- **Chat** ("聊天"). A conversational mode with per-project memory. The assistant looks at the project through Quilt's own MCP, decides its own scope, and writes back revisions attributed to the chat turn.
-- **Infinite canvas.** Screenshots tiled on a pan/zoom canvas, drag to arrange, multi-select alignment (align, distribute, one-click row / column), positions persisted. `⌘K` jumps to a screen by name, route or purpose; a screen list panel filters by dangling links / pending candidates / deviations / in-progress; a minimap shows every card and the viewport. Double-click a screen to focus it as a live iframe you can scroll, type into and click.
+- **Generate** ("造"). Type what the app is. The planner lays out a 4–6 screen main flow (or exactly the number you pick, 1–4), each screen is generated as self-contained HTML against the project's design system, linted, screenshotted and placed on the canvas. Ask for up to 4 candidate versions per screen and adopt the one you like. Running jobs sit as chips above the composer; a failed one stays there with the reason, plus a retry button when the job can be re-run as is.
+- **Edit** ("改"). Select screens and describe the change. Inside a focused screen, `⌘E` picks any element: edit its text, classes and link target with zero tokens, regenerate just that subtree with AI, or pin annotations on elements and send them in a batch. New revisions swap into the live screen in place.
+- **Sketchbook**. A full-page board for one-off components and pages outside any project. Describe one, refine it with point-and-edit or pins, flip between versions, then copy it into a project as a new screen, over a whole screen, or in place of one block.
+- **Infinite canvas.** Screenshots tiled on a pan/zoom canvas, drag to arrange, multi-select alignment (align, distribute, one-click row / column), positions persisted. `⌘K` jumps to a screen by name, route or purpose; a screen list panel filters by dangling links / pending candidates / deviations / in-progress; a minimap shows every card and the viewport. Double-click a screen to focus it as a live iframe you can scroll, type into and click. The composer docks to the left, right or bottom edge and collapses into a pill.
 - **Prototype playback.** Links, form actions and `data-href` buttons navigate between screens inside the focused iframe with state kept and a back stack. Mark a screen as an *overlay* (bottom sheet, dialog) and it is presented on top of the screen that opened it instead of replacing it. Give a screen *state variants* (empty, error, logged out…) — same route, same layout, switchable while playing. The app map is derived from the HTML; broken links are flagged and can be fixed in one click; missing routes can be generated lazily. Export the whole thing as a single offline HTML file.
 - **Design system.** A seed color derives a Material 3 token set plus a `DESIGN.md` and component recipes. Override with an explicit brand palette (light and dark), upload logos and assets, save the whole thing as a preset for the next project. Change tokens and re-flow every screen deterministically.
 - **Shared components.** Turn a tab bar, app bar or sidebar into a project-level component that lives on the canvas next to the screens. Screens reference it; Quilt fills in the HTML on every write and marks the active link per route. Edit the component once (by hand, from the composer, or over MCP) and every screen that uses it is re-baked with zero model calls.
 - **Revision tree.** Every generation, edit and agent write is a revision with a parent. Roll back to any version, keep candidate branches, adopt later.
 - **Channels.** Manage generation channels in the settings panel: Anthropic, Gemini (AI Studio or Vertex), OpenAI-compatible endpoints, the local Claude subscription, or a running Claude Code session. Keys are encrypted at rest. A usage ledger records tokens per job.
-- **MCP, both directions.** Your coding agent connects to `http://127.0.0.1:3100/mcp` and gets 54 tools and 7 resources: everything the canvas can do, from reading the design contract, screens and screenshots to creating, editing, rolling back, arranging and deleting screens, managing components, assets, presets, annotations and jobs, and exporting the prototype. Quilt can also dispatch a job to a running Claude Code session and wait for it to finish.
+- **MCP, both directions.** Your coding agent connects to `http://127.0.0.1:3100/mcp` and gets 57 tools and 7 resources: everything the canvas and the sketchbook can do. Quilt can also dispatch a job to a running Claude Code session and wait for it to finish.
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/5b94045a-2802-41d7-bb20-36443b906bec" width="760" alt="Picking an element inside a focused screen and editing it in place" />
+</p>
 
 ## How it works
 
@@ -38,7 +59,7 @@ Browser (React 19 canvas) ──REST / SSE──▶ quilt process (Hono, 127.0.0
                           ◀─iframe──────  preview origin (127.0.0.1:3101, read-only HTML)
                                           ├─ in-process job queue + worker (LLM, lint, inject, screenshot)
                                           ├─ MCP server (Streamable HTTP, same service layer as REST)
-                                          ├─ chat loop (Claude Agent SDK subprocess, talks to the same MCP)
+                                          ├─ chat jobs over the API (Claude Agent SDK subprocess, talks to the same MCP)
                                           └─ agent delivery (hands jobs to a local Claude Code session)
                                           ~/.quilt: PGlite database · objects/ · config.env
 ```
@@ -92,7 +113,7 @@ Open `http://localhost:6688`. Migrations run automatically at API startup. Every
 claude mcp add --transport http quilt http://127.0.0.1:3100/mcp
 ```
 
-The server binds to loopback only, so there is no authentication. The 54 tools cover everything the canvas does: projects (`quilt.list_projects`, `create_project`, `get_project`, `update_project`, `delete_project`), reading (`get_outline`, `get_screen`, `get_screenshot`, `get_revision`, `list_revisions`, `list_candidates`, `get_design_contract`, `get_app_map`, `list_assets`, `list_annotations`, `list_messages`, `list_jobs`, `get_job`, `get_job_events`, `list_runners`, `list_design_presets`), writing screens (`validate_screen`, `create_screen`, `update_screen`, `patch_screen`, `create_upload_url`, `append_upload`, `link_screens`, `move_screens`, `edit_element`, `restore_revision`, `adopt_candidate`, `delete_screen`), shared components (`create_component`, `update_component`, `delete_component`), design system (`update_design_system`, `create_design_preset`, `apply_design_preset`, `delete_design_preset`, `create_asset`, `delete_asset`), model jobs (`generate_screens`, `edit_screens`, `regenerate_subtree`, `edit_component`, `propose_design_system`, `export_prototype`, `get_export`, `cancel_job`, `finish_job`) and annotations (`update_annotation`, `delete_annotation`, `send_annotations`). Only channel settings (API keys) stay in the settings panel. Resources: `design-md`, `tokens`, `app-map`, `golden`, `screen-html`, `screen-screenshot`, `attachment`.
+The server binds to loopback only, so there is no authentication. The 57 tools cover everything the canvas does: projects (`quilt.list_projects`, `create_project`, `get_project`, `update_project`, `delete_project`), reading (`get_outline`, `get_screen`, `get_screenshot`, `get_revision`, `list_revisions`, `list_candidates`, `get_design_contract`, `get_app_map`, `list_assets`, `list_annotations`, `list_messages`, `list_jobs`, `get_job`, `get_job_events`, `list_runners`, `list_design_presets`), writing screens (`validate_screen`, `create_screen`, `update_screen`, `patch_screen`, `create_upload_url`, `append_upload`, `link_screens`, `move_screens`, `edit_element`, `restore_revision`, `adopt_candidate`, `delete_screen`), the sketchbook (`get_sketchbook`, `create_draft`, `copy_draft`), shared components (`create_component`, `update_component`, `delete_component`), design system (`update_design_system`, `create_design_preset`, `apply_design_preset`, `delete_design_preset`, `create_asset`, `delete_asset`), model jobs (`generate_screens`, `edit_screens`, `regenerate_subtree`, `edit_component`, `propose_design_system`, `export_prototype`, `get_export`, `cancel_job`, `finish_job`) and annotations (`update_annotation`, `delete_annotation`, `send_annotations`). Only channel settings (API keys) stay in the settings panel. Resources: `design-md`, `tokens`, `app-map`, `golden`, `screen-html`, `screen-screenshot`, `attachment`.
 
 The recommended reading order for an agent is `get_outline` (a compact structural summary of every screen) before `get_screen` (the screen body). Keep writes small: change part of a screen with `patch_screen` (find/replace on the body), and write a screen over ~8 KB as `create_upload_url` + several `append_upload` chunks — one long tool argument is what breaks a streamed model response ("Connection lost mid-response"). Writes take an `expectedRevisionId` and return 409 on a stale base, so two writers cannot clobber each other.
 
@@ -102,7 +123,7 @@ To go the other way, pick "hand to local Claude Code" as the channel in the comp
 
 ```
 apps/api        Hono server: REST, MCP, SSE, preview origin, in-process worker, Drizzle schema + migrations
-apps/web        Vite + React 19 + Tailwind 4 canvas
+apps/web        Vite + React 19 + Tailwind 4 canvas and sketchbook
 apps/cli        esbuild bundle of api + core + web → the `quilt-canvas` npm package
 packages/core   shared: zod schemas, prompt contract, lint rules, runtime injection, export, tokens, outline
 tests/unit      node:test unit tests for the pure functions in core and the canvas (pnpm test)
@@ -117,19 +138,19 @@ CLAUDE.md       working discipline for coding agents contributing to this repo
 
 ```sh
 pnpm typecheck                   # tsc across core / api / web
-pnpm test                        # unit tests (node:test, ~0.5 s, no database or browser)
+pnpm test                        # unit tests (node:test, ~1.5 s, no database or browser)
 pnpm build                       # web bundle + CLI package
 pnpm seed                        # wipe the database DATABASE_URL points at, create two demo projects
 pnpm mcp:call <tool> '<json>'    # call an MCP tool against the running server
 ```
 
-End-to-end suites live in `tests/e2e` (`core`, `proto`, `edit`, `agent`, `install`, `chat`). They wipe the database they point at, so they refuse to run unless `DATABASE_URL` targets `quilt_test`. Set `LIVE_LLM=0` to skip the turns that call a real model. Environment details are in `docs/TEST.md` §3.
+End-to-end suites live in `tests/e2e` (`core`, `load`, `canvas`, `proto`, `edit`, `components`, `agent`, `mcp`, `chat`, `sketch`, `install`); `scripts/e2e-all.sh` runs them in order against an isolated stack started by `scripts/e2e-stack.sh`. They wipe the database they point at, so they refuse to run unless the API is on a database whose name ends in `_test`. Set `LIVE_LLM=0` to skip the turns that call a real model. Environment details are in `docs/TEST.md` §3.
 
 The change discipline is: update `docs/DESIGN.md` first, then the code, then the affected cases in `docs/TEST.md`, then run and log a round.
 
 ## Status
 
-v0.45, local single-user edition. Mobile and desktop screens only. Deferred, not dropped: multi-user SaaS (login, quotas, remote dispatch). Out of scope: real-time collaboration, production React code generation, native rendering.
+v1.19, local single-user edition. Mobile and desktop screens, plus free-form component and page drafts in the sketchbook. Deferred, not dropped: multi-user SaaS (login, quotas, remote dispatch). Out of scope: real-time collaboration, production React code generation, native rendering.
 
 ## License
 
