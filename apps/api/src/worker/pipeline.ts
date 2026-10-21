@@ -479,7 +479,7 @@ async function runRegenerateSubtree(ctx: Ctx) {
   const el = document.querySelector(`[data-qid="${input.qid}"]`);
   if (!el) throw new JobFailure('validation', 'element not found');
   const exact = el.outerHTML.replace(/ data-qid="q\d+"/g, '');
-  const newFrag = stripFences(await llmCall(ctx, system, subtreeUserPrompt(screen.name, screen.route, exact, input.prompt, await priorInstructions(screen.id, screen.currentRevisionId))));
+  const newFrag = stripFences(await llmCall(ctx, system, subtreeUserPrompt(screen.name, screen.route, exact, input.prompt, await priorInstructions(screen.id, screen.currentRevisionId)), undefined, true));
   const replaced = replaceSubtree(body, input.qid, newFrag);
   if (!replaced) throw new JobFailure('validation', 'replacement produced no element');
   // 共享组件（REQ-EDIT-006）：新片段里放的占位在这里展开；实例根沿用 qid、新子树接着编号

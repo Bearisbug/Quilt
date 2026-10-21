@@ -39,7 +39,6 @@ export default defineMessages('sketch', {
       offline: '发送失败，连不上 Quilt 服务',
       toCodex: '已投递到本机 Codex 线程，它写回后草稿出现在这里',
       toClaude: '已投递到本机 Claude Code 会话，它写回后草稿出现在这里',
-      blockWithImages: '只改一块时不带参考图：先移除参考图，或去掉胶囊改整张',
     },
     retry: {
       lost: '这一轮的记录找不到了，重新发一次',
@@ -328,7 +327,6 @@ export default defineMessages('sketch', {
       offline: 'Couldn’t send: can’t reach the Quilt service',
       toCodex: 'Delivered to the local Codex thread; the draft appears here once it writes back',
       toClaude: 'Delivered to the local Claude Code session; the draft appears here once it writes back',
-      blockWithImages: 'Reference images can’t be used when editing one block: remove them, or remove the pill to edit the whole draft',
     },
     retry: {
       lost: 'Couldn’t find the record of this round; send it again',

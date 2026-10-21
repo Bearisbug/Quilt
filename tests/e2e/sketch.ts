@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import type { BrowserContext, Frame, Page } from 'playwright';
-import { RESTYLE_PROMPT, DRAFT_PAD, SKETCH_GENERATOR_MARK, draftNameFromPrompt, forkDraftName, forkBody, extractBody, buildPrelude, type Tokens } from '@quilt/core';
+import { RESTYLE_PROMPT, DRAFT_PAD, SKETCH_GENERATOR_MARK, SKETCH_REFERENCE_IMAGE_NOTE, draftNameFromPrompt, forkDraftName, forkBody, extractBody, buildPrelude, type Tokens } from '@quilt/core';
 import { launch, seed, seedJson, apiJson, assertTestApi, localFetch, pickOption, selectedValue, eventually, EVIDENCE, WEB, API } from './lib.ts';
 import { connectMcp, callTool } from './mcp-client.ts';
 import { startOpenAiStub, type StubHit } from './openai-stub.ts';
@@ -1695,6 +1695,74 @@ await step('TC-CORE-129', async () => {
   expect(Math.abs(k2.transform - 1) <= 0.01 && Math.abs(k2.shown - zoom) <= 0.01 && vw2 >= 390 && vw2 < 390 + 1 / zoom, `聚焦屏的 iframe 应按镜头倍率显示、总变换 1:1、里面按不窄于 390 排版：${JSON.stringify({ ...k2, zoom, vw2 })}`);
   await page.keyboard.press('Escape');
   return `看板倍率 ${k1.shown.toFixed(3)}、镜头倍率 ${zoom.toFixed(3)}，iframe 上的总变换都是 1:1；第 3 步（可见窗口里无灰条）不在无头脚本里`;
+});
+
+// ---------- TC-CORE-138 草稿里只改一块时带参考图（浏览器 + 接口 + MCP，REQ-CORE-045 / API-CORE-006） ----------
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+async function uploadPng(pid: string): Promise<string> {
+  const { body } = await apiJson<{ attachmentId: string; putUrl: string }>(`/v1/projects/${pid}/attachments`, { method: 'POST', body: JSON.stringify({ mediaType: 'image/png', bytes: PNG.length }) });
+  const put = await fetch(API + body.putUrl, { method: 'PUT', body: PNG, headers: { 'content-type': 'image/png' } });
+  expect(put.status === 204, `参考图上传 ${put.status}`);
+  return body.attachmentId;
+}
+await step('TC-CORE-138', async () => {
+  const sb = await sketchbook();
+  const d = await newDraft(sb, '一张播放卡片\n[stub-frame:component]');
+  const pQid = qidOf(await currentHtml(d.id), /<p[^>]*data-qid="(q\d+)"/);
+  const ref = path.join(EVIDENCE, `run-${RUN}-ref.png`);
+  await writeFile(ref, PNG);
+  await openSketch(d.id);
+  await useStubRunner();
+  await waitStage('draft', 10000);
+  // 1 点选一块，再贴一张参考图等它传完
+  await page.getByTestId('draft-pick').click();
+  await settledComponent();
+  await clickInScaled('[data-testid="draft-iframe"]', page.frameLocator('[data-testid="draft-iframe"]').locator(`[data-qid="${pQid}"]`));
+  const chip = page.getByTestId('draft-pick-chip');
+  await chip.waitFor({ timeout: 5000 });
+  expect((await page.getByTestId('verb-line').innerText()).includes('改这一块'), '动词行应写「改这一块」');
+  const thumbs = page.locator('ul[aria-label="本次参考图"] li');
+  await page.setInputFiles('input[type=file]', ref);
+  await page.locator('ul[aria-label="本次参考图"] img').first().waitFor({ timeout: 10000 });
+  await page.waitForFunction(`!document.querySelector('ul[aria-label="本次参考图"] span')`, null, { timeout: 15000 });
+  expect((await thumbs.count()) === 1, `应有 1 张缩略图，实际 ${await thumbs.count()}`);
+  // 2 发送：建 regenerate_subtree，请求带 attachmentIds，作业输入带 imageKeys，用户消息挂着这张图；不出错误提示条
+  const h0 = draftStub.hits.length;
+  await page.getByTestId('composer-input').fill('照这张图的感觉改');
+  const req = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === `/v1/projects/${sb}/jobs`);
+  const res = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === `/v1/projects/${sb}/jobs`);
+  await page.getByTestId('composer-send').click();
+  const body = JSON.parse((await req).postData() ?? '{}') as { kind?: string; input?: { qid?: string }; attachmentIds?: string[] };
+  expect(body.kind === 'regenerate_subtree' && body.input?.qid === pQid && body.attachmentIds?.length === 1, `请求体不对：${JSON.stringify(body)}`);
+  const r = await res;
+  expect(r.status() === 202, `建作业应 202，实际 ${r.status()}：${(await r.text()).slice(0, 200)}`);
+  const job = ((await r.json()) as { job: JobView }).job;
+  expect((job.input.imageKeys ?? []).length === 1, `作业输入应带 1 个 imageKeys：${JSON.stringify(job.input)}`);
+  expect((await page.locator('[data-testid=toast][data-kind=error]').count()) === 0, `不该出错误提示条：${await page.locator('[data-testid=toast]').allInnerTexts()}`);
+  const msgs = (await apiJson<{ items: { role: string; jobId: string | null; attachments: unknown[] }[] }>(`/v1/projects/${sb}/messages?limit=100`)).body.items;
+  expect(msgs.find((m) => m.role === 'user' && m.jobId === job.id)?.attachments.length === 1, '这一轮的用户消息应挂 1 张附件');
+  // 3 作业成功、落 subtree 一版；桩收到的那次调用带图、用草稿本的参考图说明；缩略图与胶囊清掉
+  expect((await waitJob(job.id, 60)).status === 'succeeded', '带图只改一块的作业没成功');
+  expect((await revisions(d.id))[0].sourceKind === 'subtree', '草稿应多出改一块的那一版');
+  const hit = draftStub.hits.slice(h0).find((h) => h.system.startsWith(SKETCH_GENERATOR_MARK));
+  expect(hit?.hasImage && hit.user.startsWith(SKETCH_REFERENCE_IMAGE_NOTE), `这次调用应带图、以草稿本的参考图说明开头：${JSON.stringify({ hasImage: hit?.hasImage, user: hit?.user.slice(0, 120) })}`);
+  await eventually(async () => expect((await thumbs.count()) === 0 && (await chip.count()) === 0, '发出去之后缩略图与胶囊应清掉'), 10000);
+  // 4 接口：不收图的作业种类带图 400；取不到的附件 400；都不建作业
+  const before = (await jobsOf(sb)).length;
+  const att = await uploadPng(sb);
+  const exp = await post<Problem>(`/v1/projects/${sb}/jobs`, { kind: 'export_prototype', input: {}, attachmentIds: [att] });
+  const cur = (await revisions(d.id))[0].id;
+  const ghost = await post<Problem>(`/v1/projects/${sb}/jobs`, { kind: 'regenerate_subtree', input: { screenId: d.id, qid: pQid, prompt: 'x', expectedRevisionId: cur, runner: STUB }, attachmentIds: [FAKE] });
+  for (const [what, x] of [['导出带图', exp], ['不存在的附件', ghost]] as const) expect(x.status === 400 && x.body.type === '/errors/validation' && paths(x.body).includes('attachmentIds'), `${what}应 400 attachmentIds：${x.status} ${JSON.stringify(x.body).slice(0, 200)}`);
+  expect((await jobsOf(sb)).length === before, '被拒的请求不该建出作业');
+  // 5 MCP：quilt.regenerate_subtree 收 attachmentIds
+  const mcp = await connectMcp();
+  cleanups.push(() => mcp.close());
+  const viaMcp = await callTool(mcp, 'quilt.regenerate_subtree', { screenId: d.id, qid: pQid, prompt: '再照图收紧一点', expectedRevisionId: cur, runner: STUB, attachmentIds: [att] });
+  expect(!viaMcp.isError, `MCP 带图只改一块：${viaMcp.text.slice(0, 200)}`);
+  const mj = await waitJob((viaMcp.json as { id: string }).id, 60);
+  expect(mj.status === 'succeeded' && (mj.input.imageKeys ?? []).length === 1, `MCP 作业：${mj.status} ${JSON.stringify(mj.input)}`);
+  return '点选一块带 1 张图发出：regenerate_subtree 带 attachmentIds → imageKeys、用户消息挂附件、桩收到带图的调用（草稿本参考图说明）；不收图的种类与取不到的附件 400；MCP 同';
 });
 
 // ---------- TC-CORE-111 FLOW-SKETCH 走查（截图） ----------

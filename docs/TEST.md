@@ -6,11 +6,11 @@
 
 | 字段 | 值 |
 | --- | --- |
-| 状态 | 生效（设计文档 v1.20；最近一次全量轮 RUN-278（2026-10-21）失败 4 条：§7 登记的 `TC-CORE-023`、`085`（并行下截图时序，脚本更正）、`136`（产品缺陷，已修）、`TC-PROTO-007`（偶发卡住）；复测轮 RUN-279 之后只剩 `TC-CORE-023`；需真实模型的 6 条，加上 `006`（单独执行）、`084` 与 `TC-EDIT-037`（提示词轮）、`038` 与 `TC-AGENT-013`（没有脚本）跳过；`TC-CORE-020` / `TC-AGENT-010` 待人工） |
+| 状态 | 生效（设计文档 v1.21；最近一次全量轮 RUN-278（2026-10-21）失败 4 条：§7 登记的 `TC-CORE-023`、`085`（并行下截图时序，脚本更正）、`136`（产品缺陷，已修）、`TC-PROTO-007`（偶发卡住）；复测轮 RUN-279 之后只剩 `TC-CORE-023`；需真实模型的 6 条，加上 `006`（单独执行）、`084` 与 `TC-EDIT-037`（提示词轮）、`038` 与 `TC-AGENT-013`（没有脚本）跳过；`TC-CORE-020` / `TC-AGENT-010` 待人工） |
 | Owner | @bug |
 | 关联设计文档 | `docs/DESIGN.md` |
 | 被测系统 | `~/Documents/Projects/Quilt`（Web 画布 + API/MCP 服务 + Worker + 预览域服务） |
-| 最后更新 | 2026-10-21（设计文档 v1.20，登记 RUN-278～280） |
+| 最后更新 | 2026-10-21（设计文档 v1.21，登记 RUN-281～283） |
 
 变更记录（登用例增改，不登执行轮次）：
 
@@ -18,11 +18,11 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-10-21 | 设计文档 v1.21（草稿里只改一块也能带参考图）：新增 `TC-CORE-138`（点选一块带 1 张图发出：请求带 `attachmentIds`、作业输入带 `imageKeys`、用户消息挂附件、「草稿桩」收到带图的调用；不收图的作业种类与取不到的附件 `400`；MCP `quilt.regenerate_subtree` 收 `attachmentIds`，在 `tests/e2e/sketch.ts`） | @bug |
 | 2026-10-21 | 设计文档 v1.20（界面中文与英文）：新增 `TC-CORE-130`～`137`（草稿本的名字跟着请求的界面语言；缺省跟浏览器语言；设置里切换即时生效、刷新后记住、草稿本跟着换；接口按 `X-Quilt-Locale` / `Accept-Language` 出中英文错误文案、两者都没有时中文，MCP 同一判定；作业失败 chip 的英文与换语言；屏里修改标记的英文与换语言；带 `X-Quilt-Locale` 的写屏作业记 `input.locale`、提示词要求这种语言，不带的不记；重试与请求体只认这次请求的头），脚本 `tests/e2e/i18n.ts`（`e2e:i18n`），§3、§5 的全量轮加 `i18n` 套件；`TC-CORE-028` 第 7 步设置弹层左栏由 3 节改为 4 节（加「语言」，脚本 `tests/e2e/core/generate.ts` 同步）；RUN-278 之后：`TC-CORE-133` 第 2 步重生成一块的 chip 名按缩短后的英文改为「Regenerate block in “Screen 1”」，`TC-CORE-023` 第 9b 步先按 `Esc` 清掉 8d 留下的选中再量（量的是造态的输入框） | @bug |
 | 2026-10-20 | 设计文档 v1.19（缩小显示的屏改用 zoom）：新增 `TC-CORE-129`（源自缺陷：草稿看板与画布聚焦屏的 iframe 上缩放连乘为 1、显示倍率不变、里面不窄于设备宽；第 3 步可见窗口里看玻璃卡片旁无灰条），样本 `tests/e2e/fixtures/glass-ledger.html` | @bug |
 | 2026-10-20 | 设计文档 v1.18（打开着的草稿出新版、换画框原地换）：新增 `TC-CORE-128`（改一轮、回到旧版、换画框、组件出新版都不重载 iframe、不出骨架与「加载中…」，滚动位置留着，在 `tests/e2e/sketch.ts`）；`TC-CORE-122` 前置加「每次在草稿里点之前等框稳住」 | @bug |
 | 2026-10-20 | 设计文档 v1.17（去掉对话记录与聊天、作业改成输入框上方的 chip、记录栏浮在草稿上、画框不跨组件与页面）：新增 `TC-CORE-127`（源自缺陷：底边收起与展开就地换形，在 `tests/e2e/canvas.ts`）；废弃 `TC-CORE-043`（接口校验并入 `TC-CORE-062` 第 7 步）与 `TC-CORE-044`（重试防连点并入 `TC-CORE-045` 第 2 步）；`TC-CORE-039` 与 `042` 只走接口，`056` 改看别处发起的作业出 chip，`045` 与 `076` 改看失败 chip（不弹提示条、双击「重试」只发一次、不能重试的写各自再发一次的入口）；`TC-CORE-103` 加第 6、7 步（组件与页面不互换、工具条的画框选项），`TC-CORE-125` 加第 4 步（开合记录栏不改看板）；`TC-EDIT-009` 改从设计系统面板提炼约定；在跑作业行改认作业 chip：`TC-CORE-005`、`023`、`029`、`032`、`036`、`057`、`082`、`092`、`TC-EDIT-012`；去掉看对话记录的步骤：`TC-CORE-023`、`027`、`049`、`054`、`055`、`075`、`TC-EDIT-035`；`TC-CORE-046` 去掉切聊天那步，`093` 改用点选一屏触发重量；`TC-CORE-054` 第 7 步的画布底色按 v1.15 改正 | @bug |
-| 2026-10-20 | 设计文档 v1.16（输入框停靠与收起、草稿放大）：新增 `TC-CORE-124`（拖到左边停靠、把手方向键与菜单换边、收起成贴边胶囊再拖、刷新与记忆、窄视口只停底边、两页记忆分开，在 `tests/e2e/canvas.ts`）与 `TC-CORE-125`（草稿工具条在顶行、草稿在看板里居中放到最大、收起与左停都不改看板——输入框浮在上面，在 `tests/e2e/sketch.ts`）；`TC-CORE-122` 加第 6 步草稿本快捷键 `⌘E` / `⌥N`（含焦点在草稿里时由运行时转发）；`TC-CORE-023` 第 8b～8d 步改为收起后底边留胶囊、加看输入框自己的「收起」与点胶囊展开；`TC-CORE-120` 前置加等草稿截图、第 1 步对比区按两格认（种子不拍截图时目标屏那格写「还没有截图」）；`TC-CORE-121` 的组件实例比较去掉 `data-qid` | @bug |
 
 ## 2. 测试范围 / 不测什么
 
@@ -1922,6 +1922,21 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 后置：无。
 
+#### `TC-CORE-138` 草稿里只改一块时带参考图 — 对应 `REQ-CORE-045`、`REQ-CORE-012`（`PAGE-SKETCH`「选元素」、`API-CORE-006`「参考图」，v1.21）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：「草稿桩」已建并验证；草稿本里用 stub 出组件草稿 D（「一张播放卡片」加第二行 `[stub-frame:component]`），记下它当前版 R0 与正文里一个 `<p>` 的 `qid`；打开 `/sketch?d=<D>`，输入框通道选「草稿桩」；一张 1×1 的 PNG 当参考图。
+脚本 `tests/e2e/sketch.ts`（`ONLY=TC-CORE-138`）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 点「选元素」，等框稳住后点草稿里那个 `<p>`；用输入框的「加参考图」选那张 PNG，等它传完 | 输入框出胶囊、动词行写「改这一块」；参考图区有 1 张缩略图，没有「上传中…」 |
+| 2 | 输入「照这张图的感觉改」，点发送 | 请求 `POST /v1/projects/<草稿本>/jobs`，`kind=regenerate_subtree`、`qid` 是那个 `<p>` 的、`attachmentIds` 1 个；没有出错提示条；作业输入的 `imageKeys` 1 个；这一轮的用户消息带 1 张附件 |
+| 3 | 等作业结束 | 作业成功；D 的最新一版 `sourceKind=subtree`；「草稿桩」收到的这次调用带图，用户提示以草稿本的参考图说明开头（「The user attached reference image(s)」）；输入框里的缩略图与胶囊都清掉 |
+| 4 | 接口：在草稿本里再传一张图，发 `export_prototype` 带 `attachmentIds:[这张图]`；再对 D 的当前版发 `regenerate_subtree` 带 `attachmentIds:[一个不存在的 id]` | 都是 `400 /errors/validation`，字段 `attachmentIds`；没有建出作业 |
+| 5 | MCP：再传一张图（`quilt.create_upload_url`，`mediaType=image/png`），调 `quilt.regenerate_subtree` 对那个 `<p>` 带 `attachmentIds` 与 stub 通道 | 作业成功，作业输入的 `imageKeys` 1 个 |
+
+后置：无。
+
 ### CORE · 界面语言
 
 浏览器语言由 Playwright 上下文的 `locale` 给（它同时决定 `navigator.languages` 与页面请求的 `Accept-Language`）；每条用例新开上下文，本机没有记过语言。
@@ -2868,15 +2883,12 @@ AI 轮次登记「待人工」——投递进真实会话要在那个终端里�
 
 ## 6. 执行记录
 
-本节只留最近 10 轮；更早的轮次（RUN-001～RUN-270）原样移到 `docs/TEST-RUNS.md`（v1.07 归档，行序不变），按轮次号 grep 即可定位。
+本节只留最近 10 轮；更早的轮次（RUN-001～RUN-273）原样移到 `docs/TEST-RUNS.md`（v1.07 归档，行序不变），按轮次号 grep 即可定位。
 
 轮次汇总：
 
 | 轮次 | 日期 | 被测版本 | 执行者 | 范围 | 结果 |
 | --- | --- | --- | --- | --- | --- |
-| RUN-271 | 2026-10-20 | 未提交工作树（设计文档 v1.17）的构建（修复前） | AI(Claude Code) | 局部(TC-CORE-127) | 通过 0/1 · 失败 1 |
-| RUN-272 | 2026-10-20 | 未提交工作树（设计文档 v1.17；含 RUN-270、RUN-271 两处修复） | AI(Claude Code) | 全量至 TC-CORE-127、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024 | 通过 158/177 · 失败 6 · 待人工 2 · 跳过 11 |
-| RUN-273 | 2026-10-20 | 同 RUN-272 的构建；`tests/e2e` 按 RUN-272 明细更正（`018`、`051`、`106`、`122`、`125`） | AI(Claude Code) | 局部(TC-CORE-018、TC-CORE-051、TC-CORE-106、TC-CORE-122、TC-CORE-125 + 冒烟级至 TC-CORE-127、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 10/12 · 跳过 2 |
 | RUN-274 | 2026-10-20 | 未提交工作树（设计文档 v1.18：草稿出新版、换画框原地换） | AI(Claude Code) | 局部(TC-CORE-098、TC-CORE-099、TC-CORE-100、TC-CORE-101、TC-CORE-102、TC-CORE-103、TC-CORE-104、TC-CORE-105、TC-CORE-106、TC-CORE-107、TC-CORE-108、TC-CORE-109、TC-CORE-110、TC-CORE-111、TC-CORE-112、TC-CORE-113、TC-CORE-114、TC-CORE-115、TC-CORE-116、TC-CORE-117、TC-CORE-118、TC-CORE-119、TC-CORE-120、TC-CORE-121、TC-CORE-122、TC-CORE-123、TC-CORE-125、TC-CORE-128、TC-AGENT-011 + 冒烟级至 TC-CORE-128、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 30/37 · 失败 4 · 跳过 3 |
 | RUN-275 | 2026-10-20 | RUN-274 之上：看板的 key 带上「有没有版本」，新草稿第一版落地照旧重挂 | AI(Claude Code) | 局部(TC-CORE-098、TC-CORE-099、TC-CORE-100、TC-CORE-101、TC-CORE-102、TC-CORE-103、TC-CORE-104、TC-CORE-105、TC-CORE-106、TC-CORE-107、TC-CORE-108、TC-CORE-109、TC-CORE-110、TC-CORE-111、TC-CORE-112、TC-CORE-113、TC-CORE-114、TC-CORE-115、TC-CORE-116、TC-CORE-117、TC-CORE-118、TC-CORE-119、TC-CORE-120、TC-CORE-121、TC-CORE-122、TC-CORE-123、TC-CORE-125、TC-CORE-128、TC-AGENT-011 + 冒烟级至 TC-CORE-128、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 35/37 · 跳过 2 |
 | RUN-276 | 2026-10-20 | 未提交工作树（设计文档 v1.19）的构建（修复前：看板与聚焦屏仍用缩放变换） | AI(Claude Code) | 局部(TC-CORE-129) | 通过 0/1 · 失败 1 |
@@ -2884,12 +2896,9 @@ AI 轮次登记「待人工」——投递进真实会话要在那个终端里�
 | RUN-278 | 2026-10-21 | 未提交工作树（设计文档 v1.20：界面中文与英文） | AI(Claude Code) | 全量至 TC-CORE-136、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024 | 通过 169/186 · 失败 4 · 待人工 2 · 跳过 11 |
 | RUN-279 | 2026-10-21 | RUN-278 之上：建作业时没带语言头就删掉 `input.locale`；英文独有的溢出与截断改短文案、风格指南卡走语言资源；`TC-CORE-023`、`085` 脚本更正 | AI(Claude Code) | 复测(RUN-278:TC-CORE-023、TC-CORE-085、TC-CORE-136、TC-PROTO-007、TC-CORE-019、TC-CORE-026、TC-CORE-035、TC-CORE-045、TC-EDIT-005、TC-EDIT-010、TC-CORE-130、TC-CORE-131、TC-CORE-132、TC-CORE-133、TC-CORE-134、TC-CORE-135 + 冒烟级至 TC-CORE-136、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 21/24 · 失败 1 · 跳过 2 |
 | RUN-280 | 2026-10-21 | 未提交工作树（设计文档 v1.20 加「草稿本的名字跟着界面语言」） | AI(Claude Code) | 局部(TC-AGENT-011、TC-AGENT-018、TC-AGENT-022、TC-CORE-098、TC-CORE-099、TC-CORE-100、TC-CORE-101、TC-CORE-102、TC-CORE-103、TC-CORE-104、TC-CORE-105、TC-CORE-106、TC-CORE-107、TC-CORE-108、TC-CORE-109、TC-CORE-110、TC-CORE-111、TC-CORE-112、TC-CORE-113、TC-CORE-114、TC-CORE-115、TC-CORE-116、TC-CORE-117、TC-CORE-118、TC-CORE-119、TC-CORE-120、TC-CORE-121、TC-CORE-122、TC-CORE-123、TC-CORE-125、TC-CORE-128、TC-CORE-129、TC-CORE-130、TC-CORE-131、TC-CORE-132、TC-CORE-133、TC-CORE-134、TC-CORE-135、TC-CORE-136、TC-CORE-137 + 冒烟级至 TC-CORE-137、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 46/48 · 跳过 2 |
-
-RUN-271 证据：e2e 改写 v1.17 时发现「收起输入框时胶囊从输入框左缘滑到底边正中」，补写源自缺陷用例 `TC-CORE-127`，在修复前的构建（2026-10-20 17:04 的 `apps/web/dist`）上用 l3 隔离栈单跑：第 1 步胶囊逐帧中线 523 → 720，用了约 10 帧才到输入框中线 720。
-
-RUN-272 证据：v1.17（去掉对话记录与聊天、作业 chip、记录栏浮层、画框不跨组件与页面）的全量轮。重新构建前端，单测轮 140/140、构建产物 `check-tokens --lint` 通过、core / api / web 类型检查与 web lint 0 处之后，跑 `scripts/e2e-all.sh` 十一套与 install（17:57～18:36）。`TC-CORE-126`（承接 RUN-270）与 `TC-CORE-127`（承接 RUN-271）本轮通过。5 条新失败都在脚本或用例数据，复现与定位见 `docs/test-runs/run-272-failures.log`：去掉对话记录后画布可用区变宽、记录栏浮起后看板变大，`051` 与 `106` 的「放不下」前提不再成立；`018` 还在数对话记录；`125` 撞上前一条用例留下的新草稿；`122` 在组件草稿重报尺寸期间点击。本轮跑的时候机器上另有别的项目在跑（1 分钟负载 20），`122` 的时序问题因此更容易出现。
-
-RUN-273 证据：RUN-272 之后的复测轮，同一构建、同一 main 隔离栈，按 §5 跑上一轮的 5 条失败加冒烟级；`TC-CORE-031` 照 `scripts/e2e-all.sh` 的做法停栈后跑 install。5 条失败全部通过。改完脚本后在 l1 隔离栈上先单跑过：`TC-CORE-122` 连跑 5 次 4 次通过，失败那次是机器满载时预览文档 15 s 内没有上报组件尺寸（不是脚本里的时序问题）。完整日志 `.e2e/main/run-273.log`（本机，不进仓库）。
+| RUN-281 | 2026-10-21 | 未提交工作树（设计文档 v1.21：草稿里只改一块也能带参考图） | AI(Claude Code) | 局部(TC-CORE-138) | 通过 1/1 |
+| RUN-282 | 2026-10-21 | 同 RUN-281 的构建 | AI(Claude Code) | 局部(TC-CORE-098、TC-CORE-099、TC-CORE-100、TC-CORE-101、TC-CORE-102、TC-CORE-103、TC-CORE-104、TC-CORE-105、TC-CORE-106、TC-CORE-107、TC-CORE-108、TC-CORE-109、TC-CORE-110、TC-CORE-111、TC-CORE-112、TC-CORE-113、TC-CORE-114、TC-CORE-115、TC-CORE-116、TC-CORE-117、TC-CORE-118、TC-CORE-119、TC-CORE-120、TC-CORE-121、TC-CORE-122、TC-CORE-123、TC-CORE-125、TC-CORE-128、TC-CORE-129、TC-CORE-138、TC-AGENT-011、TC-AGENT-023、TC-CORE-027、TC-CORE-092、TC-EDIT-003、TC-EDIT-004、TC-EDIT-014、TC-EDIT-019、TC-EDIT-026、TC-EDIT-033、TC-CORE-003、TC-CORE-005、TC-CORE-010、TC-CORE-012、TC-CORE-018、TC-PROTO-001、TC-AGENT-001) | 通过 43/47 · 失败 1 · 跳过 3 |
+| RUN-283 | 2026-10-21 | 同 RUN-281 的构建 | AI(Claude Code) | 复测(RUN-282:TC-EDIT-001、TC-EDIT-004 + 冒烟级至 TC-CORE-138、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 8/10 · 跳过 2 |
 
 RUN-274 证据：v1.18 的局部轮（改到 `REQ-CORE-040`，按 §5 整套 SKETCH 加冒烟级）。前端重新构建，单测轮 140/140，core / api / web / tests 类型检查与 web lint 0 处。新用例 `TC-CORE-128` 通过；`100`、`101`、`106`、`111` 是这次改动带出的回归：新草稿在生成中摆上看板时还没有地址，看板的 key 改成只认草稿 id 之后，第一版落地也不再重挂取地址，iframe 一直不出来（`docs/test-runs/run-274-failures.log`）。`TC-AGENT-011` 在 `mcp.ts` 里，本轮误放进 `agent.ts` 的 `ONLY`，没有执行。完整日志 `.e2e/main/run-274.log`（本机，不进仓库）。
 
@@ -2905,32 +2914,16 @@ RUN-279 证据：修完 RUN-278 之后的复测轮，main 隔离栈（00:57～01
 
 RUN-280 证据：用户要求草稿本的名字跟着界面语言变（此前按第一次建它的请求语言存死）。改为项目详情、MCP 按请求语言给名字，草稿的预览地址带 `lang`、预览域按它重写文档标题；新增 `TC-CORE-137`。改到草稿本的接口出口与预览下发，按 §5 整套 SKETCH 加 I18N、MCP 与冒烟级，三条隔离栈（main / l1 / l2）并行跑，停栈后跑 install。单测 169/169、五个包类型检查通过。日志 `.e2e/{main,l1,l2}/run-280.log`（本机，不进仓库）。
 
+RUN-281 证据：用户在草稿本里点选一块、带着参考图发送，被「只改一块时不带参考图」挡下，要求只改一块也能带图。v1.21 改为建作业接口收 `attachmentIds`、子树重生成带图调用模型、MCP `quilt.regenerate_subtree` 收 `attachmentIds`，前端去掉这道挡，新增 `TC-CORE-138`。单测 169/169，五个包类型检查与 web lint 通过；重新构建前端后在 main 隔离栈单跑通过（输出未落盘）。
+
+RUN-282 证据：v1.21 的局部轮。改到建作业接口（`API-CORE-006`，草稿本借用的公共分支点）与 MCP 工具面，按 §5 整套 SKETCH 加 `TC-AGENT-011`；建作业接口也是画布上「重生成这块」与参考图的入口，另加 `REQ-EDIT-002` 的用例、`TC-CORE-027`、`TC-CORE-092`、`TC-AGENT-023` 与冒烟级（除 `TC-CORE-031`）。两条隔离栈并行：main 跑 SKETCH，30/30；l1 跑其余；`TC-CORE-031` 要停栈，放到 RUN-283。`TC-EDIT-004` 失败是执行时漏了前置（见明细）。日志 `.e2e/main/run-282.log`、`.e2e/l1/run-282.log`（本机，不进仓库）。
+
+RUN-283 证据：RUN-282 之后的复测轮，同一构建、l1 隔离栈：`TC-EDIT-004` 带上建项目的 `TC-EDIT-001` 一起跑（001 计入本轮），加冒烟级；停栈后跑 install。日志 `.e2e/l1/run-283.log`、`.e2e/main/run-283-install.log`（本机，不进仓库）。
+
 明细（仅登非「通过」项）：
 
 | 轮次 | 用例 | 结果 | 现象 / 证据 | 跟进 |
 | --- | --- | --- | --- | --- |
-| RUN-271 | TC-CORE-127 | 失败 | 第 1 步「收起后胶囊横移了：输入框中线 720，胶囊逐帧中线 523,591,641,674,694,706,712,716,718,719,720…」：底边的 `left` 按卡片宽重算，样式表里的 `left` 过渡把这次换形也做成了 200 ms 滑动（证据：`docs/test-runs/run-271-tc-core-127-fail.log`） | 产品缺陷，已修：换形那一帧关掉外层过渡；下一轮复测 |
-| RUN-272 | TC-CORE-018 | 失败 | 第 1 步「消息数不是 12」：脚本刷新后还在数对话记录（`[role=log]`）里的消息，v1.17 界面上没有对话记录（证据：`docs/test-runs/run-272-failures.log`） | 脚本更正：改从 `GET …/messages` 数；RUN-273 复测 |
-| RUN-272 | TC-CORE-051 | 失败 | 第 3 步等「最小缩放也装不下全部」超时：可用区宽 1288 px，45 张桌面屏在 0.02 下只占 1222 px，装得下（证据：`docs/test-runs/run-272-failures.log`） | 用例数据更正：45 → 60 屏；RUN-273 复测 |
-| RUN-272 | TC-CORE-106 | 失败 | 第 1 步「应等比缩小：1280×800」：记录栏浮在看板上之后，1440×900 的看板放得下整张桌面页（证据：`docs/test-runs/run-272-failures.log`） | 用例更正：第 1 步改在 1280×800 下做；RUN-273 复测 |
-| RUN-272 | TC-CORE-122 | 失败 | 第 1 步等胶囊超时：量点击点时组件草稿还是 1280×800 的占位框，点下去时已缩成卡片大小，点空；每落一版后的点击同理（证据：`docs/test-runs/run-272-failures.log`） | 脚本更正：每次点之前等组件草稿的框稳住；RUN-273 复测 |
-| RUN-272 | TC-CORE-125 | 失败 | 前置出新草稿 `409 /errors/screen-busy`：`TC-CORE-123` 第 3 步发出的新草稿走的是挂住不回的假会话，还在跑（证据：`docs/test-runs/run-272-failures.log`） | 脚本更正：前置先取消草稿本里在跑的作业；RUN-273 复测 |
-| RUN-272 | TC-CORE-023 | 失败 | 预期失败：「叫回后安全区底部没复原」，§7 登记项（证据：`docs/test-runs/run-272-failures.log`） | 基线 |
-| RUN-272 | TC-CORE-020 | 待人工 | 对标 Stitch 盲评 | 待人工 |
-| RUN-272 | TC-AGENT-010 | 待人工 | 投递到真实 Claude Code 会话要在终端确认接收 | 待人工 |
-| RUN-272 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-272 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-272 | TC-PROTO-004 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-272 | TC-PROTO-009 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-272 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-272 | TC-EDIT-008 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-272 | TC-CORE-006 | 跳过 | 要以 `LLM_STUB=503` 重启 worker，由 `core-stub.ts` 单独执行，本轮没跑 | 基线 |
-| RUN-272 | TC-CORE-084 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
-| RUN-272 | TC-EDIT-037 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
-| RUN-272 | TC-CORE-038 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
-| RUN-272 | TC-AGENT-013 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
-| RUN-273 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-273 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-274 | TC-CORE-100 | 失败 | 等草稿的 iframe 超时：新草稿第一版落地后看板上一直没有 iframe（证据：`docs/test-runs/run-274-failures.log`） | 产品缺陷（本轮改动带出），已修：看板的 key 带上「有没有版本」，第一版落地照旧重挂；RUN-275 复测 |
 | RUN-274 | TC-CORE-101 | 失败 | 等草稿的 iframe 超时：新草稿第一版落地后看板上一直没有 iframe（证据：`docs/test-runs/run-274-failures.log`） | 产品缺陷（本轮改动带出），已修：看板的 key 带上「有没有版本」，第一版落地照旧重挂；RUN-275 复测 |
 | RUN-274 | TC-CORE-106 | 失败 | 等草稿的 iframe 超时：新草稿第一版落地后看板上一直没有 iframe（证据：`docs/test-runs/run-274-failures.log`） | 产品缺陷（本轮改动带出），已修：看板的 key 带上「有没有版本」，第一版落地照旧重挂；RUN-275 复测 |
@@ -2977,6 +2970,12 @@ RUN-280 证据：用户要求草稿本的名字跟着界面语言变（此前按
 | RUN-279 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-280 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-280 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-282 | TC-EDIT-004 | 失败 | 「Cannot read properties of undefined (reading '0')」：执行时 `ONLY` 只挑了 004，没跑建项目的 `TC-EDIT-001`，项目 id 为空，用例前置「同 `TC-EDIT-003` 项目」没满足（证据：`.e2e/l1/run-282.log`，本机） | 执行失误，不是产品缺陷：RUN-283 带上前置复测通过 |
+| RUN-282 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-282 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-282 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-283 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-283 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 
 ## 7. 遗留问题
 

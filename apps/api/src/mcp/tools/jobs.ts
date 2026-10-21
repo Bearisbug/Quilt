@@ -72,13 +72,14 @@ export function registerJobTools(c: ToolCtx) {
 
   // 其余四种作业（API-CORE-006）：子树重生成、AI 改组件、提炼约定（产出给 agent 自己确认）、导出原型
   server.registerTool('quilt.regenerate_subtree', {
-    description: 'AI-rewrite one element subtree (by data-qid) with an instruction; siblings keep their qids. expectedRevisionId must be current. Returns a job.',
-    inputSchema: { screenId: z.string().uuid(), qid: z.string().regex(/^q\d+$/), prompt: z.string().min(1).max(4000), expectedRevisionId: z.string().uuid(), runner: runnerInput },
+    description: 'AI-rewrite one element subtree (by data-qid) with an instruction; siblings keep their qids. expectedRevisionId must be current. attachmentIds as in quilt.generate_screens. Returns a job.',
+    inputSchema: { screenId: z.string().uuid(), qid: z.string().regex(/^q\d+$/), prompt: z.string().min(1).max(4000), expectedRevisionId: z.string().uuid(), runner: runnerInput, attachmentIds: attachmentsInput },
   }, wrap(async (a) => {
     write();
     const { screen, project } = await ownedScreen(user.id, a.screenId as string);
     const runner = a.runner as Runner | undefined;
-    return runJob(project.id, { kind: 'regenerate_subtree', input: { screenId: screen.id, qid: a.qid as string, prompt: a.prompt as string, expectedRevisionId: a.expectedRevisionId as string, runner } });
+    const { imageKeys } = await prep(project.id, a.attachmentIds);
+    return runJob(project.id, { kind: 'regenerate_subtree', input: { screenId: screen.id, qid: a.qid as string, prompt: a.prompt as string, expectedRevisionId: a.expectedRevisionId as string, runner, imageKeys } });
   }));
 
   server.registerTool('quilt.edit_component', {

@@ -12,24 +12,21 @@
 | 项目画像 | 生产产品（全部核心节生效） |
 | Owner | @bug |
 | 评审人 | @bug（产品 / 架构） |
-| 最后更新 | 2026-10-20（v1.20 界面支持中文与英文；v1.19 缩小显示的屏改用 zoom；v1.18 草稿出新版原地换；v1.17 去掉对话记录、作业 chip、记录栏浮层、画框不能跨组件与页面；v1.16 输入框停靠与收起、草稿放大；v1.15 界面视觉换成苹果风；v1.14 草稿写回与参照；v1.13 与 v1.14 的数据模型、接口与 ADR-030～033 已由 Owner 签字） |
+| 最后更新 | 2026-10-21（v1.21 草稿里只改一块也能带参考图；v1.20 界面支持中文与英文；v1.19 缩小显示的屏改用 zoom；v1.18 草稿出新版原地换；v1.17 去掉对话记录、作业 chip、记录栏浮层、画框不能跨组件与页面；v1.16 输入框停靠与收起、草稿放大；v1.15 界面视觉换成苹果风；v1.14 草稿写回与参照；v1.13 与 v1.14 的数据模型、接口与 ADR-030～033 已由 Owner 签字） |
 | 关联 | 契约 `api/openapi.yaml`（实现期建立） · 仓库 `github.com/Bearisbug/Quilt` · 安装 `npx quilt-canvas`（包 `apps/cli`） · 调研结论见会话记录 2026-09-07/08/09 |
 | 链路层 | 部分 |
 
-更早的版本（v0.4–v1.12）在 `docs/CHANGELOG.md`；下方两张表合计只留 v0.1–v0.3 与最近 5 版，再往前的随每次出版移过去。
+更早的版本（v0.4–v1.16）在 `docs/CHANGELOG.md`；下方两张表合计只留 v0.1–v0.3 与最近 5 版，再往前的随每次出版移过去。
 
 变更记录：
 
 | 日期 | 版本 | 涉及 ID | 一句话 | 类型 |
 | --- | --- | --- | --- | --- |
+| 2026-10-21 | v1.21 | FLOW-SKETCH-REFINE、PAGE-SKETCH、API-CORE-006 | 草稿里只改一块也能带参考图，图跟着这一块的模型调用发出 | 功能 |
 | 2026-10-20 | v1.20 | REQ-CORE-046、FLOW-LOCALE、PAGE-CANVAS、API-CORE-006、API-CORE-046、ADR-034 | 界面支持中文与英文：缺省跟浏览器、设置里可切，服务端提示与生成内容跟着界面语言 | 功能 |
 | 2026-10-20 | v1.19 | PAGE-CANVAS、PAGE-SKETCH | 缩小显示的屏改用 zoom，修玻璃卡片旁闪出灰色渐变、盖住邻近内容 | 界面 |
 | 2026-10-20 | v1.18 | PAGE-SKETCH | 打开着的草稿出新版、换画框时原地换，不重载、不出「加载中」 | 界面 |
 | 2026-10-20 | v1.17 | REQ-CORE-020、REQ-CORE-023、REQ-CORE-026、REQ-EDIT-003、FLOW-CHAT、PAGE-CANVAS、PAGE-SKETCH、API-CORE-012、ADR-010 | 去掉对话记录与聊天，作业改成输入框上方的 chip，记录栏浮在草稿上，画框不跨组件与页面，内置库少占 90 MB | 界面、功能 |
-| 2026-10-20 | v1.16 | PAGE-CANVAS、PAGE-SKETCH、REQ-CORE-040 | 输入框能拖到左右下三边停靠、收起成贴边胶囊并按页面记忆；草稿本的工具条挪到顶行，草稿在看板里放到最大 | 界面 |
-| 2026-10-20 | v1.15 | REQ-CORE-039、PAGE-CANVAS | 界面视觉换成苹果风：冷灰、系统字体、毛玻璃浮层、黑色胶囊主按钮、苹果蓝标记 | 界面 |
-| 2026-10-20 | v1.14 | FLOW-SKETCH、FLOW-SKETCH-COPY、FLOW-SKETCH-FORK、FLOW-SKETCH-REFINE、REQ-CORE-042、REQ-CORE-043、REQ-CORE-044、REQ-CORE-045、ADR-032、ADR-033、INV-CORE-005 | 草稿可参照项目的视觉、可从屏拿来改、可覆盖回原屏或其中一块，草稿里能点选元素与批注 | 功能 |
-| 2026-10-19 | v1.13 | FLOW-SKETCH、FLOW-SKETCH-COPY、REQ-CORE-040、REQ-CORE-041、ADR-030、ADR-031、INV-CORE-001、INV-CORE-002、INV-CORE-003、INV-CORE-004 | 新增草稿本：一句话出组件或页面，收起再出下一张，满意的放进项目；补上链路总览 | 功能、文档 |
 
 变更记录（旧格式）：
 
@@ -256,6 +253,7 @@
 | 类型 | 分支 | 结果 | 依据 | 测试 |
 | --- | --- | --- | --- | --- |
 | 边界 | 点选的是草稿根 | 等同改整张 | API-CORE-006 | 无用例 |
+| 边界 | 输入框里带了参考图 | 图跟这一块的模型调用一起发出，与改整张时一样 | API-CORE-006；REQ-CORE-012 | TC-CORE-138 |
 | 边界 | 攒了几条批注一起发 | 合成一轮改稿，每条带元素定位 | API-EDIT-003 | TC-CORE-117、TC-CORE-122 |
 | 失败 | 这张草稿上一轮还没改完 | 409 /errors/screen-busy | /errors/screen-busy；竞态「同一屏同时发起两次编辑作业」 | 无用例 |
 | 并发 | 点选之后这张草稿已出了新一版 | 409 /errors/revision-conflict，重新点选 | /errors/revision-conflict；API-CORE-006 | TC-CORE-117 |
@@ -785,17 +783,19 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
   - 缓存：`Cache-Control: private, no-store`（画布是编辑面，写后即读）；FE 超时 10 s，自动重试 1 次
 - **`API-CORE-005` listProjects**：`GET /projects?cursor=`，游标分页，`no-store`；不列草稿本（`kind=sketchbook`，`INV-CORE-002`），入口 `/` 的「最近更新的项目」因此也落不到它
 - **`API-CORE-006` createJob** — 实现 `REQ-CORE-003`、`REQ-CORE-014`、`REQ-PROTO-003`、`REQ-PROTO-004`、`REQ-EDIT-002`、`REQ-EDIT-003`
-  - `POST /projects/{projectId}/jobs`，请求 `{ kind, input }`，`kind` 枚举见 §9；`input` 按 kind：
+  - `POST /projects/{projectId}/jobs`，请求 `{ kind, input, attachmentIds?[] }`，`kind` 枚举见 §9；`attachmentIds` 见下「参考图」；`input` 按 kind：
     - `generate{ prompt, count?: 1|2|3|4|"auto" = 1, versions?: 1–4 = 1, anchor?: {x,y}, route?, fromScreenId?, runner?, imageKeys?, variantOf?, variantName?, presentation? }`（v0.31 三合一；v0.62 `variantOf + variantName` 二者同给 = 造变体：钉死默认屏的路由、`count` 按 1 算、跳过规划器、默认屏作参考屏，`variantOf` 不是本项目的默认屏 → `422 /errors/validation`（建作业时就查，v0.77；此前放在 worker 里判，先回 202、作业随后以英文原因失败，还短暂占着项目级 `generate` 锁）；v0.63 `presentation` 只在懒生成 / 造变体时生效，整组规划由规划器逐屏给）：`count` 为屏数档位——`1` 走单屏规划（`planOneScreen`，路由不得与现有撞车、`links` 只指向现有路由且以空为常态），`2–4` 与 `auto` 走整组规划（`auto` = 空项目 4–6 屏主流程 / 非空项目 2–6 屏子流程；规划器同时给出 `entryFrom`：既有哪一屏进入新组）；`route` 钉死时是懒生成（跳过规划器，`fromScreenId` 作来源屏参考）；`versions` = 每张新屏的候选版数；`anchor` 为画布世界坐标（一组屏按流程顺序自锚点向右排成一行，与既有屏相交则整行下移），缺省接在最右一屏右侧。
       空项目首轮且 `brief` 为空时规划器顺手扩写应用简介落库；样板屏为空时以本次第 1 屏钦定。
       按 `count × versions` 屏计费
     - `edit_screens{ prompt, screenIds[1..20], versions?: 1–4 = 1, runner?, imageKeys?, componentIds?[0..10], annotations?[0..50] }`（`componentIds` 与 `generate` 同名字段，v0.46 `REQ-EDIT-006`：画布上一起框选的共享组件，它们的完整 HTML 进这一轮的上下文；目标屏本来就放着的组件不必列、服务端自己会附上。
-      `annotations: [{ anchorText, note }]`（v0.87）由 `API-EDIT-003` 发送批注时填，只用来把这一轮写进历史指令，不进本轮提示词——本轮的指令仍是 `prompt`，见 `ADR-012` v0.87 修订）；`regenerate_subtree{ screenId, qid, prompt, expectedRevisionId, runner? }`（`runner` 同 `edit_screens`，v0.34；`kind:"agent"` 时该作业也投递到会话）；`apply_design_system{ screenIds[] | all }`；`propose_design_system{ instruction, screenId?, runner? }`（`REQ-EDIT-003`：输出 `output.proposal = { summary, conventions[], tokens?{ seedColor?, fontFamily?, radiusScale? }, regenerate }`，不改任何东西，由 `API-EDIT-002` 确认写入）；`export_prototype{}`
+      `annotations: [{ anchorText, note }]`（v0.87）由 `API-EDIT-003` 发送批注时填，只用来把这一轮写进历史指令，不进本轮提示词——本轮的指令仍是 `prompt`，见 `ADR-012` v0.87 修订）；`regenerate_subtree{ screenId, qid, prompt, expectedRevisionId, runner?, imageKeys? }`（`runner` 同 `edit_screens`，v0.34；`kind:"agent"` 时该作业也投递到会话；`imageKeys` 见下「参考图」）；`apply_design_system{ screenIds[] | all }`；`propose_design_system{ instruction, screenId?, runner? }`（`REQ-EDIT-003`：输出 `output.proposal = { summary, conventions[], tokens?{ seedColor?, fontFamily?, radiusScale? }, regenerate }`，不改任何东西，由 `API-EDIT-002` 确认写入）；`export_prototype{}`
     - `chat{ prompt, screenIds?[0..20], runner?, imageKeys? }`（v0.45 `REQ-CORE-023`）：`screenIds` 是「用户此刻选中的屏」这一条上下文提示，不是目标锁；`runner` 必须解析为 `agent-sdk` 通道（缺省取第一条已验证的 `agent-sdk` 通道），否则 `400 /errors/validation`（`path: runner`）；项目级同时只有一个 `chat` 在跑，撞上 `409 /errors/screen-busy`；成功时 `output.reply` = 助手最后一段文字、`output.screenIds` = 本作业名下修订所在屏
     - `edit_component{ componentId, prompt, runner?, imageKeys? }`（v0.46 `REQ-EDIT-006`）：改一个共享组件——worker 用 `componentSystemPrompt`（只产出组件自己的单根元素；保留 `data-slot`；导航型标恰好一条 `aria-current="page"`）+ `componentUserPrompt`（当前 HTML + 用在哪几屏 + 这个组件的历史指令，v0.87 `ADR-012`）调**一次**模型，校验（单根、无 `<script>` / `<style>`、不套组件）→ 重算 `activeClass` / `inactiveClass` 与 `summary` → 组件 `version+1` → 对所有放着它的屏做确定性回刷（`progress{ stage:"component_synced", screens: N }`，逐屏 `screen_html_ready` + 截图；有在跑作业的屏跳过并点名）；`estimateJob` = 1 次调用（超时 3 + 1 分钟）；成功时 `output.screenIds` = 回刷到的屏、`output.componentId`；一次一个组件；模型产出不合法 → `failed errorClass=validation`，组件不变。
       `runner.kind=agent`（v0.99）时不调模型：投递到本机会话，由会话经 `quilt.update_component { jobId }` 写回，回刷同一条路，收口见 `REQ-AGENT-003`
   - 目标屏（v0.77）：`edit_screens.screenIds` 里有屏不属于本项目或已被删除 → `404 /errors/not-found`，不建作业（此前照建，worker 过滤掉找不到的屏后「成功」更新 0 屏，回执「已更新 0 屏：」）；建成之后、开跑之前目标屏全被删掉的，worker 判 `failed errorClass=validation`，不再报成功；原因按实际情况说（v0.82）：一屏都不在了是「目标屏都已被删除」，屏还在但还没有当前修订（它的造屏作业还没落第一版）是「目标屏还没有生成出内容」，两种都有是「目标屏有的已被删除，其余还没有生成出内容」
   - `regenerate_subtree.screenId` 不属于建作业的项目同样 `404 /errors/not-found`：草稿本里的「只改一块」靠这一条保证目标是草稿（`REQ-CORE-045`）
+  - 参考图（v1.21 `REQ-CORE-045`）：`attachmentIds` 是 `API-CORE-019` 传完图拿到的 id，至多 4 个，服务端按 `API-CORE-010` 同一套解析成 `input.imageKeys`，也挂在这一轮的用户消息上；有 id 取不到正文（没传完或已过期）→ `400 /errors/validation`（`path: attachmentIds`）；这种作业的输入没有 `imageKeys`（`apply_design_system`、`propose_design_system`、`export_prototype`、`ingest_screen`）→ 同样的 `400`。
+    `regenerate_subtree` 带图时，图跟这一块的那一次模型调用走，参考图说明与改整张相同：草稿本里可以照着取色，普通项目只取版式与密度、颜色仍用设计系统的 token。
   - 界面语言（v1.20 `REQ-CORE-046`）：带 `X-Quilt-Locale` 的请求建作业时，服务端把它记进 `input.locale`，每种作业都记，worker 写进助手消息的回执、进度与失败文案按它（发消息 `API-CORE-010`、重试 `API-CORE-034`、批注发送 `API-EDIT-003`、写回改写 `API-CORE-047` 都经同一处建作业）。
     请求没带这个头时作业不记 `input.locale`：请求体里自带的 `locale` 不认，重试以重试请求的头为准，不沿用旧作业的值。
     `generate` / `edit_screens` / `edit_component` / `regenerate_subtree` 这四种写屏上文字的作业还据此给提示词加语言要求，草稿本的新稿与改稿也是这几种：worker 给它们的每次模型调用在系统提示末尾加一句「请求里没有明确要求语言时，屏上所有可见文字用 English / Simplified Chinese」，并写明它优先于提示词里「跟着请求的语言写」的规则；投递到本机会话的指令末尾加同一句。
@@ -1052,7 +1052,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
 | `quilt.get_revision` / `quilt.restore_revision` / `quilt.adopt_candidate` / `quilt.list_candidates` | 底层 | `API-CORE-014` / `API-CORE-015` / `API-CORE-025`（单屏 / 整组）/ `API-CORE-026` | v0.51。`get_revision { screenId, revisionId }` 直接返回该版 HTML 文本与元数据（不是签名 URL——agent 拿到就能重推）；`restore_revision` 带 `expectedRevisionId`，与 REST 一样重拍截图（v0.77；此前复用源修订的截图，屏在两版之间改过呈现方式时，叠层屏留着整屏不透明的旧截图）；`adopt_candidate { jobId, index, screenId? }`（v0.60 单屏与整批合并）：按作业 + 版号寻址，`screenId` 缺省 = 该作业出过候选的每一屏；逐屏成败，返回 `{ adopted: id[], skipped: [{ screenId, error }] }`，`error` 是 `/errors/not-found`（没有那一版）/ `revision-conflict` / `screen-busy`；`screenId` 不在该作业候选里 `404 /errors/not-found` |
 | `quilt.move_screens` | 底层 | `API-CORE-012`（`x` / `y`）+ `API-EDIT-004 PATCH`（组件只挪位置，不升版不回刷） | v0.51。`{ screens?: [{ id, x, y }], components?: [{ id, x, y }] }` 逐张写、逐张成败，返回 `{ moved: { screens, components }, failed: [{ id, error }] }`；与画布多选批量移动（`REQ-CORE-004` v0.47）落的是同一条路径 |
 | `quilt.edit_element` | 底层 | `API-EDIT-001` | v0.51。零 token 直改：`{ screenId, qid, ops, expectedRevisionId }`，`ops` 同 REST（`text` / `classes` / `style` / `link` / `remove` / `detach`），`409 /errors/component-locked` 同样适用 |
-| `quilt.regenerate_subtree` / `quilt.edit_component` / `quilt.propose_design_system` / `quilt.export_prototype` | 高层 | `API-CORE-006` 对应四种 kind | v0.51。都返回作业句柄。`propose_design_system` 的产出在 `output.proposal`，画布侧的「预览确认」在这里就是 agent 自己的判断，确认后经 `quilt.update_design_system` 的 `conventions` / token 字段写回；`edit_component` 不接 `runner.kind=agent`：调用方本身就是会话，自己用 `quilt.update_component` 写（REST 发消息从 v0.99 起可以把改组件投递到本机会话）；`export_prototype` 无输入、无模型调用 |
+| `quilt.regenerate_subtree` / `quilt.edit_component` / `quilt.propose_design_system` / `quilt.export_prototype` | 高层 | `API-CORE-006` 对应四种 kind | v0.51。都返回作业句柄。`propose_design_system` 的产出在 `output.proposal`，画布侧的「预览确认」在这里就是 agent 自己的判断，确认后经 `quilt.update_design_system` 的 `conventions` / token 字段写回；`edit_component` 不接 `runner.kind=agent`：调用方本身就是会话，自己用 `quilt.update_component` 写（REST 发消息从 v0.99 起可以把改组件投递到本机会话）；`regenerate_subtree` 与 `edit_component` 收 `attachmentIds`（参考图，同 `quilt.generate_screens`，v1.21）；`export_prototype` 无输入、无模型调用 |
 | `quilt.get_export` | 底层 | `API-PROTO-002` | v0.51。`{ jobId }` → `{ url, bytes }`，`url` 是 5 分钟签名对象地址（curl 即可下载）；作业未完成 `409 /errors/job-not-finished` |
 | `quilt.list_runners` | 高层 | `API-CORE-023` | v0.51。给 `runner` 字段取 id（响应与 REST 同 DTO，不含密钥）；参考图直传见 `quilt.create_upload_url` |
 | `quilt.list_jobs` / `quilt.cancel_job` / `quilt.get_job_events` | 高层 | `API-CORE-029` / `API-CORE-009` / `API-CORE-008` | v0.51。`get_job_events { jobId, after? }` 是拉取式：返回 `seq > after` 的事件列表，不是 SSE |
@@ -1599,7 +1599,7 @@ v0.32 本地版没有登录页与授权同意页（`PAGE-LOGIN`、`PAGE-AGENT-CO
 **看板**（v1.16，v1.17）：顶部那一行以下的整块区域；输入框、收起后的胶囊与记录栏都浮在看板上面，停在哪、开没开、收没收起都不改看板（可能压住草稿的一角，挪开或收起即可）。打开的草稿是预览域的活 iframe（可点可滚，链接惰性），在看板里居中，按画框放到能放下的最大、最大 1:1——组件按 `quilt:draft-size` 报的大小，手机页 390×844、桌面页 1280×800 的视口；放不下时等比缩小、不裁切，缩小用 `zoom`、不用缩放变换（理由见 `PAGE-CANVAS`「聚焦屏不走缩放变换」，v1.19）；不提供缩放（与预览页一样按真实尺寸看）。打开着的草稿出了新的一版（改一轮、改一块、批注、回到旧版、本机会话回写）时原地换（v1.18）：父页取新版 HTML 经 `quilt:swap`（`keepScroll`）送进 iframe，与画布的聚焦态热更新同一通道，iframe 不重载、不出骨架与「加载中…」，滚动位置留着，组件按新报的大小重排；设计系统变了（`<head>` 不同）时运行时整份重写，父页收到新的 `quilt:ready` 再把选元素与批注的模式发一次。换画框（手机页 ↔ 桌面页）只改视口，不重载。取不到新版 HTML（签名过期）先重取详情再取一次，仍取不到才整页重载。只有换一张草稿、新草稿第一版落地时才加载。
 草稿工具条（v1.16）在顶部那一行：项目切换器与记录栏开关之间，对着看板居中，毛玻璃；不占看板的高度。左端是名字（点了就地改名，`API-CORE-012`），有写回目标时名字下面一行小字「来自「<项目> · <屏>」」；后面是控件：画框（页面草稿在「手机页 / 桌面页」之间二选一，`API-CORE-012` 的 `frame`；组件草稿不显示——组件与页面不能互相换，v1.17）、「参照」（自由风格，或选一个项目，`API-CORE-012` 的 `refProjectId`，`REQ-CORE-042`）、「选元素」与「批注」两个图标开关（`REQ-CORE-045`，悬停或键盘聚焦时出说明）、「版本」（按缩略图列出各版，点「回到这一版」走 `API-CORE-015`）、「写回项目…」（窄屏只留图标）、删除（确认后 `API-CORE-018`，不可恢复）、「收起」。放不下一行时折行，看板跟着下移；窄屏（48rem 以下）它单独占顶部那一行下面的一整行、不折行，放不下的在条里横着滚（滚动条不显示）。
 **快捷键**同画布：`⌘E` 开关「选元素」、`⌥N` 开关「批注」（焦点不在输入框里时）、`⌘/` 收起或展开输入框；焦点在草稿里时由预览运行时转发，照样能按。
-**选元素**：开着时点草稿里的元素，它被框出、输入框目标区多一枚「「<草稿名>」里的 <标签>「<文字>」」胶囊，动词行写「改这一块」，发送建 `regenerate_subtree`（`API-CORE-006`）；`Esc` 或 × 去掉胶囊回到改整张。
+**选元素**：开着时点草稿里的元素，它被框出、输入框目标区多一枚「「<草稿名>」里的 <标签>「<文字>」」胶囊，动词行写「改这一块」，发送建 `regenerate_subtree`（`API-CORE-006`），输入框里的参考图一起带上（v1.21）；`Esc` 或 × 去掉胶囊回到改整张。
 **批注**：开着时点元素弹出说明框，存下后看板上该处出一枚编号气泡（随看板缩放）；输入框上方写「N 条批注 · 发送」，发送走 `API-EDIT-003`，与画布的批注同一套接口。两个开关互斥，都开着时草稿不响应链接与表单。
 看板为空时正中一句提示与三条可点的示例；新草稿生成中时看板正中是骨架（只呼吸）与进度一句话，第一版落库即换成活 iframe；失败时骨架撤掉、提示条写失败原因（`failureText`）。
 在跑的作业同画布，以作业 chip 叠在输入框上方（`PAGE-CANVAS`「作业 chip」）。

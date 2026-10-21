@@ -117,8 +117,8 @@ export const jobInputSchemas = {
   edit_screens: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).min(1).max(20), versions: versionsSchema.default(1), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), componentIds: componentIdsSchema, annotations: z.array(z.object({ anchorText: z.string().max(200), note: z.string().min(1).max(2000) })).max(50).optional(), locale: jobLocaleSchema }),
   // 改共享组件（REQ-EDIT-006）：一次一个；成功后所有用到它的屏确定性回刷（零 LLM）
   edit_component: z.object({ componentId: z.uuid(), prompt: z.string().trim().min(1).max(8000), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), locale: jobLocaleSchema }),
-  // 子树重生成（REQ-EDIT-002）：runner 可单独选（检查器里有自己的通道 / 会话选择器，记忆独立于输入框）
-  regenerate_subtree: z.object({ screenId: z.uuid(), qid: z.string().regex(/^q\d+$/), prompt: z.string().trim().min(1).max(4000), expectedRevisionId: z.uuid(), runner: runnerSchema.optional(), locale: jobLocaleSchema }),
+  // 子树重生成（REQ-EDIT-002）：runner 可单独选（检查器里有自己的通道 / 会话选择器，记忆独立于输入框）；草稿里只改一块时可带参考图（REQ-CORE-045）
+  regenerate_subtree: z.object({ screenId: z.uuid(), qid: z.string().regex(/^q\d+$/), prompt: z.string().trim().min(1).max(4000), expectedRevisionId: z.uuid(), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), locale: jobLocaleSchema }),
   apply_design_system: z.object({ screenIds: z.union([z.literal('all'), z.array(z.uuid()).min(1)]) }),
   // 设计系统提炼（REQ-EDIT-003）：只产出提案（output.proposal），写入由 API-EDIT-002 在预览确认后完成
   propose_design_system: z.object({ instruction: z.string().trim().min(1).max(4000), screenId: z.uuid().optional(), runner: runnerSchema.optional() }),
@@ -152,6 +152,8 @@ export const createJobSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('edit_component'), input: jobInputSchemas.edit_component }),
 ]);
 export type CreateJobInput = z.infer<typeof createJobSchema>;
+// 建作业请求（API-CORE-006）：作业之外可带参考图 id，服务端解析成 input.imageKeys
+export const createJobRequestSchema = createJobSchema.and(z.object({ attachmentIds: z.array(z.uuid()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional() }));
 
 // 用量预估（REQ-CORE-008）：发送前、建作业、「按新约定重生成」确认三处共用这一个函数。
 // 每屏每版一次模型调用（v0.43 起没有修复轮）；造屏另有规划 1 次、入口屏补链至多 1 次——钉死路由的懒生成不规划、

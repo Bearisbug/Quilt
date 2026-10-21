@@ -216,7 +216,7 @@ export function SketchRoute() {
     else toast(problemText(e, t('page.send.offline')), 'error');
   };
   // 发送（API-CORE-010 草稿本）：看板空着 = 新草稿（带画框与参照），有草稿 = 改它；选元素点中了一块 = 只改这一块（API-CORE-006 regenerate_subtree，
-  // 目标是这张草稿与点中的元素，expectedRevisionId 取点选时的那一版）。没发出去时输入框留着字与参考图（REQ-CORE-020）
+  // 目标是这张草稿与点中的元素，expectedRevisionId 取点选时的那一版，参考图同样带上）。没发出去时输入框留着字与参考图（REQ-CORE-020）
   const onSend = async (content: string, attachmentIds: string[], frame: DraftFrameChoice, refProjectId: string | null): Promise<boolean> => {
     if (!projectId) return false;
     const target = open;
@@ -224,9 +224,7 @@ export function SketchRoute() {
     const agentNote = prefs.agentTool === 'codex' ? t('page.send.toCodex') : t('page.send.toClaude');
     try {
       if (target && block) {
-        // 子树重生成不收参考图：带着图就挡下，不静默丢掉
-        if (attachmentIds.length) { toast(t('page.send.blockWithImages'), 'error'); return false; }
-        const { job } = await api.projects.createJob(projectId, { kind: 'regenerate_subtree', input: { screenId: target.id, qid: block.qid, prompt: content, expectedRevisionId: block.revisionId, runner: prefs.sendRunner } });
+        const { job } = await api.projects.createJob(projectId, { kind: 'regenerate_subtree', input: { screenId: target.id, qid: block.qid, prompt: content, expectedRevisionId: block.revisionId, runner: prefs.sendRunner }, attachmentIds: attachmentIds.length ? attachmentIds : undefined });
         book.track(job);
         if (job.runner === 'agent') toast(agentNote);
         return true;

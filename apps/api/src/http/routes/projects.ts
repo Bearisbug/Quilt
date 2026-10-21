@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { and, eq, desc, asc, lt, inArray, isNull } from 'drizzle-orm';
-import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, ROUND_PRESET_PROMPTS, missingPagePrompt, variantPrompt, presetPrompt, presetNote, createProjectSchema, createJobSchema, createMessageSchema, retryMessageSchema, createAttachmentSchema, updateProjectSchema, cursorQuerySchema, listJobsQuerySchema, type MessageDto, type LinkDto, type CreateJobInput, type JobKind, type ProjectEventDto, type Runner, createPresetSchema, applyPresetSchema, L } from '@quilt/core';
+import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, ROUND_PRESET_PROMPTS, missingPagePrompt, variantPrompt, presetPrompt, presetNote, createProjectSchema, createJobRequestSchema, jobInputSchemas, createMessageSchema, retryMessageSchema, createAttachmentSchema, updateProjectSchema, cursorQuerySchema, listJobsQuerySchema, type MessageDto, type LinkDto, type CreateJobInput, type JobKind, type ProjectEventDto, type Runner, createPresetSchema, applyPresetSchema, L } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
 import { parseBody, parseQuery, requireUser, type Env } from '../app.ts';
 import { createProject, deleteProject, getProjectDetail, listProjects, ownedProject, updateProject, projectDto, designSystemDto, jobDto } from '../../services/projects.ts';
@@ -111,7 +111,12 @@ function describeJob(input: CreateJobInput): string | null {
 projectRoutes.post('/v1/projects/:projectId/jobs', async (c) => {
   const user = requireUser(c);
   const project = await ownedProject(user.id, c.req.param('projectId'));
-  const input = await parseBody(c, createJobSchema);
+  const { attachmentIds, ...rest } = await parseBody(c, createJobRequestSchema);
+  const input = rest as CreateJobInput;
+  // 参考图（API-CORE-006）：同发消息，id 解析成 input.imageKeys、也挂在这一轮的用户消息上；这种作业的输入没有 imageKeys 就不收
+  if (attachmentIds?.length && !('imageKeys' in jobInputSchemas[input.kind].shape)) throw problems.validation([{ path: 'attachmentIds', message: L('这种作业不收参考图', 'This kind of job does not take reference images') }]);
+  const attachments = await resolveForMessage(project.id, attachmentIds);
+  if (attachments.length) (input.input as { imageKeys?: string[] }).imageKeys = attachments.map((a) => a.key);
   // 新草稿的参照项目（REQ-CORE-042）：同 API-CORE-010，得是本人的普通项目
   const ref = input.kind === 'generate' ? input.input.refProjectId : undefined;
   if (ref && (await ownedProject(user.id, ref)).kind !== 'app') throw problems.notFound();
@@ -119,7 +124,7 @@ projectRoutes.post('/v1/projects/:projectId/jobs', async (c) => {
   // 输入里带的通道决定执行者：本机 agent（如检查器里选了会话的子树重生成）投递到会话，其余入 worker 队列
   const jobRunner = (input.input as { runner?: { kind?: string; tool?: string; sessionId?: string } }).runner;
   const agent = jobRunner?.kind === 'agent';
-  const { job, assistantMessage, reused } = await createJob({ user, projectId: project.id, input, idempotencyKey: c.req.header('idempotency-key') ?? null, requestId: c.get('requestId'), runner: agent ? 'agent' : 'model', withMessage: content ? { content } : undefined });
+  const { job, assistantMessage, reused } = await createJob({ user, projectId: project.id, input, idempotencyKey: c.req.header('idempotency-key') ?? null, requestId: c.get('requestId'), runner: agent ? 'agent' : 'model', withMessage: content ? { content, attachments } : undefined });
   if (agent && assistantMessage && !reused) {
     await db.update(schema.messages).set({ content: await deliveredText(jobRunner) }).where(eq(schema.messages.id, assistantMessage.id));
   }
