@@ -1,4 +1,4 @@
-import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, ElementOp, AnnotationDto, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, DraftFrame, DraftFrameChoice, SketchbookDto, CopyDraftInput, CreateDraftInput, CopyDraftResultDto } from '@quilt/core/browser';
+import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, ElementOp, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, DraftFrame, DraftFrameChoice, SketchbookDto, CopyDraftInput, CreateDraftInput, CopyDraftResultDto } from '@quilt/core/browser';
 
 import { getLocale } from '@/i18n';
 
@@ -115,13 +115,6 @@ export const api = {
   },
   designSystem: {
     update: (projectId: string, patch: { seedColor?: string; fontFamily?: string; fontSource?: 'google' | 'system' | 'url'; fontUrl?: string | null; radiusScale?: 'sharp' | 'default' | 'round'; palette?: Palette | null; colorMode?: ColorMode; designMd?: string; conventions?: string[]; expectedVersion: number }) => call<{ designSystem: DesignSystemDto }>(`/v1/projects/${projectId}/design-system`, { method: 'PUT', body: JSON.stringify(patch) }),
-  },
-  annotations: {
-    create: (screenId: string, input: { qid: string; note: string; anchorText: string; rect: AnnotationDto['rect'] }) =>
-      call<{ annotation: AnnotationDto }>(`/v1/screens/${screenId}/annotations`, { method: 'POST', body: JSON.stringify(input) }),
-    update: (id: string, patch: { note?: string }) => call<{ annotation: AnnotationDto }>(`/v1/annotations/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-    remove: (id: string) => call<void>(`/v1/annotations/${id}`, { method: 'DELETE' }),
-    send: (projectId: string, annotationIds: string[]) => call<{ jobs: JobDto[] }>(`/v1/projects/${projectId}/annotations/send`, { method: 'POST', body: JSON.stringify({ annotationIds }) }),
   },
   // 草稿本（REQ-CORE-040 / REQ-CORE-041）：取回（没有就建）草稿本的项目 id，草稿与版本的读写都走项目与屏的接口；
   // 写回项目是一次性快照：新屏 / 组件 restyle 时服务端再建一个改写作业，覆盖整屏 / 换一块原样写成目标屏的新一版（API-CORE-047）；

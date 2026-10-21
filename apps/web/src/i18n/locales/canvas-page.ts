@@ -98,16 +98,6 @@ export default defineMessages('canvas-page', {
     conflict: '设计系统已被更新，请刷新后重试',
     writeFailed: '写入失败',
   },
-  annotate: {
-    noComponents: '共享组件不能批注，点任意一屏开始批注',
-    failed: '批注失败',
-    saveFailed: '保存失败',
-    deleteFailed: '删除失败',
-    sent_one: '已发送 {{count}} 条批注',
-    sent_other: '已发送 {{count}} 条批注',
-    sentScreens: '已发送 {{n}} 条批注（{{screens}} 屏）',
-    sendFailed: '发送批注失败',
-  },
   tools: {
     fit: { label: '适配视图', desc: '缩放画布，把全部屏幕和风格指南卡片一次装进视野' },
     find: { label: '找屏', desc: '按名字、路由或用途搜屏与组件，Enter 跳过去并选中' },
@@ -123,11 +113,6 @@ export default defineMessages('canvas-page', {
       label: '选择元素',
       on: '选择元素中',
       desc: '开了就一直在：点任意一屏进去点选元素，改文案/样式/跳转（零 token），或只让 AI 重做这一块。再按一次退出，卡片回到静态',
-    },
-    annotate: {
-      label: '批注',
-      on: '批注中',
-      desc: '开了就一直在：点任意一屏的元素写下要改什么，攒成一批再一起发——同一屏的多条批注合成一次作业，少跑几轮',
     },
     repair: {
       label: '接上跳转',
@@ -283,16 +268,6 @@ export default defineMessages('canvas-page', {
     conflict: 'The design system was updated elsewhere; refresh and try again',
     writeFailed: 'Write failed',
   },
-  annotate: {
-    noComponents: 'Shared components can’t be annotated; click any screen to start annotating',
-    failed: 'Couldn’t add the annotation',
-    saveFailed: 'Couldn’t save',
-    deleteFailed: 'Couldn’t delete',
-    sent_one: 'Sent {{count}} annotation',
-    sent_other: 'Sent {{count}} annotations',
-    sentScreens: 'Sent {{n}} annotations ({{screens}} screens)',
-    sendFailed: 'Couldn’t send the annotations',
-  },
   tools: {
     fit: { label: 'Fit view', desc: 'Zoom the canvas to fit every screen and the style guide card in view' },
     find: { label: 'Find screen', desc: 'Search screens and components by name, route or purpose; Enter jumps there and selects it' },
@@ -308,11 +283,6 @@ export default defineMessages('canvas-page', {
       label: 'Select element',
       on: 'Selecting element',
       desc: 'Stays on until turned off: click into any screen and pick an element to edit its text, style or link (zero tokens), or have AI regenerate just that block. Press again to exit; cards go back to static previews',
-    },
-    annotate: {
-      label: 'Annotate',
-      on: 'Annotating',
-      desc: 'Stays on until turned off: click an element on any screen, note what to change, and send the notes as one batch. Annotations on the same screen become a single job, so it takes fewer rounds',
     },
     repair: {
       label: 'Connect links',

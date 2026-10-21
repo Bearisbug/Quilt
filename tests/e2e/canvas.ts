@@ -47,6 +47,8 @@ const world = (page: Page) => page.evaluate(() => {
   const m = (document.querySelector('.world') as HTMLElement).style.transform.match(/translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/)!;
   return { x: Number(m[1]), y: Number(m[2]), zoom: Number(m[3]) };
 });
+// 双击组件卡后镜头会摆过去（v1.23，250 ms）：等世界层的 transform 连续两次读到一样再量
+const cameraSettled = async (page: Page) => { let a = JSON.stringify(await world(page)); for (let i = 0; i < 20; i++) { await sleep(100); const b = JSON.stringify(await world(page)); if (b === a) return; a = b; } };
 const blur = (page: Page) => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 const panelParam = (page: Page) => new URL(page.url()).searchParams.get('panel');
 const card = (page: Page, route: string) => page.locator(`[data-testid="screen-card"][data-route="${route}"]`);
@@ -156,23 +158,6 @@ await step('TC-CORE-057', '4', async () => {
   return '第一下清选中（目标标签留着），第二下才取消作业';
 });
 
-await step('TC-CORE-057', '5', async () => {
-  const page = await openEsc();
-  const comp = page.locator('[data-testid="component-card"][data-name="Bar"]');
-  await comp.locator('.gesture').dblclick();
-  await eventually(async () => expect((await page.locator('.comp.focused').count()) === 1, '双击组件卡没进交互态'));
-  await blur(page);
-  await page.keyboard.press('Alt+n');
-  await eventually(async () => expect((await page.locator('.comp.focused').count()) === 0, '组件交互态下按 ⌥N，组件没退出交互态'));
-  expect(panelParam(page) === 'annotate', `⌥N 后应开批注模式（panel=${panelParam(page)}）`);
-  expect((await page.getByTestId('armed-hint').innerText()).includes('批注模式'), '待命提示不是批注模式');
-  await eventually(async () => expect((await page.locator('[aria-live="polite"]').filter({ hasText: '共享组件不能批注' }).count()) === 1, '没说明组件不能批注'));
-  await page.keyboard.press('Escape');
-  await sleep(400);
-  expect(panelParam(page) === null && cancels.length === 0, 'Esc 应退出批注模式、不取消作业');
-  return '组件交互态 ⌥N：退出组件交互态、开批注模式并 toast 说明';
-});
-
 // ---------- TC-CORE-058 卡片标签、选中描边、指针与小地图（load-10 / canvas-2 / 3 / 7 / 8 / 9 / 14 / 15 / 17） ----------
 const ptr = seedProject('Pointer', '--device', 'mobile', '--screens', '4', '--no-shot');
 const ptrPid = ptr.projectId;
@@ -252,6 +237,7 @@ await step('TC-CORE-058', '5', async () => {
   await page.locator('[data-testid="component-card"][data-name="Tab Bar"][data-ready]').waitFor({ timeout: 20000 });
   await comp.locator('.gesture').dblclick();
   await eventually(async () => expect((await page.locator('.comp.focused').count()) === 1, '双击组件卡没进交互态'));
+  await cameraSettled(page);
   const f = (await comp.boundingBox())!;
   const start = { x: f.x - 150, y: f.y + f.height + 200 };
   const target = { x: f.x + f.width / 2, y: f.y + f.height / 2 };
@@ -276,6 +262,7 @@ await step('TC-CORE-058', '6', async () => {
   await page.locator('[data-testid="component-card"][data-name="Tab Bar"][data-ready]').waitFor({ timeout: 20000 });
   await comp.locator('.gesture').dblclick();
   await eventually(async () => expect((await page.locator('.comp.focused').count()) === 1, '双击组件卡没进交互态'));
+  await cameraSettled(page);
   const c = await center(page, '[data-testid="component-card"][data-name="Tab Bar"]');
   await page.mouse.move(c.x, c.y);
   const w0 = await world(page);
@@ -294,6 +281,7 @@ await step('TC-CORE-058', '7', async () => {
   await page.locator('[data-testid="component-card"][data-name="Tab Bar"][data-ready]').waitFor({ timeout: 20000 });
   await comp.locator('.gesture').dblclick();
   await eventually(async () => expect((await page.locator('.comp.focused').count()) === 1, '双击组件卡没进交互态'));
+  await cameraSettled(page);
   const c = await center(page, '[data-testid="component-card"][data-name="Tab Bar"]');
   await page.mouse.move(c.x, c.y);
   const w1 = await world(page);
@@ -347,6 +335,7 @@ await step('TC-CORE-058', '10', async () => {
   await page.locator('[data-testid="component-card"][data-name="Tab Bar"][data-ready]').waitFor({ timeout: 20000 });
   await tab.locator('.gesture').dblclick();
   await eventually(async () => expect((await page.locator('.comp.focused').count()) === 1, '双击组件卡没进交互态'));
+  await cameraSettled(page);
   const t = (await tab.boundingBox())!; const h = (await head.boundingBox())!;
   const from = { x: h.x + 40, y: h.y + h.height / 2 };
   const to = { x: t.x + t.width / 2, y: t.y + t.height / 2 };
@@ -405,6 +394,7 @@ await step('TC-CORE-058', '12', async () => {
   await page.locator('[data-testid="component-card"][data-name="Tab Bar"][data-ready]').waitFor({ timeout: 20000 });
   await comp.locator('.gesture').dblclick();
   await eventually(async () => expect((await page.locator('.comp.focused').count()) === 1, '双击组件卡没进交互态'));
+  await cameraSettled(page);
   await blur(page);
   const f = (await comp.boundingBox())!;
   const start = { x: f.x - 150, y: f.y + f.height + 200 };
@@ -490,7 +480,7 @@ await step('TC-CORE-059', '2', async () => {
 
 await step('TC-CORE-059', '3', async () => {
   const page = await open(keysPid, { view: { x: 200, y: 80, zoom: 0.5 } });
-  const tools = ['适配视图', '批注', '设计系统', '本机 agent'];
+  const tools = ['适配视图', '选择元素', '设计系统', '本机 agent'];
   const tops = async () => Object.fromEntries(await Promise.all(tools.map(async (n) => [n, Math.round((await page.getByRole('toolbar', { name: '画布工具' }).getByRole('button', { name: n, exact: true }).boundingBox())!.y)])));
   const idle = await tops();
   const c = await center(page, '[data-testid="screen-card"][data-route="/s1"]');
@@ -529,16 +519,16 @@ await step('TC-CORE-059', '4', async () => {
   const fl = page.frameLocator('.card.focused iframe');
   await fl.locator('h1').first().click();
   expect((await activeInfo(page)).tag === 'IFRAME', '点屏里之后焦点不在 iframe');
-  await page.keyboard.press('Alt+n');
-  await eventually(() => expect(panelParam(page) === 'annotate', `焦点在 iframe 里按 ⌥N 没开批注（panel=${panelParam(page)}）`), 3000);
-  await page.keyboard.press('Alt+n');
+  await page.keyboard.press('Alt+s');
+  await eventually(() => expect(panelParam(page) === 'screens', `焦点在 iframe 里按 ⌥S 没开屏列表（panel=${panelParam(page)}）`), 3000);
+  await page.keyboard.press('Alt+s');
   await sleep(300);
   await card(page, '/s2').locator('.gesture').dblclick();
   await page.locator('.card.focused .badge', { hasText: '交互中' }).waitFor({ timeout: 30000 });
   await page.frameLocator('.card.focused iframe').locator('h1').first().click();
   await page.keyboard.press('Alt+d');
   await eventually(() => expect(panelParam(page) === 'design', `焦点在 iframe 里按 ⌥D 没开设计系统（panel=${panelParam(page)}）`), 3000);
-  return '焦点在预览 iframe 里 ⌥N 开批注、⌥D 开设计系统';
+  return '焦点在预览 iframe 里 ⌥S 开屏列表、⌥D 开设计系统';
 });
 
 await step('TC-CORE-059', '5', async () => {
@@ -904,6 +894,74 @@ await step('TC-CORE-127', '1', async () => {
   expect(back.length > 0 && offBack.length === 0, `展开后输入框横移了：胶囊中线 ${mid}，输入框逐帧中线 ${back.join(',')}`);
   await page.evaluate(() => localStorage.removeItem('quilt:composer:canvas'));
   return `收起 ${down.length} 帧、展开 ${back.length} 帧，中线都在 ${mid}±2`;
+});
+
+// ---------- TC-CORE-139 双击组件卡把镜头摆过去（v1.23，PAGE-CANVAS「共享组件」） ----------
+// 可用区取画布自己量的那块（safe-area 探针：四边是工具栏、顶栏与输入框的占位），镜头按它居中
+const cfPid = seedProject('CompFocus', '--device', 'mobile', '--screens', '6', '--no-shot').projectId;
+await addComponent(cfPid, 'Bar', '<nav class="h-16 flex items-center justify-around bg-surface border-t border-outline-variant"><span>A</span><span>B</span><span>C</span></nav>', 0, 1000);
+const BAR = '[data-testid="component-card"][data-name="Bar"]';
+const barBox = async (page: Page) => (await page.locator(BAR).boundingBox())!;
+const safeBox = async (page: Page) => (await page.getByTestId('safe-area').boundingBox())!;
+const barReady = (page: Page) => page.locator(`${BAR}[data-ready]`).waitFor({ timeout: 20000 });
+// 双击卡片、等 400 ms（镜头 250 ms 到位）：卡片中心对可用区中心、宽对自然宽（卡片的 CSS 宽，不随镜头缩放）
+const enterBar = async (page: Page) => {
+  const before = await barBox(page);
+  await page.locator(BAR).locator('.gesture').dblclick();
+  await sleep(400);
+  const after = await barBox(page); const safe = await safeBox(page);
+  const natural = await page.locator(BAR).evaluate((el) => (el as HTMLElement).offsetWidth);
+  const off = { dx: after.x + after.width / 2 - (safe.x + safe.width / 2), dy: after.y + after.height / 2 - (safe.y + safe.height / 2) };
+  return { before, after, safe, natural, off, live: await page.locator(BAR).locator('.live-dot').count(), zoom: (await world(page)).zoom };
+};
+const checkCentered = (r: Awaited<ReturnType<typeof enterBar>>) => {
+  expect(r.live === 1, '双击组件卡没进交互态（没有 live-dot）');
+  expect(Math.abs(r.off.dx) <= 24 && Math.abs(r.off.dy) <= 24, `卡片中心偏离可用区中心 (${Math.round(r.off.dx)}, ${Math.round(r.off.dy)})：卡片 ${JSON.stringify(r.after)}，可用区 ${JSON.stringify(r.safe)}`);
+  expect(Math.abs(r.after.width - r.natural) <= 1, `卡片宽 ${r.after.width.toFixed(1)} 不等于自然宽 ${r.natural}（镜头缩放 ${r.zoom}）`);
+  expect(r.after.width > r.before.width, `卡片没比双击前大：${r.before.width.toFixed(1)} → ${r.after.width.toFixed(1)}`);
+};
+const openFit = async () => {
+  const page = await open(cfPid);
+  await barReady(page);
+  await blur(page);
+  await page.keyboard.press('KeyF');
+  await sleep(800);
+  return page;
+};
+
+await step('TC-CORE-139', '1', async () => {
+  const page = await openFit();
+  const r = await enterBar(page);
+  checkCentered(r);
+  return `宽 ${r.before.width.toFixed(0)} → ${r.after.width.toFixed(0)}（自然宽 ${r.natural}），中心偏差 (${Math.round(r.off.dx)}, ${Math.round(r.off.dy)})`;
+});
+
+await step('TC-CORE-139', '2', async () => {
+  const page = await openFit();
+  const r = await enterBar(page);
+  expect(r.live === 1, '双击组件卡没进交互态，接不上 Esc 这一步');
+  await page.keyboard.press('Escape');
+  await eventually(async () => expect((await page.locator('.comp.focused').count()) === 0 && (await page.locator(BAR).locator('.live-dot').count()) === 0, 'Esc 没退出组件交互态'));
+  await sleep(400);
+  const b = await barBox(page);
+  const d = [b.x - r.after.x, b.y - r.after.y, b.width - r.after.width, b.height - r.after.height];
+  expect(d.every((v) => Math.abs(v) <= 1), `Esc 后镜头没留在那儿：卡片框 ${JSON.stringify(r.after)} → ${JSON.stringify(b)}`);
+  return `Esc 后卡片框差 ${d.map((v) => v.toFixed(1)).join(' / ')} px`;
+});
+
+await step('TC-CORE-139', '3', async () => {
+  // 先按 0.3 打开量出卡片与可用区，再按算好的平移重开：卡片右下角贴在可用区右下角内 24 px
+  const probe = await open(cfPid, { view: { x: 0, y: 0, zoom: 0.3 } });
+  await barReady(probe);
+  const b0 = await barBox(probe); const a = await safeBox(probe);
+  const view = { x: Math.round(a.x + a.width - 24 - (b0.x + b0.width)), y: Math.round(a.y + a.height - 24 - (b0.y + b0.height)), zoom: 0.3 };
+  const page = await open(cfPid, { view });
+  await barReady(page);
+  const b1 = await barBox(page); const a1 = await safeBox(page);
+  expect(b1.x + b1.width <= a1.x + a1.width && b1.y + b1.height <= a1.y + a1.height && b1.x + b1.width / 2 > a1.x + a1.width / 2 && b1.y + b1.height / 2 > a1.y + a1.height / 2, `卡片没摆到可用区右下角：卡片 ${JSON.stringify(b1)}，可用区 ${JSON.stringify(a1)}`);
+  const r = await enterBar(page);
+  checkCentered(r);
+  return `0.3 下卡片在右下角 (${Math.round(b1.x)}, ${Math.round(b1.y)})，双击后宽 ${r.after.width.toFixed(0)}（自然宽 ${r.natural}），中心偏差 (${Math.round(r.off.dx)}, ${Math.round(r.off.dy)})`;
 });
 
 await (ctx as BrowserContext | null)?.close().catch(() => {});

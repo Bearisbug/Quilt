@@ -270,7 +270,7 @@ async function overwriteScreen(target: ProjectRow, input: CopyDraftInput, draftB
   const current = (await currentBody(screen.id)) ?? '';
   const replaced = overwriteBody(current, draftBody, input.qid);
   if (!replaced) throw problems.elementNotFound();
-  // 共享组件实例里的元素不能换（与直改、批注同一把锁）：换进去的内容在下一次写入时就被组件正式版盖回
+  // 共享组件实例里的元素不能换（与直改同一把锁）：换进去的内容在下一次写入时就被组件正式版盖回
   if (input.qid) await assertNotLocked(target.id, current, input.qid);
   // 共享组件占位照常按目标项目的正式版展开（草稿里改到的实例被盖回），照常 lint
   const expanded = expandComponents(replaced.body, await sharedComponentsOf(target.id), screen.route).html;

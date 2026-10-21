@@ -453,7 +453,7 @@ await step('TC-CORE-062', async () => {
   const cur = (await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${pid}`)).body.screens.find((s) => s.id === s1)!.currentRevisionId;
   const probes: [string, string, unknown?][] = [
     ['GET', '/v1/projects/x'], ['GET', '/v1/projects/x/messages'], ['PATCH', '/v1/screens/x', { x: 1 }], ['DELETE', '/v1/screens/x'], ['GET', '/v1/jobs/x'],
-    ['POST', '/v1/jobs/x/cancel', {}], ['POST', '/v1/jobs/x/candidates/adopt', { index: 0 }], ['DELETE', '/v1/components/x'], ['PATCH', '/v1/annotations/x', { note: 'n' }],
+    ['POST', '/v1/jobs/x/cancel', {}], ['POST', '/v1/jobs/x/candidates/adopt', { index: 0 }], ['DELETE', '/v1/components/x'],
     ['DELETE', '/v1/assets/x'], ['DELETE', '/v1/design-presets/x'], ['DELETE', '/v1/channels/x'], ['POST', `/v1/projects/${pid}/messages/x/retry`, {}],
     ['GET', `/v1/screens/${s1}/revisions/x`], ['POST', `/v1/screens/${s1}/revisions/x/restore`, { expectedRevisionId: cur }],
   ];
@@ -493,7 +493,7 @@ await step('TC-CORE-062', async () => {
   }
 
   if (bad.length) { console.log(`   TC-CORE-062 全部失败项：\n   - ${bad.join('\n   - ')}`); throw new Error(bad.join('；')); }
-  return '目标屏不存在 / 已删 404、组件已删的重试同发消息 400、variantOf 422，均不建作业；15 个非 UUID 路径 404、两处非法游标 400；附件类型 / 空文件与组件删根 422；空正文与不配套的隐藏参数 400';
+  return '目标屏不存在 / 已删 404、组件已删的重试同发消息 400、variantOf 422，均不建作业；14 个非 UUID 路径 404、两处非法游标 400；附件类型 / 空文件与组件删根 422；空正文与不配套的隐藏参数 400';
 });
 
 // v0.77 并发写入的一致性（DESIGN §16 竞态表）：采用候选 vs 回溯、设计系统同版本并发保存、同一幂等键并发、删屏 / 删项目时在途截图
@@ -573,7 +573,7 @@ await step('TC-CORE-063', async () => {
 });
 
 // v0.77 别处的写入推到已打开的画布（DESIGN API-CORE-030、PAGE-CANVAS「变化从哪来都能到」）：MCP 与另一个「标签页」（直接调 REST）
-// 挪屏、删屏、改项目名、改设计系统、建组件、加批注，画布不刷新就能看到；项目被删时事件流发完 project_deleted 就关，画布重取得 404
+// 挪屏、删屏、改项目名、改设计系统、建组件、改简介，画布不刷新就能看到；项目被删时事件流发完 project_deleted 就关，画布重取得 404
 await step('TC-CORE-064', async () => {
   const bad: string[] = [];
   const check = (cond: unknown, msg: string) => { if (!cond) bad.push(msg); };
@@ -604,12 +604,12 @@ await step('TC-CORE-064', async () => {
     await callTool(mcp, 'quilt.update_project', { projectId: pid, name: 'Live 2' });
     await eventually(async () => expect((await pg.title()).startsWith('Live 2'), 'rename'), 4000).catch(async () => check(false, `MCP 改名后 4 s 标签页标题仍是「${await pg.title()}」`));
     await pg.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-tc-core-064.png`) });
-    // 改设计系统（另一个标签页：直接 PUT）、建组件（MCP）、加批注（REST）
+    // 改设计系统（另一个标签页：直接 PUT）、建组件（MCP）、改简介（REST）
     const v = (await apiJson<{ designSystem: { version: number } }>(`/v1/projects/${pid}`)).body.designSystem.version;
     await refetched('另一个标签页改设计系统', () => apiJson(`/v1/projects/${pid}/design-system`, { method: 'PUT', body: JSON.stringify({ seedColor: '#E03131', expectedVersion: v }) }));
     await callTool(mcp, 'quilt.create_component', { projectId: pid, name: 'Badge', html: '<span class="px-2 rounded-full bg-primary text-on-primary">new</span>' });
     await eventually(async () => expect((await pg.locator('[data-testid="component-card"][data-name="Badge"]').count()) === 1, 'component'), 4000).catch(() => check(false, 'MCP 建组件后 4 s 画布上没有组件卡'));
-    await refetched('另一个标签页加批注', () => apiJson(`/v1/screens/${s1}/annotations`, { method: 'POST', body: JSON.stringify({ qid: 'q1', note: '标题再大一点', anchorText: 'Screen 1', rect: { x: 0, y: 0, w: 100, h: 40 } }) }));
+    await refetched('另一个标签页改简介', () => apiJson(`/v1/projects/${pid}`, { method: 'PATCH', body: JSON.stringify({ brief: '一个记账 App，简介改过' }) }));
     // 删项目：一条独立的事件流应收到 project_deleted 并结束；画布重取得 404
     const es = await fetch(`${API}/v1/projects/${pid}/events`, { headers: { Accept: 'text/event-stream' } });
     const reader = es.body!.getReader();
@@ -625,5 +625,5 @@ await step('TC-CORE-064', async () => {
     await eventually(() => expect(detailGets.filter((s) => s === 404).length > n404, '404'), 5000).catch(() => check(false, '删项目后 5 s 画布没有重取详情（没拿到 404）'));
   } finally { await mcp.close(); await pg.close(); }
   if (bad.length) { console.log(`   TC-CORE-064 全部失败项：\n   - ${bad.join('\n   - ')}`); throw new Error(bad.join('；')); }
-  return 'MCP 挪屏 / 删屏 / 改名、建组件在 4 s 内到画布；另一个标签页改设计系统、加批注触发重取；删项目时事件流发 project_deleted 后结束，画布重取得 404';
+  return 'MCP 挪屏 / 删屏 / 改名、建组件在 4 s 内到画布；另一个标签页改设计系统、改简介触发重取；删项目时事件流发 project_deleted 后结束，画布重取得 404';
 });

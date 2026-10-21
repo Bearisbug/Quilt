@@ -282,13 +282,6 @@ export function presetNote(prompt: string, base: string): string | null {
   return prompt.startsWith(base + NOTE_MARK) ? prompt.slice(base.length + NOTE_MARK.length) : null;
 }
 
-// 批注合并成一条整屏指令（REQ-EDIT-004）：每屏一次作业，逐条点名元素 qid 与当初的可见文案，
-// 元素已不存在时让模型按文案自行判断、忽略即可，不要因为一条批注失效就放弃整屏。
-export function annotationsPrompt(items: { qid: string; note: string; anchorText: string }[]): string {
-  const list = items.map((a, i) => `${i + 1}. 元素 data-qid="${a.qid}"${a.anchorText ? `（当时文案「${a.anchorText}」）` : ''}：${a.note}`).join('\n');
-  return `Apply the following element-level change requests to this screen. Each item names the element by its data-qid (and the visible text it had when the note was written):\n${list}\n\nChange only what these items ask for; keep every other element's text, layout, classes and links identical. If an element no longer exists, use its recorded text to locate the equivalent element, and skip the item if there is none.`;
-}
-
 // 历史指令块（ADR-012 v0.87）：改屏 / 局部重生成 / 改组件 / 本机 agent 投递共用；items 已按新到旧排好（history.ts）。
 // subject 如 THIS SCREEN、THIS COMPONENT、SCREEN "首页" (/home)；没有历史时为空串
 export function priorInstructionsBlock(subject: string, items: string[]): string {

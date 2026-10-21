@@ -8,7 +8,7 @@ export const MAX_PRIOR_INSTRUCTION_CHARS = 500;
 
 export type HistoryJob = { id: string; kind: string; input: unknown };
 export type HistoryRevision = { id: string; parentRevisionId: string | null; jobId: string | null };
-type Input = { prompt?: string; annotations?: { anchorText?: string; note: string }[]; variantName?: string; route?: string; componentId?: string };
+type Input = { prompt?: string; variantName?: string; route?: string; componentId?: string };
 
 /** 连续空白并成一个空格；超过 500 字（按码点）截成 499 字加「…」 */
 function clamp(text: string): string {
@@ -24,7 +24,6 @@ function screenIntent(job: HistoryJob, createdScreen: boolean): string | null {
   const prompt = i.prompt ?? '';
   switch (job.kind) {
     case 'edit_screens': {
-      if (i.annotations?.length) return `批注：${i.annotations.map((a) => (a.anchorText?.trim() ? `「${a.anchorText.trim()}」→ ${a.note}` : a.note)).join('；')}`;
       for (const kind of ROUND_PRESETS) { const note = presetNote(prompt, ROUND_PRESET_PROMPTS[kind]); if (note !== null) return note || null; }
       return prompt || null;
     }

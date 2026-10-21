@@ -1176,7 +1176,7 @@ await step('TC-CORE-116', async () => {
   return '别处改过 409、正在改 409、组件实例 409 ×2、元素不在 404、目标不对 404 ×2、超限 400；目标屏始终不变';
 });
 
-// ---------- TC-CORE-117 草稿里只改一块与批注（REQ-CORE-045，API-CORE-006 / API-EDIT-003） ----------
+// ---------- TC-CORE-117 草稿里只改一块（REQ-CORE-045，API-CORE-006） ----------
 await step('TC-CORE-117', async () => {
   const sb = await sketchbook();
   const d = await newDraft(sb, '一张播放卡片\n[stub-frame:component]');
@@ -1215,16 +1215,7 @@ await step('TC-CORE-117', async () => {
   const r2 = (await revisions(d.id))[0];
   const viaMcp = await callTool(mcp, 'quilt.regenerate_subtree', { screenId: d.id, qid: h1, prompt: '再小一号', expectedRevisionId: r2.id, runner: STUB });
   expect(!viaMcp.isError && (await waitJob((viaMcp.json as { id: string }).id, 60)).status === 'succeeded', `MCP 草稿上的 regenerate_subtree：${viaMcp.text.slice(0, 200)}`);
-  // 4 批注：草稿上挂一条、发送，建出一个改这张草稿的 edit_screens，完成后批注已处理、草稿多一版
-  const n4 = (await revisions(d.id)).length;
-  const a = await post<{ annotation: { id: string } } & Problem>(`/v1/screens/${d.id}/annotations`, { qid: h1, note: '标题改成两行', anchorText: 'Now playing', rect: { x: 84, y: 84, w: 200, h: 28 } });
-  expect(a.status === 201, `草稿上挂批注：${a.status} ${JSON.stringify(a.body).slice(0, 160)}`);
-  const sent = await post<{ jobs: JobView[] }>(`/v1/projects/${sb}/annotations/send`, { annotationIds: [a.body.annotation.id] });
-  expect(sent.status === 202 && sent.body.jobs.length === 1 && sent.body.jobs[0].kind === 'edit_screens' && JSON.stringify(sent.body.jobs[0].input.screenIds) === JSON.stringify([d.id]) && (sent.body.jobs[0].input.versions ?? 1) === 1, `批注发送：${sent.status} ${JSON.stringify(sent.body).slice(0, 200)}`);
-  expect((await waitJob(sent.body.jobs[0].id, 60)).status === 'succeeded', '批注改稿作业没成功');
-  const items = (await apiJson<{ items: { id: string; status: string }[] }>(`/v1/screens/${d.id}/annotations`)).body.items;
-  expect(items.find((x) => x.id === a.body.annotation.id)?.status === 'resolved' && (await revisions(d.id)).length === n4 + 1, `批注收口：${JSON.stringify(items)}，修订 ${n4} → ${(await revisions(d.id)).length}`);
-  return '草稿上 regenerate_subtree 只换那一块（subtree、不 lint）；旧修订 409、非草稿 404；带参照用草稿规则 + 参照、按参照 prelude；MCP 同；批注发送 edit_screens、收口 resolved';
+  return '草稿上 regenerate_subtree 只换那一块（subtree、不 lint）；旧修订 409、非草稿 404；带参照用草稿规则 + 参照、按参照 prelude；MCP 同';
 });
 
 // ---------- TC-CORE-118 交给本机会话：有参照项目的草稿读那个项目的契约、只改一块用草稿规则（假会话，REQ-CORE-042 / REQ-CORE-045） ----------
@@ -1402,7 +1393,7 @@ await step('TC-CORE-121', async () => {
   return `缺省换一块并预选「${picked0}」；组件实例里点不中；写回只换那一块`;
 });
 
-// ---------- TC-CORE-122 草稿里点选一块改它、钉批注发出（浏览器，REQ-CORE-045） ----------
+// ---------- TC-CORE-122 草稿里点选一块改它（浏览器，REQ-CORE-045） ----------
 await step('TC-CORE-122', async () => {
   const sb = await sketchbook();
   const d = await newDraft(sb, '一张播放卡片\n[stub-frame:component]');
@@ -1415,7 +1406,7 @@ await step('TC-CORE-122', async () => {
   const pressed = async (id: string) => (await page.getByTestId(id).getAttribute('aria-pressed')) === 'true';
   // 1 开「选元素」，点草稿里的一段字：输入框多一枚胶囊，动词行写「改这一块」
   await page.getByTestId('draft-pick').click();
-  expect((await pressed('draft-pick')) && !(await pressed('draft-annotate')), '「选元素」应开着、「批注」关着');
+  expect((await pressed('draft-pick')) && (await page.getByTestId('draft-annotate').count()) === 0, '「选元素」应开着、工具条上没有「批注」');
   const fl = page.frameLocator('[data-testid="draft-iframe"]');
   await settledComponent();
   await clickInScaled('[data-testid="draft-iframe"]', fl.locator(`[data-qid="${pQid}"]`));
@@ -1440,35 +1431,17 @@ await step('TC-CORE-122', async () => {
   await page.keyboard.press('Escape');
   await eventually(async () => expect((await chip.count()) === 0, 'Esc 应去掉胶囊'), 3000);
   expect((await stageState()) === 'draft', 'Esc 去胶囊时不该收起看板');
-  // 4 开「批注」（「选元素」随之关掉），点一块写说明存下：出 1 号气泡与「1 条批注 · 发送」
-  await page.getByTestId('draft-annotate').click();
-  expect((await pressed('draft-annotate')) && !(await pressed('draft-pick')), '两个开关应互斥');
-  await settledComponent();
-  await clickInScaled('[data-testid="draft-iframe"]', fl.locator('h1, h2, h3').first());
-  await page.getByTestId('draft-annotation-box').waitFor({ timeout: 5000 });
-  await page.getByTestId('draft-annotation-note').fill('标题再大一号');
-  await page.getByTestId('draft-annotation-save').click();
-  await eventually(async () => expect((await page.getByTestId('draft-annotation-pin').count()) === 1, '存下后应有 1 枚气泡'), 5000);
-  const sendBar = page.getByTestId('draft-annotations-send');
-  expect((await sendBar.innerText()).includes('1 条批注'), `输入框上方应写「1 条批注 · 发送」：${await sendBar.innerText()}`);
-  // 5 发送：建一个改这张草稿的作业，做完草稿多一版、批注清掉
-  const n5 = (await revisions(d.id)).length;
-  const sent = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === `/v1/projects/${sb}/annotations/send`);
-  await sendBar.click();
-  expect((await sent).status() === 202, '批注发送应 202');
-  await eventually(async () => expect((await revisions(d.id)).length === n5 + 1, '批注发出的那一轮还没落版'), 30000, 500);
-  await eventually(async () => expect((await page.getByTestId('draft-annotation-pin').count()) === 0 && (await sendBar.count()) === 0, '新版落库后已发出的批注应清掉'), 10000);
-  // 6 快捷键同画布：页面上 ⌘E 开关选元素、⌥N 开关批注；焦点在草稿里按 ⌘E 由运行时转发上来
-  for (const id of ['draft-pick', 'draft-annotate']) if (await pressed(id)) await page.getByTestId(id).click();
+  // 4 快捷键同画布：页面上 ⌘E 开关选元素，⌥N 什么也不开；焦点在草稿里按 ⌘E 由运行时转发上来
+  if (await pressed('draft-pick')) await page.getByTestId('draft-pick').click();
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('ControlOrMeta+KeyE');
   await eventually(async () => expect(await pressed('draft-pick'), '⌘E 没打开「选元素」'), 2000);
   await page.keyboard.press('ControlOrMeta+KeyE');
   await eventually(async () => expect(!(await pressed('draft-pick')), '再按 ⌘E 没关掉「选元素」'), 2000);
+  const url4 = page.url();
   await page.keyboard.press('Alt+KeyN');
-  await eventually(async () => expect(await pressed('draft-annotate'), '⌥N 没打开「批注」'), 2000);
-  await page.keyboard.press('Alt+KeyN');
-  await eventually(async () => expect(!(await pressed('draft-annotate')), '再按 ⌥N 没关掉「批注」'), 2000);
+  await sleep(500);
+  expect(!(await pressed('draft-pick')) && (await page.getByTestId('draft-annotate').count()) === 0 && page.url() === url4 && (await stageState()) === 'draft', `⌥N 不该打开任何东西：选元素 ${await pressed('draft-pick')}，地址 ${page.url()}，看板 ${await stageState()}`);
   await settledComponent();
   await clickInScaled('[data-testid="draft-iframe"]', fl.locator('p').first());
   await sleep(300);
@@ -1476,7 +1449,7 @@ await step('TC-CORE-122', async () => {
   await page.keyboard.press('ControlOrMeta+KeyE');
   await eventually(async () => expect(await pressed('draft-pick'), '焦点在草稿里按 ⌘E 没打开「选元素」（运行时转发）'), 3000);
   await page.getByTestId('draft-pick').click();
-  return '选元素出胶囊、改这一块建 regenerate_subtree、新版后胶囊清掉、Esc 只去胶囊；批注气泡、发送、落版后清掉；⌘E / ⌥N 开关，焦点在草稿里 ⌘E 照样生效';
+  return '选元素出胶囊、改这一块建 regenerate_subtree、新版后胶囊清掉、Esc 只去胶囊；⌘E 开关、⌥N 什么也不开，焦点在草稿里 ⌘E 照样生效';
 });
 
 // ---------- TC-CORE-123 参照项目与「来自」（浏览器，REQ-CORE-042、REQ-CORE-043） ----------

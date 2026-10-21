@@ -113,8 +113,7 @@ export const jobInputSchemas = {
     refProjectId: z.uuid().optional(),
     locale: jobLocaleSchema,
   }).refine((v) => !!v.variantOf === !!v.variantName, { path: ['variantName'], message: 'variantOf 与 variantName 要一起给' }),
-  // annotations（v0.87）：批注发出的作业由 API-EDIT-003 填上每条批注的锚点文字与说明，只用来把这一轮写进历史指令（ADR-012），本轮指令仍是 prompt
-  edit_screens: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).min(1).max(20), versions: versionsSchema.default(1), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), componentIds: componentIdsSchema, annotations: z.array(z.object({ anchorText: z.string().max(200), note: z.string().min(1).max(2000) })).max(50).optional(), locale: jobLocaleSchema }),
+  edit_screens: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).min(1).max(20), versions: versionsSchema.default(1), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), componentIds: componentIdsSchema, locale: jobLocaleSchema }),
   // 改共享组件（REQ-EDIT-006）：一次一个；成功后所有用到它的屏确定性回刷（零 LLM）
   edit_component: z.object({ componentId: z.uuid(), prompt: z.string().trim().min(1).max(8000), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), locale: jobLocaleSchema }),
   // 子树重生成（REQ-EDIT-002）：runner 可单独选（检查器里有自己的通道 / 会话选择器，记忆独立于输入框）；草稿里只改一块时可带参考图（REQ-CORE-045）
@@ -216,21 +215,6 @@ export const updateProjectSchema = z.object({
 }).refine((v) => Object.keys(v).length > 0, 'empty patch');
 // 候选整组采用（API-CORE-025）
 export const adoptGroupSchema = z.object({ index: z.number().int().min(0).max(MAX_VERSIONS - 1) });
-
-// ---- 元素批注（REQ-EDIT-004 / API-EDIT-003）----
-export const ANNOTATION_STATUSES = ['open', 'sent', 'resolved'] as const;
-export const rectSchema = z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() });
-export const createAnnotationSchema = z.object({
-  qid: z.string().trim().min(1).max(64),
-  note: z.string().trim().min(1).max(2000),
-  anchorText: z.string().max(200).default(''),
-  rect: rectSchema,
-});
-export const updateAnnotationSchema = z.object({
-  note: z.string().trim().min(1).max(2000).optional(),
-  status: z.enum(ANNOTATION_STATUSES).optional(),
-}).refine((v) => Object.keys(v).length > 0, 'empty patch');
-export const sendAnnotationsSchema = z.object({ annotationIds: z.array(z.uuid()).min(1).max(50) });
 
 export const updateScreenSchema = z.object({
   x: z.number().int().min(-1_000_000).max(1_000_000).optional(),
@@ -417,11 +401,6 @@ export type ScreenDto = {
   updatedAt: string;
 };
 export type LinkDto = { fromScreenId: string; qid: string; href: string; toScreenId: string | null };
-export type AnnotationDto = {
-  id: string; screenId: string; qid: string; note: string; anchorText: string;
-  rect: { x: number; y: number; w: number; h: number };
-  status: (typeof ANNOTATION_STATUSES)[number]; sentJobId: string | null; createdAt: string;
-};
 /** 设置页配置、前端下拉直接渲染的可选通道清单（只含标识与显示名） */
 // ---- 生成通道可配置（REQ-CORE-013 / API-CORE-020~023）----
 // agent-sdk = 本机 Claude 订阅：复用服务端机器上的 `claude` 登录态；codex = 本机 Codex 订阅（v0.68 ADR-020）：复用 `codex` 的 ChatGPT 登录态。
@@ -498,7 +477,7 @@ export type ProjectDto = { id: string; name: string; deviceType: (typeof DEVICE_
 export type SketchbookDto = { projectId: string };
 /** 草稿写回的结果（API-CORE-047）：screen / component 二选一，restyle 时带改写作业；覆盖时带新修订与覆盖前那一版（回溯用） */
 export type CopyDraftResultDto = { screen?: ScreenDto; component?: ComponentDto; job?: JobDto; revisionId?: string; previousRevisionId?: string };
-export type ProjectDetailDto = { project: ProjectDto; designSystem: DesignSystemDto; screens: ScreenDto[]; links: LinkDto[]; activeJobs: JobDto[]; annotations: AnnotationDto[]; assets: AssetDto[]; components: ComponentDto[] };
+export type ProjectDetailDto = { project: ProjectDto; designSystem: DesignSystemDto; screens: ScreenDto[]; links: LinkDto[]; activeJobs: JobDto[]; assets: AssetDto[]; components: ComponentDto[] };
 export type RevisionDto = { id: string; screenId: string; seq: number; sourceKind: SourceKind; jobId: string | null; parentRevisionId: string | null; candidateIndex: number | null; candidateSettledAt: string | null; htmlUrl: string; screenshotUrl: string | null; thumbUrl: string | null; lintReport: unknown; createdAt: string };
 /** 候选覆盖层的数据（API-CORE-026）：列 = 版本、行 = 屏 */
 export type CandidatesDto = { jobId: string; versions: number; screens: { screenId: string; name: string; route: string; width: number; height: number; currentRevisionId: string | null; settled: boolean; revisions: { id: string; index: number; seq: number; screenshotUrl: string | null; thumbUrl: string | null; htmlUrl: string; previewUrl: string }[] }[] };

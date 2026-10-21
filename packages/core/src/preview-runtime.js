@@ -116,7 +116,7 @@
     if (action.charAt(0) === '/') { snapshotForms(); send({ type: 'quilt:navigate', href: action }); }
   }, true);
   // 画布级快捷键在预览文档里按下时转发给父页：Esc 退出、Alt+← 后退、⌘E 选择元素、⌘/ 输入框、⌘K 找屏，
-  // ⌥ + 字母（⌥N 批注、⌥D 设计系统……，v0.80）只在焦点不在可编辑元素上时——macOS 下它们在输入框里是打特殊字符的。
+  // ⌥ + 字母（⌥D 设计系统、⌥G 新建屏幕……，v0.80）只在焦点不在可编辑元素上时——macOS 下它们在输入框里是打特殊字符的。
   // v0.95：⌘S 保存检查器（一律拦掉浏览器的保存网页）；⌘Z 撤销、选择元素态下的 Delete / Backspace 删除元素，焦点在可编辑元素上时留给它自己
   document.addEventListener('keydown', function (e) {
     var mod = e.metaKey || e.ctrlKey;
@@ -131,7 +131,7 @@
     }
   });
   // 选择元素模式（REQ-EDIT-001）：两层框都画在预览文档内——hover 框细虚线跟着鼠标走；选中框常驻（实线、左上角挂
-  // 「tag · qid」标签，和检查器标题对得上），随滚动 / 缩放重算，换 body 后由父页 quilt:reselect 接回。点击上报 qid 与几何，父页画检查器。
+  // 「tag · qid」标签，和检查器标题对得上），随滚动 / 缩放重算，换 body 后由父页 quilt:reselect 接回。点击上报所选元素，父页画检查器。
   var mode = 'interact';
   // 画布标记的颜色（§13.1）：父页按当前外观经 quilt:mode 给（标记色、标记上的字、halo、成功色），运行时不写颜色；
   // 外观切换时父页重发，已画出来的框与标记当场换色。收到之前沿用 currentColor
@@ -309,14 +309,13 @@
   function qidOf(el) { return /** @type {string} */ (el.getAttribute('data-qid')); }
   /** @param {Element} t @param {Element | null} anchor @returns {Outgoing} */
   function selection(t, anchor) {
-    var r = t.getBoundingClientRect();
     var text = Array.prototype.filter.call(t.childNodes, function (n) { return n.nodeType === 3; }).map(function (n) { return n.textContent; }).join('').trim();
     var comp = t.closest('[data-component]');
     // path：从屏根到锚点，检查器据此画祖先路径
     /** @type {{ qid: string, tag: string }[]} */
     var path = [];
     for (var p = /** @type {Element | null} */ (anchor || t); p; p = up(p)) path.unshift({ qid: qidOf(p), tag: p.tagName.toLowerCase() });
-    return { type: 'quilt:select', qid: qidOf(t), tag: t.tagName.toLowerCase(), text: text, classes: t.getAttribute('class') || '', href: t.getAttribute('href') || t.getAttribute('data-href') || t.getAttribute('action') || null, component: comp ? comp.getAttribute('data-component') : null, rect: { x: Math.round(r.left + window.scrollX), y: Math.round(r.top + window.scrollY), w: Math.round(r.width), h: Math.round(r.height) }, path: path };
+    return { type: 'quilt:select', qid: qidOf(t), tag: t.tagName.toLowerCase(), text: text, classes: t.getAttribute('class') || '', href: t.getAttribute('href') || t.getAttribute('data-href') || t.getAttribute('action') || null, component: comp ? comp.getAttribute('data-component') : null, path: path };
   }
   // 指针换到另一个最里层元素时悬停的层级重置；还在同一个元素上时保留按键走到的那一层
   document.addEventListener('mousemove', function (e) {

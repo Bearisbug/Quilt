@@ -68,8 +68,8 @@ type ComposerProps = {
   handle?: Ref<ComposerHandle>;
   /** 草稿本（REQ-CORE-040）：不显示目标标签、屏数与版数；动词行与占位示例由草稿本页给，extra 插在工具条右组（新草稿的画框选择）。
    *  onEmptyEscape：输入框空着时按 Esc 交给页面（收起看板），不失焦。
-   *  chip：草稿里点选的那一块（REQ-CORE-045），与目标标签同形、可移除；top：目标区上方的一行（「N 条批注 · 发送」），要在 form 里才算进输入框高度 */
-  sketch?: { verb: string; phrases: string[]; extra?: ReactNode; onEmptyEscape?: () => void; chip?: { label: string; onRemove: () => void }; top?: ReactNode };
+   *  chip：草稿里点选的那一块（REQ-CORE-045），与目标标签同形、可移除 */
+  sketch?: { verb: string; phrases: string[]; extra?: ReactNode; onEmptyEscape?: () => void; chip?: { label: string; onRemove: () => void } };
 };
 
 // 空闲且没有目标时轮播的示例：让第一次进来的人知道能说什么（文案在 composer 命名空间的 idle.*）
@@ -493,7 +493,6 @@ export function Composer(p: ComposerProps) {
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropping(false); }}
     >
       <label htmlFor="chat-input" className="sr-only">{t('inputLabel')}</label>
-      {p.sketch?.top}
       {/* 目标区始终存在：挪位置的把手 + 标签（屏 / 锚点，可逐个移除）+ 动词行 + 清空 + 收起。标签只被点屏 / × / 清空改变，点画布空白不动它。
           这一行的空白处是拖动输入框的抓手（v1.16） */}
       <div className="composer-grab mb-2.5 flex touch-none select-none items-center gap-2 px-0.5" onPointerDown={onRowPointerDown}>

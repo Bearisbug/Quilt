@@ -18,7 +18,7 @@ export async function emitProjectEvent(projectId: string, type: ProjectEventDto[
   await query('select pg_notify($1, $2)', [PROJECT_CHANNEL, payload]);
 }
 
-// 其余会改变画布所见的写入（删屏、挪屏、改项目、改设计系统、增删组件、批注、素材……）同样要让已打开的画布重取（API-CORE-030 v0.77）。
+// 其余会改变画布所见的写入（删屏、挪屏、改项目、改设计系统、增删组件、素材……）同样要让已打开的画布重取（API-CORE-030 v0.77）。
 // 复用 screen_changed：画布对它的处理就是防抖后整体重取，reason 只供排障与将来细分；通知失败不影响写入本身
 export function notifyCanvas(projectId: string, data: { reason: string; screenId?: string; revisionId?: string }): Promise<void> {
   return emitProjectEvent(projectId, 'screen_changed', data).catch(() => {});

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import type { Viewport } from '@xyflow/system';
-import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type AnnotationDto, type ComponentDto } from '@quilt/core/browser';
+import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type ComponentDto } from '@quilt/core/browser';
 import { StyleGuideCard, STYLE_GUIDE_SIZE, styleGuideSize } from '@/canvas/StyleGuideCard';
 import { Minimap, type MiniRect } from '@/canvas/Minimap';
 import { EDGE_LIMIT, mergeEdges, shownEdges, edgeCurves, drawEdges, type Curve, type EdgeColors } from '@/canvas/edges';
@@ -14,7 +14,7 @@ import { markPalette, useResolvedMode } from '@/lib/theme';
 import { useLocale, useT } from '@/i18n';
 import canvasMessages from '@/i18n/locales/canvas-parts';
 
-// 角标里提示的进入选择元素模式的键，要与 Canvas.tsx 的键位表一致（REQ-EDIT-004）
+// 角标里提示的进入选择元素模式的键，要与 Canvas.tsx 的键位表一致（REQ-EDIT-001）
 const INSPECT_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘E' : 'Ctrl+E';
 
 export type CanvasProps = {
@@ -66,17 +66,12 @@ export type CanvasProps = {
   /** 正在被子树重生成作业改的元素（REQ-EDIT-002）：聚焦屏内描边 + 「修改中…」，回写后换成「已更新」；未聚焦的卡片标「局部修改中」 */
   workingSubtrees: { screenId: string; qid: string }[];
   inspectMode: boolean;
-  /** 批注态也复用屏内的 inspect 运行时，但角标与去向不同 */
-  annotateMode: boolean;
-  /** 选择元素 / 批注模式已开但还没进任何一屏：点哪一屏就进哪一屏 */
-  armed: null | 'inspect' | 'annotate';
+  /** 选择元素模式已开但还没进任何一屏：点哪一屏就进哪一屏 */
+  armed: boolean;
   showLinks: boolean;
-  /** 未处理的批注：气泡画在画布层，按批注时记下的元素矩形定位（REQ-EDIT-004 / ADR-003） */
-  annotations: AnnotationDto[];
-  onAnnotationClick: (id: string) => void;
   /** 视图位置按项目记（quilt:view:<projectId>），刷新回到原处 */
   projectId: string;
-  /** 正在交互的共享组件卡（REQ-EDIT-006）：与屏的聚焦互斥，但不动镜头 */
+  /** 正在交互的共享组件卡（REQ-EDIT-006）：与屏的聚焦互斥 */
   focusedComponentId?: string | null;
   onFocusComponent?: (id: string | null) => void;
   /** 未被浮层遮住的那块画布：适配视图与聚焦都以它为准，否则内容会被推到输入框/工具栏底下 */
@@ -84,7 +79,7 @@ export type CanvasProps = {
   registerApi?: (api: CanvasApi) => void;
   /** 小地图（REQ-CORE-024）：画在视口左上、跟着视图流重画 */
   minimap?: boolean;
-  /** 聚焦的 iframe 此刻显示的是哪一屏（跳转、切变体、叠层之后都会变）：检查器、批注、子树重生成都要写到这一屏上 */
+  /** 聚焦的 iframe 此刻显示的是哪一屏（跳转、切变体、叠层之后都会变）：检查器、子树重生成都要写到这一屏上 */
   onShown?: (screenId: string | null) => void;
   navStack: string[];
   setNavStack: (f: (s: string[]) => string[]) => void;
@@ -214,11 +209,6 @@ export function CanvasView(p: CanvasProps) {
   const selectedSet = useMemo(() => new Set(p.selectedIds), [p.selectedIds]);
   // 每个默认屏有几个变体（v0.62）：卡片标签用
   const variantCount = useMemo(() => { const m = new Map<string, number>(); for (const s of p.screens) if (s.variantOf) m.set(s.variantOf, (m.get(s.variantOf) ?? 0) + 1); return m; }, [p.screens]);
-  const annoByScreen = useMemo(() => {
-    const m = new Map<string, AnnotationDto[]>();
-    for (const a of p.annotations) m.set(a.screenId, [...(m.get(a.screenId) ?? []), a]);
-    return m;
-  }, [p.annotations]);
   const danglingBySource = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const l of p.links) if (!l.toScreenId) m.set(l.fromScreenId, [...(m.get(l.fromScreenId) ?? []), l.href]);
@@ -332,6 +322,14 @@ export function CanvasView(p: CanvasProps) {
     setTimeout(() => moveTo(v, { duration: 250 }), 0);
   }, [byId, pos, p, safeArea, moveTo, beginFocus, viewportRef]);
   focusCardRef.current = focusCard;
+  // 组件卡进交互态（v1.23）：镜头与聚焦屏同一个算法、同一段 250 ms，按卡片此刻画出来的尺寸算（适配视图、小地图用的同一个框）
+  const focusComponent = useCallback((id: string) => {
+    const c = propsRef.current.components.find((x) => x.id === id); const node = viewportRef.current;
+    if (!c || !node) return;
+    const v = focusViewport({ ...compPos(c), ...compBox(c) }, safeArea(), node.clientHeight);
+    propsRef.current.onFocusComponent?.(id);
+    setTimeout(() => moveTo(v, { duration: 250 }), 0);
+  }, [compPos, compBox, safeArea, moveTo, viewportRef]);
 
   // 逐级选（v1.00）：聚焦的组件卡优先（组件卡的 iframe 常驻，选择元素态就在它上面），否则聚焦的屏
   const postToInspected = useCallback((msg: ParentToPreview) => {
@@ -397,8 +395,8 @@ export function CanvasView(p: CanvasProps) {
     const s = byId[id];
     if (s ? !s.previewUrl : !propsRef.current.components.some((c) => c.id === id)) return;
     kbEntered.current = id;
-    if (s) { kbFocusPending.current = true; focusCard(id); } else propsRef.current.onFocusComponent?.(id);
-  }, [byId, focusCard]);
+    if (s) { kbFocusPending.current = true; focusCard(id); } else focusComponent(id);
+  }, [byId, focusCard, focusComponent]);
   const gestures = useRef(new Map<string, HTMLElement>());
   useEffect(() => {
     const id = kbEntered.current;
@@ -494,7 +492,7 @@ export function CanvasView(p: CanvasProps) {
       const a = keyAction(m, true);
       if (a?.kind === 'exit') p.onFocus(null);
       else if (a?.kind === 'back') goBack();
-      else if (a) p.onShortcut?.(a.code, a.alt);   // ⌘E / ⌘/、⌥N / ⌥D……、Delete：键位表在 Canvas.tsx
+      else if (a) p.onShortcut?.(a.code, a.alt);   // ⌘E / ⌘/、⌥D……、Delete：键位表在 Canvas.tsx
     }
     if (m.type === 'quilt:dead') p.onDeadLink();
     if (m.type === 'quilt:wheel') frameWheel(iframeRef.current, m);
@@ -590,10 +588,10 @@ export function CanvasView(p: CanvasProps) {
   };
 
   // 双击空白处 = 在这里放锚点（REQ-CORE-014），描述在底部输入框里填。卡片自己的双击（进屏）在 .gesture 上已 stopPropagation，
-  // 这里再按目标兜一层：风格指南卡、批注钉、断链角标、候选角标、锚点自己都不算空白。聚焦态里 iframe 吃掉了双击，不会到这。
+  // 这里再按目标兜一层：风格指南卡、断链角标、候选角标、锚点自己都不算空白。聚焦态里 iframe 吃掉了双击，不会到这。
   const onViewportDoubleClick = (e: ReactMouseEvent) => {
     if (!propsRef.current.onAnchor || propsRef.current.focusedId) return;
-    if ((e.target as HTMLElement).closest('.card, .comp, .styleguide, .anno-pin, .warn, .cand-badge, .anchor')) return;
+    if ((e.target as HTMLElement).closest('.card, .comp, .styleguide, .warn, .cand-badge, .anchor')) return;
     const node = viewportRef.current;
     if (!node) return;
     const nr = node.getBoundingClientRect();
@@ -664,8 +662,7 @@ export function CanvasView(p: CanvasProps) {
     cardKey: onCardKey,
     dragStart: startDrag,
     enterScreen: focusCard,
-    enterComponent: (id) => propsRef.current.onFocusComponent?.(id),
-    annotation: (id) => propsRef.current.onAnnotationClick(id),
+    enterComponent: focusComponent,
     dangling: (screenId, hrefs) => propsRef.current.onDanglingClick(screenId, hrefs),
     candidates: (jobId, screenId) => propsRef.current.onCandidates(jobId, screenId),
     gesture: (id, el) => { if (el) gestures.current.set(id, el); else gestures.current.delete(id); },
@@ -710,7 +707,7 @@ export function CanvasView(p: CanvasProps) {
               selected={marquee ? hitSet.has(s.id) || (marquee.additive && selectedSet.has(s.id)) : selectedSet.has(s.id)}
               focused={isFocused} live={live && iframeReady} dragging={!!dragPos[s.id]}
               shotUrl={shotOf(s)} shotFailed={shotFailed.has(s.id)} shotRetry={shotRetry[s.id] ?? 0}
-              working={p.workingSubtrees.some((w) => w.screenId === s.id)} annotations={annoByScreen.get(s.id)} dangling={danglingBySource.get(s.id)}
+              working={p.workingSubtrees.some((w) => w.screenId === s.id)} dangling={danglingBySource.get(s.id)}
               exemplar={p.exemplarScreenId === s.id} variants={variantCount.get(s.id) ?? 0} tabbable={tabStop === s.id} panReady={panReady}
               // 有候选未采用的卡片：后面叠两张错位底板示意「还有几版」；展开时底板让位给展开层
               stacked={!!s.pendingCandidates && !isFocused && p.candidateStack?.screenId !== s.id} candExpanded={p.candidateStack?.screenId === s.id}
@@ -730,7 +727,7 @@ export function CanvasView(p: CanvasProps) {
                   )}
                   {frameFailed && !iframeReady ? (
                     <button type="button" className="badge failed state-layer nopan" data-testid="frame-retry" onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); frame.retryFrame(); }}>{tr('view.frameRetry')}</button>
-                  ) : <div className="badge">{!iframeReady ? tr('view.badge.loading') : p.annotateMode ? tr('view.badge.annotating') : p.inspectMode ? tr('view.badge.inspecting') : tr('interacting')} · {p.navStack.length ? p.navStack[p.navStack.length - 1] : s.route}{iframeReady ? ` · ${p.inspectMode ? tr('view.badge.clickElement') : tr('view.badge.inspectKey', { shortcut: INSPECT_KEY })}` : ''}</div>}
+                  ) : <div className="badge">{!iframeReady ? tr('view.badge.loading') : p.inspectMode ? tr('view.badge.inspecting') : tr('interacting')} · {p.navStack.length ? p.navStack[p.navStack.length - 1] : s.route}{iframeReady ? ` · ${p.inspectMode ? tr('view.badge.clickElement') : tr('view.badge.inspectKey', { shortcut: INSPECT_KEY })}` : ''}</div>}
                 </>
               )}
               act={act}
@@ -758,7 +755,7 @@ export function CanvasView(p: CanvasProps) {
       {/* 待命提示压在卡片上也得读得出（v0.80）：chrome 材质——透明强调色底（15%）压在白卡上对比度只有约 1.1:1；组件卡在交互态时不显示 */}
       {p.armed && !p.focusedId && !p.focusedComponentId && (
         <div className="chrome pointer-events-none absolute left-1/2 top-16 z-10 -translate-x-1/2 rounded-md px-3 py-1 type-label text-text-primary" data-testid="armed-hint">
-          {p.armed === 'annotate' ? tr('view.armed.annotate') : tr('view.armed.inspect')}
+          {tr('view.armed.inspect')}
         </div>
       )}
       {marquee && (

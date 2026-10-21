@@ -2,7 +2,6 @@ import { and, eq, isNull, isNotNull, inArray, sql } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { emitJobEvent } from '../lib/events.ts';
 import { pointCurrentToFirstCandidate, deriveLinks } from '../services/screens.ts';
-import { settleByJob } from '../services/annotations.ts';
 import { failureText, jobLocale, type ErrorClass, type JobKind } from '@quilt/core';
 
 // input：失败文案按作业的语言写（REQ-CORE-046，input.locale）
@@ -26,12 +25,11 @@ export async function settleInterrupted(job: { id: string; projectId: string }) 
 }
 
 // 失败收尾（§16 v1.03）：领取后的异常、启动时上次没跑完的作业、job.timeout 扫到的超时作业都走这里——
-// 回填空的助手消息（否则对话一直显示「排队中…」）、补做中断收尾、批注回落、发 failed。每一步各自兜错，一步失败不挡后面
+// 回填空的助手消息（否则对话一直显示「排队中…」）、补做中断收尾、发 failed。每一步各自兜错，一步失败不挡后面
 export async function finishFailed(job: FailedJob, errorClass: ErrorClass, message: string) {
   await db.update(schema.messages).set({ content: failureText(job.kind as JobKind, errorClass, message, 0, jobLocale(job) ?? 'zh') })
     .where(and(eq(schema.messages.jobId, job.id), eq(schema.messages.role, 'assistant'), eq(schema.messages.content, ''))).catch((e) => console.error(`[job ${job.id}] message`, e));
   await settleInterrupted(job).catch((e) => console.error(`[job ${job.id}] settle`, e));
-  await settleByJob(job.id, false).catch((e) => console.error(`[job ${job.id}] annotations`, e));
   await emitJobEvent(job.id, 'failed', { errorClass, message }).catch(() => {});
 }
 

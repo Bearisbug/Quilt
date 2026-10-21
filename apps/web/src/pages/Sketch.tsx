@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'react-router';
-import { draftNameFromPrompt, failureText, type AnnotationDto, type DraftFrame, type DraftFrameChoice, type JobDto, type ScreenDto } from '@quilt/core/browser';
+import { draftNameFromPrompt, failureText, type DraftFrame, type DraftFrameChoice, type JobDto, type ScreenDto } from '@quilt/core/browser';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button } from '@/ui/ui';
@@ -14,7 +14,7 @@ import { jobChips, useEndedJobs } from '@/composer/JobChips';
 import { coveredScreens, jobLabel } from '@/canvas/jobs';
 import type { ElementSelection } from '@/canvas/frameMessages';
 import { useSketchbook, type SketchEvent } from '@/sketch/useSketchbook';
-import { DraftStage, type SketchTool, type StageState } from '@/sketch/DraftStage';
+import { DraftStage, type StageState } from '@/sketch/DraftStage';
 import { DraftRail } from '@/sketch/DraftRail';
 import { SketchComposer, type DraftPick } from '@/sketch/SketchComposer';
 import { useRefProjects } from '@/sketch/RefSelect';
@@ -85,9 +85,9 @@ export function SketchRoute() {
   const [pendingNew, setPendingNew] = useState<{ jobId: string; frame: DraftFrameChoice; screenId?: string } | null>(null);
   const pendingRef = useRef(pendingNew);
   pendingRef.current = pendingNew;
-  // 「选元素」「批注」开关与点中的那一块（REQ-CORE-045）：都记着是哪张草稿的，换了草稿就不算数；
+  // 「选元素」开关与点中的那一块（REQ-CORE-045）：都记着是哪张草稿的，换了草稿就不算数；
   // 胶囊还记着点选时的那一版，草稿出了新一版（FLOW-SKETCH-REFINE S6）它就作废
-  const [toolFor, setToolFor] = useState<{ draftId: string; tool: SketchTool } | null>(null);
+  const [pickingFor, setPickingFor] = useState<string | null>(null);
   const [pick, setPick] = useState<DraftPick | null>(null);
   // 新草稿作业建出的是哪张屏（screen_planned 带 screenId）：失败时没内容的那张由服务端删掉，看板上开着它就一起撤
   const planned = useRef(new Map<string, string>());
@@ -189,12 +189,12 @@ export function SketchRoute() {
   // 参照项目的候选（REQ-CORE-042）：工具条与新草稿的输入框共用
   const refs = useRefProjects();
   // 开关与胶囊只对看板上这张草稿的这一版有效（见上）；换了草稿时连同记下的一起清掉，回到这张时不再自己开着
-  const tool: SketchTool = open && toolFor?.draftId === open.id ? toolFor.tool : null;
-  const activePick = tool === 'pick' && open && pick?.draftId === open.id && pick.revisionId === open.currentRevisionId ? pick : null;
+  const picking = !!open && pickingFor === open.id;
+  const activePick = picking && open && pick?.draftId === open.id && pick.revisionId === open.currentRevisionId ? pick : null;
   const openId = open?.id ?? null;
-  useEffect(() => { setToolFor(null); setPick(null); }, [openId]);
-  // 开一个关另一个（PAGE-SKETCH）；胶囊只在「选元素」开着时有
-  const changeTool = (next: SketchTool) => { if (!open) return; setToolFor({ draftId: open.id, tool: next }); setPick(null); };
+  useEffect(() => { setPickingFor(null); setPick(null); }, [openId]);
+  // 胶囊只在「选元素」开着时有：开关一换就去掉
+  const changePicking = (on: boolean) => { if (!open) return; setPickingFor(on ? open.id : null); setPick(null); };
   // 选元素点中一块（FLOW-SKETCH-REFINE S2）：输入框目标区出胶囊、焦点交给输入框写这一句。点在草稿根上等同改整张（S4）：不出胶囊，框随之撤掉
   const onPick = (sel: ElementSelection) => {
     if (!open?.currentRevisionId) return;
@@ -274,49 +274,6 @@ export function SketchRoute() {
     }
   };
 
-  // 批注（API-EDIT-003，REQ-CORE-045）：草稿是草稿本的屏，同画布一套接口；rect 是草稿文档坐标，看板据此画气泡。
-  // 详情里的批注只有未处理的（open + sent），发出的那一轮改完服务端置 resolved，下一次详情里就没有了（S6）
-  const draftAnnos = useMemo(() => (open ? (detail?.annotations ?? []).filter((a) => a.screenId === open.id) : []), [detail?.annotations, open]);
-  const openAnnos = draftAnnos.filter((a) => a.status === 'open');
-  // 批注落在共享组件实例里（S4，409 component-locked）：服务端的原话叫人去改组件，草稿本里没有组件可改，这里换个说法
-  const annoFailed = (e: unknown, fallback: string) => {
-    if (e instanceof ApiError && e.type === '/errors/component-locked') toast(t('page.anno.locked', { name: (e.problem as { component?: string }).component ?? '' }), 'error');
-    else if (e instanceof ApiError && e.type === '/errors/not-found') { toast(t('page.anno.gone'), 'error'); void refresh({ quiet: true }); }
-    else toast(problemText(e, fallback), 'error');
-  };
-  const createAnnotation = async (sel: ElementSelection, note: string): Promise<boolean> => {
-    if (!open) return false;
-    try { await api.annotations.create(open.id, { qid: sel.qid, note, anchorText: sel.text.slice(0, 200), rect: sel.rect }); await refresh({ quiet: true }); return true; }
-    catch (e) { annoFailed(e, t('page.anno.createFailed')); return false; }
-  };
-  const updateAnnotation = async (id: string, note: string): Promise<boolean> => {
-    try { await api.annotations.update(id, { note }); await refresh({ quiet: true }); return true; }
-    catch (e) { annoFailed(e, t('page.anno.updateFailed')); return false; }
-  };
-  // 删批注撤销不了（同画布 v1.03）：先确认
-  const [removingAnno, setRemovingAnno] = useState<AnnotationDto | null>(null);
-  const removeAnnotation = async () => {
-    const a = removingAnno;
-    if (!a) return;
-    try { await api.annotations.remove(a.id); setRemovingAnno(null); void refresh({ quiet: true }); }
-    catch (e) { setRemovingAnno(null); annoFailed(e, t('page.anno.removeFailed')); }
-  };
-  // 「N 条批注 · 发送」：这张草稿没发的批注合成一轮改稿（服务端按屏合成一条 edit_screens）；在途锁挡住同一帧里的连点
-  const [sendingAnnos, setSendingAnnos] = useState(false);
-  const sendingAnnosRef = useRef(false);
-  const sendAnnotations = async () => {
-    const ids = openAnnos.map((a) => a.id);
-    if (!projectId || !open || !ids.length || sendingAnnosRef.current) return;
-    sendingAnnosRef.current = true; setSendingAnnos(true);
-    try {
-      const { jobs: sent } = await api.annotations.send(projectId, ids);
-      for (const j of sent) book.track(j);
-      toast(t('page.anno.sent', { count: ids.length }));
-      void refresh();
-    } catch (e) { sendFailed(e, open, false); }
-    finally { sendingAnnosRef.current = false; setSendingAnnos(false); }
-  };
-
   // 收起（S8）：去掉 d、看板清空、焦点回输入框；在生成的照常生成，只是不再自动摆上来
   const collapse = useCallback(() => {
     if (!dRef.current && !pendingRef.current) return;
@@ -324,7 +281,7 @@ export function SketchRoute() {
     if (dRef.current) openDraft(null);
     composerRef.current?.focus();
   }, [openDraft]);
-  // Esc 的先后（PAGE-SKETCH）：说明框、下拉与弹层自己先拦下；然后去掉胶囊回到改整张；最后才按 Q-SKETCH-3 收起看板
+  // Esc 的先后（PAGE-SKETCH）：下拉与弹层自己先拦下；然后去掉胶囊回到改整张；最后才按 Q-SKETCH-3 收起看板
   const escape = () => { if (activePick) setPick(null); else collapse(); };
 
   const [copyFor, setCopyFor] = useState<ScreenDto | null>(null);
@@ -352,22 +309,18 @@ export function SketchRoute() {
 
   // Esc 收起（Q-SKETCH-3）：焦点在输入框里时由输入框处理（有字先清字），弹层与下拉开着时归它们（它们会拦下或 preventDefault）。
   // ⌘/ 收起 / 展开输入框（同画布）：焦点在输入框里也要能按，所以不过「可编辑区」那道门
-  // 快捷键同画布（v1.16）：⌘E 选元素、⌥N 批注、⌘/ 输入框；焦点在草稿 iframe 里时父页收不到键盘，由运行时转发上来（DraftStage 的 onShortcut）
-  const shortcut = (code: string, alt: boolean) => {
-    if (keyRef.current.blocked) return false;
-    if (!alt && code === 'Slash') { toggleComposer(); return true; }
-    if (!open?.currentRevisionId) return false;
-    if (!alt && code === 'KeyE') { changeTool(tool === 'pick' ? null : 'pick'); return true; }
-    if (alt && code === 'KeyN') { changeTool(tool === 'annotate' ? null : 'annotate'); return true; }
-    return false;
+  // 快捷键同画布（v1.16）：⌘E 选元素、⌘/ 输入框；焦点在草稿 iframe 里时父页收不到键盘，由运行时转发上来（DraftStage 的 onShortcut）
+  const shortcut = (code: string) => {
+    if (keyRef.current.blocked) return;
+    if (code === 'Slash') { toggleComposer(); return; }
+    if (!open?.currentRevisionId) return;
+    if (code === 'KeyE') changePicking(!picking);
   };
   const keyRef = useRef({ escape, toggleComposer, shortcut, blocked: false });
-  keyRef.current = { escape, toggleComposer, shortcut, blocked: !!copyFor || !!deleting || !!removingAnno || !!settingsSection };
+  keyRef.current = { escape, toggleComposer, shortcut, blocked: !!copyFor || !!deleting || !!settingsSection };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && (e.code === 'Slash' || e.code === 'KeyE')) { e.preventDefault(); keyRef.current.shortcut(e.code, false); return; }
-      // ⌥ + 字母在文本框里会打出字符，只在焦点不在可编辑区时当快捷键（同画布）
-      if (e.altKey && e.code === 'KeyN' && !(e.target as HTMLElement | null)?.closest(EDITABLE)) { if (keyRef.current.shortcut(e.code, true)) e.preventDefault(); return; }
+      if ((e.metaKey || e.ctrlKey) && (e.code === 'Slash' || e.code === 'KeyE')) { e.preventDefault(); keyRef.current.shortcut(e.code); return; }
       if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing || keyRef.current.blocked) return;
       if ((e.target as HTMLElement | null)?.closest(EDITABLE)) return;
       keyRef.current.escape();
@@ -418,18 +371,16 @@ export function SketchRoute() {
           onCopy={() => { if (open) setCopyFor(open); }}
           onDelete={() => { if (open) setDeleting(open); }}
           onCollapse={collapse}
-          onEscape={escape} onShortcut={(code, alt) => keyRef.current.shortcut(code, alt)}
+          onEscape={escape} onShortcut={(code) => keyRef.current.shortcut(code)}
           onStale={() => refresh({ quiet: true })}
           refs={refs} onRef={(id) => void changeRef(id)}
-          tool={tool} onTool={changeTool} pickQid={activePick?.qid ?? null} onPick={onPick}
-          annotations={draftAnnos} onCreateAnnotation={createAnnotation} onUpdateAnnotation={updateAnnotation} onRemoveAnnotation={setRemovingAnno}
+          picking={picking} onPicking={changePicking} pickQid={activePick?.qid ?? null} onPick={onPick}
         />
       ) : <StagePending failure={book.failure} onRetry={book.retry} />}
       <DraftRail open={railOpen} onToggle={toggleRail} drafts={drafts} openId={open?.id ?? null} generating={generating} onPick={(id) => { if (id !== dRef.current) openDraft(id); if (narrow()) setRailOpen(false); }} onShotError={onShotError} />
       <SketchComposer
         handle={composerRef} laneRef={laneRef} draft={open} jobs={chips} blockedReason={blockedReason} prefs={prefs}
-        refs={refs} tool={tool} pick={activePick} onClearPick={() => { setPick(null); composerRef.current?.focus(); }}
-        openAnnotations={openAnnos.length} sendingAnnotations={sendingAnnos} onSendAnnotations={() => void sendAnnotations()}
+        refs={refs} picking={picking} pick={activePick} onClearPick={() => { setPick(null); composerRef.current?.focus(); }}
         onSend={onSend} onCancelJob={(id) => void book.cancel(id)} onRetryJob={retryJob} onDismissJob={dismissJob}
         onUploadImage={(file) => (projectId ? api.projects.uploadImage(projectId, file) : Promise.reject(new Error(t('page.blocked.loading'))))}
         onError={(m) => toast(m, 'error')} onEscape={escape}
@@ -440,7 +391,6 @@ export function SketchRoute() {
       {/* 传当前的那份：弹层开着时这一版的截图、写回目标可能刚到 */}
       {copyFor && <CopyDialog draft={detail?.screens.find((x) => x.id === copyFor.id) ?? copyFor} runner={prefs.sendRunner} onClose={() => setCopyFor(null)} onCopied={() => void refresh({ quiet: true })} />}
       {deleting && <ConfirmDialog title={t('page.removeTitle', { name: deleting.name })} body={t('page.removeBody')} confirmLabel={tc('delete')} fallback={composerInput} onCancel={() => setDeleting(null)} onConfirm={remove} />}
-      {removingAnno && <ConfirmDialog title={t('page.anno.removeTitle')} body={t('page.anno.removeBody', { note: removingAnno.note.length > 40 ? `${removingAnno.note.slice(0, 40)}…` : removingAnno.note })} confirmLabel={tc('delete')} fallback={composerInput} onCancel={() => setRemovingAnno(null)} onConfirm={removeAnnotation} />}
     </div>
   );
 }

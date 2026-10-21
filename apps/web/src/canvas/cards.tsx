@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
-import type { AnnotationDto, ComponentDto, ScreenDto } from '@quilt/core/browser';
+import type { ComponentDto, ScreenDto } from '@quilt/core/browser';
 import { useT } from '@/i18n';
 import canvasMessages from '@/i18n/locales/canvas-parts';
 
@@ -17,7 +17,6 @@ export type CardActions = {
   dragStart: (e: ReactPointerEvent, kind: CardKind, id: string) => void;
   enterScreen: (id: string) => void;
   enterComponent: (id: string) => void;
-  annotation: (id: string) => void;
   dangling: (screenId: string, hrefs: string[]) => void;
   candidates: (jobId: string, screenId: string) => void;
   gesture: (id: string, el: HTMLElement | null) => void;
@@ -33,7 +32,7 @@ type ScreenCardProps = {
   selected: boolean; focused: boolean; live: boolean; dragging: boolean;
   /** 卡片显示哪一张截图（原图或缩略图，v1.02 ADR-029） */
   shotUrl: string | null; shotFailed: boolean; shotRetry: number;
-  working: boolean; annotations?: AnnotationDto[]; dangling?: string[];
+  working: boolean; dangling?: string[];
   exemplar: boolean; variants: number; tabbable: boolean; panReady: boolean;
   /** 有候选未采用：卡片后面的错位底板（stacked）与角标；candExpanded = 这一屏的候选正就地展开 */
   stacked: boolean; candExpanded: boolean;
@@ -44,7 +43,7 @@ type ScreenCardProps = {
   act: CardActions;
 };
 
-export const ScreenCard = memo(function ScreenCard({ s, idx, x, y, selected, focused, live, dragging, shotUrl, shotFailed, shotRetry, working, annotations, dangling, exemplar, variants, tabbable, panReady, stacked, candExpanded, frame, chrome, act }: ScreenCardProps) {
+export const ScreenCard = memo(function ScreenCard({ s, idx, x, y, selected, focused, live, dragging, shotUrl, shotFailed, shotRetry, working, dangling, exemplar, variants, tabbable, panReady, stacked, candExpanded, frame, chrome, act }: ScreenCardProps) {
   const t = useT(canvasMessages);
   const desktop = s.width > 600;
   const gestureRef = useCallback((el: HTMLDivElement | null) => act.gesture(s.id, el), [act, s.id]);
@@ -79,19 +78,6 @@ export const ScreenCard = memo(function ScreenCard({ s, idx, x, y, selected, foc
           onFocus={() => act.cardFocus(s.id)} onKeyDown={(ev) => act.cardKey(ev, 'screen', s.id)} onMouseDown={keepPointerFocus}
           onPointerDown={(ev) => act.dragStart(ev, 'screen', s.id)} onDoubleClick={(ev) => { ev.stopPropagation(); act.enterScreen(s.id); }} />}
         {chrome}
-        {annotations?.map((a, i) => {
-          const clamped = a.rect.y + a.rect.h / 2 > s.height - 12;
-          return (
-            <button
-              key={a.id} type="button" className={`anno-pin state-layer nopan${a.status === 'sent' ? ' sending' : ''}`}
-              style={{ left: Math.min(Math.max(a.rect.x + a.rect.w, 12), s.width - 12), top: clamped ? s.height - 16 : a.rect.y + a.rect.h / 2 }}
-              title={clamped ? t('card.belowFold', { note: a.note }) : a.note}
-              data-testid="anno-pin" data-anno={a.id}
-              onPointerDown={(ev) => ev.stopPropagation()}
-              onClick={(ev) => { ev.stopPropagation(); act.annotation(a.id); }}
-            >{i + 1}</button>
-          );
-        })}
         {dangling && (
           <button type="button" className="warn state-layer focus-ring nopan cursor-pointer" style={{ pointerEvents: 'auto' }} title={t('card.danglingTitle', { hrefs: dangling.join(', ') })} onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); act.dangling(s.id, dangling); }}>
             {t('card.dangling', { count: dangling.length, href: dangling[0] })}{dangling.length > 1 ? ' …' : ''}
@@ -136,8 +122,7 @@ export const ComponentCard = memo(function ComponentCard({ c, x, y, w, h, shift,
         <iframe ref={frameRef} className="nowheel nopan" src={c.previewUrl} title={c.name} sandbox="allow-scripts allow-same-origin" style={{ width: screenW, height: screenH, transform: shift }} />
       </div>
       {/* 交互态（与屏一致：双击进、Esc 出）。这层手势罩摘掉，指针才落得到 iframe 上；
-          **镜头不动**——组件卡是按自身内容尺寸渲染的、本来就是 1:1，没有屏那种「推到 1:1 居中」的理由，
-          为看一眼组件把整块画布推走反而丢了上下文（屏那条见 REQ-CORE-005） */}
+          进的时候镜头同屏一样摆过去（CanvasView 的 focusComponent）：画布缩得很小时组件卡只有几十像素宽，不摆过去点不中 */}
       {!focused && <div ref={gestureRef} className={`gesture${panReady ? '' : ' nopan'}`} role="button" tabIndex={tabbable ? 0 : -1} aria-label={t('card.component', { name: c.name })}
         onFocus={() => act.cardFocus(c.id)} onKeyDown={(ev) => act.cardKey(ev, 'component', c.id)} onMouseDown={keepPointerFocus}
         onPointerDown={(ev) => act.dragStart(ev, 'component', c.id)} onDoubleClick={(ev) => { ev.stopPropagation(); act.enterComponent(c.id); }} />}

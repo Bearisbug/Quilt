@@ -38,15 +38,15 @@ Quilt 整个跑在你自己的机器上：一个进程，无账号，无云端�
 ## 能做什么
 
 - **造**。输入 APP 是什么。规划器排出 4–6 屏的主流程（或你指定的 1–4 屏），每屏按项目设计系统生成为自包含 HTML，经 lint、截图后落到画布。每屏可要 1–4 版候选，看中哪版采用哪版。在跑的作业是输入框上方的一枚枚 chip；失败的留在那里写明原因，能原样重试的带「重试」。
-- **改**。选中屏、说改动。在聚焦的屏里按 `⌘E` 点选任意元素：文案、类名、跳转目标直改零 token；只让 AI 重生成这一块；或者给元素挂批注、攒够一起发。新的一版在活屏里原地换上。
-- **草稿本**。项目之外的一整页画板，专门出单个组件或页面。一句话出稿，用点选改一块或批注细调，在各版之间来回切，满意了写回项目：落成新屏、覆盖一整屏，或者只换掉其中一块。
+- **改**。选中屏、说改动。在聚焦的屏里按 `⌘E` 点选任意元素：文案、类名、跳转目标直改零 token；或者只让 AI 重生成这一块。新的一版在活屏里原地换上。
+- **草稿本**。项目之外的一整页画板，专门出单个组件或页面。一句话出稿，用点选改一块细调，在各版之间来回切，满意了写回项目：落成新屏、覆盖一整屏，或者只换掉其中一块。
 - **无限画布**。截图平铺、平移缩放、拖动摆放、多选对齐与等距（一键排成一行 / 一列），位置持久化。`⌘K` 按名字、路由或用途跳到一屏；屏列表面板按断链 / 待采用候选 / 偏离 / 进行中筛选；小地图显示全部卡片与视口。双击一屏进入聚焦态，它变成活 iframe，可滚动、可输入、可点击。输入框能停在左、右、下三条边，也能收成一枚贴边胶囊。
 - **原型播放**。链接、表单提交、`data-href` 按钮在聚焦 iframe 内跳屏，状态保留、可后退。把屏标成「叠层」（底部弹层、对话框），它就压在打开它的那一屏上面，而不是替换掉。给屏加「状态变体」（空态、出错、未登录……），同路由同版式，播放时可切换。应用地图从 HTML 派生，断链标红、一键接上，缺失路由可懒生成。整套导出为单文件 HTML，离线可开。
 - **设计系统**。种子色派生 Material 3 token、`DESIGN.md` 与组件配方；可挂显式品牌色板（亮 / 暗各一套）、上传 logo 与素材、整套存成预设给下个项目用。改 token 后确定性回刷全部屏。
 - **共享组件**。把导航栏、顶栏、侧栏记为项目级组件，和屏并排放在画布上。屏引用它、不复制代码：每次写入时 Quilt 填入正式 HTML，并按路由标出激活项。改组件一次（手改、输入框、或经 MCP），所有用它的屏零模型调用同步。
 - **修订树**。每次生成、编辑、agent 写入都是一条带父修订的修订。可回溯任意一版，候选分支保留，随时采用。
 - **通道**。设置页管理生成通道：Anthropic、Gemini（AI Studio 或 Vertex）、OpenAI 兼容端点、本机 Claude 订阅、运行中的 Claude Code 会话。密钥加密落库，用量台账按作业记 token。
-- **MCP 双向**。编码 agent 连 `http://127.0.0.1:3100/mcp`，拿到 57 个工具与 7 个资源，画布与草稿本能做的事都能经它做。反过来 Quilt 也能把作业派给一个运行中的 Claude Code 会话并等它收口。
+- **MCP 双向**。编码 agent 连 `http://127.0.0.1:3100/mcp`，拿到 53 个工具与 7 个资源，画布与草稿本能做的事都能经它做。反过来 Quilt 也能把作业派给一个运行中的 Claude Code 会话并等它收口。
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/5b94045a-2802-41d7-bb20-36443b906bec" width="760" alt="在聚焦的屏里点选一个元素，就地改它" />
@@ -64,7 +64,7 @@ Quilt 整个跑在你自己的机器上：一个进程，无账号，无云端�
                                         ~/.quilt：PGlite 数据库 · objects/ · config.env
 ```
 
-生成的屏是带 Tailwind class 与项目 token 的普通 HTML，元素带稳定 id，编辑与批注能精确定位到子树。预览域与画布不同 origin，生成的脚本拿不到工具自己的存储。
+生成的屏是带 Tailwind class 与项目 token 的普通 HTML，元素带稳定 id，编辑能精确定位到子树。预览域与画布不同 origin，生成的脚本拿不到工具自己的存储。
 
 `docs/DESIGN.md` 是需求、数据模型、接口契约、状态机与 ADR 的单一事实源；`docs/TEST.md` 是每次改动都要过的验收台账。
 
@@ -113,7 +113,7 @@ pnpm dev                         # API + Worker + 预览域在 3100/3101，Vite 
 claude mcp add --transport http quilt http://127.0.0.1:3100/mcp
 ```
 
-服务只绑回环地址，所以免鉴权。57 个工具覆盖画布能做的一切：项目（`quilt.list_projects`、`create_project`、`get_project`、`update_project`、`delete_project`）；读取（`get_outline`、`get_screen`、`get_screenshot`、`get_revision`、`list_revisions`、`list_candidates`、`get_design_contract`、`get_app_map`、`list_assets`、`list_annotations`、`list_messages`、`list_jobs`、`get_job`、`get_job_events`、`list_runners`、`list_design_presets`）；写屏（`validate_screen`、`create_screen`、`update_screen`、`patch_screen`、`create_upload_url`、`append_upload`、`link_screens`、`move_screens`、`edit_element`、`restore_revision`、`adopt_candidate`、`delete_screen`）；草稿本（`get_sketchbook`、`create_draft`、`copy_draft`）；共享组件（`create_component`、`update_component`、`delete_component`）；设计系统（`update_design_system`、`create_design_preset`、`apply_design_preset`、`delete_design_preset`、`create_asset`、`delete_asset`）；模型作业（`generate_screens`、`edit_screens`、`regenerate_subtree`、`edit_component`、`propose_design_system`、`export_prototype`、`get_export`、`cancel_job`、`finish_job`）；批注（`update_annotation`、`delete_annotation`、`send_annotations`）。只有通道设置（API Key）留在设置页。资源：`design-md`、`tokens`、`app-map`、`golden`、`screen-html`、`screen-screenshot`、`attachment`。
+服务只绑回环地址，所以免鉴权。53 个工具覆盖画布能做的一切：项目（`quilt.list_projects`、`create_project`、`get_project`、`update_project`、`delete_project`）；读取（`get_outline`、`get_screen`、`get_screenshot`、`get_revision`、`list_revisions`、`list_candidates`、`get_design_contract`、`get_app_map`、`list_assets`、`list_messages`、`list_jobs`、`get_job`、`get_job_events`、`list_runners`、`list_design_presets`）；写屏（`validate_screen`、`create_screen`、`update_screen`、`patch_screen`、`create_upload_url`、`append_upload`、`link_screens`、`move_screens`、`edit_element`、`restore_revision`、`adopt_candidate`、`delete_screen`）；草稿本（`get_sketchbook`、`create_draft`、`copy_draft`）；共享组件（`create_component`、`update_component`、`delete_component`）；设计系统（`update_design_system`、`create_design_preset`、`apply_design_preset`、`delete_design_preset`、`create_asset`、`delete_asset`）；模型作业（`generate_screens`、`edit_screens`、`regenerate_subtree`、`edit_component`、`propose_design_system`、`export_prototype`、`get_export`、`cancel_job`、`finish_job`）。只有通道设置（API Key）留在设置页。资源：`design-md`、`tokens`、`app-map`、`golden`、`screen-html`、`screen-screenshot`、`attachment`。
 
 建议 agent 先 `get_outline`（每屏一份紧凑的结构摘要）再 `get_screen`（整屏 HTML）。写入要小：改一部分用 `patch_screen`（在正文上查找替换），超过约 8 KB 的屏用 `create_upload_url` 加几次 `append_upload` 分块写——一个很长的工具参数会让流式响应中途断开（「Connection lost mid-response」）。写入都带 `expectedRevisionId`，基线过期返回 409，两个写入方不会互相覆盖。
 

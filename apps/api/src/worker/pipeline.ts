@@ -3,7 +3,6 @@ import path from 'node:path';
 import { and, eq, ne, sql, isNull, inArray } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
-import { settleByJob } from '../services/annotations.ts';
 import { loadForModel } from '../services/attachments.ts';
 import { assetsForPrompt } from '../services/assets.ts';
 import { resolveChannelSpec } from '../services/channels.ts';
@@ -703,7 +702,7 @@ async function runClaimed(claimed: JobRow): Promise<void> {
 
   const screenIds = Array.from(new Set(ctx.produced.map((p) => p.screenId)));
   const output = { screenIds, revisionIds: ctx.produced.map((p) => p.revisionId), tokensIn: ctx.usage.tokensIn, tokensOut: ctx.usage.tokensOut, ...extraOutput, ...(failure ? { errorClass: failure.errorClass, message: failure.message } : {}) };
-  // 条件更新没改到（这一刻已被取消或被 job.timeout 扫走）就到此为止：那一方已经回写消息、收口批注、发过终态事件（§16 v1.03）
+  // 条件更新没改到（这一刻已被取消或被 job.timeout 扫走）就到此为止：那一方已经回写消息、发过终态事件（§16 v1.03）
   let updated = false;
   await db.transaction(async (tx) => {
     if (ctx.produced.length) await deriveLinks(tx, project.id);
@@ -741,8 +740,6 @@ async function runClaimed(claimed: JobRow): Promise<void> {
   });
   if (!updated) return;
   const rows = screenIds.length ? await db.select().from(schema.screens).where(and(eq(schema.screens.projectId, project.id), sql`${schema.screens.id} = any(${sql.raw(`array[${screenIds.map((s) => `'${s}'::uuid`).join(',')}]`)})`)) : [];
-  // 批注随作业终态收口（REQ-EDIT-004）：成功标为已处理，失败 / 取消回落为未处理
-  await settleByJob(jobId, !failure);
   const [projectNow] = await db.select().from(schema.projects).where(eq(schema.projects.id, project.id));
   await emitJobEvent(jobId, failure ? 'failed' : 'succeeded', { errorClass: failure?.errorClass, message: failure?.message, screens: await screenDtos(projectNow, rows), ...(extraOutput.proposal ? { proposal: extraOutput.proposal } : {}) });
 }

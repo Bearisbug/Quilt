@@ -15,12 +15,11 @@ export const previewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('quilt:overlay-dismiss') }),
   // 捏合（ctrl+wheel）；pan = 组件预览里落在没有可滚区域处的普通滚轮（v0.80），父页平移画布
   z.object({ type: z.literal('quilt:wheel'), deltaY: z.number(), x: z.number(), y: z.number(), deltaX: z.number().optional(), pan: z.boolean().optional() }),
-  // rect 为屏文档坐标（含滚动偏移），与 fullPage:false 的截图同一坐标系，供画布层画批注气泡（REQ-EDIT-004 / ADR-003）
   // component：元素所在的共享组件名（自身或祖先带 data-component，REQ-EDIT-006），检查器据此挡住直改、给「改组件 / 脱离共享」
   // path（v1.00 逐级选）：从屏根到锚点（最近一次悬停 / 点中的最里层元素）的祖先链，当前选中是其中一级
   z.object({
     type: z.literal('quilt:select'), qid: z.string(), tag: z.string(), text: z.string(), classes: z.string(), href: z.string().nullable(), component: z.string().nullable(),
-    rect: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }), path: z.array(elementPathItemSchema).optional(),
+    path: z.array(elementPathItemSchema).optional(),
   }),
   // 父页在热更新后要求按 qid 重选（quilt:reselect），元素已不在时回这个：检查器清空
   z.object({ type: z.literal('quilt:deselect'), qid: z.string() }),

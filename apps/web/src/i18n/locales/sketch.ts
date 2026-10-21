@@ -49,17 +49,6 @@ export default defineMessages('sketch', {
     renameFailed: '改名失败',
     frameFailed: '换画框失败',
     refFailed: '换参照失败',
-    anno: {
-      locked: '这个元素属于共享组件「{{name}}」，草稿里不能给它批注',
-      gone: '这条批注或这张草稿已经不在了',
-      createFailed: '批注没存上，连不上 Quilt 服务',
-      updateFailed: '批注没改成，连不上 Quilt 服务',
-      removeFailed: '批注没删掉，连不上 Quilt 服务',
-      sent_one: '已发送 {{count}} 条批注',
-      sent_other: '已发送 {{count}} 条批注',
-      removeTitle: '删除这条批注？',
-      removeBody: '「{{note}}」删了撤销不了。',
-    },
     removed: '已删除「{{name}}」',
     removeBusy: '这张草稿正在生成或修改，先在输入框上方取消它',
     removeFailed: '删除失败',
@@ -100,28 +89,10 @@ export default defineMessages('sketch', {
     originBlock: '来自「{{project}} · {{screen}}」里的一块',
     frame: '画框',
     pick: { label: '选元素', desc: '点草稿里的一块，输入框就只改它' },
-    annotate: { label: '批注', desc: '点草稿里的一块钉一条说明，攒几条一起发' },
     editing: '正在改…',
     copy: '写回项目…',
     remove: { label: '删除草稿', desc: '删掉这张草稿和它的全部版本，不可恢复', busy: '{{reason}}，先在输入框上方取消它' },
     collapse: { label: '收起', desc: '看板清空，草稿留在记录栏里；在生成的照常生成' },
-  },
-
-  // 草稿上的批注气泡与说明框
-  anno: {
-    newTitle: '给 <{{tag}}> 写一条批注',
-    newTitleText: '给 <{{tag}}>「{{text}}」 写一条批注',
-    editTitle: '批注 {{n}}',
-    editTitleText: '批注 {{n}} · 「{{text}}」',
-    pin: '批注 {{n}}：{{note}}',
-    pinSent: '批注 {{n}}（已发出）：{{note}}',
-    pinFolded: '批注 {{n}}（元素在草稿下方，要往下滚才看得到）：{{note}}',
-    pinSentFolded: '批注 {{n}}（已发出）（元素在草稿下方，要往下滚才看得到）：{{note}}',
-    sentNote: '已发出，这一轮改完就清掉',
-    placeholder: '例如：这个按钮改成次要样式，文案换成「稍后再说」',
-    over: '最多 {{max}} 字，现在 {{len}} 字',
-    create: '存下',
-    save: '保存',
   },
 
   // 记录栏
@@ -196,7 +167,6 @@ export default defineMessages('sketch', {
     },
     pickPhrase: '说说这一块要怎么改：例如 换成两列卡片，标题加粗',
     pickTool: '点草稿里的一块只改它；不点就是改「{{name}}」整张',
-    annotateTool: '点草稿里的元素写批注，攒几条一起发；也可以在这里说整张怎么改',
     editPhrase: '说说「{{name}}」要怎么改：例如 按钮换成圆形，加一个音量滑块',
     verb: {
       newDraft: '新草稿',
@@ -206,8 +176,6 @@ export default defineMessages('sketch', {
     },
     chip: '「{{name}}」里的 {{tag}}',
     chipText: '「{{name}}」里的 {{tag}}「{{text}}」',
-    sendAnnotations_one: '{{count}} 条批注 · 发送',
-    sendAnnotations_other: '{{count}} 条批注 · 发送',
   },
 
   // 「写回项目…」弹层
@@ -337,17 +305,6 @@ export default defineMessages('sketch', {
     renameFailed: 'Couldn’t rename',
     frameFailed: 'Couldn’t change the frame',
     refFailed: 'Couldn’t change the reference',
-    anno: {
-      locked: 'This element belongs to the shared component “{{name}}” and can’t be annotated in a draft',
-      gone: 'This annotation or draft no longer exists',
-      createFailed: 'Annotation not saved: can’t reach the Quilt service',
-      updateFailed: 'Annotation not updated: can’t reach the Quilt service',
-      removeFailed: 'Annotation not deleted: can’t reach the Quilt service',
-      sent_one: 'Sent {{count}} annotation',
-      sent_other: 'Sent {{count}} annotations',
-      removeTitle: 'Delete this annotation?',
-      removeBody: '“{{note}}” will be deleted. This can’t be undone.',
-    },
     removed: 'Deleted “{{name}}”',
     removeBusy: 'This draft is generating or being edited; cancel its job above the composer first',
     removeFailed: 'Couldn’t delete',
@@ -385,27 +342,10 @@ export default defineMessages('sketch', {
     originBlock: 'From a block in “{{project}} · {{screen}}”',
     frame: 'Frame',
     pick: { label: 'Select element', desc: 'Click a block in the draft so the composer edits just that block' },
-    annotate: { label: 'Annotate', desc: 'Click a block in the draft to pin a note; collect a few and send them together' },
     editing: 'Editing…',
     copy: 'Copy to project…',
     remove: { label: 'Delete draft', desc: 'Delete this draft and all its versions. This can’t be undone', busy: '{{reason}}; cancel its job above the composer first' },
     collapse: { label: 'Collapse', desc: 'Clears the board. The draft stays in the draft list, and anything generating keeps going' },
-  },
-
-  anno: {
-    newTitle: 'Annotate <{{tag}}>',
-    newTitleText: 'Annotate <{{tag}}> “{{text}}”',
-    editTitle: 'Annotation {{n}}',
-    editTitleText: 'Annotation {{n}} · “{{text}}”',
-    pin: 'Annotation {{n}}: {{note}}',
-    pinSent: 'Annotation {{n}} (sent): {{note}}',
-    pinFolded: 'Annotation {{n}} (element is further down the draft; scroll down to see it): {{note}}',
-    pinSentFolded: 'Annotation {{n}} (sent) (element is further down the draft; scroll down to see it): {{note}}',
-    sentNote: 'Sent; cleared once this round of edits finishes',
-    placeholder: 'e.g. make this button secondary and change its text to “Maybe later”',
-    over: 'Up to {{max}} characters; currently {{len}}',
-    create: 'Save',
-    save: 'Save',
   },
 
   rail: {
@@ -474,7 +414,6 @@ export default defineMessages('sketch', {
     },
     pickPhrase: 'Describe how to change this block, e.g. switch to two-column cards and bold the title',
     pickTool: 'Click a block in the draft to edit just that block; otherwise all of “{{name}}” is edited',
-    annotateTool: 'Click elements in the draft to annotate them and send a few together, or describe here how to change the whole draft',
     editPhrase: 'Describe how to change “{{name}}”, e.g. make the button round and add a volume slider',
     verb: {
       newDraft: 'New draft',
@@ -484,8 +423,6 @@ export default defineMessages('sketch', {
     },
     chip: '{{tag}} in “{{name}}”',
     chipText: '{{tag}} “{{text}}” in “{{name}}”',
-    sendAnnotations_one: '{{count}} annotation · Send',
-    sendAnnotations_other: '{{count}} annotations · Send',
   },
 
   copy: {

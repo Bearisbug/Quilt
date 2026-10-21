@@ -42,7 +42,7 @@ export async function ingestScreen(ownerId: string, projectId: string, input: { 
   const route = input.route ?? (sketch && !input.screenId ? nextDraftRoute(screens.map((s) => s.route)) : undefined);
   if (!route) throw problems.validation([{ path: 'route', message: 'route is required' }]);
   // 共享组件（REQ-EDIT-006）：agent 写进来的占位（或它手抄的副本）在这里展开成正式 HTML。
-  // qid 对齐而不是全部重编（v0.65）：没动的元素保留原号，连续局部修改的锚点与挂在元素上的批注都还对得上
+  // qid 对齐而不是全部重编（v0.65）：没动的元素保留原号，连续局部修改的锚点还对得上
   const shared = await sharedComponentsOf(project.id);
   const incoming = raw.includes('<body') ? extractBody(raw) : raw;
   const componentsOverwritten = overwrittenInstances(incoming, shared, route);

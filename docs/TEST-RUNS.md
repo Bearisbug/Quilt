@@ -261,6 +261,8 @@
 | RUN-271 | 2026-10-20 | 未提交工作树（设计文档 v1.17）的构建（修复前） | AI(Claude Code) | 局部(TC-CORE-127) | 通过 0/1 · 失败 1 |
 | RUN-272 | 2026-10-20 | 未提交工作树（设计文档 v1.17；含 RUN-270、RUN-271 两处修复） | AI(Claude Code) | 全量至 TC-CORE-127、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024 | 通过 158/177 · 失败 6 · 待人工 2 · 跳过 11 |
 | RUN-273 | 2026-10-20 | 同 RUN-272 的构建；`tests/e2e` 按 RUN-272 明细更正（`018`、`051`、`106`、`122`、`125`） | AI(Claude Code) | 局部(TC-CORE-018、TC-CORE-051、TC-CORE-106、TC-CORE-122、TC-CORE-125 + 冒烟级至 TC-CORE-127、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 10/12 · 跳过 2 |
+| RUN-274 | 2026-10-20 | 未提交工作树（设计文档 v1.18：草稿出新版、换画框原地换） | AI(Claude Code) | 局部(TC-CORE-098、TC-CORE-099、TC-CORE-100、TC-CORE-101、TC-CORE-102、TC-CORE-103、TC-CORE-104、TC-CORE-105、TC-CORE-106、TC-CORE-107、TC-CORE-108、TC-CORE-109、TC-CORE-110、TC-CORE-111、TC-CORE-112、TC-CORE-113、TC-CORE-114、TC-CORE-115、TC-CORE-116、TC-CORE-117、TC-CORE-118、TC-CORE-119、TC-CORE-120、TC-CORE-121、TC-CORE-122、TC-CORE-123、TC-CORE-125、TC-CORE-128、TC-AGENT-011 + 冒烟级至 TC-CORE-128、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 30/37 · 失败 4 · 跳过 3 |
+| RUN-275 | 2026-10-20 | RUN-274 之上：看板的 key 带上「有没有版本」，新草稿第一版落地照旧重挂 | AI(Claude Code) | 局部(TC-CORE-098、TC-CORE-099、TC-CORE-100、TC-CORE-101、TC-CORE-102、TC-CORE-103、TC-CORE-104、TC-CORE-105、TC-CORE-106、TC-CORE-107、TC-CORE-108、TC-CORE-109、TC-CORE-110、TC-CORE-111、TC-CORE-112、TC-CORE-113、TC-CORE-114、TC-CORE-115、TC-CORE-116、TC-CORE-117、TC-CORE-118、TC-CORE-119、TC-CORE-120、TC-CORE-121、TC-CORE-122、TC-CORE-123、TC-CORE-125、TC-CORE-128、TC-AGENT-011 + 冒烟级至 TC-CORE-128、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 35/37 · 跳过 2 |
 
 ## 明细（仅登非「通过」项）
 
@@ -699,6 +701,15 @@
 | RUN-272 | TC-AGENT-013 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
 | RUN-273 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-273 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-274 | TC-CORE-100 | 失败 | 等草稿的 iframe 超时：新草稿第一版落地后看板上一直没有 iframe（证据：`docs/test-runs/run-274-failures.log`） | 产品缺陷（本轮改动带出），已修：看板的 key 带上「有没有版本」，第一版落地照旧重挂；RUN-275 复测 |
+| RUN-274 | TC-CORE-101 | 失败 | 等草稿的 iframe 超时：新草稿第一版落地后看板上一直没有 iframe（证据：`docs/test-runs/run-274-failures.log`） | 产品缺陷（本轮改动带出），已修：看板的 key 带上「有没有版本」，第一版落地照旧重挂；RUN-275 复测 |
+| RUN-274 | TC-CORE-106 | 失败 | 等草稿的 iframe 超时：新草稿第一版落地后看板上一直没有 iframe（证据：`docs/test-runs/run-274-failures.log`） | 产品缺陷（本轮改动带出），已修：看板的 key 带上「有没有版本」，第一版落地照旧重挂；RUN-275 复测 |
+| RUN-274 | TC-CORE-111 | 失败 | 等草稿的 iframe 超时：新草稿第一版落地后看板上一直没有 iframe（证据：`docs/test-runs/run-274-failures.log`） | 产品缺陷（本轮改动带出），已修：看板的 key 带上「有没有版本」，第一版落地照旧重挂；RUN-275 复测 |
+| RUN-274 | TC-AGENT-011 | 跳过 | 本轮误放进 `agent.ts` 的 `ONLY`（它在 `mcp.ts`），没有执行 | RUN-275 补跑 |
+| RUN-274 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-274 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-275 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-275 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 
 
 RUN-267 证据：地基变更（界面视觉换成苹果风方向 E，跨全部界面）的全量轮。构建前端后跑 `scripts/e2e-all.sh` 前九套（CORE、LOAD、CANVAS、PROTO、EDIT、COMPONENTS、AGENT、MCP、CHAT）；单测轮 144/144，构建产物 `check-tokens --lint` 通过。SKETCH 与 install 两套没跑：本轮中途 `tests/e2e/sketch.ts` 已按 v1.14 写回前端改写，与被测构建对不上，SKETCH 开跑即停，改在 RUN-268 随新构建再跑全量。`TC-CORE-008` 在毛玻璃开着时 100 屏 2 倍屏 60 fps、每帧 GPU 主线程 1.4 ms（门槛 4 ms）。完整日志 `.e2e/main/run-267.log`（本机，不进仓库）。
@@ -715,3 +726,7 @@ RUN-271 证据：e2e 改写 v1.17 时发现「收起输入框时胶囊从输入�
 RUN-272 证据：v1.17（去掉对话记录与聊天、作业 chip、记录栏浮层、画框不跨组件与页面）的全量轮。重新构建前端，单测轮 140/140、构建产物 `check-tokens --lint` 通过、core / api / web 类型检查与 web lint 0 处之后，跑 `scripts/e2e-all.sh` 十一套与 install（17:57～18:36）。`TC-CORE-126`（承接 RUN-270）与 `TC-CORE-127`（承接 RUN-271）本轮通过。5 条新失败都在脚本或用例数据，复现与定位见 `docs/test-runs/run-272-failures.log`：去掉对话记录后画布可用区变宽、记录栏浮起后看板变大，`051` 与 `106` 的「放不下」前提不再成立；`018` 还在数对话记录；`125` 撞上前一条用例留下的新草稿；`122` 在组件草稿重报尺寸期间点击。本轮跑的时候机器上另有别的项目在跑（1 分钟负载 20），`122` 的时序问题因此更容易出现。
 
 RUN-273 证据：RUN-272 之后的复测轮，同一构建、同一 main 隔离栈，按 §5 跑上一轮的 5 条失败加冒烟级；`TC-CORE-031` 照 `scripts/e2e-all.sh` 的做法停栈后跑 install。5 条失败全部通过。改完脚本后在 l1 隔离栈上先单跑过：`TC-CORE-122` 连跑 5 次 4 次通过，失败那次是机器满载时预览文档 15 s 内没有上报组件尺寸（不是脚本里的时序问题）。完整日志 `.e2e/main/run-273.log`（本机，不进仓库）。
+
+RUN-274 证据：v1.18 的局部轮（改到 `REQ-CORE-040`，按 §5 整套 SKETCH 加冒烟级）。前端重新构建，单测轮 140/140，core / api / web / tests 类型检查与 web lint 0 处。新用例 `TC-CORE-128` 通过；`100`、`101`、`106`、`111` 是这次改动带出的回归：新草稿在生成中摆上看板时还没有地址，看板的 key 改成只认草稿 id 之后，第一版落地也不再重挂取地址，iframe 一直不出来（`docs/test-runs/run-274-failures.log`）。`TC-AGENT-011` 在 `mcp.ts` 里，本轮误放进 `agent.ts` 的 `ONLY`，没有执行。完整日志 `.e2e/main/run-274.log`（本机，不进仓库）。
+
+RUN-275 证据：修完 RUN-274 的回归后重新构建，按同一范围再跑一轮（改动又碰了 `DraftStage`，所以整套 SKETCH 重跑，不只复测失败项）；`TC-AGENT-011` 本轮在 `mcp.ts` 里补跑。SKETCH 28/28，含 `TC-CORE-128`；`TC-CORE-100`、`101`、`106`、`111` 通过。完整日志 `.e2e/main/run-275.log`（本机，不进仓库）。

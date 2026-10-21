@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
-import { ArrowLeft, Bot, Component, Crosshair, Download, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MessageSquarePlus, MousePointerClick, NotebookPen, Palette, Plus, Search, Settings, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
+import { ArrowLeft, Bot, Component, Crosshair, Download, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MousePointerClick, NotebookPen, Palette, Plus, Search, Settings, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
 import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, failureText, missingPagePrompt, type ComponentDto, type ProjectDetailDto, type JobDto, type JobEventDto, type ScreenDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core/browser';
 import { api, ApiError, loadConfig, subscribeProjectEvents, type LiveState } from '@/lib/api';
 import { useToast } from '@/lib/toast';
@@ -26,7 +26,6 @@ import { reconcileJobs, settleJob, progressText } from '@/canvas/jobTracker';
 import { DeleteDialog, MissingDialog, NewComponentDialog, VariantDialog } from '@/canvas/dialogs';
 import { RevisionPanel } from '@/panels/RevisionPanel';
 import type { ElementSel, DirectEdit, InspectorKeys } from '@/panels/InspectorPanel';
-import { AnnotationPanel } from '@/panels/AnnotationPanel';
 import { AgentJobsPanel } from '@/panels/AgentJobsPanel';
 import { getLocale, tOf, useLocale, useT, type Locale } from '@/i18n';
 import canvasPageMessages from '@/i18n/locales/canvas-page';
@@ -45,11 +44,11 @@ const InspectorPanel = lazy(() => loadInspector().then((m) => ({ default: m.Insp
 const ProposalDialog = lazy(() => loadProposal().then((m) => ({ default: m.ProposalDialog })));
 const PanelLoading = () => <div className="flex flex-1 items-center justify-center"><Spinner /></div>;
 
-type Panel = 'revisions' | 'design' | 'inspect' | 'annotate' | 'agent' | 'screens' | null;
+type Panel = 'revisions' | 'design' | 'inspect' | 'agent' | 'screens' | null;
 const MINIMAP_KEY = 'quilt:minimap';
 const ICON = 18;
 const MAX_TARGETS = 20; // API-CORE-010 契约上限
-// 详情还没到时的屏、组件、批注：同一个空数组，依赖它们的 memo 不必每次渲染都重算
+// 详情还没到时的屏与组件：同一个空数组，依赖它们的 memo 不必每次渲染都重算
 const NONE: never[] = [];
 // 稳定回调（refresh）里取文案用它：按调用时的界面语言取，不进依赖——换语言不该重取项目、重连事件流
 const tNow = tOf(canvasPageMessages);
@@ -165,14 +164,11 @@ function CanvasPage() {
       });
     };
   }, [panel]);
-  // 批注态与选择元素态共用屏内的 inspect 运行时（都靠点元素），但面板与去向不同
-  // 选择元素 / 批注是**全局模式**：先开模式（不必先选中某一屏），再点任意一屏进去。
+  // 选择元素是**全局模式**：先开模式（不必先选中某一屏），再点任意一屏进去。
   // armed = 模式已开；进到某一屏（focusedId）之后才谈得上把 inspect 下发给屏内运行时。
   const inspectArmed = panel === 'inspect';
-  const annotateArmed = panel === 'annotate';
-  const annotateMode = annotateArmed && !!focusedId;
-  // 组件卡也能选元素（v0.57）：它跑同一套运行时，qid 落在组件自己的 HTML 上；批注不对组件开放（v0.80），批注模式下组件卡只是交互态
-  const inspectMode = ((inspectArmed || annotateArmed) && !!focusedId) || (inspectArmed && !!focusedComponentId);
+  // 组件卡也能选元素（v0.57）：它跑同一套运行时，qid 落在组件自己的 HTML 上
+  const inspectMode = inspectArmed && (!!focusedId || !!focusedComponentId);
 
   // 进行中作业的终态由 SSE 事件宣告；refresh 负责与后端对账：先剔除已经结束的（事件流与刷新之间的竞态会丢终态），
   // 作业对账的三个集合（含义见 canvas/jobTracker.ts）：已列出过、已宣告终态、本页开始跟踪时的详情请求序号
@@ -355,7 +351,7 @@ function CanvasPage() {
     if (!additive) setSelectedIds([]);
   }, []);
   const focused = useMemo(() => screens.find((s) => s.id === focusedId) ?? null, [screens, focusedId]);
-  // 聚焦 iframe 此刻显示的那一屏（切了状态变体就是那张变体）：检查器、批注、子树重生成都写到它上面——
+  // 聚焦 iframe 此刻显示的那一屏（切了状态变体就是那张变体）：检查器、子树重生成都写到它上面——
   // 写到卡片自己那屏的话，同号 qid 会静默改掉默认屏上的另一个元素（每屏的 qid 都从 q1 编起）
   const [shownScreenId, setShownScreenId] = useState<string | null>(null);
   const shownScreen = useMemo(() => screens.find((s) => s.id === shownScreenId) ?? focused, [screens, shownScreenId, focused]);
@@ -667,38 +663,9 @@ function CanvasPage() {
   // 输入框的停靠与收起（useComposerChrome）：输入框停的边与大小换算成画布安全区（--chrome-*）
   const { composerVisible, showComposer, toggleComposer, composerDock } = useComposerChrome(focusedId, composerRef);
   const openDesign = () => { if (panel === 'design') setPanel(null); else { setSelectedIds([]); setPanel('design'); } };
-  // 批注（REQ-EDIT-004）：入口与选择元素同源——选中一屏或已聚焦都能进
-  const toggleAnnotate = () => {
-    if (annotateArmed) { setPanel(null); setFocusedId(null); return; }
-    // 组件卡不开放批注（REQ-EDIT-006）：先退出组件交互态，批注模式照开，点一屏进去
-    if (focusedComponentId) { setFocusedComponentId(null); setPanel('annotate'); toast(t('annotate.noComponents')); return; }
-    if (focusedId) { if (navStack.length) canvasApi.current?.resetToOwn(); setPanel('annotate'); return; }
-    if (selected) { canvasApi.current?.focus(selected.id); setPanel('annotate'); return; }
-    setPanel('annotate');
-  };
-  const annotations = detail?.annotations ?? NONE;
-  const screenAnnotations = useMemo(() => annotations.filter((a) => a.screenId === shownScreen?.id), [annotations, shownScreen?.id]);
-  // 存不上时 toast 原因并回 null / false（v0.78）：面板据此留着草稿与改写框，「记下并立刻发送」存不上就不发
-  const addAnnotation = async (note: string): Promise<string | null> => {
-    if (!shownScreen || !elementSel) return null;
-    try { const { annotation } = await api.annotations.create(shownScreen.id, { qid: elementSel.qid, note, anchorText: elementSel.text.slice(0, 200), rect: elementSel.rect }); await refresh(); return annotation.id; }
-    catch (e) { handleJobError(e, t('annotate.failed')); return null; }
-  };
-  const updateAnnotation = async (id: string, note: string): Promise<boolean> => { try { await api.annotations.update(id, { note }); await refresh(); return true; } catch { toast(t('annotate.saveFailed'), 'error'); return false; } };
-  const removeAnnotation = async (id: string) => { try { await api.annotations.remove(id); await refresh(); } catch { toast(t('annotate.deleteFailed'), 'error'); } };
-  const sendAnnotations = async (target: string[]) => {
-    if (!target.length) return;
-    try {
-      const { jobs } = await api.annotations.send(projectId, target);
-      // 同一屏的多条批注合成一次作业，多屏就是多个作业——逐个跟踪，不只跟第一个
-      for (const j of jobs) if (j.runner !== 'agent') trackJob(j);
-      await refresh();
-      toast(jobs.length > 1 ? t('annotate.sentScreens', { n: target.length, screens: jobs.length }) : t('annotate.sent', { count: target.length }));
-    } catch (e) { handleJobError(e, t('annotate.sendFailed')); }
-  };
   // 交互态与选择元素态互斥，退出任一都回到静态截图（卡片本来的样子）。
   // 从交互态切进来时若已在屏内跳转过，先把 iframe 拉回这张卡片自己的那一屏——
-  // 否则选中的元素属于别的屏，与卡片截图对不上（批注的锚点也会错）。
+  // 否则选中的元素属于别的屏，与卡片截图对不上。
   const toggleInspect = () => {
     if (inspectArmed) { setPanel(null); setFocusedId(null); setFocusedComponentId(null); return; }   // 退出模式：连同聚焦一起退回静态卡片
     if (focusedComponentId) { setPanel('inspect'); return; }            // 组件卡已在交互态：就地转成选择元素
@@ -733,7 +700,6 @@ function CanvasPage() {
     KeyD: openDesign,
     KeyT: () => setPanel(panel === 'agent' ? null : 'agent'),
     KeyR: selected && !focusedId ? () => setPanel(panel === 'revisions' ? null : 'revisions') : undefined,
-    KeyN: toggleAnnotate,
     KeyG: () => canvasApi.current?.createAtCenter(),
     KeyC: detail ? () => setNewComponentOpen(true) : undefined,
     KeyS: () => setPanel(panel === 'screens' ? null : 'screens'),
@@ -764,7 +730,7 @@ function CanvasPage() {
         const k = keyRef.current;
         // 弹层自己的 Esc 只在焦点落在弹层内时生效（useModal）；点过一个随即禁用的按钮后焦点会掉到 body，这里兜底关掉
         if (k.blocked) { k.closeModals(); return; }
-        // 面板里的输入框（检查器、批注、设计系统……）只失焦，草稿留着；底部输入框自己处理 Esc 并拦下冒泡
+        // 面板里的输入框（检查器、设计系统……）只失焦，草稿留着；底部输入框自己处理 Esc 并拦下冒泡
         const field = (e.target as HTMLElement | null)?.closest<HTMLElement>('input, textarea, select, [contenteditable]');
         if (field) { field.blur(); return; }
         if (k.expanded) { setCandidates(null); return; }
@@ -780,7 +746,7 @@ function CanvasPage() {
       if ((e.metaKey || e.ctrlKey) && e.code === 'KeyK') { e.preventDefault(); if (!keyRef.current.blocked) keyRef.current.openFinder(); return; }
       // ⌘S 保存检查器（v0.95）：正在检查器的文案 / 类名框里改着时也要能按，同样放在这道门之前；检查器里没有选中元素时不拦浏览器
       if ((e.metaKey || e.ctrlKey) && e.code === 'KeyS') { const save = keyRef.current.saveElement; if (!save) return; e.preventDefault(); if (!keyRef.current.blocked) save(); return; }
-      // ⌘E 选择元素：焦点在底部输入框、检查器或批注框里也要能开关——开着选择元素去输入框写一句、再按 ⌘E 退出是常见动作；⌘E 在文本框里没有要保留的原生行为
+      // ⌘E 选择元素：焦点在底部输入框或检查器里也要能开关——开着选择元素去输入框写一句、再按 ⌘E 退出是常见动作；⌘E 在文本框里没有要保留的原生行为
       if ((e.metaKey || e.ctrlKey) && e.code === 'KeyE') { e.preventDefault(); if (!keyRef.current.blocked) keyRef.current.toggleInspect(); return; }
       if ((e.target as HTMLElement)?.closest('input, textarea, select, [contenteditable]')) return;
       const k = keyRef.current;
@@ -819,7 +785,6 @@ function CanvasPage() {
       { id: 'links', label: t('tools.links.label'), hint: 'L', desc: t('tools.links.desc'), icon: <Waypoints size={ICON} />, active: showLinks, testId: 'toggle-links', onSelect: toggleLinks },
       { id: 'composer', label: composerVisible ? t('tools.composer.hide') : t('tools.composer.show'), hint: `${CMD}/`, desc: t('tools.composer.desc'), icon: <TextCursorInput size={ICON} />, active: composerVisible, testId: 'toggle-composer', onSelect: toggleComposer },
       { id: 'inspect', label: inspectArmed ? t('tools.inspect.on') : t('tools.inspect.label'), hint: `${CMD}E`, desc: t('tools.inspect.desc'), icon: <Crosshair size={ICON} />, active: inspectArmed, onSelect: toggleInspect },
-      { id: 'annotate', label: annotateArmed ? t('tools.annotate.on') : t('tools.annotate.label'), hint: `${ALT}N`, desc: t('tools.annotate.desc'), icon: <MessageSquarePlus size={ICON} />, active: annotateArmed, onSelect: toggleAnnotate },
       { id: 'repair', label: t('tools.repair.label'), desc: selectedScreens.length ? t('tools.repair.descSelected', { count: selectedScreens.length }) : t('tools.repair.descAll'), icon: <Link2 size={ICON} />, testId: 'repair-links', unavailable: jobBlocked, onSelect: repairLinks },
       { id: 'design', label: t('tools.design.label'), hint: `${ALT}D`, desc: t('tools.design.desc'), icon: <Palette size={ICON} />, active: panel === 'design', onSelect: openDesign },
     ],
@@ -864,7 +829,6 @@ function CanvasPage() {
     : panel === 'agent' ? <AgentJobsPanel projectId={projectId} screens={screens} components={components} runners={runners} onClose={() => setPanel(null)} onChanged={refresh} />
     : panel === 'inspect' && focusedComponent ? <InspectorPanel component={focusedComponent} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyComponents.has(focusedComponent.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} tokens={tokens} onPathPick={(qid) => canvasApi.current?.pick(qid)} onPathPeek={(qid) => canvasApi.current?.peek(qid)} onClose={() => setPanel(null)} onEdited={() => { setElementSel(null); refresh(); }} />
     : panel === 'inspect' && shownScreen ? <InspectorPanel screen={shownScreen} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyScreens.has(shownScreen.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} onUndo={() => void undoStack.undo()} tokens={tokens} onPathPick={(qid) => canvasApi.current?.pick(qid)} onPathPeek={(qid) => canvasApi.current?.peek(qid)} runners={runners} composerRunnerId={runnerId} sessionLists={lists} onSessionsOpen={(tool) => void loadSessionsFor(tool)} workingQids={workingSubtrees.filter((w) => w.screenId === shownScreen.id).map((w) => w.qid)} onClose={() => setPanel(null)} onEdited={(qid) => { canvasApi.current?.markDone([qid]); refresh(); }} onRegenerate={regenerateSubtree} onEditComponent={onEditComponent} onForkToSketch={(qid) => void forkToSketch(shownScreen.id, qid)} forking={forking} />
-    : panel === 'annotate' && shownScreen ? <AnnotationPanel screen={shownScreen} sel={elementSel} items={screenAnnotations} busy={busyScreens.has(shownScreen.id)} onClose={() => { setPanel(null); setFocusedId(null); }} onAdd={addAnnotation} onUpdate={updateAnnotation} onRemove={removeAnnotation} onSend={sendAnnotations} />
     : null;
 
   return (
@@ -890,7 +854,7 @@ function CanvasPage() {
           <CanvasView
             projectId={projectId} safeAreaRef={safeAreaRef}
             projectName={detail.project.name} tokens={tokens} palette={detail.designSystem.palette} colorMode={detail.designSystem.colorMode} assets={detail.assets} screens={screens} links={detail.links} previewOrigin={previewOrigin}
-            selectedIds={selectedIds} focusedId={focusedId} styleGuideSelected={panel === 'design'} inspectMode={inspectMode} annotateMode={annotateMode} armed={inspectArmed ? 'inspect' : annotateArmed ? 'annotate' : null} showLinks={showLinks}
+            selectedIds={selectedIds} focusedId={focusedId} styleGuideSelected={panel === 'design'} inspectMode={inspectMode} armed={inspectArmed} showLinks={showLinks}
             anchor={anchor} screenSize={DEVICE_SIZE[detail.project.deviceType]} exemplarScreenId={detail.project.exemplarScreenId}
             onSelect={setSelectedId}
             onSelectMany={(ids, compIds, additive) => { setSelectedIds((prev) => (additive ? [...new Set([...prev, ...ids])] : ids)); setSelectedComponentIds((prev) => (additive ? [...new Set([...prev, ...compIds])] : compIds)); }}
@@ -908,11 +872,9 @@ function CanvasPage() {
             onCandidates={(jobId, screenId) => setCandidates((c) => (c?.screenId === screenId ? null : { jobId, screenId }))}
             candidateStack={candidates && screens.some((s) => s.id === candidates.screenId) ? { screenId: candidates.screenId, node: <CandidateStack jobId={candidates.jobId} screen={screens.find((s) => s.id === candidates.screenId)!} onClose={() => setCandidates(null)} onAdopted={async () => { await refresh(); setCandidates(null); }} /> } : null}
             onElementSelect={(sel) => { setElementSel(sel); canvasApi.current?.highlight(sel?.qid ?? null); }}
-            // sel 里带 component（REQ-EDIT-006）：检查器据此挡直改、批注面板据此挡批注
+            // sel 里带 component（REQ-EDIT-006）：检查器据此挡直改
             selectedQid={elementSel?.qid ?? null}
             workingSubtrees={workingSubtrees}
-            annotations={annotations}
-            onAnnotationClick={(id) => { const a = annotations.find((x) => x.id === id); if (a) { canvasApi.current?.focus(a.screenId); setPanel('annotate'); } }}
             registerApi={(a) => { canvasApi.current = a; }}
             minimap={minimapOn}
             onShown={setShownScreenId}
@@ -923,7 +885,7 @@ function CanvasPage() {
         ) : <CanvasPending failure={failure} onRetry={retryLoad} />}
       </div>
       {/* 多选排列条（REQ-CORE-018）：选中 ≥ 2 屏且没聚焦时出现在画布顶部中央；候选就地展开时让位。排版与键盘在 ArrangeBar，算位在 arrange.ts，落库在 positions.ts */}
-      {selectedScreens.length >= 2 && !focusedId && !inspectArmed && !annotateArmed && !candidates && <ArrangeBar count={selectedScreens.length} yieldToPanel={!!panelBody} onArrange={(k) => void arrange(k, selectedScreens)} />}
+      {selectedScreens.length >= 2 && !focusedId && !inspectArmed && !candidates && <ArrangeBar count={selectedScreens.length} yieldToPanel={!!panelBody} onArrange={(k) => void arrange(k, selectedScreens)} />}
       {settingsSection && <Suspense fallback={null}><SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} returnTo={settingsTool} onCatalog={applyCatalog} /></Suspense>}
       <Composer
         handle={composerRef} laneRef={laneRef} jobs={chips} blockedReason={blockedReason} targets={targetScreens} totalScreens={screens.length} anchor={anchor} maxTargets={MAX_TARGETS}

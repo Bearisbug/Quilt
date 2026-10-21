@@ -40,12 +40,6 @@ function assertRate(userId: string): () => void {
   arr.push(now); windows.set(userId, arr);
   return () => { const a = windows.get(userId) ?? []; const i = a.indexOf(now); if (i >= 0) a.splice(i, 1); };
 }
-// 一次要建 n 个作业时的余量预检（批注跨屏发送，API-EDIT-003 v0.77）：只看不占，名额仍由每次 createJob 自己占
-export function assertRateRoom(userId: string, n: number): void {
-  const now = Date.now();
-  const used = (windows.get(userId) ?? []).filter((t) => now - t < 60_000).length;
-  if (used + n > config.rateLimitJobsPerMinute) throw problems.rateLimited(60);
-}
 
 export function targetScreenOf(input: CreateJobInput): string | null {
   switch (input.kind) {
@@ -219,9 +213,6 @@ export async function cancelJob(job: JobRow): Promise<JobRow> {
   if (job.runner === 'agent') agentHooks?.cancel(job.id);
   else modelAborts.get(job.id)?.abort(new Error('cancelled'));
   await db.update(schema.messages).set({ content: tr('已取消', 'Cancelled') }).where(and(eq(schema.messages.jobId, job.id), eq(schema.messages.role, 'assistant'), eq(schema.messages.content, '')));
-  // 批注发出去的作业被取消：批注回到「未处理」，不然图钉永远闪「发送中」
-  const { settleByJob } = await import('./annotations.ts');
-  await settleByJob(job.id, false);
   await emitJobEvent(job.id, 'cancelled', {});
   return updated;
 }

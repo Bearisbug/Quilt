@@ -1,8 +1,7 @@
 import { defineMessages } from '@/i18n';
 
-// 检查器、类名列表、批注、修订、屏列表五个面板（panels/ 下 InspectorPanel / ClassList / AnnotationPanel / RevisionPanel / ScreensPanel）
+// 检查器、类名列表、修订、屏列表四个面板（panels/ 下 InspectorPanel / ClassList / RevisionPanel / ScreensPanel）
 export default defineMessages('panels-inspect', {
-  quoted: '「{{text}}」',
   inspector: {
     title: '检查器 · {{name}}',
     pathLabel: '元素层级',
@@ -101,26 +100,6 @@ export default defineMessages('panels-inspect', {
     addPlaceholder: '添加类名…（回车加入）',
     addLabel: '添加类名',
   },
-  annotation: {
-    title: '批注 · {{name}}',
-    target: '给 <code/> 写一条改动说明',
-    pickFirst: '在屏幕里点选一个元素，再写改动说明',
-    locked: '这个元素属于共享组件「<b/>」，批注请改组件本身（选中画布上的组件卡后在输入框里说）。',
-    placeholder: '例如：这个按钮改成次要样式，文案换成「稍后再说」',
-    add: '记下（不发送）',
-    addAndSend: '记下并立刻发送',
-    listTitle: '这一屏的批注（{{open}} 条未处理）',
-    sendAll: '一起发送',
-    busy: '这一屏正在改，等这一轮完事再发',
-    emptyTitle: '还没有批注',
-    emptyHint: '点选元素后写下改动说明，可以攒够一起发。',
-    status: { sent: '已发送', resolved: '已处理', open: '未处理' },
-    save: '保存',
-    rewrite: '改写',
-    sendOne: '只发这条',
-    confirmTitle: '删除这条批注？',
-    confirmBody: '「{{note}}」删了撤销不了。',
-  },
   revision: {
     title: '修订 · {{name}}',
     source: { generate: '生成', edit: '对话修改', subtree: '重生成一块', manual: '直改', restore: '回溯', apply_ds: '设计系统回刷', agent_ingest: 'agent 推入', component: '共享组件同步', sketch: '草稿写回' },
@@ -156,7 +135,6 @@ export default defineMessages('panels-inspect', {
     overlay: '叠层',
   },
 }, {
-  quoted: '“{{text}}”',
   inspector: {
     title: 'Inspector · {{name}}',
     pathLabel: 'Element hierarchy',
@@ -254,26 +232,6 @@ export default defineMessages('panels-inspect', {
     colorLabel: 'Change the color of row {{n}}',
     addPlaceholder: 'Add class… (Enter to add)',
     addLabel: 'Add class',
-  },
-  annotation: {
-    title: 'Annotations · {{name}}',
-    target: 'Write a change note for <code/>',
-    pickFirst: 'Click an element on the screen, then write a change note',
-    locked: 'This element belongs to the shared component “<b/>”. To annotate it, edit the component itself (select its card on the canvas, then describe the change in the composer).',
-    placeholder: 'e.g. make this button secondary and change its text to “Maybe later”',
-    add: 'Add without sending',
-    addAndSend: 'Add and send now',
-    listTitle: 'Annotations on this screen ({{open}} open)',
-    sendAll: 'Send all',
-    busy: 'This screen is being edited; send once this round finishes',
-    emptyTitle: 'No annotations yet',
-    emptyHint: 'Click an element and write a change note; collect a few and send them together.',
-    status: { sent: 'Sent', resolved: 'Resolved', open: 'Open' },
-    save: 'Save',
-    rewrite: 'Edit',
-    sendOne: 'Send only this',
-    confirmTitle: 'Delete this annotation?',
-    confirmBody: '“{{note}}” will be deleted. This can’t be undone.',
   },
   revision: {
     title: 'Revisions · {{name}}',

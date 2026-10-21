@@ -10,7 +10,7 @@ export function injectQids(bodyHtml: string): string {
 }
 
 // 写入时对齐 qid（v0.65）：保留合法（q + 数字）且在文档里唯一的已有 qid，其余元素从现有最大号之后续编。
-// agent 读屏 → 改几处 → 回写，没动的元素 qid 不变：连着几次 patch_screen 的锚点还对得上，挂在元素上的批注不会漂到别的元素。
+// agent 读屏 → 改几处 → 回写，没动的元素 qid 不变：连着几次 patch_screen 的锚点还对得上。
 // 重复出现的 qid（复制了一块带 qid 的结构）只有第一个保留。
 export function reconcileQids(bodyHtml: string): string {
   const { document } = parseHTML(`<!doctype html><html><body>${bodyHtml}</body></html>`);
@@ -52,7 +52,7 @@ export function replaceSubtree(bodyHtml: string, qid: string, newHtml: string): 
   let first = true;
   for (const root of nodes) {
     for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
-      // 替换后的根沿用被替换元素的 qid：元素身份延续，检查器重选、屏内「已更新」标记、批注都按 qid 对得上
+      // 替换后的根沿用被替换元素的 qid：元素身份延续，检查器重选、屏内「已更新」标记都按 qid 对得上
       if (first) { el.setAttribute('data-qid', qid); first = false; continue; }
       max += 1; const id = `q${max}`; el.setAttribute('data-qid', id); newQids.push(id);
     }

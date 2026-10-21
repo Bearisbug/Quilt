@@ -268,7 +268,7 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
 .viewport { position: relative; overflow: clip; height: 100%; user-select: none; cursor: default; background-color: var(--semantic-color-surface-canvas); }
 .viewport.pan-ready, .viewport.pan-ready .card .gesture, .viewport.pan-ready .styleguide { cursor: grab; }
 .viewport.dragging, .viewport.dragging .card .gesture, .viewport.dragging .styleguide { cursor: grabbing; }
-/* 选择元素 / 批注模式已开、尚未进任何一屏：光标提示「点一屏进去」 */
+/* 选择元素模式已开、尚未进任何一屏：光标提示「点一屏进去」 */
 .viewport.armed { cursor: crosshair; }
 .viewport.armed .card .gesture { cursor: crosshair; }
 /* 世界层常驻独立合成层（will-change: opacity 只为保住这一层，不冻结栅格比例）：合成层要是随手势开始才建、停下就拆，
@@ -404,7 +404,7 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
    骨架等淡入走完再藏（visibility 按时长延后切），中间不露卡片白底 */
 .comp.live iframe { opacity: 1; }
 .comp.live .skeleton { visibility: hidden; transition: visibility 0s linear var(--semantic-motion-duration-fast); }
-/* 交互态（REQ-EDIT-006）：手势罩已摘，指针交给 iframe；与屏聚焦同一套外框语言，但镜头不动 */
+/* 交互态（REQ-EDIT-006）：手势罩已摘，指针交给 iframe；与屏聚焦同一套外框语言 */
 .comp.focused iframe { pointer-events: auto; }
 /* 交互中：一个呼吸的成功色点，外圈一道 halo 隔开组件内容；复用骨架那条 sk-pulse（MOTION-029 同一效果只有一处定义）。1.2 s 一循环，
    避开 0.2 Hz 那档前庭不适区；reduced-motion 下只留常亮的点（下面统一关动画） */
@@ -414,12 +414,6 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
 .comp.dragging .gesture { cursor: grabbing; }
 .viewport.pan-ready .comp .gesture { cursor: grab; }
 .viewport.dragging .comp .gesture { cursor: grabbing; }
-/* 批注气泡（REQ-EDIT-004）：画在卡片层、坐标是批注时记下的屏文档坐标，随世界层一起缩放。标记色实心 + halo 描边。
-   pointer-events 单独打开——卡片其余部分被 .gesture 覆盖着做拖拽。 */
-.card .anno-pin { position: absolute; z-index: 2; display: grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; transform: translate(-50%, -50%); border-radius: var(--semantic-radius-pill); border: 2px solid var(--semantic-color-mark-halo); background: var(--semantic-color-mark-line); color: var(--semantic-color-mark-on-line); font-size: var(--semantic-typography-caption-font-size); font-weight: var(--primitive-font-weight-semibold); line-height: 1; cursor: pointer; pointer-events: auto; box-shadow: var(--semantic-elevation-raised); }
-.card .anno-pin.sending { background: var(--semantic-color-surface-raised); color: var(--semantic-color-feedback-warning); border-color: currentColor; }
-.card .anno-pin:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring-color); outline-offset: var(--focus-ring-offset); }
-
 /* 框选（屏幕坐标系，不随世界层缩放）。框选、拖卡片、拖小地图视口框期间画布里的 iframe 不接指针，否则指针一进跨源 iframe 父页就收不到 move / up（v0.80）。
    标记用 data 属性、不能用 class：视口的 className 由 React 管，拖动中它一变（如按下空格加 pan-ready）就整串重写、手加的 class 被冲掉 */
 .viewport[data-pointer-drag] iframe { pointer-events: none !important; }

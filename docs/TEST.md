@@ -6,7 +6,7 @@
 
 | 字段 | 值 |
 | --- | --- |
-| 状态 | 生效（设计文档 v1.21；最近一次全量轮 RUN-278（2026-10-21）失败 4 条：§7 登记的 `TC-CORE-023`、`085`（并行下截图时序，脚本更正）、`136`（产品缺陷，已修）、`TC-PROTO-007`（偶发卡住）；复测轮 RUN-279 之后只剩 `TC-CORE-023`；需真实模型的 6 条，加上 `006`（单独执行）、`084` 与 `TC-EDIT-037`（提示词轮）、`038` 与 `TC-AGENT-013`（没有脚本）跳过；`TC-CORE-020` / `TC-AGENT-010` 待人工） |
+| 状态 | 生效（设计文档 v1.23；最近一次全量轮 RUN-284（2026-10-21）失败 6 条：§7 登记的 `TC-CORE-023`，其余 5 条（`TC-CORE-058`、`080`、`100`、`TC-EDIT-001`、`TC-PROTO-010`）是五栈并行满载下的等待超时，`058` 另更正了脚本，复测轮 RUN-285 全部通过；需真实模型的 5 条，加上 `006`（单独执行）、`084` 与 `TC-EDIT-037`（提示词轮）、`038` 与 `TC-AGENT-013`（没有脚本）跳过；`TC-CORE-020` / `TC-AGENT-010` 待人工） |
 | Owner | @bug |
 | 关联设计文档 | `docs/DESIGN.md` |
 | 被测系统 | `~/Documents/Projects/Quilt`（Web 画布 + API/MCP 服务 + Worker + 预览域服务） |
@@ -18,11 +18,11 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-10-21 | 设计文档 v1.23（撤下批注、双击组件卡把镜头摆过去）：新增 `TC-CORE-139`（双击组件卡居中并按装得下与 1:1 的较小者显示，`Esc` 后镜头留着，在 `tests/e2e/canvas.ts`）、`TC-EDIT-038`（检查器按元素暂存，从 `TC-EDIT-014` 第 6 步拆出）、`TC-EDIT-039`（批注的界面、接口与 MCP 工具都没有了）；废弃 `TC-EDIT-008`、`TC-EDIT-014`；去掉批注那几步：`TC-CORE-057` 第 5 步、`TC-CORE-117` 第 4 步、`TC-CORE-122` 第 4～5 步（第 6 步改看 `⌥N` 不开任何东西）、`TC-EDIT-026` 第 2 步（历史块少一条）、`TC-EDIT-032` 第 4 步、`TC-EDIT-035` 第 3 步、`TC-AGENT-011` 第 10 步（工具数 56 改为 53）、`TC-AGENT-018` 第 4～6 步（随之不再以每分钟 10 次重启 API）；`TC-CORE-059` 改量「选择元素」、改按 `⌥S`，`TC-CORE-064` 改用改简介触发重取，`TC-CORE-062`、`073` 的端点清单去掉批注（带路径参数的端点 42 个改为 37 个，`062` 第 5 步探测 15 个改为 14 个）；`TC-EDIT-012` 第 9 步改为镜头摆到卡片上（判定引 `TC-CORE-139`）；`TC-CORE-058` 第 5 步双击后先等镜头停稳再量（第 6、7、10、12 步沿用） | @bug |
 | 2026-10-21 | 设计文档 v1.21（草稿里只改一块也能带参考图）：新增 `TC-CORE-138`（点选一块带 1 张图发出：请求带 `attachmentIds`、作业输入带 `imageKeys`、用户消息挂附件、「草稿桩」收到带图的调用；不收图的作业种类与取不到的附件 `400`；MCP `quilt.regenerate_subtree` 收 `attachmentIds`，在 `tests/e2e/sketch.ts`） | @bug |
 | 2026-10-21 | 设计文档 v1.20（界面中文与英文）：新增 `TC-CORE-130`～`137`（草稿本的名字跟着请求的界面语言；缺省跟浏览器语言；设置里切换即时生效、刷新后记住、草稿本跟着换；接口按 `X-Quilt-Locale` / `Accept-Language` 出中英文错误文案、两者都没有时中文，MCP 同一判定；作业失败 chip 的英文与换语言；屏里修改标记的英文与换语言；带 `X-Quilt-Locale` 的写屏作业记 `input.locale`、提示词要求这种语言，不带的不记；重试与请求体只认这次请求的头），脚本 `tests/e2e/i18n.ts`（`e2e:i18n`），§3、§5 的全量轮加 `i18n` 套件；`TC-CORE-028` 第 7 步设置弹层左栏由 3 节改为 4 节（加「语言」，脚本 `tests/e2e/core/generate.ts` 同步）；RUN-278 之后：`TC-CORE-133` 第 2 步重生成一块的 chip 名按缩短后的英文改为「Regenerate block in “Screen 1”」，`TC-CORE-023` 第 9b 步先按 `Esc` 清掉 8d 留下的选中再量（量的是造态的输入框） | @bug |
 | 2026-10-20 | 设计文档 v1.19（缩小显示的屏改用 zoom）：新增 `TC-CORE-129`（源自缺陷：草稿看板与画布聚焦屏的 iframe 上缩放连乘为 1、显示倍率不变、里面不窄于设备宽；第 3 步可见窗口里看玻璃卡片旁无灰条），样本 `tests/e2e/fixtures/glass-ledger.html` | @bug |
 | 2026-10-20 | 设计文档 v1.18（打开着的草稿出新版、换画框原地换）：新增 `TC-CORE-128`（改一轮、回到旧版、换画框、组件出新版都不重载 iframe、不出骨架与「加载中…」，滚动位置留着，在 `tests/e2e/sketch.ts`）；`TC-CORE-122` 前置加「每次在草稿里点之前等框稳住」 | @bug |
-| 2026-10-20 | 设计文档 v1.17（去掉对话记录与聊天、作业改成输入框上方的 chip、记录栏浮在草稿上、画框不跨组件与页面）：新增 `TC-CORE-127`（源自缺陷：底边收起与展开就地换形，在 `tests/e2e/canvas.ts`）；废弃 `TC-CORE-043`（接口校验并入 `TC-CORE-062` 第 7 步）与 `TC-CORE-044`（重试防连点并入 `TC-CORE-045` 第 2 步）；`TC-CORE-039` 与 `042` 只走接口，`056` 改看别处发起的作业出 chip，`045` 与 `076` 改看失败 chip（不弹提示条、双击「重试」只发一次、不能重试的写各自再发一次的入口）；`TC-CORE-103` 加第 6、7 步（组件与页面不互换、工具条的画框选项），`TC-CORE-125` 加第 4 步（开合记录栏不改看板）；`TC-EDIT-009` 改从设计系统面板提炼约定；在跑作业行改认作业 chip：`TC-CORE-005`、`023`、`029`、`032`、`036`、`057`、`082`、`092`、`TC-EDIT-012`；去掉看对话记录的步骤：`TC-CORE-023`、`027`、`049`、`054`、`055`、`075`、`TC-EDIT-035`；`TC-CORE-046` 去掉切聊天那步，`093` 改用点选一屏触发重量；`TC-CORE-054` 第 7 步的画布底色按 v1.15 改正 | @bug |
 
 ## 2. 测试范围 / 不测什么
 
@@ -75,7 +75,7 @@
   - `pnpm seed [--empty]`：重置基线——删掉默认用户名下全部项目（级联屏 / 修订 / 作业 / 台账 / 通道）与对象子目录，再建空项目 `Demo Mobile`（mobile）与 `Demo Desktop`（desktop），设计系统 seedColor `#3B5BDB`；`--empty` 不建示例项目（PAGE-FIRST 用例）。
   - LLM 驱动：`.env` 的 `LLM_DRIVER` 取 `agent-sdk`（本机 Claude 订阅）/ `anthropic` / `gemini`（模型 `QUILT_MODEL` 用 `gemini-3.8-flash`；计费路径二选一：AI Studio 需 `GEMINI_API_KEY`，Vertex AI 需 `GEMINI_VERTEX=1` + `GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION=global` + `GOOGLE_APPLICATION_CREDENTIALS` 指向服务账号 JSON）；`GET /v1/health` 的 `llm` / `model` 字段确认生效。
     真实 LLM 用例（`TC-CORE-005` 等）的耗时与通过率随驱动变化，登记时在明细注明驱动。
-    `.env` 里有 `GEMINI_API_KEY` 时 `pnpm seed` 会建一条已验证的 Gemini 通道并成为缺省通道，此后不带 `runner` 的作业（MCP 造屏 / 改屏、发批注、REST 建作业）都打到真实模型；`LLM_DRIVER=stub` 的轮次跑套件时在环境里把它置空（`GEMINI_API_KEY=`，dotenv 不覆盖已有的空值），种子就不建这条通道，缺省回落到 stub。
+    `.env` 里有 `GEMINI_API_KEY` 时 `pnpm seed` 会建一条已验证的 Gemini 通道并成为缺省通道，此后不带 `runner` 的作业（MCP 造屏 / 改屏、REST 建作业）都打到真实模型；`LLM_DRIVER=stub` 的轮次跑套件时在环境里把它置空（`GEMINI_API_KEY=`，dotenv 不覆盖已有的空值），种子就不建这条通道，缺省回落到 stub。
     stub 轮次里要从输入框发一轮、或要量带屏数 / 版数档位的输入框的用例（`TC-CORE-023` / `024` / `025` / `028` / `055`），自己建一条 OpenAI 兼容桩通道（`tests/e2e/openai-stub.ts`，端口 3982～3986）并验证，要用输入框的再在输入框里选中（画布在打开时取通道清单：页面打开后才建的通道要重载页面才出现在下拉里），用例结束时删通道（v0.82）——不依赖种子的 Gemini 通道。
   - `pnpm seed:project --name <名> --device mobile|desktop --screens <N> [--revisions <M>] [--dangling] [--no-shot]`：用内置 fixture HTML 直接落库（不调 LLM），每屏含 `data-qid`、路由 `/s1`…`/sN` 与互链；`--revisions M` 给每屏 M 个修订；`--dangling` 让第一屏多一条 `href=/settings` 断链。
     输出 projectId 与各 screenId。
@@ -868,7 +868,7 @@
 | 1 | MCP `quilt.move_screens` 把 `/s1` 挪到 (3000, 2000) | 4 s 内卡片 `/s1` 的 `transform` 为 `translate(3000px, 2000px)`，不刷新页面 |
 | 2 | MCP `quilt.delete_screen` 删 `/s3` | 4 s 内画布只剩 2 张卡 |
 | 3 | MCP `quilt.update_project` 改名 `Live 2`；截图 | 4 s 内标签页标题以 `Live 2` 开头；截图里顶栏项目名是 `Live 2`、屏数是「2 屏」（`run-<RUN>-tc-core-064.png`） |
-| 4 | REST `PUT …/design-system` 改种子色；MCP `quilt.create_component` 建 `Badge`；REST 给 `/s1` 加一条批注 | 改设计系统与加批注后 4 s 内画布各重取一次详情；4 s 内出现 `Badge` 组件卡 |
+| 4 | REST `PUT …/design-system` 改种子色；MCP `quilt.create_component` 建 `Badge`；REST `PATCH /projects/{id}` 改简介 | 改设计系统与改简介后 4 s 内画布各重取一次详情；4 s 内出现 `Badge` 组件卡 |
 | 5 | Node 另开一条 `GET …/events`；MCP `quilt.delete_project` | 5 s 内那条流收到含 `project_deleted` 的事件并结束；画布重取详情得到 `404` |
 
 后置：关掉这一页（项目已删）。
@@ -967,7 +967,7 @@
 | 2 | 对 `/s3` 发一轮改屏、等它结束；`DELETE /v1/screens/<s3>`；对这一轮的用户消息 `POST …/messages/<id>/retry {}` | 重试 `404 /errors/not-found`（`API-CORE-034`：目标屏已删） |
 | 3 | 建组件 `Chip`，对它发一轮改组件、等它结束；另发一条 `targetComponentIds:[FAKE]` 记下 400 的 `errors[0].path`；`DELETE /v1/components/<Chip>`；重试改组件那一轮 | 重试 `400 /errors/validation`，`errors[0].path` 与发消息那条相同（`targetComponentIds`） |
 | 4 | `POST …/jobs` 建 `generate`，`variantOf:FAKE`、`variantName:"空状态"` | `422 /errors/validation`；作业数不变 |
-| 5 | 路径 id 用 `x` 调 15 个端点（`GET /projects/x`、`GET /projects/x/messages`、`PATCH /screens/x`、`DELETE /screens/x`、`GET /jobs/x`、`POST /jobs/x/cancel`、`POST /jobs/x/candidates/adopt`、`DELETE /components/x`、`PATCH /annotations/x`、`DELETE /assets/x`、`DELETE /design-presets/x`、`DELETE /channels/x`、`POST …/messages/x/retry`、`GET /screens/<s1>/revisions/x`、`POST /screens/<s1>/revisions/x/restore`）；`GET …/messages?cursor=abc`、`GET /projects?cursor=notadate`；再用当前时间的 ISO 串当 `cursor` | 15 个全部 `404 /errors/not-found`；两处非法游标 `400 /errors/validation`；合法游标 `200` |
+| 5 | 路径 id 用 `x` 调 14 个端点（`GET /projects/x`、`GET /projects/x/messages`、`PATCH /screens/x`、`DELETE /screens/x`、`GET /jobs/x`、`POST /jobs/x/cancel`、`POST /jobs/x/candidates/adopt`、`DELETE /components/x`、`DELETE /assets/x`、`DELETE /design-presets/x`、`DELETE /channels/x`、`POST …/messages/x/retry`、`GET /screens/<s1>/revisions/x`、`POST /screens/<s1>/revisions/x/restore`）；`GET …/messages?cursor=abc`、`GET /projects?cursor=notadate`；再用当前时间的 ISO 串当 `cursor` | 15 个全部 `404 /errors/not-found`；两处非法游标 `400 /errors/validation`；合法游标 `200` |
 | 6 | `POST …/attachments` 带 `mediaType:"image/gif"`；签一张 `image/png` 后 `PUT` 空正文；建组件 `Tag`，对它的根元素 `POST /v1/components/<id>/elements/<根 qid>` 发 `remove` | 三处都 `422 /errors/validation` |
 | 7 | `POST …/messages` 分别发 `{content:"", targetScreenIds:[s1]}`、`{content:"", preset:"link_repair"}`、`{content:"x", variantOf:s1, variantName:"Empty", targetScreenIds:[s2]}`（正文只在带隐藏参数时可空，参数要与动词配套，`API-CORE-010`） | 三个都 `400 /errors/validation`，`path` 依次是 `content`、`targetScreenIds`、`targetScreenIds` |
 
@@ -997,7 +997,7 @@
 | --- | --- | --- |
 | 1 | 取 /s1 的预览地址 | `200`（对照） |
 | 2 | 预览域：`/a/not-a-uuid/not-a-uuid`、`/a/<pid>/not-a-uuid`、`/p/<pid>/not-a-uuid?rev=…&t=…`、`/p/<pid>/<s1>?rev=not-a-uuid&t=…`、`/c/<pid>/not-a-uuid?t=…` | 全部 `404`，体含 `/errors/not-found`（修复前 `500`） |
-| 3 | `/v1` 下 42 个带路径参数的端点（项目 / 作业 / 屏 / 组件 / 批注 / 素材 / 预设 / 通道及其子路径，GET / POST / PUT / PATCH / DELETE），路径参数一律 `not-a-uuid` | 全部 `404` |
+| 3 | `/v1` 下 37 个带路径参数的端点（项目 / 作业 / 屏 / 组件 / 素材 / 预设 / 通道及其子路径，GET / POST / PUT / PATCH / DELETE），路径参数一律 `not-a-uuid` | 全部 `404` |
 
 后置：无。
 
@@ -1332,7 +1332,6 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | 2 | `⌥D`，点进 DESIGN.md 文本框（`#ds-md`）键入「草稿 42」，按 `Esc`；再按 `Esc` | 第一下：文本框失焦，面板仍开着（`panel=design`），文本框里仍有「草稿 42」，没有取消请求；第二下：面板关上，仍没有取消请求 |
 | 3 | `⌘E` 进待命态，按 `Esc`；再 `⌘E`，单击 /s1 进它的选择元素态，按 `Esc`，再按 `Esc` | 待命态一下 `Esc` 即退出模式（`panel` 去掉、`armed-hint` 消失）；聚焦时第一下只退出聚焦（`.card.focused` 为 0，`panel=inspect` 仍在），第二下才退出模式；全程没有取消请求 |
 | 4 | 单击 /s2，按 `Esc`；再按 `Esc` | 第一下：画布选中清空（`.selected` 为 0），目标标签（`target-chip`）仍是 1 枚，没有取消请求；第二下（什么都没开）：发出 1 次取消请求，作业转 `cancelled` |
-| 5 | 双击组件卡 `Bar` 进交互态，按 `⌥N`；再按 `Esc` | `⌥N` 后组件卡退出交互态（`.comp.focused` 为 0），`panel=annotate`，待命提示写「批注模式」，toast「共享组件不能批注，点任意一屏开始批注」；`Esc` 退出批注模式，没有取消请求 |
 
 后置：无。
 
@@ -1346,7 +1345,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | 2 | 镜头 `{x:200,y:60,zoom:0.6}`，指针放在 /s2 卡片中心，按住空格，按下鼠标拖 (100, 60) 分 10 步，松开鼠标与空格 | 世界层平移 (100, 60)（各差 ≤ 3 px）；/s2 卡片的 `transform` 不变；没有任何 `PATCH` 请求 |
 | 3 | 镜头 `{x:600,y:300,zoom:0.1}`，`⌘A` | 4 屏都 `.selected`；每张的 `outline-width` × 缩放 在 1.5～3 px 之间（屏幕上约 2 px） |
 | 4 | 镜头 `{x:420,y:20,zoom:0.5}`，`⌘E` | 待命提示（`armed-hint`）的文字色与底色按「底色合成在白底上」算对比度 ≥ 4.5:1（颜色经 1×1 canvas 读回字节，不解析 `oklab`）；文案里有「Esc」 |
-| 5 | 镜头 `{x:400,y:-780,zoom:1}`，等 `Tab Bar` 量完（`data-ready`），双击它进交互态；从它左下外侧空白处按下，分 20 步拖到它的 iframe 中心，再松开 | 拖到 iframe 上时选框（`marquee`）四边与「起点—指针」矩形各差 ≤ 4 px（仍跟手）；在 iframe 上松开后选框消失，`Tab Bar` 被选中 |
+| 5 | 镜头 `{x:400,y:-780,zoom:1}`，等 `Tab Bar` 量完（`data-ready`），双击它进交互态，等镜头停稳（v1.23 起镜头会摆到卡片上）；从它左下外侧空白处按下，分 20 步拖到它的 iframe 中心，再松开 | 拖到 iframe 上时选框（`marquee`）四边与「起点—指针」矩形各差 ≤ 4 px（仍跟手）；在 iframe 上松开后选框消失，`Tab Bar` 被选中 |
 | 6 | 同第 5 步的镜头与交互态，指针放在 `Tab Bar` 上，按住 `Ctrl` 滚轮 5 次（每次 −40） | 画布缩放变大超过 5%（捏合转发给画布） |
 | 7 | 同第 5 步的镜头与交互态，指针放在 `Tab Bar` 上，普通滚轮 4 次（每次 +60） | 世界层 `y` 减小超过 20 px（组件里没有可滚区域，滚轮平移画布） |
 | 8 | 镜头 `{x:700,y:380,zoom:0.1}`，在小地图（`minimap`）视口框中心按下，分 15 步拖 (+300, +180)，逐步读 `data-view`；松开后再读 | 拖动中视口框的四边始终在 176×112 之内；松开前后 `data-view` 各值差 ≤ 0.6（松手不重新缩放、不跳） |
@@ -1365,8 +1364,8 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | --- | --- | --- |
 | 1 | 镜头 `{x:3000,y:2400,zoom:0.5}`（风格指南卡在视口外）打开，焦点放回 body，按 `Tab`；继续按 `Tab` 直到焦点落在「风格指南」 | 第一个停靠点是项目切换器（`project-switcher`）；8 次 `Tab` 内走到风格指南卡，它获焦后整张在视口内（镜头平移过去）、`outline` 可见（不是透明色） |
 | 2 | 镜头 `{x:200,y:80,zoom:0.5}`，从 body 连按 `Tab` 到第一张屏卡；按 `→`；按空格；按 `Enter`，等角标「交互中」；在 iframe 里按 `Esc`；焦点放回 body，`⌘K` 输入 `s3` 回车，再按 `Enter` | 10 次 `Tab` 内走到屏卡，且是阅读顺序第一张 /s1；`→` 到 /s2；空格选中 /s2（只它一张 `.selected`）；`Enter` 进入 /s2 的交互，就绪后焦点在 iframe（`activeElement` 为 `IFRAME`）；`Esc` 退出后焦点回到 /s2 卡片；`⌘K` 选中 /s3 后按 `Enter` 进入 /s3 的交互 |
-| 3 | 量工具栏「适配视图」「批注」「设计系统」「本机 agent」四个按钮的纵坐标；单击 /s1 选中，再量；点工具栏「进入交互」，再量、读同一点下的按钮；在同一坐标再点一次，再量、读指针下的按钮与焦点所在 | 四个按钮在空闲 / 选中 / 交互 / 退出后纵坐标都不变（差 ≤ 1 px）；恰好选中一屏时工具栏有「进入交互」；进入后同一点下是「退出交互」；退出后同一点下回到「进入交互」，焦点也在这一格 |
-| 4 | 双击 /s1，等「交互中」，点 iframe 里的标题（焦点进 iframe），按 `⌥N`；再按 `⌥N`；双击 /s2，等「交互中」，点 iframe 里的标题，按 `⌥D` | 焦点在 iframe 里时 `⌥N` 打开批注模式（`panel=annotate`），`⌥D` 打开设计系统面板（`panel=design`）——运行时转发了 ⌥ + 字母 |
+| 3 | 量工具栏「适配视图」「选择元素」「设计系统」「本机 agent」四个按钮的纵坐标；单击 /s1 选中，再量；点工具栏「进入交互」，再量、读同一点下的按钮；在同一坐标再点一次，再量、读指针下的按钮与焦点所在 | 四个按钮在空闲 / 选中 / 交互 / 退出后纵坐标都不变（差 ≤ 1 px）；恰好选中一屏时工具栏有「进入交互」；进入后同一点下是「退出交互」；退出后同一点下回到「进入交互」，焦点也在这一格 |
+| 4 | 双击 /s1，等「交互中」，点 iframe 里的标题（焦点进 iframe），按 `⌥S`；再按 `⌥S`；双击 /s2，等「交互中」，点 iframe 里的标题，按 `⌥D` | 焦点在 iframe 里时 `⌥S` 打开屏列表（`panel=screens`），`⌥D` 打开设计系统面板（`panel=design`）——运行时转发了 ⌥ + 字母 |
 | 5 | 新上下文模拟「减少动态效果」（`reducedMotion: reduce`），镜头 `{x:900,y:500,zoom:1.2}`；用 `MutationObserver` 记下世界层 `transform` 的每一次写入，按 `F`；再 `⌘K` 输入 `s4`（等列表只剩一行）回车 | 两次镜头移动都只写一次 `transform`（直接到位，没有中间值） |
 
 后置：无。
@@ -1442,6 +1441,21 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | 2 | 点胶囊，逐帧量输入框的中线 | 每一帧输入框中线与胶囊中线相差 ≤ 2 px：在原地展开，不从胶囊处滑开 |
 
 后置：删掉本机的 `quilt:composer:canvas` 记录。
+
+
+#### `TC-CORE-139` 双击组件卡把镜头摆过去 — 对应 `REQ-EDIT-006`、`REQ-CORE-005`（`PAGE-CANVAS`「共享组件」镜头摆过去，v1.23）· 级别: 回归 · 执行者: AI
+
+前置：`pnpm seed:project --name CompFocus --device mobile --screens 6 --no-shot`；经接口建组件 `Bar`（一行底栏，自然尺寸约 390×64）；视口 1440×900，打开项目，按 `F` 适配视图。
+「可用区」= 可用区探针 `[data-testid=safe-area]` 的框（画布视口让开顶栏、输入框与两侧工具栏后的区域，镜头居中以它为准）；「卡片」= `[data-testid=component-card][data-name=Bar]` 在页面上的框。
+脚本 `tests/e2e/canvas.ts`（`ONLY=TC-CORE-139`）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 记下卡片的框；双击卡片，等 400 ms | 卡片进交互态（`live-dot` 出现）；卡片中心与可用区中心相差 ≤ 24 px；卡片宽等于它的自然宽（装得下时 1:1），比双击前大 |
+| 2 | 按 `Esc` | 退出交互态；卡片的框与第 1 步结束时相差 ≤ 1 px（镜头留在那儿） |
+| 3 | 把镜头缩到 0.3、把卡片平移到可用区右下角，再双击卡片 | 同第 1 步：卡片回到可用区正中、按 1:1 显示 |
+
+后置：无。
 
 ### CORE · 安装与运行
 
@@ -1782,7 +1796,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 后置：无。
 
-#### `TC-CORE-117` 草稿里只改一块与批注（接口） — 对应 `REQ-CORE-045`（`API-CORE-006`、`API-EDIT-003`，v1.14）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+#### `TC-CORE-117` 草稿里只改一块（接口） — 对应 `REQ-CORE-045`（`API-CORE-006`，v1.14）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
 
 前置：「草稿桩」已建并验证；草稿本里用 stub 出组件草稿 D（「一张播放卡片」），记下它当前版 R0、正文里一个 `<p>` 的 `qid` 与 `<h1>` 的 `qid`。
 脚本同上（`ONLY=TC-CORE-117`）。
@@ -1792,7 +1806,6 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | 1 | `POST /v1/projects/<草稿本>/jobs {kind:"regenerate_subtree", input:{screenId:D, qid:<p>, prompt:"换成一行青色的小字", expectedRevisionId:R0, runner:stub}}`，等作业结束 | `202`，作业成功；D 有 2 版，最新一版 `sourceKind=subtree`、没有偏离；那个 `<p>` 换成「Regenerated block」并沿用原 `qid`；`<h1>` 原样 |
 | 2 | 再以 R0 对 `<h1>` 发同样的作业；在草稿本里对普通项目 SubApp 的一屏发 | 依次 `409 /errors/revision-conflict`、`404 /errors/not-found` |
 | 3 | 给 D 设参照 SubApp；用「草稿桩」对 `<h1>` 发「标题换成本项目的主色」；再经 MCP 对 D 发一次 `regenerate_subtree` | 作业成功；这次调用的系统提示带 `REFERENCE PROJECT: SubApp` 与 `DRAFT RULES`；新版带 SubApp 的 prelude；MCP 那次作业也成功 |
-| 4 | 在 D 上挂一条批注并发送（`API-EDIT-003`），等作业结束 | 挂批注 `201`；发送 `202`，建出 1 个 `edit_screens`，`screenIds=[D]`、版数 1；作业成功后这条批注 `resolved`，D 多 1 版 |
 
 后置：无。
 
@@ -1848,7 +1861,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 后置：无。
 
-#### `TC-CORE-122` 草稿里点选一块改它、钉批注发出 — 对应 `REQ-CORE-045`（`PAGE-SKETCH`「选元素」「批注」、`API-CORE-006`、`API-EDIT-003`，v1.14）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+#### `TC-CORE-122` 草稿里点选一块改它 — 对应 `REQ-CORE-045`（`PAGE-SKETCH`「选元素」、`API-CORE-006`，v1.14）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
 
 前置：草稿本里用 stub 出组件草稿 D（「一张播放卡片」加第二行 `[stub-frame:component]`），记下它当前版 R0 与正文里一个 `<p>` 的 `qid`；打开 `/sketch?d=<D>`，输入框通道选「草稿桩」。
 每次在草稿里点之前，等草稿的框稳住：组件草稿打开和每落一版都会重载、再报一次尺寸，框先是 1280×800 的占位，再缩成「根元素的框 + 四周各 64 px」并重新居中。
@@ -1856,12 +1869,10 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
-| 1 | 点工具条「选元素」（`draft-pick`），在草稿里点那个 `<p>` | 「选元素」`aria-pressed=true`、「批注」为 false；输入框多一枚胶囊（`draft-pick-chip`）写「「<D 的名字>」里的 …」；动词行写「改这一块」 |
+| 1 | 点工具条「选元素」（`draft-pick`），在草稿里点那个 `<p>` | 「选元素」`aria-pressed=true`；工具条上没有「批注」（`draft-annotate` 为 0）；输入框多一枚胶囊（`draft-pick-chip`）写「「<D 的名字>」里的 …」；动词行写「改这一块」 |
 | 2 | 输入「换成一行青色的小字」，点发送 | 请求 `POST /v1/projects/<草稿本>/jobs`，`kind=regenerate_subtree`，`screenId=D`、`qid` 是那个 `<p>` 的、`expectedRevisionId=R0`；D 的最新一版 `sourceKind=subtree`；新版落库后胶囊消失 |
 | 3 | 再点草稿里的标题出胶囊，焦点放在空输入框里按 `Esc` | 胶囊消失；看板仍是 `draft` |
-| 4 | 点「批注」，点草稿里的标题，在说明框（`draft-annotation-box`）写「标题再大一号」并存下 | 「批注」开、「选元素」关；看板上出 1 枚气泡（`draft-annotation-pin`）；输入框上方写「1 条批注 · 发送」（`draft-annotations-send`） |
-| 5 | 点「1 条批注 · 发送」 | `POST …/annotations/send` 返回 `202`；D 多一版；之后气泡与「N 条批注 · 发送」都消失 |
-| 6 | 两个开关都关着、焦点不在输入框里，按 `⌘E` 两次、`⌥N` 两次；再点进草稿里一段字（焦点进了草稿 iframe）按 `⌘E` | `⌘E` 开、关「选元素」，`⌥N` 开、关「批注」（`aria-pressed` 跟着翻转）；焦点在草稿里按 `⌘E` 照样打开「选元素」（预览运行时转发，v1.16） |
+| 4 | 「选元素」关着、焦点不在输入框里，按 `⌘E` 两次、`⌥N` 一次；再点进草稿里一段字（焦点进了草稿 iframe）按 `⌘E` | `⌘E` 开、关「选元素」（`aria-pressed` 跟着翻转），`⌥N` 什么也不开；焦点在草稿里按 `⌘E` 照样打开「选元素」（预览运行时转发，v1.16） |
 
 后置：无。
 
@@ -2310,7 +2321,9 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 后置：无。
 
-#### `TC-EDIT-008` 元素批注攒批发送 — 对应 `REQ-EDIT-004` · 级别: 回归 · 执行者: AI
+#### `TC-EDIT-008` 元素批注攒批发送（已废弃：v1.23 撤下批注）— 对应 `REQ-EDIT-004` · 级别: 回归 · 执行者: AI
+
+已废弃，不再执行：批注整体撤下（设计文档 v1.23）。以下是废弃前的步骤，留作对照。
 
 前置：`pnpm seed:project --name Anno --device mobile --screens 1`；打开（真实 LLM）。
 
@@ -2384,7 +2397,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | 7 | 重新按步骤 1 提取（名 `TabBar`）；打开 `/p/{id}` | 画布出现 `component-card`（`data-name="TabBar"`），标签含「用于 3 屏」；在空白处框选到它 → 目标区出现 `component-chip`「组件 · TabBar」、动词行含「改组件「TabBar」」且无 `count-group` / `versions-group`；`⌘E` 点 /s1 进选择元素态，点 nav 里一个 tab → 检查器出现 `el-component-lock`（含「共享组件「TabBar」」）与 `el-edit-component`、`el-detach`，无 `#el-text`；点 `el-edit-component` → 目标区只剩「组件 · TabBar」、输入框获得焦点；工具栏 `new-component`（`⌥C`）填名 `Footer` 确认 → `component-card` 数变 2、目标区为「组件 · Footer」 |
 | 7a | 卡片报完尺寸（`data-ready`）后，在组件卡 iframe 里给根元素加 `backdrop-blur-xl` 类，再往根里插一个文档流里的 `backdrop-blur-md` 层、一个压在渐变块上的 `absolute backdrop-blur-md` 层，等 300 ms 读计算样式（v0.73，v0.76 收窄范围） | 根元素与文档流里那层的 `backdrop-filter` 为 `none`（组件预览文档关掉了它们的背景模糊，Tailwind 生成的规则压不过它）；absolute 那层是 `blur(…)`——它背后是组件自己的内容，关掉就与屏里不一样 |
 | 8 | （真实 LLM）目标为 `TabBar` 组件，输入框发「把第二个 tab 的文案改成 Search，其他都别动」 | `POST messages` 带 `targetComponentIds=[cid]`，作业 `kind=edit_component`；作业 chip 写「改组件「TabBar」」；作业成功后组件 `version+1`、`summary` 含 `Search`，用它的每一屏各出一条 `sourceKind=component`、`jobId=本作业` 的新修订且 HTML 含 `Search`；助手消息以「已更新组件「TabBar」」开头并写「同步 N 屏」 |
-| 9 | 双击画布上的组件卡；按 `Esc`（v0.53 组件卡可交互） | 双击前后世界层 `.world` 的 `transform` **完全一致**（组件进交互不动镜头，与屏的「推到 1:1 居中」不同）；卡片带 `focused`、手势罩 `.gesture` 已移除、iframe 的 `pointer-events` 为 `auto`（组件里的按钮点得动）、右上出现呼吸绿点（`.live-dot`，`aria-label="交互中"`，8 px、`sk-pulse` 动画，不透明度在变）；此时双击一张屏卡进交互，组件的 `focused` 自动退掉（两态互斥）；`Esc` 退出交互态（焦点在组件 iframe 内按也有效）。再往组件里塞一个 `href="#"` 的链接并点它（v0.55 链接惰性）：不出现任何 toast、iframe 也不跳走 |
+| 9 | 双击画布上的组件卡；按 `Esc`（v0.53 组件卡可交互） | 镜头摆到卡片上（v1.23，位置与缩放的判定见 `TC-CORE-139`）；卡片带 `focused`、手势罩 `.gesture` 已移除、iframe 的 `pointer-events` 为 `auto`（组件里的按钮点得动）、右上出现呼吸绿点（`.live-dot`，`aria-label="交互中"`，8 px、`sk-pulse` 动画，不透明度在变）；此时双击一张屏卡进交互，组件的 `focused` 自动退掉（两态互斥）；`Esc` 退出交互态（焦点在组件 iframe 内按也有效）。再往组件里塞一个 `href="#"` 的链接并点它（v0.55 链接惰性）：不出现任何 toast、iframe 也不跳走 |
 | 10 | 目标为该组件，发「顶部一级频道导航：关注 / 推荐 / 附近 / 活动，默认选中「推荐」，点任意一条要真切换」；产出按组件预览文档渲染后点第 3 条（v0.54 组件交互契约） | 产出通过 `validateComponentHtml`（单根、无 `<script>`）；HTML 里每条是 `<label>` 且首个孩子是 `type="radio" class="peer sr-only"`、`name` 带组件名前缀，选中态全部写成 `peer-checked:` 变体、默认值只在 `checked` 上（**没有任何一条把选中样式硬编码进 class**），焦点环走 `peer-focus-visible:`，条目带 `data-slot` / `data-part`；渲染后点第 3 条：该条 `input.checked` 为 true、字重与字号升到选中档、indicator `opacity` 为 1，原选中项三项同时回落；容器高度前后一致（选中态变粗变大不得顶高）|
 | 11 | 双击组件卡进交互态 → 按 `⌘E` → 点组件里某条 tab 的文字 → 检查器把「文案」改掉并保存（v0.57 组件选元素直改） | 检查器标题为「检查器 · <组件名>」；**文案框读得到那条文字**（组件把文字设成 `pointer-events:none` 时也要能选中——选择元素态临时解除这层限制）；面板里没有「用 AI 重生成这块」与「记为共享组件」，取而代之是一句指向「改组件」的说明（`el-component-hint`）；保存后组件 `version` +1、HTML 里那条文案已变、用它的屏被回刷；**同一条上与旧文案逐字符相等的 `aria-label` / `title` 跟着改，邻条的不受影响；与文案原本就不同的（图标按钮那种）一个字都不动**（v0.59）；`expectedVersion` 过期时报「组件已被更新」而不是静默覆盖。**退出路径逐条查残留**（`⌘E` 再按一次 / `Esc` / 双击另一个组件 / 点画布空白 / 带着选择态刷新 / 只进不选就退出）：组件文档里不得留下选中框、`tag · qid` 标签、`[data-qid]{pointer-events:auto}` 那条样式或 `crosshair` 光标——组件卡的 iframe 常驻，不像屏那样退出即卸载 |
 
@@ -2406,7 +2419,9 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 后置：删掉「Stub 提案」通道。
 
-#### `TC-EDIT-014` 批注与检查器的草稿与失败态 — 对应 `REQ-EDIT-004`、`REQ-EDIT-001`、`REQ-EDIT-002`（v0.78）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+#### `TC-EDIT-014` 批注与检查器的草稿与失败态（已废弃：v1.23 撤下批注）— 对应 `REQ-EDIT-004`、`REQ-EDIT-001`、`REQ-EDIT-002`（v0.78）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+已废弃，不再执行，被 `TC-EDIT-038` 取代：第 1～5 步验的是批注，随批注撤下；第 6 步（检查器按元素暂存）改由 `TC-EDIT-038` 验。以下是废弃前的步骤，留作对照。
 
 前置：`pnpm seed:project --name Drafts --device mobile --screens 1`；经接口给这一屏预置一条未处理批注「已有的一条」；浏览器里拦下 `POST …/annotations/send`（记请求体、回 `202 {jobs:[]}`，不建作业），`POST /v1/screens/{id}/annotations` 可切换成回 `422`；`⌥N` 进批注态并点进 `/s1`。
 
@@ -2473,7 +2488,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 #### `TC-EDIT-025` 改组件带上此前改成功的指令 — 对应 `REQ-EDIT-006`（`ADR-012` v0.87 修订）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
 
-前置：`pnpm seed` 之后没有别的已验证通道（`GEMINI_API_KEY=` 运行，`TC-EDIT-026` 的批注作业走账号默认通道）；`pnpm seed:project --name History --device mobile --screens 1 --no-shot`；本机 3976 端口起 OpenAI 兼容桩（`tests/e2e/openai-stub.ts`，记下每次收到的用户提示；改组件回一个单根 `<nav>`，用户提示里带 `FAILME` 时回 400、带 `CUTME` 时回 `finish_reason: "length"`），`POST /v1/channels` 建指向它的通道并探测通过；`POST /v1/projects/<id>/components` 直建组件 `TabBar`。
+前置：`pnpm seed` 之后没有别的已验证通道（`GEMINI_API_KEY=` 运行）；`pnpm seed:project --name History --device mobile --screens 1 --no-shot`；本机 3976 端口起 OpenAI 兼容桩（`tests/e2e/openai-stub.ts`，记下每次收到的用户提示；改组件回一个单根 `<nav>`，用户提示里带 `FAILME` 时回 400、带 `CUTME` 时回 `finish_reason: "length"`），`POST /v1/channels` 建指向它的通道并探测通过；`POST /v1/projects/<id>/components` 直建组件 `TabBar`。
 作业一律带这条通道；建作业遇 `429`（每分钟 10 个）等 5 s 再发。
 脚本 `tests/e2e/edit.ts`（`ONLY=TC-EDIT-025,TC-EDIT-026,TC-EDIT-027`，三条共用项目与桩，`026` / `027` 依赖 `025` 的前置），失败项攒齐一起报。
 
@@ -2486,21 +2501,20 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 后置：留给 `TC-EDIT-026`。
 
-#### `TC-EDIT-026` 改屏与局部重生成带上此前的指令：收哪些轮、回溯之后 — 对应 `REQ-CORE-006`、`REQ-CORE-007`、`REQ-EDIT-002`、`REQ-EDIT-004`（`ADR-012` v0.87 修订）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+#### `TC-EDIT-026` 改屏与局部重生成带上此前的指令：收哪些轮、回溯之后 — 对应 `REQ-CORE-006`、`REQ-CORE-007`、`REQ-EDIT-002`（`ADR-012` v0.87 修订）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
 
-前置：`TC-EDIT-025` 的项目、桩与通道；桩对改屏回一张固定的屏（标题 `History`、按钮 `Primary action`），对局部重生成回一个 `<h1>`；`GET /v1/runners` 的 `default` 是这条桩通道（批注发出的作业走它）。
+前置：`TC-EDIT-025` 的项目、桩与通道；桩对改屏回一张固定的屏（标题 `History`、按钮 `Primary action`），对局部重生成回一个 `<h1>`；`GET /v1/runners` 的 `default` 是这条桩通道。
 下文「发」= `API-CORE-010`，`targetScreenIds=[Screen 1]`、带桩通道；「历史块」= 桩收到的那次用户提示里 `EARLIER INSTRUCTIONS ALREADY APPLIED TO THIS SCREEN` 之后的编号列表。
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
 | 1 | 发 `S1 标题改成「我的订单」` | `succeeded`；这次用户提示里没有 `EARLIER INSTRUCTIONS` |
-| 2 | 给当前版的 `Primary action` 按钮挂批注（`anchorText=Primary action`、`note=S2 按钮圆角改小`），`POST …/annotations/send` | 作业 `succeeded`，批注 `resolved` |
-| 3 | MCP `quilt.edit_screens`：`S3 底部加一行版权说明`（带桩通道） | `succeeded` |
-| 4 | `POST …/jobs` 建 `apply_design_system { screenIds: "all" }`；再发接上跳转（`preset=link_repair`，正文留空） | 两个都 `succeeded`，Screen 1 各多一版 |
-| 5 | 发 `S4 列表项加分隔线` | 历史块依次是 `1. S3 底部加一行版权说明`、`2. 批注：「Primary action」→ S2 按钮圆角改小`、`3. S1 标题改成「我的订单」`，共 3 条；块里没有 `data-qid`、`回刷`、`接上跳转`、`Apply the following` |
-| 6 | 发 `S5 顶部加一条促销横幅`；然后把 Screen 1 回溯到第 5 步那一版（`API-CORE-015`，`expectedRevisionId` = 第 6 步那一版） | 回溯 `201`；新修订的 `parentRevisionId` 是第 5 步那一版 |
-| 7 | 发 `S6 标题居中` | 历史块第 1 条是 `S4 列表项加分隔线`，整段用户提示里没有 `S5` |
-| 8 | 对当前版的 `<h1>` 建 `regenerate_subtree`（`API-CORE-006`，带桩通道）：`S7 标题字号加大` | 桩收到的用户提示（`Within the screen …`）有历史块，第 1 条是 `S6 标题居中`，没有 `S5` |
+| 2 | MCP `quilt.edit_screens`：`S3 底部加一行版权说明`（带桩通道） | `succeeded` |
+| 3 | `POST …/jobs` 建 `apply_design_system { screenIds: "all" }`；再发接上跳转（`preset=link_repair`，正文留空） | 两个都 `succeeded`，Screen 1 各多一版 |
+| 4 | 发 `S4 列表项加分隔线` | 历史块依次是 `1. S3 底部加一行版权说明`、`2. S1 标题改成「我的订单」`，共 2 条；块里没有 `data-qid`、`回刷`、`接上跳转`、`Apply the following` |
+| 5 | 发 `S5 顶部加一条促销横幅`；然后把 Screen 1 回溯到第 4 步那一版（`API-CORE-015`，`expectedRevisionId` = 第 5 步那一版） | 回溯 `201`；新修订的 `parentRevisionId` 是第 4 步那一版 |
+| 6 | 发 `S6 标题居中` | 历史块第 1 条是 `S4 列表项加分隔线`，整段用户提示里没有 `S5` |
+| 7 | 对当前版的 `<h1>` 建 `regenerate_subtree`（`API-CORE-006`，带桩通道）：`S7 标题字号加大` | 桩收到的用户提示（`Within the screen …`）有历史块，第 1 条是 `S6 标题居中`，没有 `S5` |
 
 后置：留给 `TC-EDIT-027`。
 
@@ -2585,7 +2599,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 后置：删项目。
 
-#### `TC-EDIT-032` 撤销不了的删除先确认 — 对应 `REQ-EDIT-001`、`REQ-EDIT-003`、`REQ-EDIT-004`、`REQ-EDIT-006`（设计文档 `PAGE-CANVAS` 检查器「删组件里的元素先确认」，v1.03）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+#### `TC-EDIT-032` 撤销不了的删除先确认 — 对应 `REQ-EDIT-001`、`REQ-EDIT-003`、`REQ-EDIT-006`（设计文档 `PAGE-CANVAS` 检查器「删组件里的元素先确认」，v1.03）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
 
 前置：`pnpm seed:project --name Confirm --device mobile --screens 2 --no-shot`；从 `/s1` 的顶栏建组件 `AppBar` 并同步到能同步的屏（`usedBy` 记为 N），组件卡挪到屏的右侧；视口 1440×1000。
 
@@ -2594,7 +2608,6 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | 1 | 双击组件卡、`⌘E`、点它里面的 `h1`，焦点在检查器上按 `Delete`；点「取消」 | 弹确认框「删除组件「AppBar」里的这个元素？」「会同步到用它的 N 屏，撤销不了。」；取消后组件 HTML 里 `h1` 还在 |
 | 2 | 点「删除元素」，在确认框点「删除」 | 同样先确认；确认后 toast「已删除组件「AppBar」里的元素，同步 N 屏」，组件 HTML 里没有 `h1` |
 | 3 | 经 API 写一条约定，`⌥D` 打开设计系统面板点它的「删除」，先「取消」、再删一次并确认 | 弹「删除这条约定？」；取消后约定还在；确认后 toast「已删除这条约定」、约定为空 |
-| 4 | 经 API 给 `/s1` 的 `#toggle` 建一条批注，`⌥N` 点 `/s1` 进批注态，点这条批注的「删除」并确认 | 弹「删除这条批注？」；确认后批注没了 |
 
 后置：删项目。
 
@@ -2630,7 +2643,6 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | --- | --- | --- |
 | 1 | 打开项目、`⌥D` 打开设计系统面板；在「用一句话改设计系统」里填一句 | 「回刷所有屏」不可点，下方写「有作业进行中：改「Screen 1」，等它结束再回刷」；约定的「删除」、说明框、「提炼并预览」都可用 |
 | 2 | 关掉面板，`⌘E` 点 `/s1` 的 `h1`；按 `⌘S` | 检查器写「这一屏正在改，等这一轮完事」；按 `⌘S` 弹出同样的提示 |
-| 3 | 重开，`⌥N` 点 `/s1` 进批注态 | 批注面板写「这一屏正在改，等这一轮完事再发」 |
 
 后置：取消那个停顿的作业，删项目。
 
@@ -2664,6 +2676,33 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | 5 | `AES_LABEL=eff-default … gen base sonnet <2 条需求>`、`AES_EFFORT=medium AES_LABEL=eff-medium …`，并排看截图 | 记下用时、输出 token 与内容差别；出屏要不要降档看这一步（v1.05 结论：不降，`medium` 内容少一截） |
 
 后置：无（产物留在 gitignore 目录里供核对）。
+
+
+#### `TC-EDIT-038` 检查器没存的文案与说明按元素暂存 — 对应 `REQ-EDIT-001`、`REQ-EDIT-002`（v1.23）· 级别: 回归 · 执行者: AI
+
+从 `TC-EDIT-014` 第 6 步拆出（那一条随批注废弃）。
+前置：`pnpm seed:project --name Drafts --device mobile --screens 1`；打开项目，按 `⌘E` 进选择元素并点进 `/s1`。
+脚本 `tests/e2e/edit.ts`（`ONLY=TC-EDIT-038`）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 点选 `#toggle`，文案改成「改过但还没保存的文案」、「用 AI 重生成这块」写「改成横向卡片」；点选标题 `h1`；再点回 `#toggle` | 换到 `h1` 时文案是它自己的（`Screen 1 …`）、说明为空；点回 `#toggle` 时没存的文案与说明都还在 |
+
+后置：无。
+
+#### `TC-EDIT-039` 批注已撤下：界面、接口与 MCP 都没有了 — 对应 `REQ-EDIT-004`、`REQ-AGENT-002`（`API-EDIT-003`，v1.23）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
+
+前置：`pnpm seed:project --name NoNotes --device mobile --screens 1 --no-shot`（项目 P、屏 S）；草稿本里用 stub 出组件草稿 D。
+脚本 `tests/e2e/edit.ts`（`ONLY=TC-EDIT-039`）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 打开 P 的画布，看右侧工具栏；按 `⌥N`；再以 `/p/<P>?panel=annotate` 打开 | 工具栏没有「批注」；按 `⌥N` 后地址里没有 `panel=annotate`、没有待命提示；带 `panel=annotate` 打开时不开任何面板 |
+| 2 | 打开 `/sketch?d=<D>`，看草稿工具条；按 `⌥N` | 没有「批注」开关（`draft-annotate` 为 0）；按 `⌥N` 后看板不变 |
+| 3 | `GET /v1/screens/<S>/annotations`、`POST /v1/screens/<S>/annotations`、`PATCH /v1/annotations/<随机 uuid>`、`POST /v1/projects/<P>/annotations/send` | 都是 `404 /errors/not-found` |
+| 4 | MCP 列出工具；`quilt.get_project { projectId: P }` | 没有名字里带 `annotation` 的工具；项目结果里没有 `annotations` 字段 |
+
+后置：无。
 
 ### AGENT · MCP 与本机 agent
 
@@ -2774,14 +2813,14 @@ AI 轮次登记「待人工」——投递进真实会话要在那个终端里�
 
 后置：把 Codex 的 `quilt` MCP 改回 `http://127.0.0.1:3100/mcp`；删除本用例在 Codex 里留下的测试线程（在桌面版里开着的要先切走才能删）；删除临时目录与通道。
 
-#### `TC-AGENT-011` MCP 与画布同面：删 / 修订 / 候选 / 摆放 / 直改 / 全部作业 / 素材 / 预设 / 批注 / 项目 — 对应 `REQ-AGENT-002`（v0.51）· 级别: 回归 · 执行者: AI
+#### `TC-AGENT-011` MCP 与画布同面：删 / 修订 / 候选 / 摆放 / 直改 / 全部作业 / 素材 / 预设 / 项目 — 对应 `REQ-AGENT-002`（v0.51）· 级别: 回归 · 执行者: AI
 
 前置：API 以 `LLM_DRIVER=stub` 启动（作业类步骤只验作业输入与终态，模型行为由 `TC-CORE-005` / `TC-EDIT-004` / `TC-EDIT-009` / `TC-EDIT-012` / `TC-PROTO-005` 各自覆盖）；`pnpm seed`；`pnpm seed:project --name Parity --device mobile --screens 3 --no-shot`；经 `POST /v1/projects/{id}/components` 建共享组件 `Footer`；脚本在 `$TMPDIR` 现造一张 1×1 PNG（结束即删）。
 执行与独立端口的起法见 §3。
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
-| 1 | `--list`；`quilt.list_runners` | 56 个工具（v0.51 新增 32 个、v0.60 合并两对、v0.64 增 `patch_screen` / `append_upload`、v1.13 增 `get_sketchbook` / `copy_draft`）、7 类资源；通道目录 `{ items, default }`，响应文本不含 `apiKey` |
+| 1 | `--list`；`quilt.list_runners` | 53 个工具（v0.51 新增 32 个、v0.60 合并两对、v0.64 增 `patch_screen` / `append_upload`、v1.13 增 `get_sketchbook` / `copy_draft`、v1.23 删 4 个批注工具），名字里都没有 `annotation`；7 类资源；通道目录 `{ items, default }`，响应文本不含 `apiKey` |
 | 2 | `validate_screen` OK_HTML → `create_screen /agent` → `get_screen` → `get_screenshot`（20 s 内）；违规 HTML `create_screen /bad` → `delete_screen` | 无违规；注入 qid + prelude；返回 image；违规屏照常写入且 `lintReport.violations` 非空；删后项目 4 屏、`/bad` 不在 |
 | 3 | `update_screen` 只传 `html` + `expectedRevisionId`；`get_revision` 取第 1 版；`restore_revision`（expectedRevisionId = 当前）；再用第 1 版 id 作 expectedRevisionId 回溯 | name / route 沿用、current 推进；返回第 1 版 HTML 文本（`seq=1`、无 v2）；产生 `sourceKind=restore` 修订并成为 current；`409 /errors/revision-conflict` |
 | 4 | `edit_screens` 对 `/agent` `versions=2` → `list_candidates` → `adopt_candidate { jobId, index=1, screenId=/agent }` → `adopt_candidate { jobId, index=3 }`（不带 screenId）→ `adopt_candidate` 的 `screenId` 给一个该作业没出过候选的 id | 作业 succeeded；1 屏 × 2 版未结清；`adopted=[/agent]`、`skipped=[]` 且 current 指向第 2 版、该批结清；`adopted=[]`、`skipped=[{ /agent, /errors/not-found }]`；`404 /errors/not-found` |
@@ -2791,15 +2830,14 @@ AI 轮次登记「待人工」——投递进真实会话要在那个终端里�
 | 7b | 对 `/agent` `patch_screen`：`find=Edited by MCP` 换成 `Patched by MCP`；再发两条 edit（第 2 条 `find` 不存在）；`find=px-4` 不带 `all`；`find=px-4 all=true`；用旧 `expectedRevisionId` 再 patch；`create_upload_url` → `append_upload` 三段（`offset` 依次为 0 与上次返回的 `chars`）→ `create_screen uploadId`；`append_upload uploadId=../etc` | `get_screen` 含新文案、current 推进；`422 /errors/validation` 且 `errors[0].path=edits.1.find`；`422` 且 `errors[0].matches > 1`；两次失败后 current 与内容都没变；body 里 `px-4` 全变 `px-5`；`409 /errors/revision-conflict`；累计 `chars` 等于原文长度、新屏内容正确；非法 `uploadId` 报错 |
 | 8 | `generate_screens count=2 anchor=(5000,0) attachmentIds componentIds`；`generate_screens route=/settings name=Settings fromScreenId=s1`；`regenerate_subtree s1 q1`；`propose_design_system`；`edit_component` 带 `runner.kind=agent`、再不带；`export_prototype` → `get_export`；`get_export` 对非导出作业；`list_jobs`；`get_job_events`（含 `after`）；`seed:job running` → `cancel_job` ×2；`edit_screens` 带不属于自己的 `channelId` | 作业输入落 `anchor` / `imageKeys`（1 张）/ `componentIds`；succeeded 且有一屏中心落在锚点（左上角 `(5000 − 195, 0 − 422)`，与画布双击放锚点同一语义）；懒生成 `/settings` 屏出现；子树作业 succeeded、s1 最新修订 `subtree`；提炼作业建成（stub 下终态记入明细）；`400 /errors/validation`、作业 `edit_component` 建成；导出 succeeded、下载 200 且正文含全部屏；`409 /errors/job-not-finished`；列表含各作业；事件 seq 递增、末条 `succeeded`、`after=末尾` 为空；`cancelled`、再取消 `409 /errors/job-finished`；`404 /errors/not-found` |
 | 9 | `create_design_preset Brand` → `list_design_presets` → `create_project FromPreset presetId` → `apply_design_preset expectedVersion applyToScreens=true` → 过期版本再套 → `delete_design_preset` | 预设在列；新项目种子色 = 预设；`version+1`、回刷作业 succeeded；`409 /errors/version-conflict`；删后不在列 |
-| 10 | REST 建两条批注（s2、s3）→ `list_annotations { projectId }` → `update_annotation a1 resolved` → `list_annotations { projectId }` / `{ projectId, screenId: s2 }` → `send_annotations [a2]` → `delete_annotation a1` | 两条 open 在列；resolved 后项目级未处理列表不含 a1、单屏列表含 a1（resolved）；建 1 条 `edit_screens` 作业（`screenIds=[s3]`），succeeded 后 a2 `resolved`；删后 s2 单屏列表为空 |
-| 11 | `update_project exemplarScreenId=s2` → 读 `golden` 资源 → `exemplarScreenId=null` → 空 patch；`update_design_system conventions=[…]`；REST 发一条消息（`count=2`）→ `list_messages` | 样板屏落库、golden 是 s2 正文、能回落；`400 /errors/validation`；DESIGN.md 出现 `## 约定` 与两条、`version+1`；列表含该轮 user 与 assistant（带 jobId） |
-| 12 | `delete_component Footer`；`seed:job running` → `delete_project` → `cancel_job` → `delete_project`；再删 `FromPreset`；`list_projects`、`get_project` | 详情无组件；`409 /errors/project-busy`；取消后删除成功；两个项目都不在列表、详情 `404 /errors/not-found` |
+| 10 | `update_project exemplarScreenId=s2` → 读 `golden` 资源 → `exemplarScreenId=null` → 空 patch；`update_design_system conventions=[…]`；REST 发一条消息（`count=2`）→ `list_messages` | 样板屏落库、golden 是 s2 正文、能回落；`400 /errors/validation`；DESIGN.md 出现 `## 约定` 与两条、`version+1`；列表含该轮 user 与 assistant（带 jobId） |
+| 11 | `delete_component Footer`；`seed:job running` → `delete_project` → `cancel_job` → `delete_project`；再删 `FromPreset`；`list_projects`、`get_project` | 详情无组件；`409 /errors/project-busy`；取消后删除成功；两个项目都不在列表、详情 `404 /errors/not-found` |
 
 后置：脚本删掉临时 PNG；证据为 `docs/test-runs/run-<RUN>-tc-agent-011.txt`（无浏览器，无截图）。
 
-#### `TC-AGENT-018` MCP 写工具的校验、原子性与截图 — 对应 `REQ-AGENT-002`、`REQ-EDIT-004`（v0.77）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`，要 `QUILT_E2E_RESTART`）
+#### `TC-AGENT-018` MCP 写工具的校验、原子性与截图 — 对应 `REQ-AGENT-002`（v0.77）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
 
-前置：先经 REST 删掉账号下全部通道（`send_annotations` 不收 `runner`，走缺省通道；种子按 `.env` 建的 Gemini 通道会把它送到真实模型），确认列表为空后缺省回落到 API 的 `LLM_DRIVER=stub`；以 `QUILT_RATE_LIMIT_PER_MIN=10` 重启被测 API（测试栈缺省 1000，§3；第 6 步验的是每分钟 10 个的真实上限，重启也清空了前面用例占的限流窗口），用例结束按缺省再重启一次（v1.06）；`pnpm seed:project --name Mcp18 --device mobile --screens 3 --no-shot`。
+前置：`pnpm seed:project --name Mcp18 --device mobile --screens 3 --no-shot`。
 脚本 `tests/e2e/mcp.ts`（`ONLY=TC-AGENT-018`），失败项攒齐一起报。
 
 | # | 操作 | 预期 |
@@ -2807,12 +2845,9 @@ AI 轮次登记「待人工」——投递进真实会话要在那个终端里�
 | 1 | `update_screen` 对 `/s2` 传 `route:"Not A Route!"`（带原 body） | 调用失败（协议层参数错误）；`/s2` 的路由仍是 `/s2` |
 | 2 | `create_screen /shot`（整屏）等截图就绪 = rev1；`update_screen` 出 rev2；`PATCH` 把它改成叠层；`restore_revision` 回到 rev1（`expectedRevisionId` = rev2） | 回溯出的修订 20 s 内有截图，且截图地址里是它自己的修订 id、按叠层拍（`<新修订 id>.overlay.png`，v1.03 起键带呈现方式），不是 rev1 的 |
 | 3 | `append_upload` 用没签发过的 `uploadId`；`create_upload_url` 后对它并发 5 段 `offset:0`（内容各带 `chunk-0`…`chunk-4`）；`create_screen uploadId` 读回；再对这个已用掉的 `uploadId` 追加 | 没签发过的 `404 /errors/not-found`；5 段里 1 段成功、4 段 `409 /errors/upload-offset`；建出的屏里恰好有成功那一段的标记；用掉的 `404 /errors/not-found` |
-| 4 | 给三屏各挂一条批注；`seed:job` 占住 `/s2`；`send_annotations` 发三条 | `409 /errors/screen-busy`；本项目没有新的 `edit_screens` 作业；三条批注仍是 `open` |
-| 5 | 取消占位作业，再发同样三条 | 返回 3 个作业，都结束 |
-| 6 | 另建 11 屏项目、每屏一条批注；先发前 8 条，再发全部 11 条 | 前 8 条 `429 /errors/rate-limited`（窗口里已有第 5 步的 3 个，余量 7）；11 条 `422 /errors/validation`（超过每分钟上限，让分批发）；两次都没建出作业 |
-| 7 | `list_messages` 带 `cursor:"abc"` | 调用失败，但不是 `/errors/internal` |
+| 4 | `list_messages` 带 `cursor:"abc"` | 调用失败，但不是 `/errors/internal` |
 
-后置：脚本取消第 4 / 6 步若有漏建的作业；证据随套件的 `docs/test-runs/run-<RUN>-tc-agent-011.txt`。
+后置：证据随套件的 `docs/test-runs/run-<RUN>-tc-agent-011.txt`。
 
 #### `TC-AGENT-022` 上传位闲置回收 — 对应 `REQ-AGENT-002`（`API-AGENT-003`、MCP `append_upload`、设计文档 §17 `upload.gc`，v0.82）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）
 
@@ -2883,14 +2918,12 @@ AI 轮次登记「待人工」——投递进真实会话要在那个终端里�
 
 ## 6. 执行记录
 
-本节只留最近 10 轮；更早的轮次（RUN-001～RUN-273）原样移到 `docs/TEST-RUNS.md`（v1.07 归档，行序不变），按轮次号 grep 即可定位。
+本节只留最近 10 轮；更早的轮次（RUN-001～RUN-275）原样移到 `docs/TEST-RUNS.md`（v1.07 归档，行序不变），按轮次号 grep 即可定位。
 
 轮次汇总：
 
 | 轮次 | 日期 | 被测版本 | 执行者 | 范围 | 结果 |
 | --- | --- | --- | --- | --- | --- |
-| RUN-274 | 2026-10-20 | 未提交工作树（设计文档 v1.18：草稿出新版、换画框原地换） | AI(Claude Code) | 局部(TC-CORE-098、TC-CORE-099、TC-CORE-100、TC-CORE-101、TC-CORE-102、TC-CORE-103、TC-CORE-104、TC-CORE-105、TC-CORE-106、TC-CORE-107、TC-CORE-108、TC-CORE-109、TC-CORE-110、TC-CORE-111、TC-CORE-112、TC-CORE-113、TC-CORE-114、TC-CORE-115、TC-CORE-116、TC-CORE-117、TC-CORE-118、TC-CORE-119、TC-CORE-120、TC-CORE-121、TC-CORE-122、TC-CORE-123、TC-CORE-125、TC-CORE-128、TC-AGENT-011 + 冒烟级至 TC-CORE-128、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 30/37 · 失败 4 · 跳过 3 |
-| RUN-275 | 2026-10-20 | RUN-274 之上：看板的 key 带上「有没有版本」，新草稿第一版落地照旧重挂 | AI(Claude Code) | 局部(TC-CORE-098、TC-CORE-099、TC-CORE-100、TC-CORE-101、TC-CORE-102、TC-CORE-103、TC-CORE-104、TC-CORE-105、TC-CORE-106、TC-CORE-107、TC-CORE-108、TC-CORE-109、TC-CORE-110、TC-CORE-111、TC-CORE-112、TC-CORE-113、TC-CORE-114、TC-CORE-115、TC-CORE-116、TC-CORE-117、TC-CORE-118、TC-CORE-119、TC-CORE-120、TC-CORE-121、TC-CORE-122、TC-CORE-123、TC-CORE-125、TC-CORE-128、TC-AGENT-011 + 冒烟级至 TC-CORE-128、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 35/37 · 跳过 2 |
 | RUN-276 | 2026-10-20 | 未提交工作树（设计文档 v1.19）的构建（修复前：看板与聚焦屏仍用缩放变换） | AI(Claude Code) | 局部(TC-CORE-129) | 通过 0/1 · 失败 1 |
 | RUN-277 | 2026-10-20 | 未提交工作树（设计文档 v1.19：草稿出新版原地换、缩小显示的屏改用 zoom） | AI(Claude Code) | 全量至 TC-CORE-129、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024 | 通过 165/179 · 失败 1 · 待人工 2 · 跳过 11 |
 | RUN-278 | 2026-10-21 | 未提交工作树（设计文档 v1.20：界面中文与英文） | AI(Claude Code) | 全量至 TC-CORE-136、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024 | 通过 169/186 · 失败 4 · 待人工 2 · 跳过 11 |
@@ -2899,10 +2932,8 @@ AI 轮次登记「待人工」——投递进真实会话要在那个终端里�
 | RUN-281 | 2026-10-21 | 未提交工作树（设计文档 v1.21：草稿里只改一块也能带参考图） | AI(Claude Code) | 局部(TC-CORE-138) | 通过 1/1 |
 | RUN-282 | 2026-10-21 | 同 RUN-281 的构建 | AI(Claude Code) | 局部(TC-CORE-098、TC-CORE-099、TC-CORE-100、TC-CORE-101、TC-CORE-102、TC-CORE-103、TC-CORE-104、TC-CORE-105、TC-CORE-106、TC-CORE-107、TC-CORE-108、TC-CORE-109、TC-CORE-110、TC-CORE-111、TC-CORE-112、TC-CORE-113、TC-CORE-114、TC-CORE-115、TC-CORE-116、TC-CORE-117、TC-CORE-118、TC-CORE-119、TC-CORE-120、TC-CORE-121、TC-CORE-122、TC-CORE-123、TC-CORE-125、TC-CORE-128、TC-CORE-129、TC-CORE-138、TC-AGENT-011、TC-AGENT-023、TC-CORE-027、TC-CORE-092、TC-EDIT-003、TC-EDIT-004、TC-EDIT-014、TC-EDIT-019、TC-EDIT-026、TC-EDIT-033、TC-CORE-003、TC-CORE-005、TC-CORE-010、TC-CORE-012、TC-CORE-018、TC-PROTO-001、TC-AGENT-001) | 通过 43/47 · 失败 1 · 跳过 3 |
 | RUN-283 | 2026-10-21 | 同 RUN-281 的构建 | AI(Claude Code) | 复测(RUN-282:TC-EDIT-001、TC-EDIT-004 + 冒烟级至 TC-CORE-138、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 8/10 · 跳过 2 |
-
-RUN-274 证据：v1.18 的局部轮（改到 `REQ-CORE-040`，按 §5 整套 SKETCH 加冒烟级）。前端重新构建，单测轮 140/140，core / api / web / tests 类型检查与 web lint 0 处。新用例 `TC-CORE-128` 通过；`100`、`101`、`106`、`111` 是这次改动带出的回归：新草稿在生成中摆上看板时还没有地址，看板的 key 改成只认草稿 id 之后，第一版落地也不再重挂取地址，iframe 一直不出来（`docs/test-runs/run-274-failures.log`）。`TC-AGENT-011` 在 `mcp.ts` 里，本轮误放进 `agent.ts` 的 `ONLY`，没有执行。完整日志 `.e2e/main/run-274.log`（本机，不进仓库）。
-
-RUN-275 证据：修完 RUN-274 的回归后重新构建，按同一范围再跑一轮（改动又碰了 `DraftStage`，所以整套 SKETCH 重跑，不只复测失败项）；`TC-AGENT-011` 本轮在 `mcp.ts` 里补跑。SKETCH 28/28，含 `TC-CORE-128`；`TC-CORE-100`、`101`、`106`、`111` 通过。完整日志 `.e2e/main/run-275.log`（本机，不进仓库）。
+| RUN-284 | 2026-10-21 | 未提交工作树（设计文档 v1.23：撤下批注、双击组件卡把镜头摆过去） | AI(Claude Code) | 全量至 TC-CORE-139、TC-PROTO-013、TC-EDIT-039、TC-AGENT-024 | 通过 171/189 · 失败 6 · 待人工 2 · 跳过 10 |
+| RUN-285 | 2026-10-21 | 同 RUN-284 的构建；`tests/e2e/canvas.ts` 的 `TC-CORE-058` 双击组件卡后先等镜头停稳 | AI(Claude Code) | 复测(RUN-284:TC-CORE-058、TC-CORE-080、TC-CORE-100、TC-EDIT-001、TC-PROTO-010 + 冒烟级至 TC-CORE-139、TC-PROTO-013、TC-EDIT-039、TC-AGENT-024) | 通过 12/14 · 跳过 2 |
 
 RUN-276 证据：用户报告「选元素时玻璃卡片旁闪出灰色渐变、下面一排图标消失」（草稿本与项目屏都有，附录屏视频）。无头浏览器（软件渲染与开 GPU 都试过）复现不出；征得用户同意后开可见 Edge 窗口，用用户那一屏的正文在 l1 隔离栈上复现：看板 7 次加载 7 次出现，对照得出同时带 `backdrop-filter` 与 `box-shadow` 且 iframe 带缩放变换才出，按 1:1 显示或去掉投影都不出（截图 `docs/test-runs/run-276-headed-before.png`、`run-276-headed-controls.png`）。补写源自缺陷用例 `TC-CORE-129`，在修复前的构建（看板与聚焦屏改回缩放变换，单独构建）上跑：第 1 步缩放连乘 0.976，失败；第 3 步即上述有头复现，同样失败。
 
@@ -2920,19 +2951,14 @@ RUN-282 证据：v1.21 的局部轮。改到建作业接口（`API-CORE-006`，�
 
 RUN-283 证据：RUN-282 之后的复测轮，同一构建、l1 隔离栈：`TC-EDIT-004` 带上建项目的 `TC-EDIT-001` 一起跑（001 计入本轮），加冒烟级；停栈后跑 install。日志 `.e2e/l1/run-283.log`、`.e2e/main/run-283-install.log`（本机，不进仓库）。
 
+RUN-284 证据：v1.23 的全量轮：撤下批注（画布与草稿本的入口、5 个 REST 接口、4 个 MCP 工具，迁移 `0020` 删 `annotations` 表），双击组件卡把镜头摆过去。改到数据模型，按 §5 跑全量。构建前端，单测轮 168/168，五个包类型检查与 web lint 0 处，构建产物 `check-tokens --lint` PASS。十一套分五条隔离栈并行跑（21:23～21:58）：main 跑 CORE、LOAD，l1 跑 CANVAS、PROTO，l2 跑 EDIT、COMPONENTS，l3 跑 AGENT、MCP、CHAT，l4 跑 SKETCH、I18N；全部停栈后跑 install。新用例 `TC-CORE-139`（双击后卡片宽 144 → 390、中心偏差 2 px）、`TC-EDIT-038`、`TC-EDIT-039` 通过，`TC-AGENT-011` 数到 53 个工具。六条失败里 `TC-CORE-023` 是 §7 登记项；其余五条都是等待或采样超时，出现在五栈并行、机器满载时，`TC-CORE-058` 另有脚本问题（见明细）。`TC-CORE-047` 本轮通过（§7「⌘K 找屏连按 ↓ 到底后选中行跳回」时过时不过，不据此撤销登记）。日志 `.e2e/{main,l1,l2,l3,l4}/run-284.log`、`.e2e/main/run-284-install.log`（本机，不进仓库）。
+
+RUN-285 证据：RUN-284 之后的复测轮，同一构建，只开 l1 一条隔离栈（21:59～22:05），按 §5 跑上一轮除 `TC-CORE-023` 外的五条失败加冒烟级；`TC-PROTO-010` 用 `TC-PROTO-007` 建的项目，007 一起跑并计入本轮；停栈后跑 install。`TC-CORE-058` 换成双击组件卡后先等世界层 `transform` 停稳再量的脚本，12 步全过。五条全部通过。日志 `.e2e/l1/run-285.log`（本机，不进仓库）。
+
 明细（仅登非「通过」项）：
 
 | 轮次 | 用例 | 结果 | 现象 / 证据 | 跟进 |
 | --- | --- | --- | --- | --- |
-| RUN-274 | TC-CORE-100 | 失败 | 等草稿的 iframe 超时：新草稿第一版落地后看板上一直没有 iframe（证据：`docs/test-runs/run-274-failures.log`） | 产品缺陷（本轮改动带出），已修：看板的 key 带上「有没有版本」，第一版落地照旧重挂；RUN-275 复测 |
-| RUN-274 | TC-CORE-101 | 失败 | 等草稿的 iframe 超时：新草稿第一版落地后看板上一直没有 iframe（证据：`docs/test-runs/run-274-failures.log`） | 产品缺陷（本轮改动带出），已修：看板的 key 带上「有没有版本」，第一版落地照旧重挂；RUN-275 复测 |
-| RUN-274 | TC-CORE-106 | 失败 | 等草稿的 iframe 超时：新草稿第一版落地后看板上一直没有 iframe（证据：`docs/test-runs/run-274-failures.log`） | 产品缺陷（本轮改动带出），已修：看板的 key 带上「有没有版本」，第一版落地照旧重挂；RUN-275 复测 |
-| RUN-274 | TC-CORE-111 | 失败 | 等草稿的 iframe 超时：新草稿第一版落地后看板上一直没有 iframe（证据：`docs/test-runs/run-274-failures.log`） | 产品缺陷（本轮改动带出），已修：看板的 key 带上「有没有版本」，第一版落地照旧重挂；RUN-275 复测 |
-| RUN-274 | TC-AGENT-011 | 跳过 | 本轮误放进 `agent.ts` 的 `ONLY`（它在 `mcp.ts`），没有执行 | RUN-275 补跑 |
-| RUN-274 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-274 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-275 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-275 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-276 | TC-CORE-129 | 失败 | 第 1 步「看板上的草稿应缩小显示、但 iframe 上没有缩放变换」：缩放连乘 0.976；第 3 步可见窗口里卡片右侧一片灰色渐变、下面那排图标不见（证据：`docs/test-runs/run-276-tc-core-129-fail.log`、`docs/test-runs/run-276-headed-before.png`） | 产品缺陷，已修：看板与聚焦屏改用 zoom；下一轮复测 |
 | RUN-277 | TC-CORE-023 | 失败 | 预期失败：「叫回后安全区底部没复原」，§7 登记项（证据：`.e2e/main/run-277.log` 的 CORE 段，本机） | 基线 |
 | RUN-277 | TC-CORE-020 | 待人工 | 对标 Stitch 盲评 | 待人工 |
@@ -2976,6 +3002,26 @@ RUN-283 证据：RUN-282 之后的复测轮，同一构建、l1 隔离栈：`TC-
 | RUN-282 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-283 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-283 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-284 | TC-CORE-058 | 失败 | 第 5、6、12 步等 `Tab Bar` 量完（`data-ready`）超过 20 s；第 8 步松手后小地图视口框 `22.4 16.0 153.6 96.0 → 11.2 8.0 153.6 96.0`。五栈并行、机器满载；另外 v1.23 起双击组件卡后镜头会移动，脚本双击后紧接着量框，可能读到动画中途的位置（证据：`.e2e/l1/run-284.log`，本机） | 脚本更正：双击后先等世界层 `transform` 停稳（第 5 步写明，第 6、7、10、12 步沿用）；RUN-285 复测通过 |
+| RUN-284 | TC-CORE-080 | 失败 | 「合成层静止 20、手势中 -1」：-1 是手势中 3 s 内没收到 `LayerTree.layerTreeDidChange`，没有采到层数，不是层数变了；五栈并行满载（证据：`.e2e/main/run-284.log`，本机） | 判为负载下采样超时；RUN-285 单栈复测通过 |
+| RUN-284 | TC-CORE-100 | 失败 | 「记录栏应多出这一张」：五栈并行满载（证据：`.e2e/l4/run-284.log`，本机） | 判为偶发；RUN-285 复测通过 |
+| RUN-284 | TC-EDIT-001 | 失败 | 等直改后的「已更新」角标（`data-quilt-mark`）8 s 超时。同一构建在空闲的 l5 栈上单跑 2 次（`RUN=0`，不计轮次）：一次「10 s 内截图未更新」、一次通过；RUN-269 有过同样的负载下失败（证据：`.e2e/l2/run-284.log`，本机） | 判为负载下偶发；RUN-285 复测通过 |
+| RUN-284 | TC-PROTO-010 | 失败 | 「单步超过 10 min 没有结束」，与 RUN-278 `TC-PROTO-007` 同一类现象；没有 trace（证据：`.e2e/l1/run-284.log`，本机） | 判为偶发；RUN-285 复测通过 |
+| RUN-284 | TC-CORE-023 | 失败 | 预期失败（§7 登记项）：「叫回后安全区底部没复原」（证据：`.e2e/main/run-284.log`，本机） | §7 跟进 |
+| RUN-284 | TC-CORE-020 | 待人工 | 对标 Stitch 盲评 | 待人工 |
+| RUN-284 | TC-AGENT-010 | 待人工 | 投递到真实 Claude Code 会话要在终端确认接收 | 待人工 |
+| RUN-284 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-284 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-284 | TC-PROTO-004 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-284 | TC-PROTO-009 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-284 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-284 | TC-CORE-006 | 跳过 | 要以 `LLM_STUB=503` 重启 worker，由 `core-stub.ts` 单独执行，本轮没跑 | 基线 |
+| RUN-284 | TC-CORE-084 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
+| RUN-284 | TC-EDIT-037 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
+| RUN-284 | TC-CORE-038 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
+| RUN-284 | TC-AGENT-013 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
+| RUN-285 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-285 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 
 ## 7. 遗留问题
 

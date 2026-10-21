@@ -3,12 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { seed, seedJson, apiJson, EVIDENCE, API } from './lib.ts';
 import { connectMcp, callTool, resourceText } from './mcp-client.ts';
-import { suite, expect, sleep, restartApi } from './harness.ts';
+import { suite, expect, sleep } from './harness.ts';
 
 // docs/TEST.md TC-AGENT-011（MCP 与画布同面，REQ-AGENT-002 v0.51）AI 执行脚本。纯 MCP / REST，不开浏览器。
 // 作业类工具只验「作业输入与 API-CORE-006 同义 + 终态」，模型行为由各自用例覆盖——API 以 LLM_DRIVER=stub 启动即可全程跑完。
 // 可用 QUILT_E2E_API 指到独立端口上的一套 API（配 DATABASE_URL=…quilt_test），不占用 3100 上的开发实例。
-const { RUN, results, cleanups, step, summary } = suite('MCP');
+const { RUN, results, step, summary } = suite('MCP');
 await mkdir(EVIDENCE, { recursive: true });
 const health = await (await fetch(`${API}/v1/health`)).json() as { llm: string };
 if (health.llm !== 'stub') { console.log(`❌ TC-AGENT-011 阻塞：API 不是 stub 驱动（当前 ${health.llm}），作业类步骤要确定性驱动`); process.exit(2); }
@@ -24,8 +24,8 @@ type Detail = { project: { exemplarScreenId: string | null }; screens: Screen[];
 
 seed('seed');
 await writeFile(PNG_PATH, PNG);
-let mcp = await connectMcp();
-const NEW_TOOLS = ['delete_screen', 'delete_component', 'delete_project', 'get_revision', 'restore_revision', 'list_candidates', 'adopt_candidate', 'move_screens', 'edit_element', 'regenerate_subtree', 'edit_component', 'propose_design_system', 'export_prototype', 'get_export', 'list_runners', 'create_upload_url', 'list_jobs', 'cancel_job', 'get_job_events', 'list_assets', 'create_asset', 'delete_asset', 'list_design_presets', 'create_design_preset', 'apply_design_preset', 'delete_design_preset', 'list_annotations', 'update_annotation', 'delete_annotation', 'send_annotations', 'list_messages', 'patch_screen', 'append_upload', 'get_sketchbook', 'copy_draft', 'create_draft'].map((t) => `quilt.${t}`);
+const mcp = await connectMcp();
+const NEW_TOOLS = ['delete_screen', 'delete_component', 'delete_project', 'get_revision', 'restore_revision', 'list_candidates', 'adopt_candidate', 'move_screens', 'edit_element', 'regenerate_subtree', 'edit_component', 'propose_design_system', 'export_prototype', 'get_export', 'list_runners', 'create_upload_url', 'list_jobs', 'cancel_job', 'get_job_events', 'list_assets', 'create_asset', 'delete_asset', 'list_design_presets', 'create_design_preset', 'apply_design_preset', 'delete_design_preset', 'list_messages', 'patch_screen', 'append_upload', 'get_sketchbook', 'copy_draft', 'create_draft'].map((t) => `quilt.${t}`);
 // 工具调用助手：成功要 JSON、失败要错误类型
 const call = async <T = Record<string, unknown>>(name: string, args: Record<string, unknown>, what = name): Promise<T> => { const r = await callTool(mcp, name, args); expect(!r.isError, `${what} 出错：${r.text.slice(0, 300)}`); return r.json as T; };
 const fail = async (name: string, args: Record<string, unknown>, type: string, what = name) => { const r = await callTool(mcp, name, args); expect(r.isError, `${what} 应失败（${type}），实际成功：${r.text.slice(0, 200)}`); const t = (r.json as { type?: string }).type; expect(t === type, `${what} 应 ${type}，实际 ${t}：${r.text.slice(0, 200)}`); };
@@ -36,14 +36,17 @@ const revisionsOf = async (screenId: string) => call<{ id: string; seq: number; 
 await step('TC-AGENT-011', async () => {
   const notes: string[] = [];
   const r = seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', 'Parity', '--device', 'mobile', '--screens', '3', '--no-shot');
-  const pid = r.projectId; const [s1, s2, s3] = r.screens.map((s) => s.id);
+  const pid = r.projectId; const [s1, s2] = r.screens.map((s) => s.id);
   const footer = (await apiJson<{ component: { id: string; version: number } }>(`/v1/projects/${pid}/components`, { method: 'POST', body: JSON.stringify({ name: 'Footer', html: '<footer class="p-4 text-sm">Footer</footer>' }) })).body.component;
 
-  // 1 工具面：57 个工具（v0.60 合并两对、v0.64 增 patch_screen / append_upload、v1.13 增 get_sketchbook / copy_draft、v1.14 增 create_draft）、7 类资源；list_runners 不含密钥
+  // 1 工具面：53 个工具（v0.60 合并两对、v0.64 增 patch_screen / append_upload、v1.13 增 get_sketchbook / copy_draft、v1.14 增 create_draft、v1.23 删 4 个批注工具），
+  // 名字里都没有 annotation；7 类资源；list_runners 不含密钥
   const tools = (await mcp.listTools()).tools.map((t) => t.name);
   const missing = NEW_TOOLS.filter((t) => !tools.includes(t));
   expect(missing.length === 0, `缺工具：${missing.join(',')}`);
-  expect(tools.length === 57, `工具数应为 57，实际 ${tools.length}`);
+  expect(tools.length === 53, `工具数应为 53，实际 ${tools.length}`);
+  const annoTools = tools.filter((t) => t.includes('annotation'));
+  expect(annoTools.length === 0, `不该再有批注工具：${annoTools.join(',')}`);
   const resources = (await mcp.listResourceTemplates()).resourceTemplates.length;
   expect(resources === 7, `资源模板应为 7 类，实际 ${resources}`);
   const runnersRaw = await callTool(mcp, 'quilt.list_runners', {});
@@ -263,24 +266,7 @@ await step('TC-AGENT-011', async () => {
   expect(!(await call<{ items: { id: string }[] }>('quilt.list_design_presets', {})).items.some((p) => p.id === preset.id), '删预设后仍在列表');
   notes.push('预设存 / 建项目 / 套用回刷 / 409 / 删');
 
-  // 10 批注：列（项目内未处理 / 单屏全部）、改状态、发送成作业、删
-  const mk = async (screenId: string, note: string) => (await apiJson<{ annotation: { id: string } }>(`/v1/screens/${screenId}/annotations`, { method: 'POST', body: JSON.stringify({ qid: 'q1', note, anchorText: 'Screen', rect: { x: 0, y: 0, w: 10, h: 10 } }) })).body.annotation.id;
-  const a1 = await mk(s2, '改成蓝色'); const a2 = await mk(s3, '标题加粗');
-  type Ann = { id: string; status: string };
-  const open = (await call<{ items: Ann[] }>('quilt.list_annotations', { projectId: pid })).items;
-  expect(open.some((a) => a.id === a1 && a.status === 'open') && open.some((a) => a.id === a2), 'list_annotations(projectId) 应列出两条 open');
-  expect((await call<{ annotation: Ann }>('quilt.update_annotation', { annotationId: a1, status: 'resolved' })).annotation.status === 'resolved', '改状态未生效');
-  expect(!(await call<{ items: Ann[] }>('quilt.list_annotations', { projectId: pid })).items.some((a) => a.id === a1), 'resolved 的批注不该出现在项目级未处理列表');
-  expect((await call<{ items: Ann[] }>('quilt.list_annotations', { projectId: pid, screenId: s2 })).items.some((a) => a.id === a1 && a.status === 'resolved'), '单屏列表应含 resolved 的批注');
-  const sent = await call<{ jobs: Job[] }>('quilt.send_annotations', { projectId: pid, annotationIds: [a2] });
-  expect(sent.jobs.length === 1 && sent.jobs[0].kind === 'edit_screens' && (sent.jobs[0].input.screenIds as string[])[0] === s3, `发送批注应建 1 条 edit_screens：${JSON.stringify(sent).slice(0, 200)}`);
-  expect((await waitJob(sent.jobs[0].id, 120)).status === 'succeeded', '批注作业未成功');
-  expect((await call<{ items: Ann[] }>('quilt.list_annotations', { projectId: pid, screenId: s3 })).items.find((a) => a.id === a2)?.status === 'resolved', '作业成功后批注应 resolved');
-  await call('quilt.delete_annotation', { annotationId: a1 });
-  expect((await call<{ items: Ann[] }>('quilt.list_annotations', { projectId: pid, screenId: s2 })).items.length === 0, '删批注后单屏列表应为空');
-  notes.push('批注列 / 改 / 发 / 删');
-
-  // 11 项目与设计系统：样板屏（golden 资源跟着变）、空 patch 400、约定节写回、对话记录
+  // 10 项目与设计系统：样板屏（golden 资源跟着变）、空 patch 400、约定节写回、对话记录
   expect((await call<{ exemplarScreenId: string | null }>('quilt.update_project', { projectId: pid, exemplarScreenId: s2 })).exemplarScreenId === s2, '样板屏未落库');
   const golden = await mcp.readResource({ uri: `quilt://projects/${pid}/golden` });
   expect(resourceText(golden).includes('Screen 2'), 'golden 资源应是样板屏 s2 的正文');
@@ -296,7 +282,7 @@ await step('TC-AGENT-011', async () => {
   expect(msgs.items.some((m) => m.role === 'user' && m.content === '做一个记账 app') && msgs.items.some((m) => m.role === 'assistant' && m.jobId === msg.body.job.id), `list_messages 缺这一轮：${JSON.stringify(msgs).slice(0, 200)}`);
   notes.push('样板屏 / 约定写回 / 对话记录');
 
-  // 12 删组件、删项目：有在跑作业 409 project-busy，取消后级联删除；顺手删掉按预设建的项目
+  // 11 删组件、删项目：有在跑作业 409 project-busy，取消后级联删除；顺手删掉按预设建的项目
   await call('quilt.delete_component', { componentId: footer.id });
   expect((await detail(pid)).components.length === 0, '删组件后详情仍有组件');
   const busy = seedJson<{ jobId: string }>('seed:job', '--project', pid, '--status', 'running');
@@ -312,22 +298,13 @@ await step('TC-AGENT-011', async () => {
 });
 
 // TC-AGENT-018（v0.77）：MCP 写工具的校验、原子性与截图——update_screen 的路由格式、restore_revision 重拍截图、
-// append_upload 只收签发过的上传位且同一上传位串行、send_annotations 全有或全无、list_messages 的游标。失败项攒齐一起报
+// append_upload 只收签发过的上传位且同一上传位串行、list_messages 的游标。失败项攒齐一起报
 await step('TC-AGENT-018', async () => {
   const bad: string[] = [];
   const check = (cond: unknown, msg: string) => { if (!cond) bad.push(msg); };
   const typeOf = (r: { json: unknown }) => (r.json as { type?: string } | null)?.type;
-  // 发批注不收 runner、走账号的缺省通道：删掉种子按 .env 建的云端通道，缺省回落到 API 的 LLM_DRIVER=stub，不打真实模型
-  for (const ch of (await apiJson<{ items: { id: string }[] }>('/v1/channels')).body.items) await apiJson(`/v1/channels/${ch.id}`, { method: 'DELETE' });
-  expect((await apiJson<{ items: unknown[] }>('/v1/channels')).body.items.length === 0, '通道没删干净，发批注会打到真实模型');
-  // 本条要验真实的限流（10 次 / 分钟）：测试栈平时放到 1000（§3），这里按 10 重启 API——重启顺带清空计数窗口；收尾按测试栈缺省重启回来。
-  // 重启后原来的 MCP 会话失效，两头都重连
-  await restartApi({ QUILT_RATE_LIMIT_PER_MIN: '10' });
-  await mcp.close().catch(() => {});
-  mcp = await connectMcp();
-  cleanups.push(async () => { await restartApi(); await mcp.close().catch(() => {}); mcp = await connectMcp(); });
   const r = seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', 'Mcp18', '--device', 'mobile', '--screens', '3', '--no-shot');
-  const pid = r.projectId; const [s1, s2, s3] = r.screens.map((s) => s.id);
+  const pid = r.projectId; const s2 = r.screens[1].id;
 
   // 1 update_screen 的 route 与 create_screen 同一格式校验
   const body2 = (await callTool(mcp, 'quilt.get_screen', { screenId: s2 })).text;
@@ -365,40 +342,12 @@ await step('TC-AGENT-018', async () => {
   const consumed = await callTool(mcp, 'quilt.append_upload', { uploadId: slot.uploadId, offset: 0, chunk: '<div>reuse</div>' });
   check(consumed.isError && typeOf(consumed) === '/errors/not-found', `用掉的上传位再追加应 404：${consumed.text.slice(0, 120)}`);
 
-  // 4 send_annotations 全有或全无：第 2 屏被占着时整批 409、一个作业不建、批注仍是 open；放开后三屏各一条作业
-  const ann = async (sid: string) => (await apiJson<{ annotation: { id: string } }>(`/v1/screens/${sid}/annotations`, { method: 'POST', body: JSON.stringify({ qid: 'q1', note: '标题再大一点', anchorText: 'Screen', rect: { x: 0, y: 0, w: 100, h: 40 } }) })).body.annotation.id;
-  const ids = [await ann(s1), await ann(s2), await ann(s3)];
-  const editJobs = async (p: string) => (await call<{ items: Job[] }>('quilt.list_jobs', { projectId: p, limit: 100 })).items.filter((j) => j.kind === 'edit_screens' && (j.input.prompt as string) !== 'seeded');
-  const busy = seedJson<{ jobId: string }>('seed:job', '--project', pid, '--screen', s2, '--status', 'running');
-  const sent409 = await callTool(mcp, 'quilt.send_annotations', { projectId: pid, annotationIds: ids });
-  const open409 = (await call<{ items: { id: string; status: string }[] }>('quilt.list_annotations', { projectId: pid })).items.filter((a) => ids.includes(a.id) && a.status === 'open').length;
-  const jobs409 = await editJobs(pid);
-  check(sent409.isError && typeOf(sent409) === '/errors/screen-busy' && jobs409.length === 0 && open409 === 3, `第 2 屏被占着时应整批 409、不建作业、批注仍 open：${typeOf(sent409) ?? 'ok'}，作业 ${jobs409.length}，open ${open409}`);
-  for (const j of jobs409) await callTool(mcp, 'quilt.cancel_job', { jobId: j.id });
-  await call('quilt.cancel_job', { jobId: busy.jobId });
-  await sleep(500);
-  const sentOk = await callTool(mcp, 'quilt.send_annotations', { projectId: pid, annotationIds: ids });
-  const okJobs = sentOk.isError ? [] : (sentOk.json as { jobs: Job[] }).jobs;
-  check(okJobs.length === 3, `放开后应三屏各一条作业：${sentOk.text.slice(0, 160)}`);
-  for (const j of okJobs) await waitJob(j.id, 60);
-  // 限流余量（窗口里已有上面这 3 条，剩 7）不够 8 屏时整批 429；超过每分钟上限的 11 屏直接 422 让分批发；都不建作业
-  const big = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Mcp18b', '--device', 'mobile', '--screens', '11', '--no-shot');
-  const bigIds: string[] = [];
-  for (const s of big.screens) bigIds.push(await ann(s.id));
-  const sent429 = await callTool(mcp, 'quilt.send_annotations', { projectId: big.projectId, annotationIds: bigIds.slice(0, 8) });
-  const jobs429 = await editJobs(big.projectId);
-  check(sent429.isError && typeOf(sent429) === '/errors/rate-limited' && jobs429.length === 0, `8 屏超出限流余量应整批 429、不建作业：${typeOf(sent429) ?? 'ok'}，作业 ${jobs429.length}`);
-  const sent422 = await callTool(mcp, 'quilt.send_annotations', { projectId: big.projectId, annotationIds: bigIds });
-  const jobs422 = await editJobs(big.projectId);
-  check(sent422.isError && typeOf(sent422) === '/errors/validation' && jobs422.length === jobs429.length, `11 屏超过每分钟上限应 422 分批发、不建作业：${typeOf(sent422) ?? 'ok'}，作业 ${jobs422.length - jobs429.length}`);
-  for (const j of jobs422) await callTool(mcp, 'quilt.cancel_job', { jobId: j.id });
-
-  // 5 list_messages 的游标不是 ISO 时间：参数错误，不是 500
+  // 4 list_messages 的游标不是 ISO 时间：参数错误，不是 500
   const cur = await callTool(mcp, 'quilt.list_messages', { projectId: pid, cursor: 'abc' });
   check(cur.isError && typeOf(cur) !== '/errors/internal', `非法游标应是参数错误：${cur.text.slice(0, 120)}`);
 
   if (bad.length) { console.log(`   TC-AGENT-018 全部失败项：\n   - ${bad.join('\n   - ')}`); throw new Error(bad.join('；')); }
-  return 'update_screen 非法路由被拒；restore_revision 重拍；append_upload 未签发 404、并发一成四 409、用后 404；send_annotations 被占 409 / 超限 429 均不建作业，放开后三屏三条；非法游标是参数错误';
+  return 'update_screen 非法路由被拒；restore_revision 重拍；append_upload 未签发 404、并发一成四 409、用后 404；非法游标是参数错误';
 });
 
 // TC-AGENT-022（v0.82）：上传位按最后一次写入闲置 10 分钟回收（upload.gc，§17）——签发后没用的空位、写了一半被丢下的都删；正在写的不动。

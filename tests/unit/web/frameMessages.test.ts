@@ -19,6 +19,6 @@ test('keyAction：Esc 退出；⌥← 只有屏能后退；⌘ / Ctrl 组合与 
 });
 
 test('toSelection：字段原样搬过去', () => {
-  const m = { type: 'quilt:select' as const, qid: 'q3', tag: 'a', text: '去', classes: 'p-2', href: '/next', component: null, rect: { x: 1, y: 2, w: 3, h: 4 }, path: [{ qid: 'q1', tag: 'main' }, { qid: 'q3', tag: 'a' }] };
-  assert.deepEqual(toSelection(m), { qid: 'q3', tag: 'a', text: '去', classes: 'p-2', href: '/next', component: null, rect: { x: 1, y: 2, w: 3, h: 4 }, path: m.path });
+  const m = { type: 'quilt:select' as const, qid: 'q3', tag: 'a', text: '去', classes: 'p-2', href: '/next', component: null, path: [{ qid: 'q1', tag: 'main' }, { qid: 'q3', tag: 'a' }] };
+  assert.deepEqual(toSelection(m), { qid: 'q3', tag: 'a', text: '去', classes: 'p-2', href: '/next', component: null, path: m.path });
 });

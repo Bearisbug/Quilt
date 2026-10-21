@@ -301,99 +301,6 @@ await step('TC-EDIT-007', async () => {
   await page.keyboard.press('Escape');
 });
 
-// TC-EDIT-008 元素批注：攒一批再一起发（REQ-EDIT-004）
-await step('TC-EDIT-008', async () => {
-  needLiveLlm();
-  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Anno', '--device', 'mobile', '--screens', '1');
-  const s1 = r.screens[0].id;
-  await page.goto(`${WEB}/p/${r.projectId}`);
-  await page.locator('[data-testid="screen-card"] img').first().waitFor({ timeout: 15000 });
-
-  // 进批注态：与选择元素同源入口，不必先双击进交互
-  // 批注同样是全局模式
-  await page.keyboard.press('Alt+n');
-  await page.getByTestId('armed-hint').waitFor({ timeout: 5000 });
-  await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
-  await page.locator('.card.focused .badge', { hasText: '批注中' }).waitFor({ timeout: 20000 });
-  const fl = page.frameLocator('.card.focused iframe');
-  await fl.locator('#toggle').waitFor({ timeout: 15000 });
-  // quilt:mode 是在 iframe ready 之后才发过去的；抢在它送达前点，元素点击会被当成普通交互而非选中
-  // 必须等面板的标签真的换成这个元素——只等输入框可用是不够的：上一次选中会让它一直可用，
-  // 于是第二条批注会悄悄挂到同一个元素上（实测踩过）
-  // 按选中的 qid 变化判定：只等输入框可用不行（上一次选中会让它一直可用，第二条会悄悄挂到同一元素），
-  // 按文案也不行（容器类元素没有直接文本节点）
-  const pickedQid = () => page.getByTestId('anno-target').getAttribute('data-qid');
-  const pickElement = async (sel: string) => {
-    const from = await pickedQid();
-    for (let i = 0; i < 6; i++) {
-      await fl.locator(sel).first().click();
-      await page.waitForTimeout(600);
-      const now = await pickedQid();
-      if (now && now !== from) return now;
-    }
-    throw new Error(`点选 ${sel} 后选中的元素没变（仍为 ${from || '空'}）`);
-  };
-  // 换一个元素：直接遍历带 qid 的可点元素，点到选中变了为止（不依赖任何文案/选择器猜测）
-  const pickAnother = async () => {
-    const from = await pickedQid();
-    const n = await fl.locator('[data-qid]').count();
-    for (let i = 0; i < Math.min(n, 20); i++) {
-      const el = fl.locator('[data-qid]').nth(i);
-      if (!(await el.isVisible().catch(() => false))) continue;
-      await el.click({ timeout: 5000 }).catch(() => {});
-      await page.waitForTimeout(400);
-      const now = await pickedQid();
-      if (now && now !== from) return now;
-    }
-    throw new Error(`遍历 ${n} 个带 qid 的元素后选中仍为 ${from || '空'}`);
-  };
-
-  // 第 1 条
-  await pickElement('#toggle');
-  await page.fill('#anno-note', '这个按钮改成次要样式');
-  await page.getByRole('button', { name: '记下（不发送）' }).click();
-  await page.locator('[data-testid="anno-item"]').first().waitFor({ timeout: 10000 });
-
-  // 第 2 条（换一个元素）
-  await pickAnother();
-  await page.fill('#anno-note', '这一行右边加个数量角标');
-  await page.getByRole('button', { name: '记下（不发送）' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="anno-item"]').length === 2, null, { timeout: 10000 });
-
-  // 气泡画在画布层，编号可见
-  expect((await page.locator('[data-testid="anno-pin"]').count()) === 2, `画布上批注气泡不是 2 个，实际 ${await page.locator('[data-testid="anno-pin"]').count()}`);
-  const before = (await apiJson<{ items: { id: string; qid: string; status: string }[] }>(`/v1/screens/${s1}/annotations`)).body.items;
-  expect(before.length === 2 && before.every((a) => a.status === 'open'), '批注未落库或状态不对');
-  // 保存过一条之后仍然能换元素——previewUrl 每次 refresh 都重新签名，
-  // 若 iframe 的 src 不钉住就会静默重载、掉回 interact 模式，选择元素当场失效（实测踩过）
-  expect(before[0].qid !== before[1].qid, `两条批注挂在了同一个元素上（qid ${before[0].qid}）——保存后选不中别的元素`);
-
-  // 一起发送：2 条批注合成 1 个作业（不是 2 个）
-  const jobsBefore = (await apiJson<{ activeJobs: unknown[] }>(`/v1/projects/${r.projectId}`)).body.activeJobs.length;
-  await page.getByTestId('send-annotations').click();
-  await page.waitForTimeout(2500);
-  const afterSend = (await apiJson<{ items: { status: string; sentJobId: string | null }[] }>(`/v1/screens/${s1}/annotations`)).body.items;
-  expect(afterSend.every((a) => a.status === 'sent'), '发送后批注未置为 sent');
-  const jobIds = new Set(afterSend.map((a) => a.sentJobId));
-  expect(jobIds.size === 1 && [...jobIds][0], `2 条批注应合成 1 个作业，实际 ${jobIds.size} 个`);
-  const jobId = [...jobIds][0]!;
-  const job = (await apiJson<{ job: { kind: string; input: { prompt: string; screenIds: string[] } } }>(`/v1/jobs/${jobId}`)).body.job;
-  expect(job.kind === 'edit_screens' && job.input.screenIds.length === 1, `作业类型/目标屏不对：${job.kind}`);
-  expect(job.input.prompt.includes('次要样式') && job.input.prompt.includes('数量角标') && /data-qid="q\d+"/.test(job.input.prompt), '合并指令未包含两条批注与元素定位');
-  expect(jobsBefore === 0, '发送前不应已有进行中作业');
-
-  // 作业完成后批注收口为已处理，画布上的气泡随之消失
-  const done = await waitJob(jobId, 240);
-  expect(done.status === 'succeeded', `作业未成功：${done.status}`);
-  const resolved = (await apiJson<{ items: { status: string }[] }>(`/v1/screens/${s1}/annotations`)).body.items;
-  expect(resolved.every((a) => a.status === 'resolved'), `作业成功后批注未置为 resolved：${resolved.map((a) => a.status).join(',')}`);
-  await page.reload();
-  await page.locator('[data-testid="screen-card"]').first().waitFor();
-
-  await eventually(async () => expect((await page.locator('[data-testid="anno-pin"]').count()) === 0, '已处理的批注仍在画布上留着气泡'));
-  return '2 条批注合成 1 个作业；成功后收口为已处理、气泡收起';
-});
-
 // v0.31 REQ-EDIT-003：设计系统只显式改——⌘A + 发送不碰设计系统；设计系统面板的一句话指令 → 提炼 → 预览 → 写入约定节
 await step('TC-EDIT-009', async () => {
   const { startOpenAiStub } = await import('./openai-stub.ts');
@@ -572,7 +479,7 @@ await step('TC-EDIT-011', async () => {
   return 'Google 任意族名进 prelude 链接；本机字体不发外链、栈以族名开头带 -apple-system 回退；自定义链接原样进 <link>；缺链接 / 带引号族名 400；面板回显、就地报错、切来源收起链接框';
 });
 
-// ---- v0.78 共用（TC-EDIT-013 / 014）----
+// ---- v0.78 共用（TC-EDIT-013 / 035 / 039）----
 // 软断言：缺陷相关的检查不在第一处就停，整条跑完一并报（修复前一轮就能看到每一步的现象）；前置条件仍用 expect 硬停
 const blurActive = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 const STUB_RUNNER = { kind: 'model', driver: 'stub', model: 'stub' };
@@ -703,105 +610,6 @@ await step('TC-EDIT-013', async () => {
   } catch (e) { S.fail(e); } finally { await page.unroute(JOBS_RE); await stub.close(); if (cid) await apiJson(`/v1/channels/${cid}`, { method: 'DELETE' }).catch(() => {}); }
   S.done();
   return '文本框细滚动条；草稿跨关闭与切面板留存；确认写入即落库、第二步焦点在「不重生成」、Esc 不丢约定；21 屏按 20 + 1 两个作业全部重生成；删约定只同步没动过的格子、草稿约定节换新；放弃改动复原；只改大小写 / 空格的保存不留未保存标记、不冲掉之后的草稿';
-});
-
-// TC-EDIT-014 批注与检查器的草稿：按元素暂存、存不上不清、「记下并立刻发送」只发这一条、改写失败不关（REQ-EDIT-004 / REQ-EDIT-001 v0.78）
-await step('TC-EDIT-014', async () => {
-  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Drafts', '--device', 'mobile', '--screens', '1');
-  const s1 = r.screens[0].id;
-  const S = softly();
-  // 已有一条未处理批注：修复前「记下并立刻发送」会把它一起发出去
-  const pre = await apiJson<{ annotation: { id: string } }>(`/v1/screens/${s1}/annotations`, { method: 'POST', body: JSON.stringify({ qid: 'q1', note: '已有的一条', anchorText: '', rect: { x: 4, y: 4, w: 10, h: 10 } }) });
-  expect(pre.status === 201, `预置批注 ${pre.status}`);
-  // 发送一律在浏览器里截下（不建作业、不打模型），只记请求体；建批注可切换成失败（模拟 422）
-  const SEND_A = /\/v1\/projects\/[^/]+\/annotations\/send$/;
-  const CREATE_A = /\/v1\/screens\/[^/]+\/annotations$/;
-  const PATCH_A = /\/v1\/annotations\/[^/]+$/;
-  const sends: { annotationIds: string[] }[] = [];
-  let failCreate = false;
-  await page.route(SEND_A, async (route) => { sends.push(JSON.parse(route.request().postData() || '{}')); await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ jobs: [] }) }); });
-  await page.route(CREATE_A, async (route) => {
-    if (route.request().method() === 'POST' && failCreate) return route.fulfill({ status: 422, contentType: 'application/problem+json', body: JSON.stringify({ type: '/errors/validation', title: '批注说明太长', status: 422 }) });
-    return route.fallback();
-  });
-  try {
-    await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.goto(`${WEB}/p/${r.projectId}`);
-    await page.locator('[data-testid="screen-card"] img').first().waitFor({ timeout: 15000 });
-    await page.keyboard.press('Alt+n');
-    await page.getByTestId('armed-hint').waitFor({ timeout: 5000 });
-    await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
-    await page.locator('.card.focused .badge', { hasText: '批注中' }).waitFor({ timeout: 20000 });
-    const fl = page.frameLocator('.card.focused iframe');
-    await fl.locator('#toggle').waitFor({ timeout: 15000 });
-    // 点屏内元素，直到面板报的选中 qid 就是它（quilt:mode 送达前的那一下会被当成普通交互）
-    const pickIn = async (sel: string, readQid: () => Promise<string | null>) => {
-      const want = await fl.locator(sel).first().getAttribute('data-qid');
-      for (let i = 0; i < 6; i++) { await fl.locator(sel).first().click(); await page.waitForTimeout(500); if ((await readQid()) === want) return; }
-      throw new Error(`点 ${sel} 后没选中它（要 ${want}，实际 ${await readQid()}）`);
-    };
-    const annoQid = () => page.getByTestId('anno-target').getAttribute('data-qid');
-    const note = page.locator('#anno-note');
-    // 1 写一半点别的元素再点回来：草稿还在
-    await pickIn('#toggle', annoQid);
-    await note.fill('写了一半的批注');
-    await pickIn('h1', annoQid);
-    await S.check(async () => expect((await note.inputValue()) === '', `① 换到另一个元素时说明框应是它自己的（空）：「${await note.inputValue()}」`));
-    await pickIn('#toggle', annoQid);
-    await S.check(async () => expect((await note.inputValue()) === '写了一半的批注', `① 点回原来的元素草稿应还在：「${await note.inputValue()}」`));
-    if ((await note.inputValue()) !== '写了一半的批注') await note.fill('写了一半的批注');
-    // 2 「记下」存不上：toast 报原因，草稿留着
-    failCreate = true;
-    await page.getByRole('button', { name: '记下（不发送）' }).click();
-    await page.getByText('批注说明太长').first().waitFor({ timeout: 5000 });
-    await S.check(async () => expect((await note.inputValue()) === '写了一半的批注', `② 存不上时草稿应留着：「${await note.inputValue()}」`));
-    if ((await note.inputValue()) !== '写了一半的批注') await note.fill('写了一半的批注');
-    // 3 「记下并立刻发送」存不上：不发送
-    await page.getByRole('button', { name: '记下并立刻发送' }).click();
-    await page.waitForTimeout(1200);
-    await S.check(() => expect(sends.length === 0, `③ 新批注没存上时不应发送：${JSON.stringify(sends)}`));
-    await S.check(async () => expect((await note.inputValue()) === '写了一半的批注', `③ 存不上时草稿应留着：「${await note.inputValue()}」`));
-    if ((await note.inputValue()) !== '写了一半的批注') await note.fill('写了一半的批注');
-    // 4 存得上：只发刚记下的这一条
-    failCreate = false;
-    const n0 = sends.length;
-    await page.getByRole('button', { name: '记下并立刻发送' }).click();
-    await eventually(async () => expect(sends.length > n0, '应发出一次发送'), 8000);
-    const created = (await apiJson<{ items: { id: string; note: string }[] }>(`/v1/screens/${s1}/annotations`)).body.items.find((a) => a.note === '写了一半的批注');
-    await S.check(() => expect(!!created && JSON.stringify(sends.at(-1)) === JSON.stringify({ annotationIds: [created.id] }), `④ 只应发刚记下的这一条：${JSON.stringify(sends.at(-1))}（新批注 ${created?.id}，预置 ${pre.body.annotation.id}）`));
-    await S.check(async () => expect((await note.inputValue()) === '', '④ 记下之后说明框应清空'));
-    // 5 改写保存失败：改写框不关、内容留着
-    await page.route(PATCH_A, async (route) => (route.request().method() === 'PATCH' ? route.fulfill({ status: 500, contentType: 'application/problem+json', body: JSON.stringify({ type: '/errors/internal', title: '服务端出错', status: 500 }) }) : route.fallback()));
-    const item = page.locator('[data-testid="anno-item"][data-status="open"]').first();
-    await item.getByRole('button', { name: '改写' }).click();
-    const ed = item.locator('textarea');
-    await ed.fill('改写后的说明');
-    await item.getByRole('button', { name: '保存' }).click();
-    await page.waitForTimeout(1000);
-    await S.check(async () => expect((await ed.count()) === 1 && (await ed.inputValue()) === '改写后的说明', '⑤ 改写保存失败时改写框应不关、内容留着'));
-    await page.unroute(PATCH_A);
-    // 6 检查器：改了没存的文案与重生成说明按元素暂存
-    await blurActive();
-    await page.keyboard.press('Alt+n');
-    await eventually(async () => expect(!page.url().includes('panel=annotate'), '⌥N 应退出批注'));
-    // 这一屏还选中着：⌘E 直接推镜头进它；没选中时才是待命态，点一下进去
-    await page.keyboard.press('ControlOrMeta+e');
-    const inspectBadge = page.locator('.card.focused .badge', { hasText: '选择元素中' });
-    await inspectBadge.waitFor({ timeout: 5000 }).catch(async () => { await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click(); await inspectBadge.waitFor({ timeout: 20000 }); });
-    await fl.locator('#toggle').waitFor({ timeout: 15000 });
-    const inspQid = async () => (await page.locator('.slide-in-right').innerText()).match(/· (q\d+)/)?.[1] ?? null;
-    await pickIn('#toggle', inspQid);
-    await page.locator('#el-text').fill('改过但还没保存的文案');
-    await page.locator('#el-prompt').fill('改成横向卡片');
-    await pickIn('h1', inspQid);
-    const other = { text: await page.locator('#el-text').inputValue(), prompt: await page.locator('#el-prompt').inputValue() };
-    await S.check(() => expect(other.text.startsWith('Screen 1') && other.prompt === '', `⑥ 换到标题时字段应是标题自己的：${JSON.stringify(other)}`));
-    await pickIn('#toggle', inspQid);
-    const back = { text: await page.locator('#el-text').inputValue(), prompt: await page.locator('#el-prompt').inputValue() };
-    await S.check(() => expect(back.text === '改过但还没保存的文案' && back.prompt === '改成横向卡片', `⑥ 点回按钮时没存的文案与说明应还在：${JSON.stringify(back)}`));
-  } catch (e) { S.fail(e); } finally { await page.unroute(SEND_A); await page.unroute(CREATE_A); await page.unroute(PATCH_A); }
-  S.done();
-  return '批注草稿按元素暂存；记下失败草稿留着、立刻发送不发；存上后只发这一条；改写失败框不关；检查器没存的文案与说明按元素暂存';
 });
 
 // v0.79 作业落地与取消、组件改动（DESIGN §11 running→cancelled、§16 edit_component 两行）：模型回来时作业已取消，子树重生成与改组件都不落；
@@ -1081,20 +889,11 @@ await step('TC-EDIT-026', async () => {
   const scr = { targetScreenIds: [h.s1] };
   const currentOf = async () => (await detail(h.pid)).screens.find((s) => s.id === h.s1)!.currentRevisionId;
   try {
-    expect((await apiJson<{ default: string }>('/v1/runners')).body.default === `channel:${h.channelId}`, '账号默认通道不是桩通道（批注作业要走它）：先确认没有别的已验证通道（GEMINI_API_KEY= 运行）');
+    expect((await apiJson<{ default: string }>('/v1/runners')).body.default === `channel:${h.channelId}`, '账号默认通道不是桩通道：先确认没有别的已验证通道（GEMINI_API_KEY= 运行）');
     // 1 对话改
     const r1 = await histRound(h, { ...scr, content: 'S1 标题改成「我的订单」' }, 'S1 标题');
     await S.check(() => expect(r1.job.status === 'succeeded' && r1.hit && !r1.hit.user.includes('EARLIER INSTRUCTIONS'), `① 首轮应成功且没有历史块：${r1.job.status}`));
-    // 2 批注改
-    const btn = qidOf((await revisionHtml(h.s1, await currentOf())).html, 'type="button"');
-    const anno = await apiJson<{ annotation: { id: string } }>(`/v1/screens/${h.s1}/annotations`, { method: 'POST', body: JSON.stringify({ qid: btn, note: 'S2 按钮圆角改小', anchorText: 'Primary action', rect: { x: 0, y: 0, w: 10, h: 10 } }) });
-    expect(anno.status === 201, `挂批注 ${anno.status}`);
-    const sent = await histPost<{ jobs: { id: string }[] }>(`/v1/projects/${h.pid}/annotations/send`, { annotationIds: [anno.body.annotation.id] });
-    expect(sent.status === 202, `发批注 ${sent.status}`);
-    const aj = await histJob(sent.body.jobs[0].id);
-    const annos = (await apiJson<{ items: { id: string; status: string }[] }>(`/v1/screens/${h.s1}/annotations`)).body.items;
-    await S.check(() => expect(aj.status === 'succeeded' && annos.find((a) => a.id === anno.body.annotation.id)?.status === 'resolved', `② 批注作业应成功、批注 resolved：${aj.status}`));
-    // 3 MCP 改
+    // 2 MCP 改
     const { connectMcp, callTool } = await import('./mcp-client.ts');
     const mcp = await connectMcp();
     let mj: { id: string } | null = null;
@@ -1103,46 +902,46 @@ await step('TC-EDIT-026', async () => {
         const r = await callTool(mcp, 'quilt.edit_screens', { projectId: h.pid, screenIds: [h.s1], prompt: 'S3 底部加一行版权说明', runner: { kind: 'channel', channelId: h.channelId } });
         if (!r.isError) mj = r.json as { id: string };
         else if ((r.json as { type?: string }).type === '/errors/rate-limited') await histSleep(5000);
-        else throw new Error(`③ MCP edit_screens：${r.text.slice(0, 160)}`);
+        else throw new Error(`② MCP edit_screens：${r.text.slice(0, 160)}`);
       }
     } finally { await mcp.close(); }
-    expect(mj, '③ MCP edit_screens 一直被限流');
-    await S.check(async () => expect((await histJob(mj!.id)).status === 'succeeded', '③ MCP 改屏应成功'));
-    // 4 设计系统回刷 + 不写附加要求的补链
+    expect(mj, '② MCP edit_screens 一直被限流');
+    await S.check(async () => expect((await histJob(mj!.id)).status === 'succeeded', '② MCP 改屏应成功'));
+    // 3 设计系统回刷 + 不写附加要求的补链
     const ap = await histPost<{ job: { id: string } }>(`/v1/projects/${h.pid}/jobs`, { kind: 'apply_design_system', input: { screenIds: 'all' } });
-    await S.check(async () => expect(ap.status === 202 && (await histJob(ap.body.job.id)).status === 'succeeded', `④ 回刷应成功：${ap.status}`));
+    await S.check(async () => expect(ap.status === 202 && (await histJob(ap.body.job.id)).status === 'succeeded', `③ 回刷应成功：${ap.status}`));
     const lr = await histRound(h, { ...scr, content: '', preset: 'link_repair' }, 'Connect every navigation action');
-    await S.check(() => expect(lr.job.status === 'succeeded', `④ 补链应成功：${lr.job.status}`));
-    // 5 再改：历史块 = MCP、批注、对话三轮，从新到旧；回刷与补链不进、不带 qid
-    const r5 = await histRound(h, { ...scr, content: 'S4 列表项加分隔线' }, 'S4 列表项');
-    const b5 = r5.hit ? historyIn(r5.hit.user, 'SCREEN') : null;
-    const want5 = ['S3 底部加一行版权说明', '批注：「Primary action」→ S2 按钮圆角改小', 'S1 标题改成「我的订单」'];
-    await S.check(() => expect(JSON.stringify(b5) === JSON.stringify(want5), `⑤ 历史块应为 ${JSON.stringify(want5)}：${JSON.stringify(b5)}`));
-    await S.check(() => expect(b5 && !/data-qid|回刷|接上跳转|Apply the following/.test(b5.join('\n')), `⑤ 历史块里混进了 qid / 系统描述：${JSON.stringify(b5)}`));
+    await S.check(() => expect(lr.job.status === 'succeeded', `③ 补链应成功：${lr.job.status}`));
+    // 4 再改：历史块 = MCP、对话两轮，从新到旧；回刷与补链不进、不带 qid
+    const r4 = await histRound(h, { ...scr, content: 'S4 列表项加分隔线' }, 'S4 列表项');
+    const b4 = r4.hit ? historyIn(r4.hit.user, 'SCREEN') : null;
+    const want4 = ['S3 底部加一行版权说明', 'S1 标题改成「我的订单」'];
+    await S.check(() => expect(JSON.stringify(b4) === JSON.stringify(want4), `④ 历史块应为 ${JSON.stringify(want4)}：${JSON.stringify(b4)}`));
+    await S.check(() => expect(b4 && !/data-qid|回刷|接上跳转|Apply the following/.test(b4.join('\n')), `④ 历史块里混进了 qid / 系统描述：${JSON.stringify(b4)}`));
     const rev4 = await currentOf();
-    // 6 改一轮再回溯：回溯修订的父修订是被回溯到的那一版
-    const r6 = await histRound(h, { ...scr, content: 'S5 顶部加一条促销横幅' }, 'S5 顶部');
-    expect(r6.job.status === 'succeeded', `⑥ S5 应成功：${r6.job.status}`);
+    // 5 改一轮再回溯：回溯修订的父修订是被回溯到的那一版
+    const r5 = await histRound(h, { ...scr, content: 'S5 顶部加一条促销横幅' }, 'S5 顶部');
+    expect(r5.job.status === 'succeeded', `⑤ S5 应成功：${r5.job.status}`);
     const rev5 = await currentOf();
     const back = await apiJson<{ revision: { id: string; parentRevisionId: string | null } }>(`/v1/screens/${h.s1}/revisions/${rev4}/restore`, { method: 'POST', body: JSON.stringify({ expectedRevisionId: rev5 }) });
-    await S.check(() => expect(back.status === 201 && back.body.revision.parentRevisionId === rev4, `⑥ 回溯应 201 且父修订是被回溯到的那一版：${back.status} parent=${back.body.revision?.parentRevisionId} 期望 ${rev4}`));
-    // 7 回溯之后再改：被撤销的 S5 不在
-    const r7 = await histRound(h, { ...scr, content: 'S6 标题居中' }, 'S6 标题');
-    const b7 = r7.hit ? historyIn(r7.hit.user, 'SCREEN') : null;
-    await S.check(() => expect(b7?.[0] === 'S4 列表项加分隔线' && r7.hit && !r7.hit.user.includes('S5'), `⑦ 历史块第 1 条应是 S4、不含 S5：${JSON.stringify(b7)}`));
-    // 8 局部重生成也带历史
-    const html8 = (await revisionHtml(h.s1, await currentOf())).html;
-    const h1 = /<h1[^>]*data-qid="(q\d+)"/.exec(html8)?.[1] ?? /data-qid="(q\d+)"[^>]*>History<\/h1>/.exec(html8)?.[1];
+    await S.check(() => expect(back.status === 201 && back.body.revision.parentRevisionId === rev4, `⑤ 回溯应 201 且父修订是被回溯到的那一版：${back.status} parent=${back.body.revision?.parentRevisionId} 期望 ${rev4}`));
+    // 6 回溯之后再改：被撤销的 S5 不在
+    const r6 = await histRound(h, { ...scr, content: 'S6 标题居中' }, 'S6 标题');
+    const b6 = r6.hit ? historyIn(r6.hit.user, 'SCREEN') : null;
+    await S.check(() => expect(b6?.[0] === 'S4 列表项加分隔线' && r6.hit && !r6.hit.user.includes('S5'), `⑥ 历史块第 1 条应是 S4、不含 S5：${JSON.stringify(b6)}`));
+    // 7 局部重生成也带历史
+    const html7 = (await revisionHtml(h.s1, await currentOf())).html;
+    const h1 = /<h1[^>]*data-qid="(q\d+)"/.exec(html7)?.[1] ?? /data-qid="(q\d+)"[^>]*>History<\/h1>/.exec(html7)?.[1];
     const from = h.stub.hits.length;
     const sub = await histPost<{ job: { id: string } }>(`/v1/projects/${h.pid}/jobs`, { kind: 'regenerate_subtree', input: { screenId: h.s1, qid: h1, prompt: 'S7 标题字号加大', expectedRevisionId: await currentOf(), runner: { kind: 'channel', channelId: h.channelId } } });
-    expect(sub.status === 202, `⑧ 局部重生成 ${sub.status} ${JSON.stringify(sub.body).slice(0, 160)}`);
+    expect(sub.status === 202, `⑦ 局部重生成 ${sub.status} ${JSON.stringify(sub.body).slice(0, 160)}`);
     await histJob(sub.body.job.id);
-    const hit8 = h.stub.hits.slice(from).find((x) => x.user.includes('S7 标题字号'));
-    const b8 = hit8 ? historyIn(hit8.user, 'SCREEN') : null;
-    await S.check(() => expect(b8?.[0] === 'S6 标题居中' && hit8 && !hit8.user.includes('S5'), `⑧ 局部重生成的历史块第 1 条应是 S6、不含 S5：${JSON.stringify(b8)}`));
+    const hit7 = h.stub.hits.slice(from).find((x) => x.user.includes('S7 标题字号'));
+    const b7 = hit7 ? historyIn(hit7.user, 'SCREEN') : null;
+    await S.check(() => expect(b7?.[0] === 'S6 标题居中' && hit7 && !hit7.user.includes('S5'), `⑦ 局部重生成的历史块第 1 条应是 S6、不含 S5：${JSON.stringify(b7)}`));
   } catch (e) { S.fail(e); }
   S.done();
-  return '对话 / 批注 / MCP 三类进历史、回刷与补链不进、不带 qid；回溯修订的父修订是被回溯到的那一版，撤销的那轮不在改屏与局部重生成的历史里';
+  return '对话 / MCP 两类进历史、回刷与补链不进、不带 qid；回溯修订的父修订是被回溯到的那一版，撤销的那轮不在改屏与局部重生成的历史里';
 });
 
 // TC-EDIT-027 输出到上限被截断（§17 LLM 一行，v0.90）：桩对带 CUTME 的请求回 finish_reason=length，截断的文字不能落成一版残屏
@@ -1529,7 +1328,7 @@ await step('TC-EDIT-031', async () => {
 });
 
 // TC-EDIT-032 撤销不了的删除先确认（v1.03 UX-1）：组件里的元素（Delete 键与「删除元素」按钮都先弹确认，写明同步屏数；取消不删、确认才删）；
-// 设计系统面板删约定；批注面板删批注
+// 设计系统面板删约定
 await step('TC-EDIT-032', async () => {
   const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Confirm', '--device', 'mobile', '--screens', '2', '--no-shot');
   const pid = r.projectId; const s1 = r.screens[0].id;
@@ -1590,25 +1389,10 @@ await step('TC-EDIT-032', async () => {
     await dialog.getByRole('button', { name: '删除' }).click();
     await page.getByText('已删除这条约定').last().waitFor({ timeout: 10000 });
     await S.check(async () => expect((await conventions()).length === 0, '③ 确认后约定应被删'));
-    // 4 删批注：先确认，确认才删
-    const toggleQid = qidOf(html1, 'id="toggle"')!;
-    const a = await apiJson<{ annotation: { id: string } }>(`/v1/screens/${s1}/annotations`, { method: 'POST', body: JSON.stringify({ qid: toggleQid, note: '这里改成两列', rect: { x: 0, y: 0, w: 10, h: 10 } }) });
-    expect(a.status === 201, `建批注 ${a.status}`);
-    await page.goto(`${WEB}/p/${pid}`);
-    await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
-    await page.keyboard.press('Alt+n');
-    await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
-    await page.locator('.card.focused .badge', { hasText: '批注中' }).waitFor({ timeout: 20000 });
-    const row = page.locator('li', { hasText: '这里改成两列' });
-    await row.getByRole('button', { name: '删除' }).click();
-    await dialog.waitFor({ timeout: 5000 });
-    await S.check(async () => expect((await dialog.innerText()).includes('删除这条批注？'), `④ 删批注没先确认：${await dialog.innerText()}`));
-    await dialog.getByRole('button', { name: '删除' }).click();
-    await eventually(async () => expect(((await detail(pid)) as unknown as { annotations: { id: string }[] }).annotations.every((x) => x.id !== a.body.annotation.id), '④ 确认后批注应被删'), 10000);
   } catch (e) { S.fail(e); }
   finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
   S.done();
-  return '组件里删元素（Delete 与按钮）先确认、写明同步屏数，取消不删、确认才删；删约定、删批注同样先确认';
+  return '组件里删元素（Delete 与按钮）先确认、写明同步屏数，取消不删、确认才删；删约定同样先确认';
 });
 
 // TC-EDIT-033 计划的修订全部落库后被时限中止，按成功收尾（§11 v1.03 GEN-3）：用 QUILT_JOB_TIMEOUT_TOTAL_MS 把时限定死在 5 s 重启 API，
@@ -1723,7 +1507,7 @@ await step('TC-EDIT-034', async () => {
 });
 
 // TC-EDIT-035 作业进行中时的面板（PAGE-CANVAS「作业进行中时的面板」v1.04 UX-3）：别的屏有作业在跑时，删约定、一句话改设计系统照常可点；
-// 回刷所有屏不可点、就地写是哪个作业；检查器所在的屏正在改时写明原因，按 ⌘S 弹同样的提示；批注面板同样写明原因
+// 回刷所有屏不可点、就地写是哪个作业；检查器所在的屏正在改时写明原因，按 ⌘S 弹同样的提示
 await step('TC-EDIT-035', async () => {
   const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'BusyPanels', '--device', 'mobile', '--screens', '2', '--no-shot');
   const pid = r.projectId; const s1 = r.screens[0].id;
@@ -1764,21 +1548,13 @@ await step('TC-EDIT-035', async () => {
     await S.check(async () => expect((await note.innerText()) === '这一屏正在改，等这一轮完事', `② 检查器的原因不对：${await note.innerText()}`));
     await page.keyboard.press('ControlOrMeta+s');
     await S.check(() => page.getByTestId('toast').filter({ hasText: '这一屏正在改，等这一轮完事' }).waitFor({ timeout: 3000 }).catch(() => { throw new Error('② 屏忙时按 ⌘S 没有提示'); }));
-    // 3 批注面板在正改的 s1 上：发送类按钮不可点并写明原因，「记下（不发送）」照常
-    await page.goto(`${WEB}/p/${pid}`);
-    await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
-    await page.keyboard.press('Alt+n');
-    await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
-    await page.locator('.card.focused .badge', { hasText: '批注中' }).waitFor({ timeout: 20000 });
-    const anno = page.getByTestId('anno-busy');
-    await S.check(() => anno.waitFor({ timeout: 5000 }).then(async () => expect((await anno.innerText()) === '这一屏正在改，等这一轮完事再发', `③ 批注面板的原因不对：${await anno.innerText()}`)).catch((e) => { throw new Error(`③ 批注面板没写原因：${(e as Error).message.slice(0, 80)}`); }));
   } catch (e) { S.fail(e); }
   finally {
     if (held) await apiJson(`/v1/jobs/${held}/cancel`, { method: 'POST' }).catch(() => {});
     await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});
   }
   S.done();
-  return '别的屏有作业在跑时删约定、一句话改设计系统照常可点；回刷所有屏不可点并写明是哪个作业；检查器写明这一屏正在改，⌘S 弹同样的提示；批注面板写明原因';
+  return '别的屏有作业在跑时删约定、一句话改设计系统照常可点；回刷所有屏不可点并写明是哪个作业；检查器写明这一屏正在改，⌘S 弹同样的提示';
 });
 
 // TC-EDIT-036 改屏走补丁（ADR-007 / ADR-012 v1.05）：OpenAI 兼容桩看到的是补丁提示词，回一块把第一个 <h1> 换掉的补丁——新修订里标题变了、
@@ -1832,6 +1608,109 @@ await step('TC-EDIT-036', async () => {
   finally { await stub.close(); await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
   S.done();
   return '只改样板屏：一次补丁调用、参考屏不放样板屏、标题换上且 qid 集合不变；两屏一起改：参考屏有样板屏；补丁对不上：同一轮退回整屏、用量记两次';
+});
+
+// TC-EDIT-038 检查器没存的文案与说明按元素暂存（REQ-EDIT-001 / REQ-EDIT-002 v1.23）：换到别的元素时字段是它自己的，点回来没存的还在
+await step('TC-EDIT-038', async () => {
+  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Drafts', '--device', 'mobile', '--screens', '1');
+  const S = softly();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${WEB}/p/${r.projectId}`);
+  const card = page.locator('[data-testid="screen-card"][data-route="/s1"]');
+  await card.waitFor({ timeout: 15000 });
+  await page.keyboard.press('ControlOrMeta+e');
+  await page.getByTestId('armed-hint').waitFor({ timeout: 5000 });
+  await card.locator('.gesture').click();
+  await page.locator('.card.focused .badge', { hasText: '选择元素中' }).waitFor({ timeout: 20000 });
+  const fl = page.frameLocator('.card.focused iframe');
+  await fl.locator('#toggle').waitFor({ timeout: 15000 });
+  // 点屏内元素，直到检查器标题报的 qid 就是它（quilt:mode 送达前的那一下会被当成普通交互）
+  const inspQid = async () => (await page.locator('.slide-in-right').innerText()).match(/· (q\d+)/)?.[1] ?? null;
+  const pickIn = async (sel: string) => {
+    const want = await fl.locator(sel).first().getAttribute('data-qid');
+    for (let i = 0; i < 6; i++) { await fl.locator(sel).first().click(); await page.waitForTimeout(500); if ((await inspQid()) === want) return; }
+    throw new Error(`点 ${sel} 后没选中它（要 ${want}，实际 ${await inspQid()}）`);
+  };
+  try {
+    await pickIn('#toggle');
+    await page.locator('#el-text').fill('改过但还没保存的文案');
+    await page.locator('#el-prompt').fill('改成横向卡片');
+    await pickIn('h1');
+    const other = { text: await page.locator('#el-text').inputValue(), prompt: await page.locator('#el-prompt').inputValue() };
+    await S.check(() => expect(other.text.startsWith('Screen 1') && other.prompt === '', `换到标题时字段应是标题自己的：${JSON.stringify(other)}`));
+    await pickIn('#toggle');
+    const back = { text: await page.locator('#el-text').inputValue(), prompt: await page.locator('#el-prompt').inputValue() };
+    await S.check(() => expect(back.text === '改过但还没保存的文案' && back.prompt === '改成横向卡片', `点回按钮时没存的文案与说明应还在：${JSON.stringify(back)}`));
+  } catch (e) { S.fail(e); }
+  S.done();
+  return '换到标题时文案是它自己的、说明为空；点回按钮时没存的文案与说明都还在';
+});
+
+// TC-EDIT-039 批注已撤下（REQ-EDIT-004 / REQ-AGENT-002 v1.23）：画布与草稿本没有入口、⌥N 不开任何东西，批注接口 404，MCP 没有批注工具、项目详情没有批注字段
+await step('TC-EDIT-039', async () => {
+  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'NoNotes', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const pid = r.projectId; const sid = r.screens[0].id;
+  const S = softly();
+  // 前置：草稿本里用 stub 出一张组件草稿（第二行的标记定画框）
+  const sb = (await apiJson<{ projectId: string }>('/v1/sketchbook')).body.projectId;
+  const m = await apiJson<{ job: { id: string } }>(`/v1/projects/${sb}/messages`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ content: '一张播放卡片\n[stub-frame:component]', runner: STUB_RUNNER }) });
+  expect(m.status === 202, `出草稿 ${m.status} ${JSON.stringify(m.body).slice(0, 160)}`);
+  const dj = await waitJob(m.body.job.id, 120);
+  const draft = (dj.output?.screenIds as string[] | undefined)?.[0];
+  expect(dj.status === 'succeeded' && draft, `出草稿作业 ${dj.status}：${JSON.stringify(dj.output).slice(0, 160)}`);
+  try {
+    // 1 画布：工具栏没有「批注」；⌥N 不开批注、不出待命提示；带 panel=annotate 打开不开任何面板
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(`${WEB}/p/${pid}`);
+    await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+    await page.waitForTimeout(400);
+    const annoTool = page.getByRole('toolbar', { name: '画布工具' }).getByRole('button', { name: /批注/ });
+    await S.check(async () => expect((await annoTool.count()) === 0, '① 工具栏还有「批注」'));
+    await blurActive();
+    await page.keyboard.press('Alt+n');
+    await page.waitForTimeout(500);
+    await S.check(async () => expect(!page.url().includes('panel=annotate') && (await page.getByTestId('armed-hint').count()) === 0, `① ⌥N 后不该开批注：${page.url()}，待命提示 ${await page.getByTestId('armed-hint').count()}`));
+    await page.goto(`${WEB}/p/${pid}?panel=annotate`);
+    await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 });
+    await page.waitForTimeout(500);
+    const shellPanel = await page.locator('.canvas-shell').getAttribute('data-panel');
+    await S.check(async () => expect(shellPanel === 'closed' && (await page.getByTestId('armed-hint').count()) === 0, `① 带 panel=annotate 打开不该开任何面板：data-panel=${shellPanel}`));
+    // 2 草稿本：工具条没有「批注」开关；⌥N 后看板不变
+    await page.goto(`${WEB}/sketch?d=${draft}`);
+    await page.getByTestId('sketch-page').waitFor({ timeout: 15000 });
+    await eventually(async () => expect((await page.getByTestId('sketch-stage').getAttribute('data-state')) === 'draft', '看板没打开这张草稿'), 10000);
+    await S.check(async () => expect((await page.getByTestId('draft-annotate').count()) === 0, '② 草稿工具条还有「批注」'));
+    const board = async () => ({ url: page.url(), stage: await page.getByTestId('sketch-stage').getAttribute('data-state'), pick: await page.getByTestId('draft-pick').getAttribute('aria-pressed') });
+    await blurActive();
+    const b0 = await board();
+    await page.keyboard.press('Alt+n');
+    await page.waitForTimeout(500);
+    const b1 = await board();
+    await S.check(() => expect(JSON.stringify(b1) === JSON.stringify(b0), `② ⌥N 后看板变了：${JSON.stringify(b0)} → ${JSON.stringify(b1)}`));
+    // 3 批注接口都没有了
+    const FAKE = crypto.randomUUID();
+    const gone: [string, string, unknown?][] = [
+      ['GET', `/v1/screens/${sid}/annotations`],
+      ['POST', `/v1/screens/${sid}/annotations`, { qid: 'q1', note: '标题再大一点', anchorText: 'Screen 1', rect: { x: 0, y: 0, w: 100, h: 40 } }],
+      ['PATCH', `/v1/annotations/${FAKE}`, { note: 'n' }],
+      ['POST', `/v1/projects/${pid}/annotations/send`, { annotationIds: [FAKE] }],
+    ];
+    for (const [method, p, body] of gone) {
+      const res = await apiJson<{ type?: string } | null>(p, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+      await S.check(() => expect(res.status === 404 && res.body?.type === '/errors/not-found', `③ ${method} ${p} 应 404 /errors/not-found：${res.status} ${res.body?.type}`));
+    }
+    // 4 MCP：没有名字里带 annotation 的工具；项目详情里没有 annotations 字段
+    const { connectMcp, callTool } = await import('./mcp-client.ts');
+    const mcp = await connectMcp();
+    try {
+      const annoTools = (await mcp.listTools()).tools.map((t) => t.name).filter((n) => n.includes('annotation'));
+      await S.check(() => expect(annoTools.length === 0, `④ 还有批注工具：${annoTools.join(',')}`));
+      const proj = await callTool(mcp, 'quilt.get_project', { projectId: pid });
+      await S.check(() => expect(!proj.isError && !/"annotations"\s*:/.test(proj.text), `④ get_project 结果里还有 annotations 字段：${proj.text.slice(0, 160)}`));
+    } finally { await mcp.close(); }
+  } catch (e) { S.fail(e); }
+  S.done();
+  return '画布工具栏与草稿工具条都没有「批注」，⌥N 不开任何东西，panel=annotate 不开面板；四个批注接口 404；MCP 没有批注工具、项目详情没有 annotations';
 });
 
 await browser.close();

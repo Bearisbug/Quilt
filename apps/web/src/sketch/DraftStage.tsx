@@ -1,20 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { Crosshair, FolderInput, MessageSquarePlus, Minimize2, Trash2 } from 'lucide-react';
-import { DEVICE_SIZE, DRAFT_PAD, isPreviewMessage, type AnnotationDto, type DraftFrame, type DraftFrameChoice, type ParentToPreview, type ProjectDetailDto, type ScreenDto } from '@quilt/core/browser';
+import { Crosshair, FolderInput, Minimize2, Trash2 } from 'lucide-react';
+import { DEVICE_SIZE, DRAFT_PAD, isPreviewMessage, type DraftFrame, type DraftFrameChoice, type ParentToPreview, type ProjectDetailDto, type ScreenDto } from '@quilt/core/browser';
 import { markPalette, useResolvedMode } from '@/lib/theme';
 import { frameSide } from '@/lib/frameZoom';
 import { toSelection, type ElementSelection } from '@/canvas/frameMessages';
 import { cn, IconButton } from '@/ui/ui';
 import { ChoiceGroup } from '@/sketch/ChoiceGroup';
 import { DraftVersions } from '@/sketch/DraftVersions';
-import { DraftAnnotations, type PinPlace } from '@/sketch/DraftAnnotations';
 import { RefSelect, type RefProjects } from '@/sketch/RefSelect';
 import { useLocale, useT } from '@/i18n';
 import sketchMessages from '@/i18n/locales/sketch';
 
 export type StageState = 'empty' | 'generating' | 'draft';
-/** 草稿工具条上的两个开关（REQ-CORE-045）：选元素 / 批注，互斥；null = 都关着，草稿照常可点可滚 */
-export type SketchTool = 'pick' | 'annotate' | null;
 type Size = { w: number; h: number };
 
 // 画框只在页面之间换（API-CORE-012 v1.17）：组件按自身大小、页面按视口排，两者不能互换，组件草稿不显示这一项
@@ -62,23 +59,19 @@ type StageProps = {
   onCollapse: () => void;
   /** 焦点在草稿里时按的 Esc（运行时转发）：先去胶囊、再收起，优先级由页面定 */
   onEscape: () => void;
-  /** 焦点在草稿 iframe 里时运行时转发上来的 ⌘ / ⌥ 组合键（⌘E、⌥N、⌘/），交给页面的键位表 */
-  onShortcut: (code: string, alt: boolean) => void;
+  /** 焦点在草稿 iframe 里时运行时转发上来的 ⌘ 组合键（⌘E、⌘/），交给页面的键位表 */
+  onShortcut: (code: string) => void;
   /** 预览签名过期时重取详情（API-CORE-004），返回新的详情 */
   onStale: () => Promise<ProjectDetailDto | null>;
   /** 参照（REQ-CORE-042）：候选项目与改参照 */
   refs: RefProjects;
   onRef: (projectId: string | null) => void;
-  tool: SketchTool;
-  onTool: (tool: SketchTool) => void;
+  /** 草稿工具条上的「选元素」开关（REQ-CORE-045）：关着时草稿照常可点可滚 */
+  picking: boolean;
+  onPicking: (on: boolean) => void;
   /** 选元素点中的那一块（输入框里的胶囊）：草稿里框着它；null = 改整张 */
   pickQid: string | null;
   onPick: (sel: ElementSelection) => void;
-  /** 这张草稿上未处理的批注（open + sent） */
-  annotations: AnnotationDto[];
-  onCreateAnnotation: (sel: ElementSelection, note: string) => Promise<boolean>;
-  onUpdateAnnotation: (id: string, note: string) => Promise<boolean>;
-  onRemoveAnnotation: (anno: AnnotationDto) => void;
   /** 草稿工具条的实际底边 + 间隙（px，相对外壳顶）：页面拿它当看板的上沿；没有草稿（工具条不在）时 null */
   onTopRow: (bottom: number | null) => void;
 };
@@ -89,7 +82,6 @@ type StageProps = {
 export function DraftStage(p: StageProps) {
   const t = useT(sketchMessages);
   const ref = useRef<HTMLElement>(null);
-  const annotateBtn = useRef<HTMLButtonElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const draftId = p.draft?.id;
   // 工具条落位：夹在项目切换器与右上角的记录栏开关之间，对着看板居中（记录栏浮在看板上、开合不挪它），放不下就贴向一头、
@@ -138,15 +130,14 @@ export function DraftStage(p: StageProps) {
   }, []);
   return (
     <>
-    {p.draft && <DraftToolbar key={p.draft.id} {...p} draft={p.draft} barRef={barRef} annotateRef={annotateBtn} />}
+    {p.draft && <DraftToolbar key={p.draft.id} {...p} draft={p.draft} barRef={barRef} />}
     <main ref={ref} data-testid="sketch-stage" data-state={p.state} aria-label={t('stage.label')} className="absolute bottom-[var(--stage-bottom)] left-[var(--stage-left)] right-[var(--stage-right)] top-[var(--chrome-top)] grid place-items-center">
       {p.draft ? (
         <section data-testid="draft-view" data-draft-id={p.draft.id} data-frame={p.draft.frame ?? ''} aria-label={t('stage.draft', { name: p.draft.name })}>
           {/* 换一张草稿、新草稿第一版落地才整个重挂（之前没有地址可载）；之后出新版、换画框都在 DraftFrameView 里原地换（PAGE-SKETCH「看板」） */}
           <DraftFrameView
             key={`${p.draft.id}|${p.draft.currentRevisionId ? 'live' : 'pending'}`} draft={p.draft} avail={room} progress={p.progress} previewOrigin={p.previewOrigin} onEscape={p.onEscape} onShortcut={p.onShortcut} onStale={p.onStale}
-            tool={p.tool} pickQid={p.pickQid} onPick={p.onPick} annotations={p.annotations}
-            onCreateAnnotation={p.onCreateAnnotation} onUpdateAnnotation={p.onUpdateAnnotation} onRemoveAnnotation={p.onRemoveAnnotation} returnFocus={() => annotateBtn.current?.focus()}
+            picking={p.picking} pickQid={p.pickQid} onPick={p.onPick}
           />
         </section>
       ) : p.state === 'generating' ? (
@@ -167,9 +158,9 @@ export function DraftStage(p: StageProps) {
   );
 }
 
-// 草稿工具条（顶部那一行的 chrome）：名字（点了就地改名）与「来自」、画框（页面草稿在手机页 / 桌面页之间二选一）、参照、选元素与批注两个开关、版本、
+// 草稿工具条（顶部那一行的 chrome）：名字（点了就地改名）与「来自」、画框（页面草稿在手机页 / 桌面页之间二选一）、参照、「选元素」开关、版本、
 // 写回项目（这条里唯一铺填充底的按钮）、删除、收起
-function DraftToolbar({ draft, busy, progress, onRename, onFrame, onRestored, onCopy, onDelete, onCollapse, refs, onRef, tool, onTool, barRef, annotateRef }: StageProps & { draft: ScreenDto; barRef: RefObject<HTMLDivElement | null>; annotateRef: RefObject<HTMLButtonElement | null> }) {
+function DraftToolbar({ draft, busy, progress, onRename, onFrame, onRestored, onCopy, onDelete, onCollapse, refs, onRef, picking, onPicking, barRef }: StageProps & { draft: ScreenDto; barRef: RefObject<HTMLDivElement | null> }) {
   const t = useT(sketchMessages);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
@@ -212,9 +203,8 @@ function DraftToolbar({ draft, busy, progress, onRename, onFrame, onRestored, on
         <>
           <RefSelect refs={refs} value={draft.refProjectId} onChange={onRef} testId="draft-ref" side="bottom" className="text-text-secondary data-[state=open]:bg-(--semantic-color-surface-selected) data-[state=open]:text-text-primary" />
           <Divider />
-          {/* 两个开关互斥（PAGE-SKETCH）：开一个关另一个；开着时草稿进选择元素态，链接与表单不响应 */}
-          <IconButton size="xs" tip="bottom" label={t('toolbar.pick.label')} desc={t('toolbar.pick.desc')} active={tool === 'pick'} aria-pressed={tool === 'pick'} data-testid="draft-pick" onClick={() => onTool(tool === 'pick' ? null : 'pick')}><Crosshair size={14} aria-hidden="true" /></IconButton>
-          <IconButton ref={annotateRef} size="xs" tip="bottom" label={t('toolbar.annotate.label')} desc={t('toolbar.annotate.desc')} active={tool === 'annotate'} aria-pressed={tool === 'annotate'} data-testid="draft-annotate" onClick={() => onTool(tool === 'annotate' ? null : 'annotate')}><MessageSquarePlus size={14} aria-hidden="true" /></IconButton>
+          {/* 开着时草稿进选择元素态，链接与表单不响应（PAGE-SKETCH） */}
+          <IconButton size="xs" tip="bottom" label={t('toolbar.pick.label')} desc={t('toolbar.pick.desc')} active={picking} aria-pressed={picking} data-testid="draft-pick" onClick={() => onPicking(!picking)}><Crosshair size={14} aria-hidden="true" /></IconButton>
         </>
       )}
       {landed && <Divider />}
@@ -247,15 +237,15 @@ function Skeleton({ nat, scale, label }: { nat: Size; scale: number; label: stri
   );
 }
 
-// 草稿的活 iframe（API-CORE-016）：交互方式与画布聚焦屏一致——就绪后下发 quilt:mode（带当前外观的标记色）：两个开关都关着是 interact，
-// 链接与表单由运行时惰性处理（草稿里的链接都是 #），这里不接导航；开着任一个是 inspect，点中的元素回 quilt:select（REQ-CORE-045）。
+// 草稿的活 iframe（API-CORE-016）：交互方式与画布聚焦屏一致——就绪后下发 quilt:mode（带当前外观的标记色）：「选元素」关着是 interact，
+// 链接与表单由运行时惰性处理（草稿里的链接都是 #），这里不接导航；开着是 inspect，点中的元素回 quilt:select（REQ-CORE-045）。
 // 只认这个 iframe 发来、来源是预览域、形状过 previewMessageSchema 的消息。
 // 手机页 / 桌面页给对应视口；组件画框（画框还没定的按组件）的视口就是 quilt:draft-size 报的根元素框，iframe 透明，四周露出看板底色。
 // 就绪看门同画布：load 后 2 s 还没 quilt:ready 多半是签名过期，重取详情换新地址重载一次，仍不行给「重试」
-type FrameProps = Pick<StageProps, 'previewOrigin' | 'onEscape' | 'onShortcut' | 'onStale' | 'tool' | 'pickQid' | 'onPick' | 'annotations' | 'onCreateAnnotation' | 'onUpdateAnnotation' | 'onRemoveAnnotation'> & {
-  draft: ScreenDto; avail: Size | null; progress: string | null; returnFocus: () => void;
+type FrameProps = Pick<StageProps, 'previewOrigin' | 'onEscape' | 'onShortcut' | 'onStale' | 'picking' | 'pickQid' | 'onPick'> & {
+  draft: ScreenDto; avail: Size | null; progress: string | null;
 };
-function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onShortcut, onStale, tool, pickQid, onPick, annotations, onCreateAnnotation, onUpdateAnnotation, onRemoveAnnotation, returnFocus }: FrameProps) {
+function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onShortcut, onStale, picking, pickQid, onPick }: FrameProps) {
   const t = useT(sketchMessages);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   // 地址钉住：签名每 30 分钟换一个窗口，换了也不重载正在看的草稿；新的一版经 quilt:swap 送进去（见下），换画框只改视口
@@ -286,40 +276,25 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
   const bleed = component && !!box;
   const scale = fit(nat, avail);
   const shown = live && ready && (!component || !!box);
-  // 批注的 rect 是草稿文档坐标（REQ-CORE-045）：组件画框的 iframe 往左上挪了一圈透明边，减掉它再按看板缩放。
-  // 气泡落在元素右缘的竖直正中（同画布），贴边时收进草稿里；元素在可见区下方（页面要往下滚）的贴在底边
-  const offset = bleed ? DRAFT_PAD : 0;
-  const place: PinPlace = (r) => {
-    const w = nat.w * scale; const h = nat.h * scale;
-    const x = (r.x + r.w - offset) * scale; const y = (r.y + r.h / 2 - offset) * scale;
-    const folded = y > h - 12;
-    return { x: Math.min(Math.max(x, 12), w - 12), y: folded ? h - 12 : Math.max(12, y), folded };
-  };
 
   const post = (msg: ParentToPreview) => { if (previewOrigin) iframeRef.current?.contentWindow?.postMessage(msg, previewOrigin); };
   const themeMode = useResolvedMode();
   const locale = useLocale();
-  const inspect = tool !== null;
   // 换外观、换界面语言时重发一次：屏内的标记跟着换色、换字（§13.1）
-  useEffect(() => { if (ready) post({ type: 'quilt:mode', mode: inspect ? 'inspect' : 'interact', marks: markPalette() }); }, [ready, readySeq, themeMode, locale, inspect]); // eslint-disable-line react-hooks/exhaustive-deps
-  // 批注开着时点中、还没写说明的元素（FLOW-SKETCH-REFINE S3）；换了开关就作废
-  const [composing, setComposing] = useState<ElementSelection | null>(null);
-  useEffect(() => { if (tool !== 'annotate') setComposing(null); }, [tool]);
-  // 草稿里框着哪个元素由父页定：选元素是输入框里那枚胶囊，批注是正在写说明的那个。运行时点中就先框上，
+  useEffect(() => { if (ready) post({ type: 'quilt:mode', mode: picking ? 'inspect' : 'interact', marks: markPalette() }); }, [ready, readySeq, themeMode, locale, picking]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 草稿里框着哪个元素由父页定：输入框里那枚胶囊。运行时点中就先框上，
   // 每次点中之后按父页的决定再对一次——点在草稿根上不出胶囊（等同改整张），框要撤掉
   const [selSeq, setSelSeq] = useState(0);
-  const framed = tool === 'annotate' ? composing?.qid ?? null : tool === 'pick' ? pickQid : null;
-  useEffect(() => { if (ready && inspect) post({ type: 'quilt:highlight', qid: framed }); }, [ready, readySeq, inspect, framed, selSeq]); // eslint-disable-line react-hooks/exhaustive-deps
+  const framed = picking ? pickQid : null;
+  useEffect(() => { if (ready && picking) post({ type: 'quilt:highlight', qid: framed }); }, [ready, readySeq, picking, framed, selSeq]); // eslint-disable-line react-hooks/exhaustive-deps
   const escape = useRef(onEscape);
   escape.current = onEscape;
   const shortcutRef = useRef(onShortcut);
   shortcutRef.current = onShortcut;
-  const toolRef = useRef(tool);
-  toolRef.current = tool;
+  const pickingRef = useRef(picking);
+  pickingRef.current = picking;
   const pickRef = useRef(onPick);
   pickRef.current = onPick;
-  const composingRef = useRef(composing);
-  composingRef.current = composing;
   useEffect(() => {
     if (!previewOrigin) return;
     const on = (e: MessageEvent) => {
@@ -338,13 +313,11 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
       }
       if (m.type === 'quilt:select') {
         setSelSeq((n) => n + 1);
-        const sel = toSelection(m);
-        if (toolRef.current === 'annotate') setComposing(sel);
-        else if (toolRef.current === 'pick') pickRef.current(sel);
+        if (pickingRef.current) pickRef.current(toSelection(m));
       }
-      // 焦点在草稿里时父页收不到键盘：Esc 靠运行时转发——说明框开着先关它，其余同页面上的 Esc
-      if (m.type === 'quilt:key' && m.key === 'Escape') { if (composingRef.current) setComposing(null); else escape.current(); }
-      else if (m.type === 'quilt:key' && m.code && ((m.metaKey || m.ctrlKey) || m.altKey)) shortcutRef.current(m.code, !!m.altKey && !(m.metaKey || m.ctrlKey));
+      // 焦点在草稿里时父页收不到键盘：Esc 与 ⌘ 组合键靠运行时转发，交给页面同一套处理
+      if (m.type === 'quilt:key' && m.key === 'Escape') escape.current();
+      else if (m.type === 'quilt:key' && m.code && (m.metaKey || m.ctrlKey)) shortcutRef.current(m.code);
     };
     window.addEventListener('message', on);
     return () => window.removeEventListener('message', on);
@@ -365,7 +338,7 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
     readyRef.current = false; setReady(false); setLoadKey((k) => k + 1);
   };
   // 新的一版原地换（PAGE-SKETCH「看板」，同画布的聚焦态热更新）：取新版 HTML 经 quilt:swap 送进去，iframe 不重载、不出骨架，滚动位置留着；
-  // 签名过期取不到时重取详情再取一次，仍取不到才整页重载。没存的说明框随之撤掉（FLOW-SKETCH-REFINE S6）
+  // 签名过期取不到时重取详情再取一次，仍取不到才整页重载
   useEffect(() => {
     const rev = draft.currentRevisionId;
     if (!ready || !rev || !draft.previewUrl || rev === shownRev.current) return;
@@ -381,7 +354,6 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
       }
       if (stale) return;
       shownRev.current = rev;
-      setComposing(null);
       post({ type: 'quilt:swap', html, route: draft.route, keepScroll: true });
     })().catch(() => { if (!stale) { shownRev.current = rev; void reloadFresh(); } });
     return () => { stale = true; };
@@ -421,12 +393,6 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
       {failed && (
         <button type="button" data-testid="draft-retry" onClick={() => { setFailed(false); void reloadFresh(); }}
           className="state-layer focus-ring absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-sm border border-warning bg-surface-raised px-3 py-1.5 type-label font-semibold text-warning shadow-(--semantic-elevation-raised)">{t('stage.retry')}</button>
-      )}
-      {shown && (
-        <DraftAnnotations
-          items={annotations} place={place} composing={composing} onCloseCompose={() => setComposing(null)}
-          onCreate={onCreateAnnotation} onUpdate={onUpdateAnnotation} onRemove={onRemoveAnnotation} returnFocus={returnFocus}
-        />
       )}
     </div>
   );

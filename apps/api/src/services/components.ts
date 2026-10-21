@@ -102,7 +102,7 @@ export async function componentInstructions(projectId: string, componentId: stri
   return componentInstructionHistory(componentId, jobs.filter((j) => j.runner !== 'agent' || (j.output as { component?: string } | null)?.component));
 }
 
-// 直改 / 批注的锁（API-EDIT-001）：元素在某个还存在的组件实例里就拒，唯一放行的是「脱离共享」
+// 直改的锁（API-EDIT-001）：元素在某个还存在的组件实例里就拒，唯一放行的是「脱离共享」
 export async function assertNotLocked(projectId: string, body: string, qid: string, ops?: ElementOp[]): Promise<void> {
   const inside = componentOf(body, qid);
   if (!inside) return;

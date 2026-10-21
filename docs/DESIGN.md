@@ -12,21 +12,21 @@
 | 项目画像 | 生产产品（全部核心节生效） |
 | Owner | @bug |
 | 评审人 | @bug（产品 / 架构） |
-| 最后更新 | 2026-10-21（v1.21 草稿里只改一块也能带参考图；v1.20 界面支持中文与英文；v1.19 缩小显示的屏改用 zoom；v1.18 草稿出新版原地换；v1.17 去掉对话记录、作业 chip、记录栏浮层、画框不能跨组件与页面；v1.16 输入框停靠与收起、草稿放大；v1.15 界面视觉换成苹果风；v1.14 草稿写回与参照；v1.13 与 v1.14 的数据模型、接口与 ADR-030～033 已由 Owner 签字） |
+| 最后更新 | 2026-10-21（v1.23 撤下批注、双击组件卡把镜头摆过去；v1.22 本机使用记录，设计待确认；v1.21 草稿里只改一块也能带参考图；v1.20 界面支持中文与英文；v1.19 缩小显示的屏改用 zoom；v1.18 草稿出新版原地换；v1.17 去掉对话记录、作业 chip、记录栏浮层、画框不能跨组件与页面；v1.16 输入框停靠与收起、草稿放大；v1.15 界面视觉换成苹果风；v1.14 草稿写回与参照；v1.13 与 v1.14 的数据模型、接口与 ADR-030～033 已由 Owner 签字） |
 | 关联 | 契约 `api/openapi.yaml`（实现期建立） · 仓库 `github.com/Bearisbug/Quilt` · 安装 `npx quilt-canvas`（包 `apps/cli`） · 调研结论见会话记录 2026-09-07/08/09 |
 | 链路层 | 部分 |
 
-更早的版本（v0.4–v1.16）在 `docs/CHANGELOG.md`；下方两张表合计只留 v0.1–v0.3 与最近 5 版，再往前的随每次出版移过去。
+更早的版本（v0.4–v1.18）在 `docs/CHANGELOG.md`；下方两张表合计只留 v0.1–v0.3 与最近 5 版，再往前的随每次出版移过去。
 
 变更记录：
 
 | 日期 | 版本 | 涉及 ID | 一句话 | 类型 |
 | --- | --- | --- | --- | --- |
+| 2026-10-21 | v1.23 | REQ-EDIT-001、REQ-EDIT-002、REQ-EDIT-004、REQ-CORE-045、REQ-AGENT-002、FLOW-ELEMENT、FLOW-ANNOTATE、FLOW-SKETCH-REFINE、ENT-Annotation、API-EDIT-003、API-CORE-006、API-CORE-018、API-CORE-030、API-CORE-031、PAGE-CANVAS、PAGE-SKETCH、ADR-012 | 撤下批注：画布与草稿本的入口、接口、MCP 的 4 个工具与批注表一并删除；双击组件卡与双击屏一样把镜头摆过去 | 功能 |
+| 2026-10-21 | v1.22 | REQ-CORE-047、FLOW-RECORD、ENT-RecordEvent、ENT-ModelCall、API-CORE-049、API-CORE-050、API-CORE-051、API-CORE-006、API-CORE-018、API-CORE-031、API-AGENT-002、ADR-035、INV-CORE-006、INV-CORE-007、PAGE-CANVAS | 新增本机使用记录：设置里打开后记下界面操作、输入过程与每次模型调用，删掉的东西留归档 | 功能 |
 | 2026-10-21 | v1.21 | FLOW-SKETCH-REFINE、PAGE-SKETCH、API-CORE-006 | 草稿里只改一块也能带参考图，图跟着这一块的模型调用发出 | 功能 |
 | 2026-10-20 | v1.20 | REQ-CORE-046、FLOW-LOCALE、PAGE-CANVAS、API-CORE-006、API-CORE-046、ADR-034 | 界面支持中文与英文：缺省跟浏览器、设置里可切，服务端提示与生成内容跟着界面语言 | 功能 |
 | 2026-10-20 | v1.19 | PAGE-CANVAS、PAGE-SKETCH | 缩小显示的屏改用 zoom，修玻璃卡片旁闪出灰色渐变、盖住邻近内容 | 界面 |
-| 2026-10-20 | v1.18 | PAGE-SKETCH | 打开着的草稿出新版、换画框时原地换，不重载、不出「加载中」 | 界面 |
-| 2026-10-20 | v1.17 | REQ-CORE-020、REQ-CORE-023、REQ-CORE-026、REQ-EDIT-003、FLOW-CHAT、PAGE-CANVAS、PAGE-SKETCH、API-CORE-012、ADR-010 | 去掉对话记录与聊天，作业改成输入框上方的 chip，记录栏浮在草稿上，画框不跨组件与页面，内置库少占 90 MB | 界面、功能 |
 
 变更记录（旧格式）：
 
@@ -51,8 +51,9 @@
 | FLOW-GENERATE | 造屏 | 生成 | 已实现 | REQ-CORE-003、REQ-CORE-012、REQ-CORE-014、REQ-CORE-016、REQ-CORE-022、REQ-CORE-025 |
 | FLOW-EDIT | 改屏 | 迭代 | 已实现 | REQ-CORE-006、REQ-CORE-020、REQ-CORE-026 |
 | FLOW-REVISION | 候选与修订 | 迭代 | 已实现 | REQ-CORE-007、REQ-CORE-015 |
-| FLOW-ELEMENT | 元素直改与批注 | 迭代 | 已实现 | REQ-EDIT-001、REQ-EDIT-002、REQ-EDIT-004 |
+| FLOW-ELEMENT | 元素直改与局部重生成 | 迭代 | 已实现 | REQ-EDIT-001、REQ-EDIT-002 |
 | FLOW-CHAT | 聊天 | 迭代 | 已废弃 | REQ-CORE-023 |
+| FLOW-ANNOTATE | 批注 | 迭代 | 已废弃 | REQ-EDIT-004 |
 | FLOW-DESIGN-SYSTEM | 设计系统 | 设计系统 | 已实现 | REQ-CORE-010、REQ-CORE-019、REQ-CORE-021、REQ-CORE-036、REQ-EDIT-003、REQ-EDIT-005 |
 | FLOW-COMPONENT | 共享组件 | 设计系统 | 已实现 | REQ-EDIT-006 |
 | FLOW-BRAND-IMPORT | 导入品牌设计系统 | 设计系统 | 设计中 | REQ-CORE-038 |
@@ -64,6 +65,7 @@
 | FLOW-SKETCH-COPY | 草稿写回项目 | 草稿本 | 设计中 | REQ-CORE-041、REQ-CORE-044 |
 | FLOW-SETTINGS | 通道、用量与外观 | 设置 | 已实现 | REQ-CORE-008、REQ-CORE-011、REQ-CORE-013、REQ-CORE-039 |
 | FLOW-LOCALE | 界面语言 | 设置 | 设计中 | REQ-CORE-046 |
+| FLOW-RECORD | 本机使用记录 | 设置 | 设计中 | REQ-CORE-047 |
 
 ### 角色：本机 agent
 
@@ -230,19 +232,19 @@
 #### 概要
 
 - **执行者**：本机用户
-- **触发**：在草稿上方的工具条打开「选元素」或「批注」（PAGE-SKETCH）
+- **触发**：在草稿上方的工具条打开「选元素」（PAGE-SKETCH）
 - **进入条件**：看板上打开着一张有内容的草稿
 - **结果**：只改点中的那一块，草稿多出一版，其余原样
-- **不管**：零 token 直改、跨草稿的批注
+- **不管**：零 token 直改
 
 #### 主流程
 
-1. S1 用户打开「选元素」或「批注」 〔界面：Web 草稿看板｜apps/web/src/sketch/DraftStage.tsx〕
+1. S1 用户打开「选元素」 〔界面：Web 草稿看板｜apps/web/src/sketch/DraftStage.tsx〕
 2. S2 用户点中草稿里的一个元素，它被框出 〔界面：Web 草稿看板｜apps/web/src/sketch/DraftStage.tsx〕
-3. S3 选元素时在输入框写一句，批注时在说明框写一条并存下 〔界面：Web 草稿本输入框｜apps/web/src/sketch/SketchComposer.tsx、apps/web/src/sketch/DraftAnnotations.tsx〕
-4. S4 用户发送（API-CORE-006、API-EDIT-003） 〔界面：Web 草稿本输入框｜apps/web/src/sketch/SketchComposer.tsx〕
+3. S3 在输入框写一句 〔界面：Web 草稿本输入框｜apps/web/src/sketch/SketchComposer.tsx〕
+4. S4 用户发送（API-CORE-006） 〔界面：Web 草稿本输入框｜apps/web/src/sketch/SketchComposer.tsx〕
 5. S5 后台只改那一块，落成草稿的新一版 〔无界面〕
-6. S6 看板换成新版，选中与已发的批注清掉 〔界面：Web 草稿看板｜apps/web/src/sketch/DraftStage.tsx〕
+6. S6 看板换成新版，选中清掉 〔界面：Web 草稿看板｜apps/web/src/sketch/DraftStage.tsx〕
 
 #### 分支
 
@@ -254,12 +256,10 @@
 | --- | --- | --- | --- | --- |
 | 边界 | 点选的是草稿根 | 等同改整张 | API-CORE-006 | 无用例 |
 | 边界 | 输入框里带了参考图 | 图跟这一块的模型调用一起发出，与改整张时一样 | API-CORE-006；REQ-CORE-012 | TC-CORE-138 |
-| 边界 | 攒了几条批注一起发 | 合成一轮改稿，每条带元素定位 | API-EDIT-003 | TC-CORE-117、TC-CORE-122 |
 | 失败 | 这张草稿上一轮还没改完 | 409 /errors/screen-busy | /errors/screen-busy；竞态「同一屏同时发起两次编辑作业」 | 无用例 |
 | 并发 | 点选之后这张草稿已出了新一版 | 409 /errors/revision-conflict，重新点选 | /errors/revision-conflict；API-CORE-006 | TC-CORE-117 |
 | 失败 | 一分钟内发得太多 | 429 /errors/rate-limited | /errors/rate-limited；API-CORE-006 | 无用例 |
 | 失败 | 元素在别处的改动里已被换掉 | 作业失败，提示重新点选〔提示：这一块已经变了，重新点一下〕 | 迁移 ENT-GenerationJob running→failed「生成失败」；API-CORE-006 | 无用例 |
-| 失败 | 批注落在共享组件实例里 | 409 /errors/component-locked | /errors/component-locked；API-EDIT-003 | 无用例 |
 
 #### 待决策
 
@@ -269,15 +269,15 @@
 
 #### 关联
 
-- **契约锚点**：API-CORE-006；API-EDIT-003；API-CORE-010
+- **契约锚点**：API-CORE-006；API-CORE-010
 - **上游**：FLOW-SKETCH
 - **下游**：—
 - **守住的不变量**：INV-CORE-003
 
 | 步骤 | 位置 |
 | --- | --- |
-| S1–S4 | `apps/web/src/sketch/DraftStage.tsx#DraftStage`；`apps/web/src/sketch/DraftAnnotations.tsx#DraftAnnotations` |
-| S5 | `apps/api/src/worker/pipeline.ts#runRegenerateSubtree`；`apps/api/src/worker/pipeline.ts#runEditScreens` |
+| S1–S4 | `apps/web/src/sketch/DraftStage.tsx#DraftStage` |
+| S5 | `apps/api/src/worker/pipeline.ts#runRegenerateSubtree` |
 
 ### FLOW-SKETCH-COPY · 草稿写回项目
 
@@ -367,6 +367,106 @@
 | S6–S7 | `apps/api/src/services/sketchbook.ts#copyDraft` |
 | S8 | `apps/web/src/sketch/CopyDialog.tsx#CopyDialog` |
 
+### FLOW-RECORD · 本机使用记录
+
+#### 概要
+
+- **执行者**：本机用户
+- **触发**：在设置「使用记录」一节打开开关
+- **进入条件**：无
+- **结果**：之后的操作、输入与模型调用都留在本机，删掉的留归档
+- **不管**：分析报告、上传到外部、自动清理
+
+#### 主流程
+
+1. S1 用户在设置里打开「使用记录」（API-CORE-050） 〔界面：Web 设置弹层｜apps/web/src/settings/RecordSection.tsx〕
+2. S2 用户照常在画布与草稿本里操作和输入 〔界面：Web 画布｜apps/web/src/pages/Canvas.tsx、apps/web/src/pages/Sketch.tsx〕
+3. S3 浏览器把攒下的事件成批写进本机库（API-CORE-051） 〔无界面〕
+4. S4 后台每调一次模型，存下完整提示词与原始回复 〔无界面〕
+5. S5 外部 agent 每调一次 MCP 工具，服务端记一条 〔无界面〕
+6. S6 删屏、删项目、清掉没发出的图之前，先拷进归档 〔无界面〕
+7. S7 用户在设置里看已记的条数、占用与存放位置（API-CORE-049） 〔界面：Web 设置弹层｜apps/web/src/settings/RecordSection.tsx〕
+
+#### 分支
+
+> 分支未与用户逐类核对：S1–S7
+
+##### S1 打开记录
+
+| 类型 | 分支 | 结果 | 依据 | 测试 |
+| --- | --- | --- | --- | --- |
+| 边界 | 关掉开关 | 之后不再记，已记的留着 | API-CORE-050；INV-CORE-007 | 无用例 |
+| 失败 | 请求来源不在本机名单 | 403 /errors/forbidden，开关不变 | /errors/forbidden；API-CORE-050 | 无用例 |
+
+##### S3 成批写进本机库
+
+| 类型 | 分支 | 结果 | 依据 | 测试 |
+| --- | --- | --- | --- | --- |
+| 并发 | 开关已关，别的标签页还在发 | 整批丢弃，不写库 | 竞态「关掉记录时别的标签页还在发事件」；API-CORE-051 | 无用例 |
+| 失败 | 一批超过 200 条或单条过大 | 400 /errors/validation，整批不写 | /errors/validation；API-CORE-051 | 无用例 |
+| 失败 | 请求来源不在本机名单 | 403 /errors/forbidden，整批不写 | /errors/forbidden；API-CORE-051 | 无用例 |
+| 失败 | 本机服务连不上 | 事件留在浏览器里下次再发 | §15 本机使用记录；API-CORE-051 | 无用例 |
+| 边界 | 密码框与通道密钥框 | 不记它们的内容 | 字段 record_events.data；INV-CORE-006 | 无用例 |
+| 边界 | 同一批重发了一次 | 重复的条目跳过 | API-CORE-051 | 无用例 |
+
+##### S4 记模型调用
+
+| 类型 | 分支 | 结果 | 依据 | 测试 |
+| --- | --- | --- | --- | --- |
+| 失败 | 模型报错或超时 | 照样记一条，带错误与重试次数 | /errors/provider-unavailable；字段 model_calls.error | 无用例 |
+| 失败 | 记录写不进去 | 作业照常完成，只在服务日志记一行 | §15 本机使用记录；ADR-035 | 无用例 |
+| 边界 | 作业交给本机会话 | 只记投递出去的那段指令 | 字段 model_calls.purpose | 无用例 |
+
+##### S5 记 MCP 调用
+
+| 类型 | 分支 | 结果 | 依据 | 测试 |
+| --- | --- | --- | --- | --- |
+| 边界 | 参数里带整屏 HTML | 超过 2000 字的字段只记长度 | 字段 record_events.data | 无用例 |
+
+##### S6 先拷进归档
+
+| 类型 | 分支 | 结果 | 依据 | 测试 |
+| --- | --- | --- | --- | --- |
+| 边界 | 开关关着 | 照旧直接删，不留归档 | API-CORE-018；INV-CORE-007 | 无用例 |
+| 失败 | 拷贝失败 | 照常删除，服务日志记一行 | §15 本机使用记录；ADR-035 | 无用例 |
+| 边界 | 新草稿失败或取消后删掉的空草稿 | 同样留归档 | API-CORE-018 | 无用例 |
+
+##### S7 看已记的情况
+
+| 类型 | 分支 | 结果 | 依据 | 测试 |
+| --- | --- | --- | --- | --- |
+| 失败 | 请求来源不在本机名单 | 403 /errors/forbidden，这一节不显示数字 | /errors/forbidden；API-CORE-049 | 无用例 |
+| 边界 | 对象存储不在本机 | 存放位置不显示 | API-CORE-049 | 无用例 |
+
+#### 待决策
+
+- **Q-RECORD-1 · 记录一直留着，还是按天数自动清理？**
+  - 现状：未实现
+  - 建议：一直留着，设置里显示占用，不自动清
+  - 何时换：占用超过 2 GB 还想继续记
+  - 代价：磁盘随使用一直涨，约每天 5 MB
+  - 不可逆：否
+  - 何时定：占用第一次超过 1 GB 时
+  - 谁定：产品
+  - 卡住：不卡
+
+另见：无
+
+#### 关联
+
+- **契约锚点**：API-CORE-049；API-CORE-050；API-CORE-051；API-CORE-018；ADR-035
+- **上游**：—
+- **下游**：—
+- **守住的不变量**：INV-CORE-006、INV-CORE-007
+
+| 步骤 | 位置 |
+| --- | --- |
+| S1、S7 | `apps/web/src/settings/RecordSection.tsx#RecordSection` |
+| S2–S3 | `apps/web/src/lib/recorder.ts#startRecorder`；`apps/api/src/http/routes/record.ts#recordRoutes` |
+| S4 | `apps/api/src/worker/pipeline.ts#llmCall`；`apps/api/src/services/record.ts#recordModelCall` |
+| S5 | `apps/api/src/mcp/ctx.ts#wrap` |
+| S6 | `apps/api/src/services/record.ts#archiveScreen`；`apps/api/src/services/record.ts#archiveProject`；`apps/api/src/worker/index.ts#sweepStorage` |
+
 ## L3. 业务规则
 
 无。
@@ -380,12 +480,14 @@
 | INV-CORE-003 | 草稿本里的造与改只出一屏一版 | API-CORE-010；API-AGENT-002 | TC-CORE-102、TC-CORE-110 |
 | INV-CORE-004 | 项目里的屏与组件从不引用草稿 | ADR-031；API-CORE-047 | TC-CORE-107、TC-CORE-108 |
 | INV-CORE-005 | 写回覆盖只给目标屏加一条新修订，不改它已有的修订 | API-CORE-047；ADR-032 | TC-CORE-114 |
+| INV-CORE-006 | 密码、通道密钥与签名地址从不进使用记录 | ADR-035；API-CORE-051 | 无用例 |
+| INV-CORE-007 | 记录开关关着时不写事件、模型调用与归档 | API-CORE-050；ADR-035 | 无用例 |
 
 ## 2. 背景 / 目标 / 非目标
 
 - 背景：Google Stitch 证明了「一句话 → 多屏 UI 设计稿」的需求真实存在，但它的屏幕彼此孤立（链接全是 `href="#"`）、画布只是缩略图墙、agent 只能单向拉取、生成的 HTML 硬编码色值导致多屏漂移。
   设计师和独立开发者需要一个能把整个 APP **串起来**、能**直接点着走**、能被自己的编码 agent **双向驱动**的画布。
-- 目标：① 从需求描述生成整套风格一致的多屏设计稿并摆在无限画布上；② 屏幕可直接交互、可沿路由穿行成完整原型；③ 多轮对话迭代与元素级编辑，且任何一版可回溯；④ 设计系统可改可回刷；⑤ MCP 让本地 agent 既能读写画布，又能被画布派活；⑥（v0.32）一条命令装好、在本机跑起来，不装 Docker、不注册账号。⑦ 不属于任何项目的草稿本：一句话出单张组件或页面，收起再出下一张，满意的放进项目。
+- 目标：① 从需求描述生成整套风格一致的多屏设计稿并摆在无限画布上；② 屏幕可直接交互、可沿路由穿行成完整原型；③ 多轮对话迭代与元素级编辑，且任何一版可回溯；④ 设计系统可改可回刷；⑤ MCP 让本地 agent 既能读写画布，又能被画布派活；⑥（v0.32）一条命令装好、在本机跑起来，不装 Docker、不注册账号。⑦ 不属于任何项目的草稿本：一句话出单张组件或页面，收起再出下一张，满意的放进项目。⑧（v1.22）本机使用记录：打开后把自己的使用过程留在本机，日后用来分析与改进流程，不上传。
 - 非目标：① 多人实时协作（单用户项目，不做 CRDT）；② 生成生产级 React 工程代码（导出仅为可交互 HTML 原型，代码实现交给接入的 agent）；③ React Native / 原生端渲染；④ 计费与支付（本地版只记用量台账，无上限）；⑤ 跨用户的分支合并（v0.31 起修订链允许分支与候选，但只在单用户项目内，不做合并 / 冲突解决）；⑥ 平板设备形态（只做手机与桌面）；⑦ 国内市场合规与中转（面向海外）；⑧（v0.32 推迟）多账号 SaaS——登录、OAuth、配额、远程派活通道整体推迟，数据模型不为它让路也不为它删字段。
 
 规模画像：
@@ -477,12 +579,12 @@
 | REQ-PROTO-003 | 懒生成：点到不存在的路由 → 一键生成该屏（v0.31 起为 `generate` 作业的一种输入：`route` 与 `name` 钉死、跳过规划器、来源屏作为参考） | 目标 ② | P1 / M2 · M9 改写 |
 | REQ-PROTO-004 | 导出单文件可交互原型（全部屏 + hash 路由） | 目标 ② | P1 / M2 |
 | REQ-PROTO-005 | **叠层屏**（v0.63）：屏的呈现方式 `presentation = push \| overlay`（默认 push）。播放时跳到 overlay 屏不换 DOM，而是压在当前屏上（暗遮罩 + 该屏根元素），点遮罩或后退关掉；跳到 push 屏先清掉全部叠层；导出原型同构（起始屏取第一张整屏；直接打开叠层的 hash 时先把起始屏垫在底下）。生成侧规划器 / 懒生成 / MCP 都能指定；叠层屏的提示词只写弹层本身、根透明、不画遮罩。呈现是元数据：改它不重烤修订，预览域与截图按它临时注入透明背景（截图带 alpha，改了就重拍），画布卡片铺在暗底上并标「叠层」；默认屏与它的变体呈现方式一致。入口：工具栏「设为叠层 / 设为整屏」、`API-CORE-012 presentation`、MCP | 目标 ② | P1 / v0.63 |
-| REQ-EDIT-001 | 元素级选中与本地直改：改文案/样式/跳转目标零 token，落为新修订；直改没有作业，不进这屏的历史指令（`ADR-012` v0.87 修订）；键盘（v0.95）：`⌘S` 保存、`Delete` / `Backspace` 删除选中元素，`⌘Z` 撤销上一步直改（回到改之前那一版）；类名（v0.96）一行一个、配中文说明（按本项目的实际取值），数值类 ‹ › 换档、颜色类选 token 色；逐级选（v1.00）：`Shift+Enter` 选父级、`Enter` 回到刚才那层子级（悬停时扩大 / 缩回高亮，选中后移动选中），检查器顶部的祖先路径点任一级选中 | 目标 ③ | P0 / M3 · v0.87 / v0.95 / v0.96 / v1.00 补充 |
-| REQ-EDIT-002 | 元素子树 AI 重生成：只发选中子树，整段替换。**通道单独选**（v0.34）：检查器「用 AI 重生成这块」下方有与输入框同一套的通道 + 会话选择器，`regenerate_subtree` 输入带 `runner?`；记忆独立于输入框（局部改动常只要更快的模型），第一次沿用输入框当前通道；选本机 agent 时作业投递到会话，提示词限定只重写该 `qid` 子树、其余元素原样推回；两条路上模型都看得到这屏此前已生效的用户指令（`ADR-012` v0.87 修订） | 目标 ③ | P0 / M3 · v0.34 改写 · v0.87 补充 |
+| REQ-EDIT-001 | 选中屏内元素，零 token 改文案、样式与跳转，落为新修订 | 目标 ③ | P0 / M3 |
+| REQ-EDIT-002 | 选中元素用 AI 只重写这一块，整段替换 | 目标 ③ | P0 / M3 |
 | REQ-EDIT-003 | 设计系统面板改色板、字体、圆角与约定，回刷所有屏（见 `PAGE-CANVAS`） | 目标 ④ | P0 / M3 · M9 改写 · v0.44 扩写 |
-| REQ-EDIT-004 | 元素批注：在聚焦屏内给任意元素挂一条自然语言改动说明，批注以编号气泡常驻在画布上（跟随平移缩放），可逐条立刻发送，也可攒够一起发送；发送按屏合并成一条带元素定位的整屏指令（v0.78：存不上时草稿不丢、不发送；未记下的草稿按元素暂存）；这一轮以「批注：「锚点文字」→ 说明」进这屏的历史指令，不带 qid（`ADR-012` v0.87 修订） | 目标 ③ | P0 / M6 · v0.87 补充 |
+| REQ-EDIT-004 | 已废弃：批注整体撤下，改一块用选元素加输入框 | 目标 ③ | P0 / M6 |
 | REQ-EDIT-005 | **品牌色板**（v0.35）：设计系统可挂一份显式色板逐键覆盖种子派生值，亮 / 暗各一套，`colorMode` 选当前生效的那套（切换 = 换一套 token 再按原路回刷）；用途是把外部品牌规范的精确色值原样搬进来——种子派生只能算出邻近色（`#284CCA` 派生出 `#3052d0`），品牌规范要的是原值；token 色键新增 `success / onSuccess / warning / onWarning`，无覆盖时由种子按固定色相派生，保证任何项目都有语义色可用；面板逐键标「派生 / 品牌」，可整份清空回到纯派生。**未覆盖键的派生值随模式走**：`colorMode=dark` 时底座取 Material 暗色方案、语义色明度切到 80/20（与 `error`/`onError` 同规则），否则暗色项目会得到一套亮色派生值（`text-on-surface-variant` 压在 `bg-surface-variant` 上只有 1.39:1）。暗色色板被撤掉时 `colorMode` 回落 `light`，`dark:{}` 等同于没有暗色色板 | 目标 ④ | P1 / v0.35 |
-| REQ-EDIT-006 | **共享组件**（v0.46）：项目级的一段 HTML 作为画布上的一等对象——有名字、活渲染、可拖、可点选 / 框选、可当输入框目标。屏**引用**它：屏 HTML 里只放占位根元素 `<nav data-component="TabBar"></nav>`，每次写入屏时（生成 / 改屏 / 子树重生成 / agent 经 MCP 写入 / 组件改动后的回刷）在注入阶段确定性展开成正式 HTML，改组件一次所有用它的屏零 LLM 同步（新修订 `source_kind=component`）。三条来路：检查器选中元素「记为共享组件」（同时把其他屏里对应的元素换成它——同标签、同深度、类名最相近）、工具栏「新建组件」建空组件再在输入框描述、agent 经 MCP `create_component`。改法三种：只框选 1 个组件发「改」→ `edit_component` 作业（1 次模型调用 + 确定性回刷；模型看得到这个组件此前改成功的用户指令，v0.87 `ADR-012`；通道选本机会话时投递到会话，由会话经 MCP `quilt.update_component` 写回，v0.99）；`PATCH` 直改 HTML / 名字（乐观锁 `version`）；屏 + 组件一起框选 / 造屏时框选组件 → 完整 HTML 进上下文。上下文分级：每个组件永远进稳定前缀一张卡（名字 + 确定性一行摘要 + 占位写法，约 30 token），完整 HTML 只在框选了它或目标屏本来就用它时附上。参数克制：导航型组件的激活项按屏路由自动算（href 等于当前屏路由的链接加 `activeClass` / 去 `inactiveClass`、置 `aria-current="page"`）；随屏变的文字用 `data-slot` 槽位。实例里的元素锁定直改与批注（`409 /errors/component-locked`），出口是「改组件」或「脱离共享」；删组件不动屏（已展开的 HTML 留在屏里、只是不再跟着变）。不支持组件套组件；组件里不能有 `<script>` / `<style>` | 目标 ①③④ | P1 / M11 · v0.87 补充 |
+| REQ-EDIT-006 | **共享组件**（v0.46）：项目级的一段 HTML 作为画布上的一等对象——有名字、活渲染、可拖、可点选 / 框选、可当输入框目标。屏**引用**它：屏 HTML 里只放占位根元素 `<nav data-component="TabBar"></nav>`，每次写入屏时（生成 / 改屏 / 子树重生成 / agent 经 MCP 写入 / 组件改动后的回刷）在注入阶段确定性展开成正式 HTML，改组件一次所有用它的屏零 LLM 同步（新修订 `source_kind=component`）。三条来路：检查器选中元素「记为共享组件」（同时把其他屏里对应的元素换成它——同标签、同深度、类名最相近）、工具栏「新建组件」建空组件再在输入框描述、agent 经 MCP `create_component`。改法三种：只框选 1 个组件发「改」→ `edit_component` 作业（1 次模型调用 + 确定性回刷；模型看得到这个组件此前改成功的用户指令，v0.87 `ADR-012`；通道选本机会话时投递到会话，由会话经 MCP `quilt.update_component` 写回，v0.99）；`PATCH` 直改 HTML / 名字（乐观锁 `version`）；屏 + 组件一起框选 / 造屏时框选组件 → 完整 HTML 进上下文。上下文分级：每个组件永远进稳定前缀一张卡（名字 + 确定性一行摘要 + 占位写法，约 30 token），完整 HTML 只在框选了它或目标屏本来就用它时附上。参数克制：导航型组件的激活项按屏路由自动算（href 等于当前屏路由的链接加 `activeClass` / 去 `inactiveClass`、置 `aria-current="page"`）；随屏变的文字用 `data-slot` 槽位。实例里的元素锁定直改（`409 /errors/component-locked`），出口是「改组件」或「脱离共享」；删组件不动屏（已展开的 HTML 留在屏里、只是不再跟着变）。不支持组件套组件；组件里不能有 `<script>` / `<style>` | 目标 ①③④ | P1 / M11 · v0.87 补充 |
 | REQ-CORE-012 | 参考图输入：输入框可贴 / 拖 / 选图片，随消息作为参考进模型（照着这个感觉做，不是复刻成屏）；至多 4 张、单张 ≤ 5 MB。一次贴 / 拖 / 选入几张就同时出几张缩略图（各自「上传中…」）、并行上传；4 张上限按输入框里已有的张数（含还在上传的）算，超出部分当场提示「一条消息最多 4 张参考图」并跳过（v0.74） | 目标 ①④ | P1 / M6 |
 | REQ-CORE-014 | 画布空白处放锚点：双击空白 / 工具栏「新建屏幕」`⌥G` 在该点放一个锚点并聚焦输入框，目标区显示「新屏 · 此处」（可移除）；下一次「造」把屏（一组屏按流程顺序排成一行，包围盒与既有屏相交则整行下移）摆在锚点，无锚点接在最右一屏右侧；规划器声明「既有屏 X 进入新组」时对 X 跑一次现成的「接上跳转」固定指令（指令里把新组路由标为「本次新增」），产生一条可回溯修订，回执列出实际改动的链接；新屏不强制与既有屏连线（`links` 可为空） | 目标 ①④ | P1 / M8 · M9 改写 |
 | REQ-CORE-013 | 生成通道可配置：设置页管理 API 类通道（Anthropic / Gemini / OpenAI 兼容端点：显示名、Endpoint、Key、模型），本机通道（Claude Code / Codex CLI）的可用性 = 命令在 PATH 上，不可用时就地给出安装步骤；两类本机订阅通道（v0.68）：「本机 Claude 订阅」（`kind=agent-sdk`，复用本机 `claude` 登录态）与「本机 Codex 订阅」（`kind=codex`，复用本机 `codex` 的 ChatGPT 登录态，经 `codex exec` 调模型），都没有 Key 与端点、只填模型名；每条可一键验证；只有验证通过的才进输入框下拉；密钥加密落库（v0.32：加密主密钥由首次启动写进 `~/.quilt/config.env`，用户不必手配） | 目标 ①③⑤ | P1 / M7 · M10 改写 |
@@ -495,7 +597,7 @@
 | REQ-CORE-022 | **屏可以用外部开源库**（v0.43）：屏内允许 `<script>` 与任意 `https:` CDN（Chart.js、ECharts、自写组件库等），预览域与导出产物的 CSP 相应放开；token 与组件配方仍然是默认词汇表，但不再是唯一可写的东西。代价写进逐屏偏离报告：外部库在离线或 CDN 失效时退化，硬编码颜色不随主题变 | 目标 ④ | P1 / v0.43 |
 | REQ-CORE-023 | 已废弃：界面不再有聊天模式，接口的聊天作业保留 | 目标 ①③④ | P1 / v0.45 |
 | REQ-CORE-024 | **找屏与总览**（v0.61）：`⌘K` 跳屏（按名字 / 路由 / 用途模糊匹配屏与共享组件，列出全部命中项、列表内滚动，Enter 把镜头摆到那张卡、选中它）；屏列表面板（`⌥S`，画布阅读顺序，筛选片「断链 / 待选候选 / 有偏离 / 正在改」带计数，变体缩进跟在默认屏后）；小地图（顶栏下方左侧，画屏 / 组件 / 风格指南卡与视口框，点即平移、框可拖，聚焦屏或组件时隐藏，工具栏可开关、本机记忆）。零 token 纯前端 | 目标 ① | P1 / v0.61 |
-| REQ-CORE-025 | **状态变体**（v0.62）：同路由下的具名兄弟屏（`variantOf` + `variantName`，只有一层，删默认屏级联删变体）。应用地图、导航目标、屏注册表、导出只认默认屏；变体发出的链接照常入图。造变体 = 钉死路由的 `generate`（`variantOf + variantName`，跳过规划器、默认屏作第一个参考屏且超预算时最后被丢、落在默认屏那一行最右——这一行 = 与默认屏纵向范围相交的全部屏，变体排在它们右侧、与默认屏同 y，不压住已有的屏，v0.82），之后是普通屏（改 / 直改 / 批注 / 候选 / 回溯都一样），只是 `route` 不可改、`variantName` 可改。画布：变体卡标「变体」、默认屏标「N 个变体」；聚焦时家族 ≥ 2 在卡内顶部中央出状态胶囊，点即同 iframe 换成该变体（不动镜头、不进导航栈）。入口：工具栏「出变体」、MCP `generate_screens` | 目标 ①② | P1 / v0.62 |
+| REQ-CORE-025 | **状态变体**（v0.62）：同路由下的具名兄弟屏（`variantOf` + `variantName`，只有一层，删默认屏级联删变体）。应用地图、导航目标、屏注册表、导出只认默认屏；变体发出的链接照常入图。造变体 = 钉死路由的 `generate`（`variantOf + variantName`，跳过规划器、默认屏作第一个参考屏且超预算时最后被丢、落在默认屏那一行最右——这一行 = 与默认屏纵向范围相交的全部屏，变体排在它们右侧、与默认屏同 y，不压住已有的屏，v0.82），之后是普通屏（改 / 直改 / 候选 / 回溯都一样），只是 `route` 不可改、`variantName` 可改。画布：变体卡标「变体」、默认屏标「N 个变体」；聚焦时家族 ≥ 2 在卡内顶部中央出状态胶囊，点即同 iframe 换成该变体（不动镜头、不进导航栈）。入口：工具栏「出变体」、MCP `generate_screens` | 目标 ①② | P1 / v0.62 |
 | REQ-CORE-026 | 作业失败时，失败的作业 chip 能原样重试一轮 | 目标 ③ | P1 / v0.72 |
 | REQ-CORE-036 | **样例页**（v0.85）：按 SPEC v1.2（「标准组件样例页」，brand-design 仓 `references/specimen-spec.md`）把设计系统的全部基础值与基础组件的全部状态排在一页上，用来定稿、评审、做真实屏的对照基准。① **内容**：SPEC §4 的 18 节（字阶、正文行内元素、颜色、间距、圆角与层级、焦点与状态层、图标、按钮、表单、列表卡片表格、导航、反馈与叠层、动效、数据可视化、本系统不用、参考小屏、压力测试、项目自有组件）；SPEC §2 的每个类别在页面上必须是「有值 / 不适用（写理由）/ 缺（写原因）」之一，缺的不许用字面值补。Quilt 项目固定标「不适用」：z-index（弹层是叠层屏、由播放器叠放，`REQ-PROTO-005`）与断点（一个项目一种设备）；宣传展示字阶与材质在 `token_ext` 里没给时标「不适用」；数据可视化在有图表色键之前标「缺」（类别键与判定同 §9 `tokens.categories`）。② **确定性**：服务端由 `designSystem.tokens` 与项目共享组件渲染，零 LLM，同一份输入逐字节同一份输出；设计系统或组件一变，URL 里的版本随之变、画布卡片重载。③ **两个视图**：画布上的样例卡 = 概览视图（颜色角色、UI 字阶、四层表面、按钮一行六态，宽度等于设备宽度），取代原风格指南卡（`REQ-CORE-010`）；完整页 = 全部章节、1440 宽，从样例卡标签与设计系统面板的「打开完整样例页」新开标签页。④ **硬约束**（SPEC §3 的 Quilt 口径）：C1 样式由渲染器的带类型规则表生成，单测遍历规则表——白名单属性的值只能是 `var(--…)` 或登记过的字面量；C2 每个样本旁由页内脚本读 `getComputedStyle` 写出「token 名 + 计算值」；C3 状态格的选择器与真实伪类成对（`.is-hover, :hover`），状态样式只由状态层 token 推出，工具类与屏的 prelude 共用同一份（`ADR-025`）；C4 只有颜色一节亮暗并排（`data-theme`），没挂暗色色板的项目暗色栏标「派生，未启用」；C5 每档字阶中英各一行，样本自带 `lang`；C6 单文件导出（P3）除字体外零外网，字体按来源处理——`google` 用 css2 接口的 `text=` 取子集后 base64 内联，`url` 回落 `system-ui` 并标注，`system` 不内联；C7 每节稳定 `id`，1440×900 下每节不超过一屏，放不下拆成带独立 `id` 的子节；C8「本系统不用」清单（`tokens.notUsed`）同时驱动样例页自检与屏的 lint 偏离；C9 按节截图固定 DPR 2，元数据记系统、浏览器版本与每节实际渲染字体，环境不同的两组标「不可比」、不拒截图。⑤ **按节截图**（P3）：`capture_specimen` 作业产出 390 / 1440 × 亮 / 暗的按节截图与元数据，另在 1440 下各一次 `prefers-contrast: more` 与 `forced-colors: active` | 目标 ④ | P1 / v0.85 登记（P2 骨架与核心章节、P3 其余章节 / 导出 / 截图） |
 | REQ-CORE-037 | **项目语言**（v0.85）：项目级 `language` = `zh-CN` / `en`。新建项目弹窗里选，缺省 `en`，存量项目也迁移为 `en`，都与改动前的行为一致；设计系统面板「应用简介」一节可改。它决定三件事：① 屏文档、组件预览文档、导出产物与样例页外壳的 `<html lang>`——写入与回刷时按当前值拼装，所以改语言后发一次回刷（零 LLM）就能让存量屏的 `lang` 跟上；② 模型写界面文案用的语言，从下一次生成 / 改屏起生效；存量屏的文案不自动翻译，要换语言就发一轮「把文案改成中文」；③ prelude 输出的中文排版覆盖（`:lang(zh)` 下字阶逐档的行高、字距、字体族，`ADR-025`）只在中文文档里命中。样例页的样本自带 `lang`，不受项目语言影响 | 目标 ④ | P1 / v0.85 登记（P1 落地） |
@@ -506,10 +608,11 @@
 | REQ-CORE-042 | 草稿可选参照某个项目的视觉系统出稿与改稿 | 目标 ⑦ | P1 / 草稿本 |
 | REQ-CORE-043 | 从项目的一屏或其中一块建草稿，带上它的当前内容 | 目标 ⑦ | P1 / 草稿本 |
 | REQ-CORE-044 | 草稿写回时覆盖已有的一屏或屏里的一块，可回溯 | 目标 ⑦ | P1 / 草稿本 |
-| REQ-CORE-045 | 在草稿里点选元素或钉批注，只改那一块 | 目标 ⑦ | P1 / 草稿本 |
+| REQ-CORE-045 | 在草稿里点选元素，只改那一块 | 目标 ⑦ | P1 / 草稿本 |
 | REQ-CORE-046 | 界面支持中文与英文，缺省跟浏览器语言、可在设置里切换 | 目标 ① | P1 |
+| REQ-CORE-047 | 设置里打开后，在本机记下界面操作、输入过程与每次模型调用 | 目标 ⑧ | P1 |
 | REQ-AGENT-001 | MCP server（Streamable HTTP，`http://127.0.0.1:3100/mcp`）+ 高层工具（生成/编辑/列表/取屏/截图）。**v0.32：本地版免鉴权**——服务只绑回环地址，不校验凭据；v0.75 起 `/mcp` 先过来源校验（`Host` 须是本机地址，带 `Origin` 时须在名单里，见 §15「本地服务」），本机 MCP 客户端不带 `Origin`、照常接入；OAuth 2.1 接入推迟到 SaaS | 目标 ⑤ | P0 / M4 · M10 改写 · v0.75 补充 |
-| REQ-AGENT-002 | MCP 底层原语与资源：设计契约、校验、创建/更新屏、连接屏、应用地图、上传 URL、resources。**v0.51 与画布同面**：画布能做的每一件事都有对应工具——删屏 / 组件 / 项目，读旧修订与回溯、采用候选，摆放屏与组件，素材、预设、导出，作业列表 / 取消 / 事件，批注处理，元素直改，全部作业类型与造 / 改屏的全部选项（通道、参考图、锚点、懒生成、组件上下文）；只有通道的增删改（含密钥）留在设置页 | 目标 ⑤ | P0 / M4 · v0.51 补充 |
+| REQ-AGENT-002 | MCP 工具覆盖画布能做的事，只有通道的增删改留在设置页 | 目标 ⑤ | P0 / M4 |
 | REQ-AGENT-003 | **本机 agent 执行作业**（v0.34 改写）：通道选「交给本机 Claude Code」并在会话下拉里选定一个本机正在运行的 Claude Code 交互式会话后，发送建的是 `runner=agent` 的 `generate` / `edit_screens` / `edit_component`（v0.99）作业（`input.runner = { kind:"agent", tool:"claude-code", sessionId }`），由 Quilt 进程的 `agentDelivery` 立即把提示词（项目、指令、目标屏与各自的 `expectedRevisionId`、各目标屏此前已生效的用户指令（v0.87 `ADR-012`）、作业 id、MCP 地址与接入命令、收口要求；改组件时目标是组件：它的 `componentId` 与 `expectedVersion`、用在哪几屏、这个组件此前的指令与组件写法，v0.99）**投递到该会话的 inbox socket**，作业随即 `running`（`output.delivery = { sessionId, name, deliveredAt }`）；会话在自己的终端窗口里做，经本机 MCP 回写（带 `jobId` 的 `quilt.update_screen` 必须传 `expectedRevisionId`，不一致 409；改组件用带 `jobId` 的 `quilt.update_component`，回刷到的屏记在该作业名下，v0.99），做完调 `quilt.finish_job { jobId, status, summary }` 收口 → `succeeded`（`output.screenIds` = 该作业名下修订所在屏）或 `failed errorClass=agent`；投递失败（会话已关、socket 拒绝）→ `failed errorClass=agent`；30 分钟没收口 → `failed errorClass=timeout`；取消作业 = 标 `cancelled`，之后该 jobId 的回写与收口都被拒（会话那边的活由用户自己叫停）；作业运行期间持屏锁（与云端作业同一条索引）；agent 通道固定 1 版。**会话列表**（`API-AGENT-010`）：读 Claude Code 登记处 `~/.claude/sessions/*.json`，只取 `kind=interactive`、`peerProtocol=1`、socket 250 ms 探活通过的，按最近活跃排序、列全机；有名字（`nameSource=user`）显示名字，派生名显示会话 UUID，另带目录名与 idle / busy。**选择跨会话记忆**，同通道选择一样不必每条重选；记住的会话已关闭时不自动换人，下拉回到「选择会话」、发送被挡并说明。agent 面板 = `runner=agent` 的作业列表（投递到谁、状态、收口摘要），靠**轮询** `API-CORE-029` 推进、不订阅作业事件流（各开一条会撞满浏览器同源 6 条的连接额度，见 §16 连接预算）。无头 `claude -p` / `codex exec` 拉起路径删除；派活队列、租约、长轮询领取仍不存在。**Codex（v0.68，`ADR-020`）**：通道「交给本机 Codex」（`input.runner = { kind:"agent", tool:"codex", sessionId: <线程 UUID> }`），会话下拉列 Codex 线程库 `$CODEX_HOME/state_5.sqlite`（只读）里用户自己开的线程（`thread_source=user`、来源为桌面版 / VS Code / 终端，排除无头 `exec`、子 agent 与审查线程，未归档，按最近活跃排序、取前 50），每项带标题、目录名、在哪个应用（桌面版 / VS Code / 终端）与「已打开 / 未打开」（`$CODEX_HOME/thread-writer-locks/<id>.lock` 此刻被某个进程占着即已打开，用 `lsof` 查；只看文件在不在会误判——Codex 进程被杀后锁文件会留下，实测）；投递 = 执行 `codex queue --thread <id> --message <提示词>`，线程在任何 Codex 窗口里打开着就由那个窗口取走执行（排在当前这一轮之后，不打断）；线程未打开时再执行 `open codex://threads/<id>` 让桌面版打开它（会把桌面版切到前台）、取走排队的消息；打开失败（只装了 CLI / VS Code 插件、没有桌面版）不算投递失败——消息已经在队列里，线程之后在哪个窗口打开就由哪个窗口执行：作业保持 `running`、照常 30 分钟计时，`delivery.opened=false` 并记 `openError`，助手消息与 agent 面板提示用户在 Codex 里打开这个线程（v0.79；此前标成「投递失败」，消息之后照样执行，回写与收口全被 `409 job-finished` 挡掉）；`output.delivery` 另记 `tool` 与 `opened`；收口、计时、屏锁、取消与 Claude Code 完全一致。只能投给已有线程：桌面版没有带提示词新开会话的入口。Codex 默认每次调 MCP 工具都要用户批准，要让投来的作业自己跑完，`[mcp_servers.quilt]` 须设 `default_tools_approval_mode = "approve"`（设置页与安装提示写明）；不设时由用户在 Codex 窗口里逐个批准 | 目标 ⑤ | P0 / M4 · M10 · v0.34 改写 · v0.87 补充 |
 | REQ-AGENT-004 | Deeplink 派活：零安装，把任务预填进本机 Claude Code / Codex（**v0.32 推迟**：本机直接拉起后无此需要） | 目标 ⑤ | 推迟 |
 | REQ-AGENT-005 | 本地伴侣进程 `quilt connect`（**v0.32 删除实现并推迟**：它解决的是「云端连不到本机」，本地版不存在这个问题；SaaS 阶段若需要再按 `ADR-009` 重做） | 目标 ⑤ | 推迟 |
@@ -583,15 +686,18 @@ erDiagram
   SCREEN ||--o{ SCREEN_REVISION : "revision tree"
   SCREEN_REVISION o|--o{ SCREEN_REVISION : "parent of"
   PROJECT o|--o| SCREEN : "exemplar"
-  SCREEN ||--o{ ANNOTATION : "marked up with"
   SCREEN ||--o{ LINK : "outgoing from"
   SCREEN o|--o{ LINK : "target of"
   MESSAGE o|--o| GENERATION_JOB : triggers
   GENERATION_JOB ||--o{ SCREEN_REVISION : produces
   GENERATION_JOB ||--o| USAGE_ENTRY : bills
+  USER ||--o{ RECORD_EVENT : records
+  GENERATION_JOB ||--o{ MODEL_CALL : "logged (no FK)"
   USER {
     uuid id PK
     string email
+    boolean record_usage
+    timestamptz record_since
   }
   CHANNEL {
     uuid id PK
@@ -736,10 +842,44 @@ erDiagram
     string driver
     string model
   }
+  RECORD_EVENT {
+    bigint id PK
+    uuid user_id FK
+    string source
+    string session_id
+    int seq
+    timestamptz at
+    string page
+    string type
+    string target
+    uuid project_id
+    uuid screen_id
+    jsonb data
+  }
+  MODEL_CALL {
+    uuid id PK
+    uuid job_id
+    uuid project_id
+    int seq
+    string purpose
+    string runner
+    string driver
+    string model
+    boolean ok
+    string error
+    int attempts
+    int tokens_in
+    int tokens_out
+    jsonb image_keys
+    string body_key
+    timestamptz started_at
+    timestamptz finished_at
+  }
 ```
 
-实体 ID：`ENT-User`（v0.32 起本地版恒为一行默认用户，`email=local@quilt.local`，启动时不存在则创建；保留这一层是为了 `owner_id` / `created_by` 在 SaaS 阶段直接可用）、`ENT-Project`、`ENT-DesignSystem`、`ENT-Screen`、`ENT-ScreenRevision`、`ENT-Annotation`（M6，元素批注：挂在某屏某个 `qid` 上的一条自然语言改动说明）、`ENT-Message`、`ENT-GenerationJob`、`ENT-Link`、`ENT-UsageEntry`、`ENT-Channel`（M7，用户自配的生成通道：类型、厂商、端点、加密后的密钥、模型、验证状态）、`ENT-Asset`（v0.35，项目素材：logo / 插图 / 模板等二进制资源，正文在对象存储，行里只记名字、类型、字节数与像素尺寸）、`ENT-DesignPreset` 与 `ENT-PresetAsset`（v0.40，账号级的设计预设及其素材副本：预设存的是设计系统的**输入**，套用时按当时的 token 引擎重算）、`ENT-Component`（v0.46，共享组件：项目级一段正式 HTML、名字项目内唯一、导航型的激活 / 未激活两套类、画布位置与乐观锁版本；哪些屏放着它由派生表 `component_uses(project_id, screen_id, name)` 记录——与 `links` 一样在 `deriveLinks` 时按每屏当前修订全量重算，不手工维护）。
+实体 ID：`ENT-User`（v0.32 起本地版恒为一行默认用户，`email=local@quilt.local`，启动时不存在则创建；保留这一层是为了 `owner_id` / `created_by` 在 SaaS 阶段直接可用）、`ENT-Project`、`ENT-DesignSystem`、`ENT-Screen`、`ENT-ScreenRevision`、`ENT-Message`、`ENT-GenerationJob`、`ENT-Link`、`ENT-UsageEntry`、`ENT-Channel`（M7，用户自配的生成通道：类型、厂商、端点、加密后的密钥、模型、验证状态）、`ENT-Asset`（v0.35，项目素材：logo / 插图 / 模板等二进制资源，正文在对象存储，行里只记名字、类型、字节数与像素尺寸）、`ENT-DesignPreset` 与 `ENT-PresetAsset`（v0.40，账号级的设计预设及其素材副本：预设存的是设计系统的**输入**，套用时按当时的 token 引擎重算）、`ENT-Component`（v0.46，共享组件：项目级一段正式 HTML、名字项目内唯一、导航型的激活 / 未激活两套类、画布位置与乐观锁版本；哪些屏放着它由派生表 `component_uses(project_id, screen_id, name)` 记录——与 `links` 一样在 `deriveLinks` 时按每屏当前修订全量重算，不手工维护）。
 v0.32 删除的实体：`ENT-AgentTask`、`ENT-OAuthGrant`、`ENT-OAuthClient`、`ENT-OAuthCode`、`ENT-DeviceToken`、magic link 与会话（都是鉴权与远程派活的机制，不是领域模型；SaaS 阶段按当时的方案重建，不保留空表）。
+v1.23 删除的实体：`ENT-Annotation`（元素批注；批注整体撤下，迁移 `0020` 删表）。
 字段权威定义见 §9。
 修订链为树（v0.31）：`SCREEN_REVISION.seq` 在同一屏内单调递增（创建时对屏行 `select … for update` 再取号，并行落候选不撞唯一键），`parent_revision_id` 记录它由哪一版派生（生成时的 current，首版为空），`SCREEN.current_revision_id` 指向当前版；同一作业为同一屏产出的多版是**候选**：同 `job_id`、`candidate_index` 0..N−1，`candidate_settled_at` 为空表示尚待采用；回溯 = 以旧版内容创建新修订（不改历史，见 `API-CORE-015`），采用候选 = 只改 current 指针、不建新修订（`API-CORE-025`）。
 `PROJECT.exemplar_screen_id` 是样板屏（不建外键，屏删除时由服务层清空并回落）。
@@ -750,6 +890,10 @@ HTML 与截图正文存对象存储，表内只存 key。**变体**（v0.62 `REQ
 草稿就是草稿本的屏，每改一轮是屏的一条修订；`SCREEN.frame` 记画框，只在草稿上有值。
 `SCREEN.ref_project_id` 是草稿的参照项目（外键，项目删除时置空，`ADR-033`）；`SCREEN.target_screen_id` / `target_qid` 是写回目标（不建外键，那一屏删了就当没有目标），三者都只在草稿上有值。
 草稿本照常有一行设计系统（按 `ADR-028` 开局），只为 prelude 提供 Tailwind、图标与基础字体，不进草稿的提示词；路由由服务端取 `/draft-<n>`，界面不显示。
+**本机使用记录**（v1.22 `REQ-CORE-047`，`ADR-035`）：`USER.record_usage` 是开关（缺省关），`record_since` 是最近一次打开的时间。
+`ENT-RecordEvent`（`record_events`）一行是一条事件：浏览器里的操作与输入（`source=web`）或外部 agent 的一次 MCP 工具调用（`source=mcp`）；`(session_id, seq)` 唯一，重发的批次靠它去重。
+`ENT-ModelCall`（`model_calls`）一行是作业里的一次模型调用，完整提示词与原始回复存在对象存储 `records/model-calls/<日期>/<id>.json`，行里只存 `body_key`。
+两张表都不对项目、屏、作业建外键：删了项目与作业，记录还在；归档放在对象存储 `records/archive/` 下，`storage.gc` 不扫 `records/`。
 
 ## 8. 接口契约 (API-first)
 
@@ -776,7 +920,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
   - v0.85（`REQ-CORE-037`）：请求增可选 `language`（`zh-CN` / `en`，缺省 `en`）；按预设开局时语言仍取请求值——语言属于项目，不属于设计系统，预设里没有它
   - 错误：`400 /errors/validation`
 - **`API-CORE-004` getProject** — 实现 `REQ-CORE-009`、`REQ-CORE-004`、`REQ-CORE-010`（v0.85 前风格指南卡片由响应中的 `designSystem` 在前端渲染；v0.85 起样例卡是 `API-CORE-045` 的文档，URL 随本响应下发）
-  - `GET /projects/{projectId}`；响应 `200 { project, designSystem, screens[] (含 currentRevision 摘要与截图 URL；v1.02 起另带缩略图地址 `thumbUrl`，还没生成时为 `null`), links[], activeJobs[], annotations[], assets[], components[] }`（`assets` 见 `REQ-CORE-019`，v0.35：风格指南卡片与设计系统面板共用这一份，不再各取各的；`components` 见 `API-EDIT-004`，v0.46：每项 `{ id, name, summary, html, slots[], nav, x, y, version, previewUrl, usedBy: screenId[] }`，`usedBy` 取自派生表 `component_uses`）
+  - `GET /projects/{projectId}`；响应 `200 { project, designSystem, screens[] (含 currentRevision 摘要与截图 URL；v1.02 起另带缩略图地址 `thumbUrl`，还没生成时为 `null`), links[], activeJobs[], assets[], components[] }`（`assets` 见 `REQ-CORE-019`，v0.35：风格指南卡片与设计系统面板共用这一份，不再各取各的；`components` 见 `API-EDIT-004`，v0.46：每项 `{ id, name, summary, html, slots[], nav, x, y, version, previewUrl, usedBy: screenId[] }`，`usedBy` 取自派生表 `component_uses`）
   - v0.85：`project` 增 `language`；`designSystem.tokens` 按 `ADR-025` 的扩展形状下发（旧行由启动回填补齐，见 §25）；`designSystem` 增 `specimenUrl`（样例卡概览视图的签名 URL，`API-CORE-045`，版本随设计系统 `version` 与组件版本变化）
   - 草稿本（`REQ-CORE-040`）：`project` 增 `kind`（`app` / `sketchbook`），`screens[]` 每项增 `frame`（非草稿为 `null`）；草稿本页用本接口取草稿、版本以外的全部数据
   - 草稿（`REQ-CORE-042`、`REQ-CORE-044`）：`screens[]` 每项另增 `refProjectId`、`targetScreenId`、`targetQid`，非草稿为 `null`；另有服务端派生的 `target { projectId, projectName, screenName }`，是写回目标那一屏所在的项目与屏名，草稿本页的「来自」与写回弹层的缺省值用它；那一屏已被删时 `targetScreenId` 还在、`target` 为 `null`
@@ -787,8 +931,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
     - `generate{ prompt, count?: 1|2|3|4|"auto" = 1, versions?: 1–4 = 1, anchor?: {x,y}, route?, fromScreenId?, runner?, imageKeys?, variantOf?, variantName?, presentation? }`（v0.31 三合一；v0.62 `variantOf + variantName` 二者同给 = 造变体：钉死默认屏的路由、`count` 按 1 算、跳过规划器、默认屏作参考屏，`variantOf` 不是本项目的默认屏 → `422 /errors/validation`（建作业时就查，v0.77；此前放在 worker 里判，先回 202、作业随后以英文原因失败，还短暂占着项目级 `generate` 锁）；v0.63 `presentation` 只在懒生成 / 造变体时生效，整组规划由规划器逐屏给）：`count` 为屏数档位——`1` 走单屏规划（`planOneScreen`，路由不得与现有撞车、`links` 只指向现有路由且以空为常态），`2–4` 与 `auto` 走整组规划（`auto` = 空项目 4–6 屏主流程 / 非空项目 2–6 屏子流程；规划器同时给出 `entryFrom`：既有哪一屏进入新组）；`route` 钉死时是懒生成（跳过规划器，`fromScreenId` 作来源屏参考）；`versions` = 每张新屏的候选版数；`anchor` 为画布世界坐标（一组屏按流程顺序自锚点向右排成一行，与既有屏相交则整行下移），缺省接在最右一屏右侧。
       空项目首轮且 `brief` 为空时规划器顺手扩写应用简介落库；样板屏为空时以本次第 1 屏钦定。
       按 `count × versions` 屏计费
-    - `edit_screens{ prompt, screenIds[1..20], versions?: 1–4 = 1, runner?, imageKeys?, componentIds?[0..10], annotations?[0..50] }`（`componentIds` 与 `generate` 同名字段，v0.46 `REQ-EDIT-006`：画布上一起框选的共享组件，它们的完整 HTML 进这一轮的上下文；目标屏本来就放着的组件不必列、服务端自己会附上。
-      `annotations: [{ anchorText, note }]`（v0.87）由 `API-EDIT-003` 发送批注时填，只用来把这一轮写进历史指令，不进本轮提示词——本轮的指令仍是 `prompt`，见 `ADR-012` v0.87 修订）；`regenerate_subtree{ screenId, qid, prompt, expectedRevisionId, runner?, imageKeys? }`（`runner` 同 `edit_screens`，v0.34；`kind:"agent"` 时该作业也投递到会话；`imageKeys` 见下「参考图」）；`apply_design_system{ screenIds[] | all }`；`propose_design_system{ instruction, screenId?, runner? }`（`REQ-EDIT-003`：输出 `output.proposal = { summary, conventions[], tokens?{ seedColor?, fontFamily?, radiusScale? }, regenerate }`，不改任何东西，由 `API-EDIT-002` 确认写入）；`export_prototype{}`
+    - `edit_screens{ prompt, screenIds[1..20], versions?: 1–4 = 1, runner?, imageKeys?, componentIds?[0..10] }`（`componentIds` 与 `generate` 同名字段，v0.46 `REQ-EDIT-006`：画布上一起框选的共享组件，它们的完整 HTML 进这一轮的上下文；目标屏本来就放着的组件不必列、服务端自己会附上。）；`regenerate_subtree{ screenId, qid, prompt, expectedRevisionId, runner?, imageKeys? }`（`runner` 同 `edit_screens`，v0.34；`kind:"agent"` 时该作业也投递到会话；`imageKeys` 见下「参考图」）；`apply_design_system{ screenIds[] | all }`；`propose_design_system{ instruction, screenId?, runner? }`（`REQ-EDIT-003`：输出 `output.proposal = { summary, conventions[], tokens?{ seedColor?, fontFamily?, radiusScale? }, regenerate }`，不改任何东西，由 `API-EDIT-002` 确认写入）；`export_prototype{}`
     - `chat{ prompt, screenIds?[0..20], runner?, imageKeys? }`（v0.45 `REQ-CORE-023`）：`screenIds` 是「用户此刻选中的屏」这一条上下文提示，不是目标锁；`runner` 必须解析为 `agent-sdk` 通道（缺省取第一条已验证的 `agent-sdk` 通道），否则 `400 /errors/validation`（`path: runner`）；项目级同时只有一个 `chat` 在跑，撞上 `409 /errors/screen-busy`；成功时 `output.reply` = 助手最后一段文字、`output.screenIds` = 本作业名下修订所在屏
     - `edit_component{ componentId, prompt, runner?, imageKeys? }`（v0.46 `REQ-EDIT-006`）：改一个共享组件——worker 用 `componentSystemPrompt`（只产出组件自己的单根元素；保留 `data-slot`；导航型标恰好一条 `aria-current="page"`）+ `componentUserPrompt`（当前 HTML + 用在哪几屏 + 这个组件的历史指令，v0.87 `ADR-012`）调**一次**模型，校验（单根、无 `<script>` / `<style>`、不套组件）→ 重算 `activeClass` / `inactiveClass` 与 `summary` → 组件 `version+1` → 对所有放着它的屏做确定性回刷（`progress{ stage:"component_synced", screens: N }`，逐屏 `screen_html_ready` + 截图；有在跑作业的屏跳过并点名）；`estimateJob` = 1 次调用（超时 3 + 1 分钟）；成功时 `output.screenIds` = 回刷到的屏、`output.componentId`；一次一个组件；模型产出不合法 → `failed errorClass=validation`，组件不变。
       `runner.kind=agent`（v0.99）时不调模型：投递到本机会话，由会话经 `quilt.update_component { jobId }` 写回，回刷同一条路，收口见 `REQ-AGENT-003`
@@ -796,7 +939,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
   - `regenerate_subtree.screenId` 不属于建作业的项目同样 `404 /errors/not-found`：草稿本里的「只改一块」靠这一条保证目标是草稿（`REQ-CORE-045`）
   - 参考图（v1.21 `REQ-CORE-045`）：`attachmentIds` 是 `API-CORE-019` 传完图拿到的 id，至多 4 个，服务端按 `API-CORE-010` 同一套解析成 `input.imageKeys`，也挂在这一轮的用户消息上；有 id 取不到正文（没传完或已过期）→ `400 /errors/validation`（`path: attachmentIds`）；这种作业的输入没有 `imageKeys`（`apply_design_system`、`propose_design_system`、`export_prototype`、`ingest_screen`）→ 同样的 `400`。
     `regenerate_subtree` 带图时，图跟这一块的那一次模型调用走，参考图说明与改整张相同：草稿本里可以照着取色，普通项目只取版式与密度、颜色仍用设计系统的 token。
-  - 界面语言（v1.20 `REQ-CORE-046`）：带 `X-Quilt-Locale` 的请求建作业时，服务端把它记进 `input.locale`，每种作业都记，worker 写进助手消息的回执、进度与失败文案按它（发消息 `API-CORE-010`、重试 `API-CORE-034`、批注发送 `API-EDIT-003`、写回改写 `API-CORE-047` 都经同一处建作业）。
+  - 界面语言（v1.20 `REQ-CORE-046`）：带 `X-Quilt-Locale` 的请求建作业时，服务端把它记进 `input.locale`，每种作业都记，worker 写进助手消息的回执、进度与失败文案按它（发消息 `API-CORE-010`、重试 `API-CORE-034`、写回改写 `API-CORE-047` 都经同一处建作业）。
     请求没带这个头时作业不记 `input.locale`：请求体里自带的 `locale` 不认，重试以重试请求的头为准，不沿用旧作业的值。
     `generate` / `edit_screens` / `edit_component` / `regenerate_subtree` 这四种写屏上文字的作业还据此给提示词加语言要求，草稿本的新稿与改稿也是这几种：worker 给它们的每次模型调用在系统提示末尾加一句「请求里没有明确要求语言时，屏上所有可见文字用 English / Simplified Chinese」，并写明它优先于提示词里「跟着请求的语言写」的规则；投递到本机会话的指令末尾加同一句。
     不带这个头建的作业（MCP、脚本）不加这一句，文案语言照旧跟着提示词。
@@ -832,7 +975,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
     `frame=auto` 时提示词要求模型在根元素上写 `data-frame="component|mobile|desktop"`，第一版落库时据此写 `screens.frame`，缺失或取值不认识按 `component`；用户选定了画框时提示词直接给定，`screens.frame` 建屏时就写好。
     截图按画框：`mobile` / `desktop` 用对应视口拍首屏，`component` 在 1280×800 视口里拍根元素的框（同样 DPR 2，缩略图照常生成）。
     草稿有参照项目时（`REQ-CORE-042`，`ADR-033`）：提示词改带该项目的 DESIGN.md、token 类、组件配方与路由表（链接可写它的路由），落库时按它的 prelude 拼装；参照项目被删后退回自由风格。
-    只改一块（`REQ-CORE-045`）：草稿本里同样受理 `regenerate_subtree`（`API-CORE-006`，目标是草稿、`qid` 是点选的元素），提示词换成草稿规则与参照项目，落库不做 lint；批注发出的是 `edit_screens`（`API-EDIT-003`），同上。
+    只改一块（`REQ-CORE-045`）：草稿本里同样受理 `regenerate_subtree`（`API-CORE-006`，目标是草稿、`qid` 是点选的元素），提示词换成草稿规则与参照项目，落库不做 lint。
     `runner.kind=agent` 时照常投递到会话，提示词换成草稿规则：新草稿用带 `jobId` 的 `quilt.create_screen` 写进草稿本（`route` 可省），改草稿用带 `jobId` 与 `expectedRevisionId` 的 `quilt.patch_screen` / `quilt.update_screen`，不读设计契约。
   - 错误：同 `API-CORE-006`
 - **`API-CORE-019` createAttachmentUpload** — 实现 `REQ-CORE-012`
@@ -910,6 +1053,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
   - 按节截图（P3）：作业 `kind=capture_specimen`（`API-CORE-006`，`input { widths?: [390,1440], modes?: ["light","dark"], contrast?: boolean }`），产出 `output { shots:[{ section, width, mode, media, key, url }], environment:{ os, browser, fonts:{ <section>: string[] } } }`；截图固定 DPR 2，`fonts` 由 CDP `CSS.getPlatformFontsForNode` 按节读出；不计模型额度
 - **`API-CORE-017` getUsage** — 实现 `REQ-CORE-008`：`GET /me/usage`；响应 `{ month, screens, tokensIn, tokensOut, byDriver:[{ driver, model, screens, tokensIn, tokensOut }], inflight:{ calls, screens } }`——`inflight` 由 queued / running 作业的 payload 按 `estimateJob` 派生（`runner=agent` 的作业计 0），不落库；v0.32 起无 `quota`、不拦截；`no-store`
 - **`API-CORE-018` deleteScreen** — 实现 `REQ-CORE-004`：`DELETE /screens/{screenId}`；`204`；进行中作业占用时 `409 /errors/screen-busy`；删除后重新派生应用地图
+  - 使用记录开着时（v1.22 `ADR-035`）先归档再删：这一屏（含变体）的行、全部修订行写成清单，连同修订 HTML、截图拷到 `records/archive/<日期>/screen-<id>/`；草稿本里新草稿失败或取消后自动删掉的空草稿同样归档；拷贝失败不挡删除，服务日志记一行
 
 - **`API-CORE-030` projectEvents** — 实现 `REQ-CORE-005` / `REQ-AGENT-003`（v0.34）：`GET /projects/{projectId}/events`，SSE。
   事件 `screen_changed { screenId, revisionId, jobId?, screenshot? }`（MCP 回写落修订、截图就绪）与 `job_changed { jobId, type, seq, data? }`（任何作业事件的项目级投影，含别处建的作业与投递到本机会话的作业；`data` 是 `API-CORE-008` 同名事件负载的**裁剪版**，只留画布要用的字段——`progress{stage,attempt,step}`（`step` 是 `kind=chat` 作业每调一次工具的一句话进度，v0.45）、`screen_planned{name}`、`screen_html_ready{screenId,revisionId,lintPassed}`、`screen_screenshot_ready{screenId}`、终态 `{errorClass,message,screenIds}`；`succeeded` 原始负载带全量屏 DTO，直接透传会超出 `pg_notify` 的 8000 字节上限，所以只送屏 id，要完整产出的场景（如设计系统提案）由画布另取 `API-CORE-007`。
@@ -918,10 +1062,11 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
   断线（v0.76）：网络错误时 EventSource 自己重连；代理在 API 重启期间回 `502` 这类非 200 响应会让 EventSource 永久关闭（规范行为），画布见 `readyState=CLOSED` 就按 1 / 2 / 5 / 10 / 30 s 退避自己重建，连续 20 次失败后停下、顶栏给「重连」；**除第一次外每次 `open` 都重取 `API-CORE-004` 与消息列表**，补上断线期间丢掉的变化（事件不续传）；断开超过 3 s 时顶栏写「实时更新已断开 · 重连中」，恢复即撤；**假死**（v0.88）：经 Vite 代理时 API 重启（`kill -9` 或崩溃），代理不关浏览器这一侧，EventSource 一直停在 `open`、再也收不到任何事件（连 `ping` 都没有），画布据此看不出断线——画布 35 s（两个 `ping` 加余量）里什么都没收到就关掉这条流重建，按断线处理（重取详情与消息）；项目不存在（详情 `404`，含加载后被删）时画布不连、已开的关掉，也就不写这一句（v0.83）。
   实现：`pg_notify('quilt_project_events')`，与作业事件同一套 LISTEN 基建；服务端这一侧的 LISTEN 连接断了会自己重连，重连后推 `screen_changed{reason:"reconnected"}`（v0.79，见 §16 一致性承诺）
   - **不落修订的写入也发**（v0.77）：此前只有回写落修订、截图就绪与作业事件会通知，经 MCP 或另一个标签页删屏、挪屏、改项目名，已打开的画布一直留着旧样子（删掉的屏还能被选中、当成目标发出去）。
-    服务端在每条会改变画布所见的写路径上发一条 `screen_changed { reason, screenId?, revisionId? }`——复用这个类型是因为画布对它的处理就是防抖后整体重取，`reason` 只供排障与将来细分：`deleted`（删屏）、`updated`（改屏的位置 / 名字 / 路由 / 呈现方式，含 MCP `move_screens` / `link_screens`）、`revision`（回溯、元素直改、采用候选；落在单屏上的带 `screenId` / `revisionId`，整组采用只带 `reason`）、`project`（改名 / 简介 / 样板屏）、`design_system`（改设计系统、套预设）、`components`（建 / 改 / 挪 / 删组件）、`annotations`（建 / 改 / 删批注；发送建出的作业走 `job_changed`）、`assets`（增删素材）
+    服务端在每条会改变画布所见的写路径上发一条 `screen_changed { reason, screenId?, revisionId? }`——复用这个类型是因为画布对它的处理就是防抖后整体重取，`reason` 只供排障与将来细分：`deleted`（删屏）、`updated`（改屏的位置 / 名字 / 路由 / 呈现方式，含 MCP `move_screens` / `link_screens`）、`revision`（回溯、元素直改、采用候选；落在单屏上的带 `screenId` / `revisionId`，整组采用只带 `reason`）、`project`（改名 / 简介 / 样板屏）、`design_system`（改设计系统、套预设）、`components`（建 / 改 / 挪 / 删组件）、`assets`（增删素材）
   - **项目被删**：删完发 `screen_changed { reason: "project_deleted" }`，事件流写完这一条就结束；EventSource 随后重连拿到 `404`、不再重连，画布重取详情得 `404`，由画布的加载错误态接手（v0.77；此前流一直开着、只有 15 s 一次的 ping，其他标签页停在已删除的项目上，之后每个操作都 404）
   - 草稿本（`REQ-CORE-040`）：`job_changed` 的 `screen_planned` 裁剪版另带 `screenId`，草稿本页据此把本页发出的新草稿摆上看板；本机会话写出的新草稿靠带同一 `jobId` 的 `screen_changed` 认领
-- **`API-CORE-031` deleteProject** — 实现 `REQ-CORE-002`（v0.34）：`DELETE /projects/{projectId}`；行级联删掉屏 / 修订 / 作业 / 消息 / 连线 / 批注 / 设计系统，对象存储按前缀 `projects/{id}/` 清掉修订 HTML、截图与导出；有 `queued` / `running` 作业时 `409 /errors/project-busy`（worker 还在往里写）；删完给还开着这个项目的画布发 `project_deleted` 并关掉它们的事件流（`API-CORE-030`，v0.77）；响应 `204`
+- **`API-CORE-031` deleteProject** — 实现 `REQ-CORE-002`（v0.34）：`DELETE /projects/{projectId}`；行级联删掉屏 / 修订 / 作业 / 消息 / 连线 / 设计系统，对象存储按前缀 `projects/{id}/` 清掉修订 HTML、截图与导出；有 `queued` / `running` 作业时 `409 /errors/project-busy`（worker 还在往里写）；删完给还开着这个项目的画布发 `project_deleted` 并关掉它们的事件流（`API-CORE-030`，v0.77）；响应 `204`
+  - 使用记录开着时（v1.22 `ADR-035`）先归档再删：项目、设计系统、屏、修订、消息、作业与作业事件、组件、素材的行写成清单，连同 `projects/{id}/` 下的全部对象拷到 `records/archive/<日期>/project-<id>/`；拷贝失败不挡删除，服务日志记一行
 
 - **`API-CORE-046` getSketchbook** — 实现 `REQ-CORE-040`（Owner 2026-10-20 签字，`ADR-030`）
   - `GET /sketchbook`；响应 `200 { projectId }`；`no-store`
@@ -954,6 +1099,24 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
   - 来源屏里的共享组件实例原样带进草稿；草稿本没有这些组件，它们在草稿里就是普通 HTML，写回时由目标项目的组件正式版展开盖回（`ADR-032`）
   - 不占来源屏的屏锁：来源屏之后被改，草稿不受影响；写回时由 `expectedRevisionId` 挡住覆盖掉别人的新改动
   - 错误：`404 /errors/not-found`（来源屏不存在或不属于本人、在草稿本里）、`404 /errors/element-not-found`、`400 /errors/validation`（来源屏还没有内容）
+- **`API-CORE-049` getRecording** — 实现 `REQ-CORE-047`（`ADR-035`）
+  - `GET /record`；响应 `200 { enabled, since, events, modelCalls, archived, bytes, dir }`；`no-store`
+  - `since` 是最近一次打开的时间，没开过为 `null`；三个计数是全部已记的条数，关掉后不清零
+  - `bytes` 是对象存储 `records/` 前缀的合计字节；`dir` 是它在本机的绝对路径，对象存储不是本地 fs 时为 `null`
+  - 错误：`403 /errors/forbidden`（来源校验，同全部 `/v1/*`）
+- **`API-CORE-050` updateRecording** — 实现 `REQ-CORE-047`
+  - `PATCH /record`，请求 `{ enabled: boolean }`；响应 `200`，体同 `API-CORE-049`
+  - 从关到开时 `since` 置为当前时间；关掉或重复设同一个值不改 `since`；打开与关掉各写一条 `type=record` 的事件（关掉那条是最后一条）
+  - 改完的那个标签页当场开始或停止采集；别的标签页每 60 s 重取一次开关，期间发来的批次由服务端按开关丢弃
+  - 错误：`400 /errors/validation`（`enabled` 不是布尔）、`403 /errors/forbidden`
+- **`API-CORE-051` recordEvents** — 实现 `REQ-CORE-047`
+  - `POST /record/events`，请求 `{ sessionId, events: [{ seq, at, page, path?, type, target?, projectId?, screenId?, data? }] }`；1–200 条，单条序列化后 ≤ 16 KB；响应 `204`
+  - 开关关着时整批丢弃，照样 `204`（`INV-CORE-007`）；开着时整批写进 `record_events`，服务端补 `source=web` 与 `user_id`，`at` 用浏览器给的
+  - `(session_id, seq)` 撞了的行跳过：浏览器重发同一批不会写两遍，所以不要 `Idempotency-Key`
+  - `type` 与各类型的 `data` 见 §9；`sessionId` 每打开一次页面一个，`seq` 在这个页面里从 1 递增
+  - 浏览器端攒满 50 条或过 5 s 发一次，页面隐藏或关闭时用 `keepalive` 发出剩下的；发失败的留在缓冲里下次再发，缓冲最多 2000 条，再多丢最旧的
+  - 错误：`400 /errors/validation`（条数、单条大小、`type` 不在枚举里）、`403 /errors/forbidden`
+
 ### PROTO（M2）
 
 - **`API-CORE-032` assets** — 实现 `REQ-CORE-019`（v0.35）
@@ -990,16 +1153,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
     校验：字阶 `key` 须匹配 `^[a-z][a-z0-9-]{0,23}$` 且不重复、至少 1 档至多 16 档，`size` 8–128 px、`lineHeight` ≥ `size`，`weight` 须在 `typography.weights` 集合里；`state` 各透明度 0–1；`notUsed` 只收 §9 列出的词；不合法 → `400 /errors/validation`（`path` 指到具体字段，如 `tokenExt.typography.scale.3.lineHeight`）
   - 错误：`409 /errors/version-conflict`、`400 /errors/validation`
 
-- **`API-EDIT-003` annotations** — 实现 `REQ-EDIT-004`
-  - `GET /screens/{screenId}/annotations` → `200 { items:[{ id, qid, note, status:"open"|"sent"|"resolved", anchorText, createdAt, sentJobId? }] }`（按创建时间升序，编号即序号）
-  - `POST /screens/{screenId}/annotations`，请求 `{ qid, note, anchorText, rect:{x,y,w,h} }`（`anchorText` 为批注时元素的可见文案片段，qid 失效后仍能告诉用户当初批的是哪儿；`rect` 为屏文档坐标，父页据此在画布层画气泡，见 ADR-003）→ `201 { annotation }`；不消耗额度
-  - `PATCH /annotations/{id}`，请求 `{ note?, status? }` → `200 { annotation }`；`DELETE /annotations/{id}` → `204`
-  - `POST /projects/{projectId}/annotations/send`，请求 `{ annotationIds[] }` → `202 { jobs[] }`：服务端按 `screen_id` 分组，**每屏合成一条 `edit_screens` 作业**（指令 = 固定前缀 + 逐条「元素 `qid`（原文案「…」）：<note>」；v0.87：作业输入另存 `annotations: [{ anchorText, note }]`，这一轮据此以「批注：「锚点文字」→ 说明」进这屏的历史指令，不带会失效的 qid，见 `ADR-012` v0.87 修订），把这些批注置为 `sent` 并记 `sentJobId`；作业成功后置 `resolved`，失败回落 `open`。
-    每屏计一次费，与手写整屏指令同价。**全有或全无**（v0.77）：建任何作业之前先对全部目标屏查屏锁、查限流余量够不够 N 次，不满足就整体 `409 /errors/screen-busy` / `429 /errors/rate-limited`、一个作业也不建；N 超过每分钟上限（10）时等多久都凑不够，直接 `422 /errors/validation`（`path: annotationIds`，数量超限，让调用方分批发）；预检之后仍在中途失败（与别的请求撞上）时，取消已建的作业（批注随之回到 `open`）再返回那个错误——此前每屏各建各的，前几屏的作业已入队、批注已置 `sent`，响应却是 409 / 429 且不带这些作业，agent 按失败重发同一组 id，已发出的那几屏会被改两次。
-    画布一次只发一屏，问题出在 MCP 多屏发送
-  - 错误：`404 /errors/not-found`、`409 /errors/screen-busy`、`409 /errors/component-locked`（v0.46：`qid` 在共享组件实例里——批注会随整屏指令交给模型，而模型改的副本下次写入就被盖回去，所以在挂批注这一刻拒掉、面板提示去改组件）、`422 /errors/validation`（`note` 空或超长、`annotationIds` 为空或跨项目）
-  - qid 失效（元素在此期间被删除或重生成）不阻塞发送：该条批注照常进指令，由模型按 `anchorText` 自行定位；若模型判断已不存在则忽略
-  - 草稿（`REQ-CORE-045`）：草稿本里的屏同样挂批注、同样发送，建出的 `edit_screens` 走草稿本规则（`API-CORE-010`）；`rect` 是草稿文档坐标，草稿本页把气泡画在看板上
+- **`API-EDIT-003` annotations** — 已删除（v1.23，`REQ-EDIT-004` 废弃）：批注的读写与发送接口、MCP 的 4 个批注工具一并删除，`annotations` 表由迁移 `0020` 删掉；这几个路径回 `404 /errors/not-found`
 - **`API-EDIT-004` components** — 实现 `REQ-EDIT-006`（v0.46）
   - `POST /projects/{projectId}/components`，两种请求体：**提取** `{ name, fromScreenId, qid, applyToScreens?: true }`——取该元素去 `qid` 的 outerHTML 做正式 HTML（元素在别的组件里、或自己包着组件 → `400 /errors/validation`）；导航型判定：≥ 2 条 `/` 开头的链接且能认出激活项（带 `aria-current="page"` 或 `href` 等于本屏路由）时，激活项独有的类 = `activeClass`、其余链接共有而它没有的 = `inactiveClass`，正式 HTML 里给激活项标 `aria-current`（两者都空 = 非导航型，`nav=false`）；来源屏当场换成实例并展开 → 新修订 `component`；`applyToScreens` 时对其他每一屏找「对应元素」：同标签、同深度（离 body 根的层数）、不在组件里——唯一候选直接取，多个按类名 Jaccard 相似度取最高且 ≥ 0.3；找到就换成占位再展开 → 该屏新修订；找不到、或该屏有在跑作业 → 跳过并点名。**直建** `{ name, html }`（MCP / 工具栏「新建组件」的空组件）：`html` 须单根、无 `<script>` / `<style>`、不套组件、≤ 64 KB。
     `name`：`^[\p{L}\p{N}][\p{L}\p{N} _-]{0,39}$`，项目内唯一；每项目 ≤ 30 个。
@@ -1020,6 +1174,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
 - **`API-AGENT-002` mcp** — 实现 `REQ-AGENT-001`、`REQ-AGENT-002`
   - `POST /mcp`（MCP Streamable HTTP，协议版本 `2025-06-18` 主 + `2026-07-28` 分支）；无鉴权（v0.32）；来源校验同 §8（v0.75：`Host` 不是本机地址、或带了不在名单里的 `Origin` 即 `403`，transport 另开 SDK 的 `enableDnsRebindingProtection`，名单同一份）。
     接入方式：`claude mcp add --transport http quilt http://127.0.0.1:3100/mcp`，Codex 为 `codex mcp add quilt --url http://127.0.0.1:3100/mcp`（v0.68；Codex 线程在打开时加载 MCP 配置，接入后新开或重开线程；让投来的作业不必逐个批准要在 `[mcp_servers.quilt]` 下设 `default_tools_approval_mode = "approve"`；两条命令都在设置弹层「生成通道」一节可复制）。
+    使用记录开着时（v1.22 `REQ-CORE-047`）每次工具调用写一条 `record_events`（`source=mcp`、`type=tool`、`target`=工具名），`data` 带参数、成败、错误类型与耗时；参数里超过 2000 字的字符串只记长度
     工具、资源、提示词均为服务层投影，与 REST 同源：
 
 | MCP 工具 | 层 | 投影到 | 说明 |
@@ -1031,7 +1186,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
 | `quilt.edit_screens` | 高层 | `API-CORE-006 kind=edit_screens` | v0.51 补齐 `runner` / `attachmentIds` / `componentIds`，校验同 `generate_screens` |
 | `quilt.list_revisions` | 高层 | `API-CORE-013` | 含候选标记（`candidateIndex`），agent 不会在第 1 版上继续改而把其余候选变成孤儿 |
 | `quilt.get_job` | 高层 | `API-CORE-007` | |
-| `quilt.get_project` | 高层 | `API-CORE-004` 的 agent 投影 | v0.65 起为紧凑投影：`project`（id / name / deviceType / brief / exemplarScreenId；v0.85 加 language）、`designSystem`（version / seedColor / colorMode）、`screens[]`（id / name / route / currentRevisionId / presentation / variantOf? / variantName? / deviations / pendingCandidates? / danglingLinks? / x / y）、`components[]`（id / name / version / nav / usedBy / x / y）、`activeJobs[]`（id / kind / status / runner）、`openAnnotations`；不带签名 URL、链接、素材与 DESIGN.md（分别见 `get_app_map`、`get_design_contract`） |
+| `quilt.get_project` | 高层 | `API-CORE-004` 的 agent 投影 | v0.65 起为紧凑投影：`project`（id / name / deviceType / brief / exemplarScreenId；v0.85 加 language）、`designSystem`（version / seedColor / colorMode）、`screens[]`（id / name / route / currentRevisionId / presentation / variantOf? / variantName? / deviations / pendingCandidates? / danglingLinks? / x / y）、`components[]`（id / name / version / nav / usedBy / x / y）、`activeJobs[]`（id / kind / status / runner）；不带签名 URL、链接、素材与 DESIGN.md（分别见 `get_app_map`、`get_design_contract`） |
 | `quilt.get_screen` | 高层 | `API-CORE-014` | 返回当前修订的 body（带 data-qid，不含 prelude——v0.64 起；prelude 每次写入由服务端重拼，agent 回写只需 body） |
 | `quilt.patch_screen` | 底层 | 服务层 `ingestScreen`（同 `update_screen`） | v0.64。`{ screenId, expectedRevisionId, edits:[{ find, replace, all? }] (1–50), jobId? }`：在当前 body 上按原文锚点依次替换，只传改动——整屏重发会让单条模型响应长到流式中断。入参不合 schema（条数、长度）是 MCP 协议层参数错误（-32602）；`find` 按字面匹配（含 data-qid 属性原文），找不到或匹配多处且未给 `all` 时 `422 /errors/validation`，`errors[].path = edits.<i>.find` 并带匹配数，整批不落库；`409 /errors/revision-conflict` / `screen-busy` 同 `update_screen`；返回同 `update_screen`（`screenId` / `revisionId` / `lintReport`） |
 | `quilt.get_screenshot` | 高层 | `API-CORE-014` | 直接返回 image content block，不返回 URL |
@@ -1058,7 +1213,6 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
 | `quilt.list_jobs` / `quilt.cancel_job` / `quilt.get_job_events` | 高层 | `API-CORE-029` / `API-CORE-009` / `API-CORE-008` | v0.51。`get_job_events { jobId, after? }` 是拉取式：返回 `seq > after` 的事件列表，不是 SSE |
 | `quilt.list_assets` / `quilt.create_asset` / `quilt.delete_asset` | 底层 | `API-CORE-032` | v0.51。`create_asset { projectId, path, name? }` 读**服务端本机**的文件（MCP 与 Quilt 同机是本地版前提，`ADR-016`）——不走 multipart 也不收 base64，几百 KB 的 logo 经模型回显 base64 是浪费；`name` 缺省取文件名；类型仍按魔数认定、大小与数量上限同 REST，文件不存在 `404 /errors/not-found`；v1.06 起读之前先 `stat`：不是普通文件（目录、设备、`/dev/zero`、管道）或超过 5 MB 直接 `400 /errors/validation`，不打开它（`ADR-016` v1.06 修订） |
 | `quilt.list_design_presets` / `quilt.create_design_preset` / `quilt.apply_design_preset` / `quilt.delete_design_preset` | 高层 | `API-CORE-033` | v0.51。`apply_design_preset { projectId, presetId, expectedVersion, applyToScreens? }`，`applyToScreens=true` 时顺带发回刷作业并返回 `job`（同 `update_design_system`） |
-| `quilt.list_annotations` / `quilt.update_annotation` / `quilt.delete_annotation` / `quilt.send_annotations` | 底层 | `API-EDIT-003` | v0.51。`list` 给 `screenId` 列该屏全部状态的批注、只给 `projectId` 列项目内未处理的（`open` + `sent`）；**不提供建批注**——气泡 `rect` 要在画布里量，agent 给不出 |
 | `quilt.list_messages` | 高层 | `API-CORE-011` | v0.51。游标分页，同 REST DTO；`cursor` 须是上一页的 `nextCursor`（ISO 时间），不合格是协议层参数错误（v0.77，此前 500） |
 | `quilt.get_sketchbook` / `quilt.copy_draft` / `quilt.create_draft` | 高层 | `API-CORE-046` / `API-CORE-047` / `API-CORE-048` | 草稿本（`REQ-CORE-040`、`REQ-CORE-041`）。`get_sketchbook {}` → `{ projectId }`，之后用 `get_project`、`generate_screens`、`edit_screens` 读写草稿，校验同 `API-CORE-010` 的草稿本规则（`generate_screens` 可带 `frame`）；`quilt.list_projects` 不列草稿本。`copy_draft { screenId, projectId, as, targetScreenId?, qid?, expectedRevisionId?, name?, restyle?, runner? }` 同 REST（`targetScreenId` 对应 REST 的 `screenId`：MCP 里 `screenId` 已是草稿）；`create_draft { fromScreenId, qid? }` 同 REST。目标是草稿本时 `quilt.create_screen` 的 `route` 可省（服务端取 `/draft-<n>`），画框按根元素的 `data-frame` 定，不做设计契约 lint；同一个造草稿作业只能写出一张草稿，带同一 `jobId` 第二次 `create_screen` 返回 `400 /errors/validation`（`INV-CORE-003`） |
 
@@ -1152,7 +1306,6 @@ FE 请求超时：普通 15 s，通道验证（`API-CORE-022`）100 s（v0.69：
 | 通道状态 | `status` | `status` | enum | 是 | `unverified` / `verified` / `failed`（记录型，改端点 / 模型 / 密钥即回 `unverified`） | `unverified` | 否 |
 | 最近探测 | `lastProbeAt` / `lastError` | `last_probe_at` / `last_error` | timestamptz / text | 否 | 探测结果；`lastError` 截断 200 字符、不含请求体 | — | 否 |
 | 作业类型 | `kind` | `kind` | enum | 是 | `generate`（v0.31 三合一：整组 / 单屏 / 懒生成）/ `edit_screens` / `regenerate_subtree` / `apply_design_system` / `propose_design_system` / `export_prototype` / `ingest_screen` / `chat`（v0.45）/ `edit_component`（v0.46）/ `capture_specimen`（v0.85 登记，P3：样例页按节截图，`API-CORE-045`，不调模型）；历史行里的 `generate_screens` / `generate_screen` / `generate_missing_screen` 只读保留 | — | 否 |
-| 批注原话 | `input.annotations` | `input->'annotations'` | jsonb | 否 | 只在批注发出的 `edit_screens` 作业里有（v0.87）：`[{anchorText, note}]`，取发送那一刻的批注行（锚点 ≤ 200、说明 ≤ 2000 字符），≤ 50 条；只供历史指令用（`ADR-012` v0.87 修订），批注之后被改或删不影响它 | — | 否 |
 | 界面语言 | `input.locale` | `input->>'locale'` | enum | 否 | `zh` / `en`（v1.20 `REQ-CORE-046`）：只在带 `X-Quilt-Locale` 的请求建的作业里有（每种作业都记），取自那个请求头，不看请求体；服务端写进助手消息的回执、进度与失败文案按它，没有时中文；`generate` / `edit_screens` / `edit_component` / `regenerate_subtree` 还据此给提示词加语言要求（`API-CORE-006`） | — | 否 |
 | 作业执行者 | `runner` | `runner` | enum | 是 | `model`（worker 跑云端 / 自建通道）/ `agent`（投递到本机 Claude Code 会话，不入队列） | `model` | 否 |
 | 作业状态 | `status` | `status` | enum | 是 | `queued` / `running` / `succeeded` / `failed` / `cancelled`（状态机见 §11） | — | 否 |
@@ -1164,6 +1317,16 @@ FE 请求超时：普通 15 s，通道验证（`API-CORE-022`）100 s（v0.69：
 | 用量 | `tokensIn` / `tokensOut` / `screens` / `driver` / `model` | 同名 snake | int / int / int / text / text | 是 | 只增；按作业一条；本地版无上限 | token / 屏 | 否 |
 | 缓存读写 | —（只在库里，v1.05） | `cache_read_tokens` / `cache_write_tokens` | int / int | 是 | 这一作业各次调用里读缓存、写缓存的输入 token 合计，已含在 `tokens_in` 里；Anthropic 与订阅驱动按响应的 `usage` 填，其余驱动记 0（`ADR-012` v1.05 修订） | `0` | 否 |
 | 运行时配置 | `previewOrigin` / `version` / `local` / `home` / `secretsConfigured` | —（`API-CORE-028`，不落库） | string / string / bool / string / bool | 是 | `home` = `$QUILT_HOME`（默认 `~/.quilt`）；`secretsConfigured`（v0.78）= 配了 `QUILT_SECRETS_KEY` | — | 否 |
+| 记录开关 | `enabled` | `users.record_usage` | boolean | 是 | 缺省 `false`（v1.22 `REQ-CORE-047`）；开着时才写事件、模型调用与归档 | — | 否 |
+| 记录起点 | `since` | `users.record_since` | timestamptz | 否 | 最近一次从关到开的时间；没开过为空 | — | 否 |
+| 记录来源 | — | `record_events.source` | enum | 是 | `web`（浏览器发来的事件）/ `mcp`（服务端记的工具调用） | — | 否 |
+| 页面会话 | `sessionId` | `record_events.session_id` | string | 是 | 浏览器每打开一次页面生成一个 uuid；MCP 无状态、没有会话，取这次 HTTP 请求的 `requestId`；与 `seq` 合起来唯一 | — | 否 |
+| 事件类型 | `type` | `record_events.type` | enum | 是 | `view` 进入页面或换路由 / `click` 按下可点的元素 / `key` 快捷键 / `input` 文本框内容快照 / `change` 下拉、单选、开关取值 / `attach` 参考图加删与上传结果 / `drag` 拖完（停靠、摆放、框选、面板宽度） / `viewport` 画布平移缩放停下 / `select` 画布选中变化 / `preview` 屏与草稿里的点选和跳转 / `toast` 出现的提示条 / `job` 界面上作业出现与结束 / `record` 开关开关 / `tool` MCP 工具调用 | — | 否 |
+| 事件目标 | `target` | `record_events.target` | string | 否 | 元素的 `data-testid`，没有取 `aria-label`，再没有取「标签名:可见文字前 40 字」；`tool` 是工具名 | — | 否 |
+| 事件附加 | `data` | `record_events.data` | jsonb | 否 | 按类型：`input` 是文本框全文（停 1.5 s、失焦、发送时各一次）；`key` 是键名与修饰键；`viewport` 是镜头位置与倍率；`tool` 是参数、成败与耗时；超过 2000 字的字符串只记长度；密码框与通道密钥框的值不记（`INV-CORE-006`） | — | **是** |
+| 调用用途 | — | `model_calls.purpose` | enum | 是 | `plan` 规划 / `screen` 出屏或新草稿 / `edit` 改屏 / `subtree` 改一块 / `component` 改组件 / `propose` 提炼约定 / `chat` 聊天 / `warmup` 预热 / `agent` 投递给本机会话的指令 | — | 否 |
+| 调用结果 | — | `model_calls.ok` / `error` / `attempts` | boolean / string / int | 是 / 否 / 是 | 最后一次尝试的成败与错误原文、连同重试一共试了几次 | — | 否 |
+| 调用正文 | — | `model_calls.body_key` | string | 是 | 对象存储里 `{ system, prompt, imageKeys, response, attempts[] }` 的键；不含通道密钥与端点 | — | **是** |
 
 v0.32 删除的字段（随表删除）：派活任务全部字段（`kind` / `status` / `payload` / `claimed_by` / `lease_*` / `expires_at` / `attempts` / `once_token`）、OAuth 全部字段（scope / 客户端 / 授权码 / 访问与刷新 token）、伴侣设备 token、magic link、会话、`quota_*`。
 
@@ -1546,6 +1709,32 @@ sequenceDiagram
   API-->>S: 201 {screen, revisionId, previousRevisionId}
   API-->>C: screen_changed (API-CORE-030)，画布换成新版
 ```
+### 时序 9：本机使用记录（`REQ-CORE-047`）
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant FE as 画布 / 草稿本 FE
+  participant API as API 服务
+  participant W as 作业 Worker (同进程)
+  participant LLM as 模型通道
+  participant S as 对象存储
+  FE->>API: PATCH /record {enabled:true} (API-CORE-050)
+  API-->>FE: 200 {enabled, since, events, …}
+  loop 每 5 s 或攒满 50 条
+    FE->>API: POST /record/events {sessionId, events} (API-CORE-051)
+    API->>API: 开关开着就写 record_events，(session_id, seq) 撞了跳过
+    API-->>FE: 204
+  end
+  W->>LLM: 提示词 + 参考图
+  LLM-->>W: 原始回复
+  W->>S: records/model-calls/<日期>/<id>.json
+  W->>W: 写 model_calls 一行
+  FE->>API: DELETE /screens/{id} (API-CORE-018)
+  API->>S: 清单与修订 HTML、截图拷到 records/archive/
+  API-->>FE: 204，屏照常删掉
+```
+
 ## 13. 页面与跳转地图
 
 ```mermaid
@@ -1596,11 +1785,10 @@ v0.32 本地版没有登录页与授权同意页（`PAGE-LOGIN`、`PAGE-AGENT-CO
 `PAGE-SKETCH`（`REQ-CORE-040`，路由 `/sketch`，`?d=<草稿 id>` 是看板上正打开的那张）：沉浸式的一整页，没有画布、工具栏与小地图。
 入口：各项目画布的项目切换器菜单顶部固定一条「草稿本」；本页左上角是同一枚切换器 chip，写「草稿本」，菜单里列项目（选一个回到它的画布）与「新建项目…」。
 打开 `/p/<草稿本 id>` 重定向到 `/sketch`；浏览器标签页标题「草稿本 · Quilt」。
-**看板**（v1.16，v1.17）：顶部那一行以下的整块区域；输入框、收起后的胶囊与记录栏都浮在看板上面，停在哪、开没开、收没收起都不改看板（可能压住草稿的一角，挪开或收起即可）。打开的草稿是预览域的活 iframe（可点可滚，链接惰性），在看板里居中，按画框放到能放下的最大、最大 1:1——组件按 `quilt:draft-size` 报的大小，手机页 390×844、桌面页 1280×800 的视口；放不下时等比缩小、不裁切，缩小用 `zoom`、不用缩放变换（理由见 `PAGE-CANVAS`「聚焦屏不走缩放变换」，v1.19）；不提供缩放（与预览页一样按真实尺寸看）。打开着的草稿出了新的一版（改一轮、改一块、批注、回到旧版、本机会话回写）时原地换（v1.18）：父页取新版 HTML 经 `quilt:swap`（`keepScroll`）送进 iframe，与画布的聚焦态热更新同一通道，iframe 不重载、不出骨架与「加载中…」，滚动位置留着，组件按新报的大小重排；设计系统变了（`<head>` 不同）时运行时整份重写，父页收到新的 `quilt:ready` 再把选元素与批注的模式发一次。换画框（手机页 ↔ 桌面页）只改视口，不重载。取不到新版 HTML（签名过期）先重取详情再取一次，仍取不到才整页重载。只有换一张草稿、新草稿第一版落地时才加载。
-草稿工具条（v1.16）在顶部那一行：项目切换器与记录栏开关之间，对着看板居中，毛玻璃；不占看板的高度。左端是名字（点了就地改名，`API-CORE-012`），有写回目标时名字下面一行小字「来自「<项目> · <屏>」」；后面是控件：画框（页面草稿在「手机页 / 桌面页」之间二选一，`API-CORE-012` 的 `frame`；组件草稿不显示——组件与页面不能互相换，v1.17）、「参照」（自由风格，或选一个项目，`API-CORE-012` 的 `refProjectId`，`REQ-CORE-042`）、「选元素」与「批注」两个图标开关（`REQ-CORE-045`，悬停或键盘聚焦时出说明）、「版本」（按缩略图列出各版，点「回到这一版」走 `API-CORE-015`）、「写回项目…」（窄屏只留图标）、删除（确认后 `API-CORE-018`，不可恢复）、「收起」。放不下一行时折行，看板跟着下移；窄屏（48rem 以下）它单独占顶部那一行下面的一整行、不折行，放不下的在条里横着滚（滚动条不显示）。
-**快捷键**同画布：`⌘E` 开关「选元素」、`⌥N` 开关「批注」（焦点不在输入框里时）、`⌘/` 收起或展开输入框；焦点在草稿里时由预览运行时转发，照样能按。
+**看板**（v1.16，v1.17）：顶部那一行以下的整块区域；输入框、收起后的胶囊与记录栏都浮在看板上面，停在哪、开没开、收没收起都不改看板（可能压住草稿的一角，挪开或收起即可）。打开的草稿是预览域的活 iframe（可点可滚，链接惰性），在看板里居中，按画框放到能放下的最大、最大 1:1——组件按 `quilt:draft-size` 报的大小，手机页 390×844、桌面页 1280×800 的视口；放不下时等比缩小、不裁切，缩小用 `zoom`、不用缩放变换（理由见 `PAGE-CANVAS`「聚焦屏不走缩放变换」，v1.19）；不提供缩放（与预览页一样按真实尺寸看）。打开着的草稿出了新的一版（改一轮、改一块、回到旧版、本机会话回写）时原地换（v1.18）：父页取新版 HTML 经 `quilt:swap`（`keepScroll`）送进 iframe，与画布的聚焦态热更新同一通道，iframe 不重载、不出骨架与「加载中…」，滚动位置留着，组件按新报的大小重排；设计系统变了（`<head>` 不同）时运行时整份重写，父页收到新的 `quilt:ready` 再把选元素的模式发一次。换画框（手机页 ↔ 桌面页）只改视口，不重载。取不到新版 HTML（签名过期）先重取详情再取一次，仍取不到才整页重载。只有换一张草稿、新草稿第一版落地时才加载。
+草稿工具条（v1.16）在顶部那一行：项目切换器与记录栏开关之间，对着看板居中，毛玻璃；不占看板的高度。左端是名字（点了就地改名，`API-CORE-012`），有写回目标时名字下面一行小字「来自「<项目> · <屏>」」；后面是控件：画框（页面草稿在「手机页 / 桌面页」之间二选一，`API-CORE-012` 的 `frame`；组件草稿不显示——组件与页面不能互相换，v1.17）、「参照」（自由风格，或选一个项目，`API-CORE-012` 的 `refProjectId`，`REQ-CORE-042`）、「选元素」图标开关（`REQ-CORE-045`，悬停或键盘聚焦时出说明）、「版本」（按缩略图列出各版，点「回到这一版」走 `API-CORE-015`）、「写回项目…」（窄屏只留图标）、删除（确认后 `API-CORE-018`，不可恢复）、「收起」。放不下一行时折行，看板跟着下移；窄屏（48rem 以下）它单独占顶部那一行下面的一整行、不折行，放不下的在条里横着滚（滚动条不显示）。
+**快捷键**同画布：`⌘E` 开关「选元素」、`⌘/` 收起或展开输入框；焦点在草稿里时由预览运行时转发，照样能按。
 **选元素**：开着时点草稿里的元素，它被框出、输入框目标区多一枚「「<草稿名>」里的 <标签>「<文字>」」胶囊，动词行写「改这一块」，发送建 `regenerate_subtree`（`API-CORE-006`），输入框里的参考图一起带上（v1.21）；`Esc` 或 × 去掉胶囊回到改整张。
-**批注**：开着时点元素弹出说明框，存下后看板上该处出一枚编号气泡（随看板缩放）；输入框上方写「N 条批注 · 发送」，发送走 `API-EDIT-003`，与画布的批注同一套接口。两个开关互斥，都开着时草稿不响应链接与表单。
 看板为空时正中一句提示与三条可点的示例；新草稿生成中时看板正中是骨架（只呼吸）与进度一句话，第一版落库即换成活 iframe；失败时骨架撤掉、提示条写失败原因（`failureText`）。
 在跑的作业同画布，以作业 chip 叠在输入框上方（`PAGE-CANVAS`「作业 chip」）。
 **输入框**（缺省停在底边正中；停靠、拖动与收起同画布，见 `PAGE-CANVAS`「停靠与收起」，记忆单独一份，但浮在看板上、不让位；与画布同一套通道 / 会话选择与参考图）：看板为空时动词行写「新草稿」，多一个画框选择「自动 / 组件 / 手机页 / 桌面页」（缺省自动，记在本机）与一个「参照」下拉（自由风格或选一个项目，缺省自由风格、不记忆；选了就随新草稿发出 `refProjectId`）；看板上有草稿时动词行写「改「<草稿名>」」，画框选择与参照下拉收起（这张草稿的参照在工具条上改）；没有屏数、版数与聊天。
@@ -1620,30 +1808,31 @@ v0.32 本地版没有登录页与授权同意页（`PAGE-LOGIN`、`PAGE-AGENT-CO
 导航（v0.28，标识 v0.30，v0.32 收窄，v0.40 补重命名）：顶栏左上第一个元素就是**项目名 ▾**（画布顶栏不挂品牌标识，见 §13.1），它即**项目切换器**——点开为按更新时间倒序的列表（当前项打勾，每项带设备形态药丸），选一项即切到 `/p/:id`；列表底部固定一条「新建项目…」打开新建弹窗，创建成功跳新项目。
 每行 hover / 键盘高亮时露出垃圾桶（键盘等价物：高亮行按 `Delete`）→ 先关下拉再弹确认（写明项目名、级联范围、不可恢复）→ `API-CORE-031` 删除；删的是当前项目就回 `/`（落到最近更新的其它项目，一个不剩就是 `PAGE-FIRST`）；有进行中作业的项目拒删并说明（v0.34）。
 浏览器标签页标题 = 「<项目名> · Quilt」，多个项目开在不同标签页时靠它分辨，离开画布复位为「Quilt」。
-工具栏最下方的「设置」（齿轮，v0.97 前在顶栏右侧）打开**设置弹层**，关闭后焦点回到这个按钮（经 `?settings=` 直接打开的也一样）：分栏布局——左栏是**四节**导航（本月用量 / 生成通道 / 外观（v1.08）/ 语言（v1.20）；Radix Tabs 垂直方向，整组在 Tab 序里只占一个停靠点，上下方向键换节并立即切换），右栏只显示当前节（自身滚动）。
-当前节即视图标识，进 URL `?settings=usage|runners|appearance|language`（刷新保持；不认识的值回 `usage`），`Esc` / 右上「关闭」关闭并去掉参数。
+工具栏最下方的「设置」（齿轮，v0.97 前在顶栏右侧）打开**设置弹层**，关闭后焦点回到这个按钮（经 `?settings=` 直接打开的也一样）：分栏布局——左栏是**五节**导航（本月用量 / 生成通道 / 外观（v1.08）/ 语言（v1.20）/ 使用记录（v1.22）；Radix Tabs 垂直方向，整组在 Tab 序里只占一个停靠点，上下方向键换节并立即切换），右栏只显示当前节（自身滚动）。
+当前节即视图标识，进 URL `?settings=usage|runners|appearance|language|record`（刷新保持；不认识的值回 `usage`），`Esc` / 右上「关闭」关闭并去掉参数。
 通道下拉里的「管理通道…」打开 `runners` 节。
 「本月用量」只展示台账（屏数、token 进出、按驱动 / 模型分列）与「本地版不设上限」的说明；「生成通道」一节顶部给出 MCP 接入命令（`claude mcp add --transport http quilt http://127.0.0.1:3100/mcp`，可复制）。
 「外观」一节（`REQ-CORE-039`）是一组单选：跟随系统（缺省）/ 浅色 / 深色，选中即生效、不用保存；选择记在本机 `localStorage` 的 `quilt:theme`（`light` / `dark`，跟随系统时删掉这一键），对所有项目与 `PAGE-FIRST` 生效。
 「语言」一节（`REQ-CORE-046`）是同样的单选列表：中文 / English（语言名各用自己的文字写、标上 `lang`），选中即生效、不刷新页面；选择记在本机 `localStorage` 的 `quilt:locale`（`zh` / `en`），对所有页面生效，说明写明之后生成的屏也用这种语言、除非要求里另说。
 没选过时按浏览器：`navigator.languages` 的第一项（没有时 `navigator.language`）以 `zh` 开头为中文，否则英文。
+「使用记录」一节（v1.22 `REQ-CORE-047`）是一个开关「记录我的使用」（缺省关，改了当场生效，`API-CORE-050`）加一段说明：记什么（界面操作、输入过程、每次模型调用的提示词与回复、删掉的东西留归档）、不记什么（密码与密钥）、只存在本机不上传。
+下面一行写已记的条数、占用与起始时间，一行写存放位置（绝对路径，可复制；`API-CORE-049`）；关掉之后这两行照样显示。
 切换后 `<html lang>` 跟着变（`zh-CN` / `en`），之后的每个请求带新的 `X-Quilt-Locale`（§8 开头）；界面文字当场换成新语言（屏内修改标记的字见 §13.1「画布标记」）；用户生成的内容不重译，存量屏与已有草稿保持原样。
 设置弹层里可再打开「添加通道」弹层，因此弹层基建的 `inert` 按层栈计数：开一层隔离其下所有层，关一层只放开新的最上层，栈空才解除背景隔离；弹层内的按键不冒泡给画布快捷键。
 画布页进入调 `API-CORE-004`，对话面板调 `API-CORE-010/011` 并订阅 `API-CORE-008`。
 
 `PAGE-CANVAS` 外壳：画布铺满视口，**视口那一层只裁剪、不滚动**（`overflow: clip`，v0.38）——平移缩放全在世界层的 transform 上，视口不需要滚动能力；留成滚动容器的话浏览器自发的 scroll-into-view（点候选格里的输入框、甚至自动化的 `scrollIntoViewIfNeeded`）会把整块画布连同全部卡片横移（实测 `scrollLeft` 一路到 699），而世界层的 transform 对此一无所知，屏幕↔世界换算随之整体偏 `scrollLeft/zoom`：框选、拖卡、放锚点全错位。
-chrome 一律浮于其上，四处互不重叠——① **顶栏**（只承担去向）：左上角一枚项目切换器 chip（项目名；v1.10 起不再显示设备形态与选中计数——设备形态在切换器的项目列表里，选中靠卡片描边与输入框的目标标签），实时更新断开时它右侧多一枚「实时更新已断开」chip（v0.97 去掉屏数与缩放比例，设置移到工具栏最下方）。**退出账号不在顶栏**，收在设置弹层；② **右侧竖排工具栏**（`role=toolbar`，方向键在组内移动焦点；每个工具悬停/获焦时给出作用说明与快捷键，提示渲染在滚动容器之外以免被裁切，且工具栏整体层级高于右侧滑出面板——面板开着时提示正好落在面板上，要画在面板之上而不是被它盖住（v0.78）；v0.70：高度封顶在可用区内，放不下时在工具栏内纵向滚动——滚动条隐藏、键盘移动焦点时自动滚到可见，哪一侧还有被遮住的工具，那一侧边缘露出一个弱文字色的小箭头（v1.11；不用渐隐遮罩，界面不用渐变），内边距在滚动区内以免首尾按钮的焦点环被裁；v0.80：**顶端固定**在顶栏下方、与右侧滑出面板同一上沿，上下文组只在末尾增减——此前整列垂直居中，选中一屏时全部按钮上移 61 px、进交互再下移 9 px，用户正要点的按钮被自己的上一个操作挪走）：适配视图 `F` / 连线 `L` / **输入框 `⌘/`**（收起 / 显示底部输入框） / **选择元素 `⌘E`** / **批注 `⌥N`** ｜ 接上跳转 / 设计系统 `⌥D` / 新建屏幕 `⌥G`（在可见区中心放锚点并聚焦输入框）/ 导出原型（无快捷键）/ 派活 `⌥T` ｜ 恰好选中一屏时追加 **进入交互** `Enter`（v0.80，双击卡片的键盘与指针等价入口）、修订 `⌥R` 与 **设为样板**（`REQ-CORE-016`，当前样板屏上显示为「样板」且不可再点），选中任意屏时追加 删除 `Del`，聚焦某屏时追加 退出交互 `Esc` / 后退 `Alt+←` ｜ 最末单独一组：**设置**（齿轮图标，无快捷键，打开设置弹层；v0.97 从顶栏移来）——它排在上下文组之后，上下文工具增减时跟着上下挪，设置不是选中、聚焦之后紧接着要点的东西。**「进入交互」与「退出交互」是同一格的同一个工具**（v0.80）：上下文组的第一格，未聚焦时是「进入交互」、聚焦时是「退出交互」（状态只靠按钮名表达，不挂 `aria-pressed`：名字与按下态一起变，读屏会读成「退出交互，已按下」），在那一格上连点是进去再出来，焦点也一直留在这一格——此前退出后同一位置换成了「出变体」（再点一下就开出变体弹层），被点的按钮卸载、键盘焦点掉到 body。**选择元素与批注是全局模式，不挂在某一屏上**：按 `⌘E` / `⌥N` 即开启（不必先选中或双击任何屏），开启后画布光标变准星并给出「点任意一屏开始 · Esc 退出」的提示（v0.80：提示条用 chrome 材质——此前是 15% 透明的强调色底，压在白卡上文字对比度约 1.1:1、基本读不出），单击哪一屏就推镜头进哪一屏；退出模式时连同聚焦一起退回静态卡片。
-退出某一屏（`Esc`）只是回到画布，模式仍然开着，可以接着点下一屏——这正是「攒一批批注」要的手感；没有聚焦任何屏时再按 `Esc` 才退出模式（见下文 `Esc` 顺序）。**交互态与选择元素态互斥**：一张聚焦卡片同一时刻只处于其中一种（角标分别显示「交互中」「选择元素中」），退出任一都回到卡片本身的静态截图。
-从交互态切进选择元素态时，若已在屏内跳转过别的路由，先把 iframe 拉回这张卡片自己的那一屏并清空导航栈——否则选中的元素属于别的屏，与卡片截图对不上（`REQ-EDIT-004` 批注的锚点矩形也会因此错位）。**聚焦屏不走缩放变换**（v1.19）：聚焦屏的 iframe 按镜头倍率显示，但不跟着世界层的 transform 缩放——包它的那一层按倍率 `zoom`、再 `scale(1/倍率)` 抵消，iframe 上的总变换是 1:1，里面仍按设备宽度排版；宽高取到不少于设备宽高的整设备像素，里面的视口不比设备窄。镜头停下时按新倍率重摆。原因：Chromium 在带缩放变换的跨域 iframe 里用 GPU 合成时，同时带 `backdrop-filter` 与 `box-shadow` 的元素旁会出一片灰色渐变、盖住邻近的内容，等下一次重绘才消失（无头浏览器复现不出）。**聚焦态热更新**（v0.33）：聚焦期间 iframe 的 `src` 钉住不动（签名 URL 每次刷新都换，不钉就会静默重载、丢掉模式），所以屏出了新修订要由父页显式送进去——iframe 里正显示的那一屏（导航栈顶，没跳转过就是卡片自己）的 `currentRevisionId` 一变（直改、改屏、重生成子树、回刷、采用候选），父页取新 HTML 经 `quilt:swap{keepScroll:true}` 换进同一文档：不重挂 iframe、不丢导航栈，模式与滚动位置由运行时保住。
+chrome 一律浮于其上，四处互不重叠——① **顶栏**（只承担去向）：左上角一枚项目切换器 chip（项目名；v1.10 起不再显示设备形态与选中计数——设备形态在切换器的项目列表里，选中靠卡片描边与输入框的目标标签），实时更新断开时它右侧多一枚「实时更新已断开」chip（v0.97 去掉屏数与缩放比例，设置移到工具栏最下方）。**退出账号不在顶栏**，收在设置弹层；② **右侧竖排工具栏**（`role=toolbar`，方向键在组内移动焦点；每个工具悬停/获焦时给出作用说明与快捷键，提示渲染在滚动容器之外以免被裁切，且工具栏整体层级高于右侧滑出面板——面板开着时提示正好落在面板上，要画在面板之上而不是被它盖住（v0.78）；v0.70：高度封顶在可用区内，放不下时在工具栏内纵向滚动——滚动条隐藏、键盘移动焦点时自动滚到可见，哪一侧还有被遮住的工具，那一侧边缘露出一个弱文字色的小箭头（v1.11；不用渐隐遮罩，界面不用渐变），内边距在滚动区内以免首尾按钮的焦点环被裁；v0.80：**顶端固定**在顶栏下方、与右侧滑出面板同一上沿，上下文组只在末尾增减——此前整列垂直居中，选中一屏时全部按钮上移 61 px、进交互再下移 9 px，用户正要点的按钮被自己的上一个操作挪走）：适配视图 `F` / 连线 `L` / **输入框 `⌘/`**（收起 / 显示底部输入框） / **选择元素 `⌘E`** ｜ 接上跳转 / 设计系统 `⌥D` / 新建屏幕 `⌥G`（在可见区中心放锚点并聚焦输入框）/ 导出原型（无快捷键）/ 派活 `⌥T` ｜ 恰好选中一屏时追加 **进入交互** `Enter`（v0.80，双击卡片的键盘与指针等价入口）、修订 `⌥R` 与 **设为样板**（`REQ-CORE-016`，当前样板屏上显示为「样板」且不可再点），选中任意屏时追加 删除 `Del`，聚焦某屏时追加 退出交互 `Esc` / 后退 `Alt+←` ｜ 最末单独一组：**设置**（齿轮图标，无快捷键，打开设置弹层；v0.97 从顶栏移来）——它排在上下文组之后，上下文工具增减时跟着上下挪，设置不是选中、聚焦之后紧接着要点的东西。**「进入交互」与「退出交互」是同一格的同一个工具**（v0.80）：上下文组的第一格，未聚焦时是「进入交互」、聚焦时是「退出交互」（状态只靠按钮名表达，不挂 `aria-pressed`：名字与按下态一起变，读屏会读成「退出交互，已按下」），在那一格上连点是进去再出来，焦点也一直留在这一格——此前退出后同一位置换成了「出变体」（再点一下就开出变体弹层），被点的按钮卸载、键盘焦点掉到 body。**选择元素是全局模式，不挂在某一屏上**：按 `⌘E` 即开启（不必先选中或双击任何屏），开启后画布光标变准星并给出「点任意一屏开始 · Esc 退出」的提示（v0.80：提示条用 chrome 材质——此前是 15% 透明的强调色底，压在白卡上文字对比度约 1.1:1、基本读不出），单击哪一屏就推镜头进哪一屏；退出模式时连同聚焦一起退回静态卡片。
+退出某一屏（`Esc`）只是回到画布，模式仍然开着，可以接着点下一屏；没有聚焦任何屏时再按 `Esc` 才退出模式（见下文 `Esc` 顺序）。**交互态与选择元素态互斥**：一张聚焦卡片同一时刻只处于其中一种（角标分别显示「交互中」「选择元素中」），退出任一都回到卡片本身的静态截图。
+从交互态切进选择元素态时，若已在屏内跳转过别的路由，先把 iframe 拉回这张卡片自己的那一屏并清空导航栈——否则选中的元素属于别的屏，与卡片截图对不上。**聚焦屏不走缩放变换**（v1.19）：聚焦屏的 iframe 按镜头倍率显示，但不跟着世界层的 transform 缩放——包它的那一层按倍率 `zoom`、再 `scale(1/倍率)` 抵消，iframe 上的总变换是 1:1，里面仍按设备宽度排版；宽高取到不少于设备宽高的整设备像素，里面的视口不比设备窄。镜头停下时按新倍率重摆。原因：Chromium 在带缩放变换的跨域 iframe 里用 GPU 合成时，同时带 `backdrop-filter` 与 `box-shadow` 的元素旁会出一片灰色渐变、盖住邻近的内容，等下一次重绘才消失（无头浏览器复现不出）。**聚焦态热更新**（v0.33）：聚焦期间 iframe 的 `src` 钉住不动（签名 URL 每次刷新都换，不钉就会静默重载、丢掉模式），所以屏出了新修订要由父页显式送进去——iframe 里正显示的那一屏（导航栈顶，没跳转过就是卡片自己）的 `currentRevisionId` 一变（直改、改屏、重生成子树、回刷、采用候选），父页取新 HTML 经 `quilt:swap{keepScroll:true}` 换进同一文档：不重挂 iframe、不丢导航栈，模式与滚动位置由运行时保住。
 运行时比对新旧 `<head>` 里的设计系统三样（token 变量块、字体链接、Tailwind 配置）：一致就只换 `<body>`（`startViewTransition`），不一致（回刷改了色 / 圆角 / 字体）就整份重写文档——`document.open` 不换 window，表单状态与滚动位置照旧恢复，新运行时重发 `quilt:ready`、父页再下发一次模式；正显示的是别的屏时卡片自己的屏被改不动它，下次回到它再显示。
 换完 DOM 后父页让运行时按当前选中元素的 `qid` **重选**（`quilt:reselect` → 回一份新的 `quilt:select`）：检查器留在同一元素上、字段刷成新修订的值；元素已不在（被删、子树重生成换了 qid）运行时回 `quilt:deselect` 才清空。
 发出直改 / 子树重生成时同样不清选中，只清说明框——面板不该在用户眼皮底下退回空态。
-元素直改也走这条通道，不再换 key 重挂。**变化从哪来都能到**：画布订阅项目级事件流（`API-CORE-030`），本机会话经 MCP 回写、别处建的作业、截图就绪，以及别处的删屏、挪屏、改项目名、改设计系统、增删组件、批注（v0.77）都触发同一个刷新，不必进出交互态或刷新页面；刷新后已删的屏从画布与目标标签里一并消失（目标取的是还在项目里的屏）。
+元素直改也走这条通道，不再换 key 重挂。**变化从哪来都能到**：画布订阅项目级事件流（`API-CORE-030`），本机会话经 MCP 回写、别处建的作业、截图就绪，以及别处的删屏、挪屏、改项目名、改设计系统、增删组件（v0.77）都触发同一个刷新，不必进出交互态或刷新页面；刷新后已删的屏从画布与目标标签里一并消失（目标取的是还在项目里的屏）。
 项目被别处删掉时事件流发完最后一条就关闭，重取详情得 `404`，交给画布的加载错误态。**选中框常驻**（`REQ-EDIT-001`，v0.34）：选择元素态里运行时画两层框——hover 框细虚线跟着鼠标，选中框 2px 实线常驻在选中元素上、左上角挂「tag · qid」标签（与检查器标题一致，看一眼就知道右侧面板改的是谁），随滚动 / 缩放重算；两层框与标签用 §13.1 的标记色并套 halo（v1.08，颜色由父页经 `quilt:mode` 给，此前写死界面蓝）；父页的选中状态是事实源（`quilt:highlight` 同步、热更新后 `quilt:reselect` 接回、退出选择元素态清空）。**逐级选**（v1.00，`REQ-EDIT-001`）：指针下取到的永远是最里层的元素，要选外面的大块就逐级往上走。
 运行时记两样：**锚点**（最近一次悬停或点中的最里层元素）与**当前层**（锚点自身或它的某个带 `data-qid` 的祖先，最高到屏的根元素）。
 `Shift+Enter` 当前层上移一级，`Enter` 沿锚点那条链下移一级、到锚点为止；已有选中时按键移动选中（回 `quilt:select`，检查器跟着刷），还没选中时按键只移动悬停框，点一下选中的是悬停框所在的那层；指针换到另一个最里层元素时锚点与当前层一起重置。
 按键只在焦点不在可编辑元素与按钮、链接这类控件上时生效：焦点在预览文档里由运行时就地处理，在父页（检查器面板、画布）时父页发 `quilt:climb{ dir }` 给当前处于选择元素态的那个 iframe（聚焦的组件卡优先，否则聚焦的屏）；键盘引起的框移动不带过渡。
-批注态（`⌥N`）同样适用。
 `quilt:select` 带 `path`（从屏根到锚点的 `{ qid, tag }` 列表）：检查器标题下排一行祖先路径，每级一个按钮写标签名（`title` 为「tag · qid」），当前层加粗并带 `aria-current`，当前层以下（回锚点的那几级）淡色仍可点；点一级 = `quilt:pick{ qid }` 选中它（锚点不变，还能按 `Enter` 走回去），悬停一级 = `quilt:peek{ qid }` 在屏上画悬停框、移开撤掉；路径按钮不进 Tab 序——键盘走层级用 `Shift+Enter` / `Enter`，`Tab` 照旧从检查器直接进文案框；路径下方一行提示「Shift+Enter 选父级 · Enter 回到子级」。**屏内修改标记**（`REQ-EDIT-002`）：直改保存后该元素打「已更新」；项目里进行中的子树重生成作业（`activeJobs` 里 `kind=regenerate_subtree`）在聚焦屏内把该元素虚线描边并挂「修改中…」角标（`quilt:mark{working}`；元素本身描边随滚动走，角标固定定位、滚动时重算），未聚焦的卡片右上标「局部修改中」（同一张卡还挂着候选角标时药丸下移一档——两者都贴右上角，叠在一起会把角标整块盖住）；作业一收口同一 qid 就换成绿描边 + 「已更新」（热更新换完 DOM 再补一次，运行时每次都重新计 4 s 自撤；失败 / 取消只撤「修改中」）；检查器里选中的元素正在被改时写明并挡住再次发起。**检查器的键盘操作与撤销**（v0.95）：`⌘S`（Windows `Ctrl+S`）= 「保存」，焦点在检查器的文案 / 类名框里或在屏里都生效，并拦掉浏览器的「保存网页」；`Delete` / `Backspace`（macOS 的 delete 键发的是 `Backspace`）= 「删除元素」，只在选择元素态下选中了元素、焦点不在任何输入框里时生效——在文案框里删字不会删掉元素，未聚焦时这两个键仍是删屏。
 两个键与按钮走同一条路：没改动提示「没有改动」，保存中或这一屏有作业时不响应；共享组件实例里的元素没有这两个操作。
 选择元素态下点了屏里的元素，焦点从 iframe 挪到检查器的内容区：这三个键直接可用，`Tab` 一下进文案框——此前焦点留在 iframe 里，要先点一下面板才能按快捷键、进字段；只在焦点确实在画布的 iframe 上（刚点过元素）时挪，保存后的重选、别处回写这类被动更新不抢焦点（`INT-008`）；不直接落进文案框，否则 `Delete` 成了删字。
@@ -1651,7 +1840,7 @@ chrome 一律浮于其上，四处互不重叠——① **顶栏**（只承担�
 `⌘Z` 撤销上一步直改（保存、删除、脱离共享）：以改之前那一版调 `API-CORE-015` 回溯，`expectedRevisionId` 是这次直改落下的修订——这一屏之后又被别的写入改过（对话、MCP、回刷）就 409，提示「这一屏之后又改过了，撤销不了这一步，去修订面板找回」，这一步出栈；这一屏有作业在跑时提示稍后再撤，这一步留在栈里。
 回溯本身会新建一版（内容同改前那一版）：连按 `⌘Z` 时，下一步比对的是接替了改前那一版的这一版，而不是原来的修订 id——否则第二下必定判成冲突。
 直改与位置改动共用一个撤销栈（至多 20 步），按时间先后撤；组件里的直改撤不了（它会同步到所有用这个组件的屏，没有组件版本回退），撤到这一步时提示「改组件撤销不了」并出栈，不越过它去撤更早的一步。**删组件里的元素先确认**（v1.03）：目标是共享组件时，「删除元素」按钮与 `Delete` / `Backspace` 都先弹确认框（`alertdialog`，标题「删除组件「X」里的这个元素？」，正文「会同步到用它的 N 屏，撤销不了。」），确认后才删，成功提示「已删除组件「X」里的元素，同步 N 屏」；屏上的元素照旧直接删、可 `⌘Z`。
-设计系统面板删约定、批注面板删批注同样先确认——这两样也撤不了。
+设计系统面板删约定同样先确认——它也撤不了。
 撤成后 toast「已撤销删除元素 / 修改元素 / 脱离共享」。**类名编辑**（v0.96）：检查器的「类名」是一行一个类的列表，按元素上原来的书写顺序排。
 每个类上面是可直接改的类名（等宽字体）与 ‹ › ×，正下方一句中文说明——作用加本项目的实际取值（说明不并排放在类名右边：检查器约 300px 宽，并排时类名一栏只剩约 90px，常见类名会被截断）：间距、尺寸按 Tailwind 刻度换算成 px（`px-6` → 左右内边距 24px），圆角四档（`sm` / `md` / `lg` / `full`）与颜色按本项目设计系统的取值（`rounded-lg` 在 sharp 档是 8px，`bg-primary` 写「背景色」并带 primary 色块），其余按 Tailwind v3 默认值（Play CDN 是 v3）。
 变体前缀写成条件（`hover:` 悬停时、`focus-visible:` 键盘获焦时、`md:` 宽度 ≥ 768px 时、`dark:` 暗色下，未收录的前缀原样写出），`!` 写「强制」，透明度修饰符（`/40`）写百分比，任意值（`w-[120px]`）写原值；`items-*` / `justify-*` 按同一元素有没有 `flex-col` 说成纵向或横向；说明表没收录的类写「未收录」，不拦保存；不是 token 色的颜色类（`bg-blue-500`）标「非 token 色」。
@@ -1659,9 +1848,9 @@ chrome 一律浮于其上，四处互不重叠——① **顶栏**（只承担�
 颜色类在说明后面跟一个 token 色下拉（26 个色键，各带色块），换色保留前缀与透明度修饰符。
 每行末尾 × 删掉这一行；列表末尾「添加类名…」回车加入（一次输入多个类时按空白拆成多行）；一行里打了空格，失焦时拆成多行，清空的行失焦时去掉。
 保存时按行序用一个空格拼回；与元素原值规范化后（按空白拆开、去掉空项）相同算没改动。
-草稿按元素暂存、`⌘S`、撤销都沿用上文。**快捷键分档防误触**：只有「一眼看得出、再按一次即撤销」的视图操作用单键（`F`、`L`），会弹出/收起面板的一律带 `⌥`；输入框显隐用 `⌘/`——它要在焦点落在输入框里时也能按，单键与 `⌥` 组合在文本框里都会打字，只有 `⌘` 组合能穿过去；同理 `⌘E`（选择元素）、`⌘K`（找屏）、`⌘S`（保存检查器）在焦点落在任何文本框里（底部输入框、检查器、批注框）时照样生效，`⌘A` / `⌘Z` 在文本框里留给文本框自己（v1.16，此前 `⌘E` 在文本框里不生效：开着选择元素去输入框写一句，再按 `⌘E` 关不掉）；③ （v1.17 去掉）左下角的对话记录面板不再有：历史回看、消息的复制与修改、参考图大图预览、「N 轮失败」与鼠标手势提示随之去掉；作业的进度与失败改由输入框上方的作业 chip 显示，失败的 chip 上能重试；④ **底部输入框**（`Enter` 发送、`Shift+Enter` 换行，随内容增高至 8 行后内部滚动）。
+草稿按元素暂存、`⌘S`、撤销都沿用上文。**快捷键分档防误触**：只有「一眼看得出、再按一次即撤销」的视图操作用单键（`F`、`L`），会弹出/收起面板的一律带 `⌥`；输入框显隐用 `⌘/`——它要在焦点落在输入框里时也能按，单键与 `⌥` 组合在文本框里都会打字，只有 `⌘` 组合能穿过去；同理 `⌘E`（选择元素）、`⌘K`（找屏）、`⌘S`（保存检查器）在焦点落在任何文本框里（底部输入框、检查器）时照样生效，`⌘A` / `⌘Z` 在文本框里留给文本框自己（v1.16，此前 `⌘E` 在文本框里不生效：开着选择元素去输入框写一句，再按 `⌘E` 关不掉）；③ （v1.17 去掉）左下角的对话记录面板不再有：历史回看、消息的复制与修改、参考图大图预览、「N 轮失败」与鼠标手势提示随之去掉；作业的进度与失败改由输入框上方的作业 chip 显示，失败的 chip 上能重试；④ **底部输入框**（`Enter` 发送、`Shift+Enter` 换行，随内容增高至 8 行后内部滚动）。
 toast 浮在输入框上方（距底 = 输入框实际高度 + 32px，与 `--chrome-bottom` 同一数值；收起成停在底边的胶囊时浮在胶囊上方 16px；输入框或胶囊停在左右两边时距底 1.5rem）、水平居中，单条限宽 28rem、长文案换行（v0.74；此前与输入框同在底部正中，盖住发送键与屏数档位）。**停靠与收起**（v1.16，草稿本页同一套，见 `PAGE-SKETCH`）：输入框能停在左、右、下三条边上，形状不变（仍是这张横向卡片，宽度规则同上）；不去顶边——顶边是项目切换器与草稿工具条。缺省停在底边正中。按住输入框顶部那一行（动词行的空白处，指针显示抓手）拖，卡片跟手走、拖动中不吸附；松手后吸到离指针最近的那条边，沿这条边停在松手的位置，夹在这条边的可用段里（不压住项目切换器、小地图、右侧工具栏与打开的面板），200 ms 动画到位（减少动态效果时直接到位）。动词行左端一枚「挪位置」把手（`composer-grip`）是拖动之外的入口：点它（或聚焦后按 `Enter`）弹出「左边 / 右边 / 底边」三选一（`composer-dock-menu`），聚焦时按 `←` / `→` / `↓` 直接换边；换边都停在那条边的正中，读屏读出当前停在哪条边。窄视口（48rem 以下）放不下侧停的卡片，只停底边，拖动只在底边内左右挪。
-**收起**（v0.33，v1.16 改为贴边胶囊）：输入框右上角的「收起」（`composer-collapse`）、`⌘/` 与工具栏「输入框」三处是同一开关；收起后在同一条边、同一位置留一枚贴边胶囊（`composer-pill`）「✎ 写一句」（输入框里有没发出的字时写「✎ 继续写」），点它或按 `⌘/` 展开、光标落回输入区；胶囊能像输入框一样拖。草稿、参考图、目标标签都留着。停在哪条边、沿边的位置（按这条边可用段的比例记，换窗口大小后按比例还原）与收没收起按页面记在本机（画布一份 `quilt:composer:canvas`、草稿本一份 `quilt:composer:sketch`），刷新首帧就是记下的样子——收起后边上总有胶囊，不会找不到，所以不再「刷新总是显示」。**聚焦某屏（双击进交互 / 选择元素 / 批注）时自动收起**成胶囊，把屏底让出来，退出聚焦回到进入前的状态；聚焦期间 `⌘/` 可临时展开。
+**收起**（v0.33，v1.16 改为贴边胶囊）：输入框右上角的「收起」（`composer-collapse`）、`⌘/` 与工具栏「输入框」三处是同一开关；收起后在同一条边、同一位置留一枚贴边胶囊（`composer-pill`）「✎ 写一句」（输入框里有没发出的字时写「✎ 继续写」），点它或按 `⌘/` 展开、光标落回输入区；胶囊能像输入框一样拖。草稿、参考图、目标标签都留着。停在哪条边、沿边的位置（按这条边可用段的比例记，换窗口大小后按比例还原）与收没收起按页面记在本机（画布一份 `quilt:composer:canvas`、草稿本一份 `quilt:composer:sketch`），刷新首帧就是记下的样子——收起后边上总有胶囊，不会找不到，所以不再「刷新总是显示」。**聚焦某屏（双击进交互 / 选择元素）时自动收起**成胶囊，把屏底让出来，退出聚焦回到进入前的状态；聚焦期间 `⌘/` 可临时展开。
 放锚点（双击空白 / `⌥G`）总会把它叫回来。
 画布安全区跟着输入框停的那条边让位：停在底边时底部占位（`--chrome-bottom`）跟着输入框的实际高度走（`ResizeObserver` 量到的高度 + 32px，首帧默认 11.5rem）——输入框会随内容增高、窄视口下工具条会折行，写死一个数会压住别的浮层；停在左边或右边时那一侧的占位至少让到输入框内缘外 16px，底部占位缩回 1rem；收起时胶囊所在那条边只让出胶囊的厚度，聚焦落点随之移动。停在左边时可用段在小地图（开着时）下方到距底 1rem，放不下就吸到底边、不改记忆；两侧的可用段都从 7.5rem 起，让开顶部正中的排列条与提示；停在右边时贴在工具栏与打开着的面板的内侧。下面「横向落点」规则只在输入框停在底边时生效。**横向落点以视口居中为默认，且不随侧边浮层开合而移动**——右侧面板滑出不把它搬走；只有当浮层真的会压住它时才让位，且只让到不重叠为止（`clamp`：浮层内边界 ≤ 视口居中 ≤ 另一侧浮层内边界）。
 工具条量宽用的是输入框自己这一条横带的宽度（探针 `composer-lane`），不是画布可用区。**首帧就是终值宽度**（v0.78）：通道触发器直接渲染当前通道名，不等下拉组件事后把名字填进去（此前第一次量宽时触发器只有 41 px，量出来的宽度偏小，名字到了再量一次才对）；宽度过渡在首次量完的下一帧才启用——守卫与第一次写入宽度落在同一帧的话，浏览器照样从 30rem 起跑过渡（此前每次加载 / 切项目从 480 px 长到 709 px、左缘横移 114 px）。
@@ -1677,7 +1866,7 @@ toast 浮在输入框上方（距底 = 输入框实际高度 + 32px，与 `--chr
 鼠标点的「关闭」不挪焦点：焦点停在工具栏按钮上的话，接着按空格是点它，而不是平移画布。
 `?panel=revisions` 只在恰好选中一屏时成立：加载后没有选中、或加选成多屏时从 URL 去掉（`replace`，`INT-020`；此前面板不显示但参数留着，下次单选某屏修订面板自己弹出来）。
 元素检查器的「用 AI 重生成这块」下方有自己的通道选择器（与输入框同一套控件，`el-runner-select`；选本机 agent 时旁边再出会话下拉 `el-session-select`，面板放不下就折行）：记忆独立于输入框（本机 `quilt:runner:subtree` / `quilt:agent-session:subtree`），第一次沿用输入框当前通道；点「重生成选中区域」或在说明文本框里按 `Shift+Enter`（这里是多行说明，`Enter` 留给换行，与输入框的 `Enter` 发送不同；按钮旁标出）建的作业带这个 `runner`。
-材质（v1.15，§13.1 方向 E）：浮在画布上、画布内容会从底下经过的 chrome 用毛玻璃（§13.1「材质与形状」），不画细线外框，靠扩散影与画布分开。**顶栏**不铺底、不画边线（v1.10），左上角的项目切换器是一枚毛玻璃胶囊 chip，压在卡片上也读得出；顶栏的盒子只包住这几枚 chip，其余位置的指针照常落到画布上；**右侧滑出面板、小地图**是毛玻璃面板（圆角 16），面板标题用面板标题字阶（17 px、600），与内容之间一道分隔线色的发丝线（v1.10），面板里的分组用发丝线分开、不再套卡片；**右侧工具栏**是一条毛玻璃竖条（圆角 16），开着的工具（连线、小地图、选择元素、批注、打开着面板的那一个）铺一块填充底、图标用主文字色（v1.09：状态层常驻在按下那一档 0.16，悬停没开的工具是 0.08，两者分得开）；**底部输入框**是毛玻璃（圆角 22，四边不描边，聚焦不套强调色描边）——它是主输入控件，86% 不透明的底保证压在任何设计稿上都读得出；画布上方的浮动提示（待命提示、连线计数、加载中、加载失败）、整理条、候选与变体胶囊、断线提示同样是毛玻璃（断线提示的字用正文色，警告色只给前面的圆点）；从这些 chrome 里展开的菜单与下拉是实底弹层（不叠第二层毛玻璃）；**提示条与工具提示**是反色实底。
+材质（v1.15，§13.1 方向 E）：浮在画布上、画布内容会从底下经过的 chrome 用毛玻璃（§13.1「材质与形状」），不画细线外框，靠扩散影与画布分开。**顶栏**不铺底、不画边线（v1.10），左上角的项目切换器是一枚毛玻璃胶囊 chip，压在卡片上也读得出；顶栏的盒子只包住这几枚 chip，其余位置的指针照常落到画布上；**右侧滑出面板、小地图**是毛玻璃面板（圆角 16），面板标题用面板标题字阶（17 px、600），与内容之间一道分隔线色的发丝线（v1.10），面板里的分组用发丝线分开、不再套卡片；**右侧工具栏**是一条毛玻璃竖条（圆角 16），开着的工具（连线、小地图、选择元素、打开着面板的那一个）铺一块填充底、图标用主文字色（v1.09：状态层常驻在按下那一档 0.16，悬停没开的工具是 0.08，两者分得开）；**底部输入框**是毛玻璃（圆角 22，四边不描边，聚焦不套强调色描边）——它是主输入控件，86% 不透明的底保证压在任何设计稿上都读得出；画布上方的浮动提示（待命提示、连线计数、加载中、加载失败）、整理条、候选与变体胶囊、断线提示同样是毛玻璃（断线提示的字用正文色，警告色只给前面的圆点）；从这些 chrome 里展开的菜单与下拉是实底弹层（不叠第二层毛玻璃）；**提示条与工具提示**是反色实底。
 渲染路径的性能约束（v0.67，100 屏 2 倍屏下平移缩放每帧 GPU 主线程 ≤ 4 ms、布局 ≤ 0.5 ms，`TC-CORE-008` 用性能追踪断言）：世界层常驻一个合成层（`will-change: opacity`，不冻结栅格比例），平移缩放进行中再加 `transform` 提示（停下 200 ms 摘掉这一项，按最终比例清晰重画；手势中往小缩到挂上提示那一刻缩放的 0.7 以下，摘掉提示一帧、按当前比例重画再挂回——提示把栅格比例冻在手势开始时，从放大态快速缩小，新露出来的区域都要按那个高比例现画，一帧缺几百块图块、卡片整块空着，v0.86）——合成层不能随手势建拆：新层第一帧图块还没栅格化，整块画布会被画成白色（v0.84）；世界层底部垫一块与画布同色、1% 不透明的大底，让分散的卡片与连线合成一层，否则浏览器按稀疏度把内容拆成上百个合成层（25 屏 133 层、约 12 亿像素），放大时显存超预算、卡片整块画不出来（v0.84）；骨架卡 `content-visibility: auto`，视口外的跳过渲染——只暂停动画不够，暂停的动画仍各占一个合成层（v0.84）；世界层里不放 SVG 文字（连线计数是 HTML 徽标）；逐帧变化的东西不走页面 state、不写在世界层的 CSS 变量上（`--zoom` 只写在候选展开层；世界层上的 `--canvas-zoom` 只在平移缩放停下、摘 `will-change` 的同一刻写一次，见「屏幕选择与目标」的选中描边）；小地图用 `<canvas>`；平移缩放进行中暂停骨架卡动画。
 
 画布镜头（平移缩放）按项目留存（v0.53，`INT-019`）：存在 `quilt:view:<projectId>`，刷新、跳走再回来都**首帧就在原处**——惰性初值读一次、世界层的 transform 直接写在首次渲染上（panzoom 的 effect 跑在绘制之后，等它就会先画一帧初始位置再跳，用户读作「镜头自己动了一下」）。**没存过镜头时首帧就是适配视图**（v0.76）：在布局阶段同步算好、不带动画——此前先按默认镜头画一帧、再用 300 ms 滑到适配位。**自动适配不写 `quilt:view`**（v0.76）：首帧适配、空项目首批屏到达后的适配（带 300 ms 动画，内容是那一刻才出现的）、组件尺寸首次量完后的补一次适配（不带动画，只在用户还没动过镜头时做）都不落盘；只有用户自己平移缩放、按「适配视图」、找屏跳转、聚焦推镜头才写——此前自动适配与手动一样落盘，按未量尺寸算出的镜头（组件按 844 高算，缩放 34%，按 F 是 57%）被当成用户摆好的存下来，此后每次打开都停在那儿。
@@ -1686,7 +1875,7 @@ toast 浮在输入框上方（距底 = 输入框实际高度 + 32px，与 `--chr
 换项目时整个画布页重挂（见「加载、失败与数据新鲜度」），不把上一个项目的镜头带过去。**减少动态效果**（v0.80，`MOTION-004`）：系统开了 `prefers-reduced-motion: reduce` 时镜头移动一律直接到位——适配视图、首批屏到达后的自动适配、聚焦推镜头、找屏跳转、小地图点击都不带动画（此前照做 200–300 ms 的大幅缩放平移，⌘K 跳屏一次放大 7 倍）；手势驱动的平移缩放本来就是 1:1 跟手，不受影响。
 
 屏幕选择与目标（`REQ-CORE-006` 的上下文来源）：画布支持多选——单击替换选择，`Shift` / `⌘` 单击加选去选，在画布空白处按住拖出选框批量选中（与选框相交即选中；越过 10 px 迟滞、选框出现后画布里的 iframe 一律 `pointer-events: none` 到松手为止——拖卡片、拖小地图视口框同样处理，拖过交互态组件卡、聚焦屏或候选格的 iframe 时选框照样跟手、在 iframe 上松手即结算——指针一进跨源 iframe 父页就收不到 move / up，此前选框就此冻住、松手后残留、按离开 iframe 的位置结算；对视口 `setPointerCapture` 不管用，Edge 实测事件照样落进 iframe，v0.80），`⌘A` 全选（屏与共享组件卡，v0.80 补上组件卡），`⌘Z` 撤销上一步：位置改动（拖动 / 对齐 / 等距 / 排列；v0.41、v0.52），v0.95 起还有检查器的直改（见检查器一段），两类共用一个栈、至多 20 步，点空白处或 `Esc` 清空**画布高亮**；空白处拖拽从此是框选，平移改走滚轮 / 触控板 / `空格+拖拽`。
-指针随之分工：画布与卡片平时都是箭头，按住空格进入平移就绪时画布变抓手、平移中变握拳，卡片只在拖动中变握拳（选择元素 / 批注模式已开时仍是十字线）。**按住空格时从卡片或风格指南卡上起手同样是平移**（v0.80）：卡片不动、不换选择、不写库——此前卡片的手势层照样接住按下，卡片被拖走并 `PATCH`，光标却显示为平移的抓手；缩放 ≥ 60% 时桌面屏基本铺满视口，空格平移几乎总从卡片上起手。**卡片标签与选中描边**（v0.80）：卡片上方的标签（名字、路由、变体 / 叠层片、样板、N 个变体、N 处偏离；组件卡「名字 · 用于 N 屏」）随世界层缩放；卡片的圆角裁切只作用于里面截图 / 骨架 / iframe 那一层，标签、角标不在裁切范围里（此前整张卡 `overflow:hidden`，画在卡外的标签自 v0.45 起一直被裁掉）。
+指针随之分工：画布与卡片平时都是箭头，按住空格进入平移就绪时画布变抓手、平移中变握拳，卡片只在拖动中变握拳（选择元素模式已开时仍是十字线）。**按住空格时从卡片或风格指南卡上起手同样是平移**（v0.80）：卡片不动、不换选择、不写库——此前卡片的手势层照样接住按下，卡片被拖走并 `PATCH`，光标却显示为平移的抓手；缩放 ≥ 60% 时桌面屏基本铺满视口，空格平移几乎总从卡片上起手。**卡片标签与选中描边**（v0.80）：卡片上方的标签（名字、路由、变体 / 叠层片、样板、N 个变体、N 处偏离；组件卡「名字 · 用于 N 屏」）随世界层缩放；卡片的圆角裁切只作用于里面截图 / 骨架 / iframe 那一层，标签、角标不在裁切范围里（此前整张卡 `overflow:hidden`，画在卡外的标签自 v0.45 起一直被裁掉）。
 选中描边（含框选拖动中的命中高亮）与卡片的键盘焦点环保持屏幕像素宽度：描边 2 px / zoom、外扩 4 px / zoom，`zoom` 取世界层的 `--canvas-zoom`（平移缩放停下时写一次，缩放进行中描边随世界层一起缩放、停下后复位）——此前 10% 缩放下描边只剩 0.2 px，选中与没选中看不出区别。**键盘**（v0.80，`INT-002`）：屏卡与组件卡在 Tab 序里只占一个停靠点（roving：默认是选中的那张，没有选中时是阅读顺序第一张），方向键按阅读顺序（`y` 再 `x`）在卡片间移动、`Home` / `End` 到两端，焦点落到可用区外的卡片时镜头平移过去（缩放不变、不带动画——键盘触发的镜头移动一律直接到位）；`Enter` 进入交互（屏：等同双击，iframe 就绪后焦点移进 iframe；组件：进交互态，焦点移进它的 iframe），`空格` 选中（`Shift` / `⌘` 加选去选），`Esc` 退出后焦点回到这张卡；键盘获焦时卡片外圈一道焦点环（焦点环色，外扩 8 px / zoom，与标记色的选中描边分成两层）。
 鼠标点卡片不把焦点留在卡片上（焦点照旧回到页面：按住空格仍是平移就绪，`Delete` / `F` 这些单键照常）——任何按键都会让持有焦点的元素变成 `:focus-visible`，靠它区分不了鼠标点过的卡片与键盘停下的卡片。
 画布之外也能进：恰好选中一屏（或没选屏、只选了一个组件）、焦点不在任何控件上时按 `Enter` 即进入交互（`⌘K` 找屏回车选中，再回车进去）。
@@ -1697,12 +1886,12 @@ toast 浮在输入框上方（距底 = 输入框实际高度 + 32px，与 `--chr
 松手后屏走 `PATCH /screens/{id}`、组件走 `PATCH /components/{id}`，本地先行与在途坐标同单张拖动，**等全部 PATCH 有结果再决定**：全成功即止；任一失败 toast `位置保存失败：<名> 没挪过去，再拖一次` 并重取，失败的坐标交还服务端、成功的不回滚（口径同排列）。
 位置撤销栈的每一步同时记屏与组件，`⌘Z` 整组还原（toast「已撤销移动」）。**画布选中与输入框目标是两个状态**（v0.31）：选中变化（点屏、加选、框选、`⌘A`）同步写入目标标签并清掉锚点，但清空选中（点空白、`Esc`）不动目标标签；目标标签只经标签 × 与「清空」减少。
 发送时目标作为 `targetScreenIds` 传给 `API-CORE-010`（契约上限 20 屏，超出时只取前 20 并在输入框提示）。**造完自动选中新屏**：`generate` 作业成功后新屏成为选中集合与目标，追加指令时直接是改——**只在目标为空时接管**（v0.38）：一批屏在造、同时手动选了另一张屏要改是 `REQ-CORE-020` 的主场景，这一落地把药丸换成新屏就等于把用户写好的指令改投到刚造出来的屏上；目标标签本就是权威状态（点空白 / `Esc` 都不动它），设过目标就是明确意图。
-工具栏中「修订」「设为样板」只在恰好选中一屏时出现（修订链是单屏概念），「删除」与「接上跳转」对选中的全部屏生效——前者在确认框里点明屏数，后者未选中时退化为作用于全部屏（v1.03 起超过 20 屏分批发出，每批一个作业；此前只取最早的 20 屏、其余静默跳过）。**多选排列**（v0.34 `REQ-CORE-018`）：选中 ≥ 2 屏且未聚焦、未开选择元素 / 批注模式、**未在就地展开候选**时，画布顶部出现排列条（`role=toolbar`，`data-testid=arrange-bar`）：屏数、六个对齐图标按钮（`arrange-left / hcenter / right / top / vcenter / bottom`）、分隔、两个等距图标按钮（`arrange-hspace / vspace`，选中不足 3 屏时 `aria-disabled` 并在提示里写「至少选 3 屏」）；提示浮在按钮下方。**候选就地展开时整条让位**（v0.38）：每格上方的动作胶囊与它争同一条横带（实测排列条 y 64~106、胶囊 y 74~106），而排列条在上面——不让位就会把「收起」点成「右对齐」并把新位置落库，用户点一下丢了整批摆位。**横向落点在可用区内居中、右端避让右侧浮层**（左右都给值 + 自动外边距，不必知道条宽；右端留 `--chrome-right`，它含工具栏与滑出面板）：面板层级更高且不避让，写死视口居中时窄视口下右端的等距按钮会钻到面板底下点不着；左侧只有小地图（v0.61，顶栏下方左上角）与它同一条横带：排列条层级高于小地图，窄视口下两者相交时排列条盖在小地图的右上一角上，而不是被小地图盖住屏数与前两个对齐键（v0.78）——排列条只在多选期间出现，此时它是更要紧的那一个。
+工具栏中「修订」「设为样板」只在恰好选中一屏时出现（修订链是单屏概念），「删除」与「接上跳转」对选中的全部屏生效——前者在确认框里点明屏数，后者未选中时退化为作用于全部屏（v1.03 起超过 20 屏分批发出，每批一个作业；此前只取最早的 20 屏、其余静默跳过）。**多选排列**（v0.34 `REQ-CORE-018`）：选中 ≥ 2 屏且未聚焦、未开选择元素模式、**未在就地展开候选**时，画布顶部出现排列条（`role=toolbar`，`data-testid=arrange-bar`）：屏数、六个对齐图标按钮（`arrange-left / hcenter / right / top / vcenter / bottom`）、分隔、两个等距图标按钮（`arrange-hspace / vspace`，选中不足 3 屏时 `aria-disabled` 并在提示里写「至少选 3 屏」）；提示浮在按钮下方。**候选就地展开时整条让位**（v0.38）：每格上方的动作胶囊与它争同一条横带（实测排列条 y 64~106、胶囊 y 74~106），而排列条在上面——不让位就会把「收起」点成「右对齐」并把新位置落库，用户点一下丢了整批摆位。**横向落点在可用区内居中、右端避让右侧浮层**（左右都给值 + 自动外边距，不必知道条宽；右端留 `--chrome-right`，它含工具栏与滑出面板）：面板层级更高且不避让，写死视口居中时窄视口下右端的等距按钮会钻到面板底下点不着；左侧只有小地图（v0.61，顶栏下方左上角）与它同一条横带：排列条层级高于小地图，窄视口下两者相交时排列条盖在小地图的右上一角上，而不是被小地图盖住屏数与前两个对齐键（v0.78）——排列条只在多选期间出现，此时它是更要紧的那一个。
 48rem 以下面板改成叠在画布上、可用区不再为它让位，这一档面板开着时整条隐藏。**键盘按工具条模式**（`INT-002`，与右侧工具栏同一套）：8 个按钮 roving tabindex（同一时刻只有停靠项进 Tab 序），方向键在组内移动并环绕、`Home` / `End` 跳两端，点击与获焦都同步停靠点。
 对齐按选中集合的外接框算：左对齐 = 全部 `x` 取最小 `x`，右对齐 = 右缘对齐最大右缘，水平居中 = 中心对齐外接框中心，上 / 下 / 垂直居中同理；等距保住最左 / 最上与最右 / 最下两屏，中间按间隙均分（间隙可为负）。
 先改本地状态再逐屏 `PATCH /screens/{id}` 位置（只发位置变了的屏），**等全部 PATCH 有结果再决定**（先回来的旧快照会盖掉后落地的那几条写入）：全成功即止；任一失败 toast `位置保存失败：<屏名> 没排上，再点一次对齐` 并重取，失败那几屏的坐标交还服务端、成功的仍归本地（不回滚已落库的屏）。**刚写出去的坐标在服务端回声之前归本地**：项目事件流每来一条事件就整体重取，那次 GET 可能早于排列发出、晚于它落地才回来，旧快照整份写进详情就把位置顶回去且此后无人纠正；按屏记一份「在途坐标」，响应里与本地一致（或该屏已不在响应里）即出栈，其余用本地值覆盖响应——只护坐标，截图就绪、新屏这些更新照常生效。
 
-`Esc` 的处理顺序是「由近及远」，每按一次只关一层（v0.80 重排）：① 有弹窗先关弹窗（删屏确认、缺屏提示、提案预览、新建组件、找屏、出变体，**以及 `?settings=` 设置弹层**——弹层开着时画布快捷键整组让位，这是弹层该有的模态语义 `A11Y-004/005`；此前设置弹层不在这条链里，点过一个随即消失的按钮、焦点掉到 body 时按 `Esc` 会把在跑作业取消掉）；② 焦点在编辑控件上（侧面板里的输入框、文本框、下拉，`contenteditable`）只失焦，草稿留着——底部输入框自己处理（有草稿清草稿、无草稿失焦）并拦下冒泡；被下拉 / 菜单等控件自己接住（`preventDefault`）的 `Esc` 画布不再处理；③ 展开着候选就收起候选；④ 处于聚焦态（屏的交互 / 选择元素 / 批注，或组件卡的交互态）就退出聚焦，选择元素 / 批注模式仍开着；⑤ 右侧开着面板、或选择元素 / 批注模式开着（二者同是 URL 上的 `?panel=`）就关掉面板、退出模式；⑥ 画布上有选中（屏或组件）就清空选中，目标标签不动；⑦ 以上都没有，才在有进行中的作业时取消**最新**那一个——按一次取消一个，取消别的用在跑作业行上的取消键（`REQ-CORE-020`）；作业取消后已消耗的用量仍按 `REQ-CORE-008` 记账。
+`Esc` 的处理顺序是「由近及远」，每按一次只关一层（v0.80 重排）：① 有弹窗先关弹窗（删屏确认、缺屏提示、提案预览、新建组件、找屏、出变体，**以及 `?settings=` 设置弹层**——弹层开着时画布快捷键整组让位，这是弹层该有的模态语义 `A11Y-004/005`；此前设置弹层不在这条链里，点过一个随即消失的按钮、焦点掉到 body 时按 `Esc` 会把在跑作业取消掉）；② 焦点在编辑控件上（侧面板里的输入框、文本框、下拉，`contenteditable`）只失焦，草稿留着——底部输入框自己处理（有草稿清草稿、无草稿失焦）并拦下冒泡；被下拉 / 菜单等控件自己接住（`preventDefault`）的 `Esc` 画布不再处理；③ 展开着候选就收起候选；④ 处于聚焦态（屏的交互 / 选择元素，或组件卡的交互态）就退出聚焦，选择元素模式仍开着；⑤ 右侧开着面板、或选择元素模式开着（二者同是 URL 上的 `?panel=`）就关掉面板、退出模式；⑥ 画布上有选中（屏或组件）就清空选中，目标标签不动；⑦ 以上都没有，才在有进行中的作业时取消**最新**那一个——按一次取消一个，取消别的用在跑作业行上的取消键（`REQ-CORE-020`）；作业取消后已消耗的用量仍按 `REQ-CORE-008` 记账。
 此前 ⑤⑥ 不在链上、② 排在取消作业之后：侧面板输入框里按 `Esc` 失焦的同一下把在跑作业取消了，面板或模式开着时按 `Esc`（本机 agent 面板的关闭键还标着 `Esc`）面板不关、作业被取消，且都没有任何提示——取消作业不可撤销，所以它必须是链上最后一层。
 焦点在预览 iframe 里时 `Esc` 由运行时转发，走的是 ③④：收起候选或退出聚焦。
 
@@ -1738,11 +1927,6 @@ toast 浮在输入框上方（距底 = 输入框实际高度 + 32px，与 `--chr
 缩略图与风格指南卡片上的素材瓦片**按该图的平均亮度选底色，底色取项目自己的色板**（v0.98）：深色标志衬 `background`、浅色标志衬 `primary`，该色与标志拉不开亮度（`background` 亮度 < 0.85 / `primary` 亮度 > 0.3）时回落到中性浅灰 / 近黑，读不出亮度时回落到透明棋盘格（亮度要跨源读像素，由另一个带 `crossOrigin` 的离屏 Image 去取；**展示用的 `<img>` 一律不加 `crossOrigin`**——`/a/` 的 `Access-Control-Allow-Origin` 是常量 `webOrigin`，与它不符的 origin 下加了就连图都不显示，而亮度读不出本来就有回落）——品牌包里白色版与深墨版是同一个标志的两份文件，固定一种底色必然有一半看不见。
 素材清单随每次生成进 prompt，模型据此写 `<img src>`。
 
-批注态（M6 `REQ-EDIT-004`）：聚焦某屏后，工具栏的「选择元素」旁增加「批注」；进入批注态后点屏内元素即挂一条批注，元素旁出现编号气泡（气泡画在父页画布层，按批注时记下的元素矩形 × 画布缩放定位，随平移缩放跟随；卡片退出聚焦变回截图后气泡照常显示，因为截图与矩形出自同一修订）。
-检查器面板列出本屏全部批注，每条可改写、删除、**单独发送**，面板底部可**一起发送**（按屏合并成一条整屏指令）。
-发送中的批注标为「已发送」，作业成功后标为「已处理」并从画布上收起；失败回落为未处理。
-批注不进导出产物、不进应用地图。
-「记下」只在批注存上之后才清空说明框：存不上（例如超过 2000 字被 `422` 拒）说明原样留着、toast 写原因；「记下并立刻发送」存上之后**只发刚记下的这一条**，存不上就不发；改写同理，保存失败时改写框不关（v0.78；此前存失败也清空，「记下并立刻发送」还会把这一屏其它未处理批注发出去）。
 说明框的草稿按「屏 + 元素」暂存：点别的元素换成那个元素的草稿，点回来原样还在；检查器同样按元素暂存改了没存的文案 / 类名 / 跳转与「用 AI 重生成这块」的说明，元素本身变了（保存后热更新重选、别处改了它）时直改那几格回到新值、说明留着（v0.78；此前一点别的元素就清空）。
 
 生成通道（M6 `REQ-CORE-011`）：底部输入框工具条左端是通道选择器（触发器显示当前通道名，点开为向上展开的列表）——上半组「云端模型」（按设置页配置的清单，每项只有厂商图标 + 显示名；模型 id 是配置细节，在设置弹层的通道管理器里看，v0.30），下半组「本机 agent」是「交给本机 Claude Code」与「交给本机 Codex」（v0.34 / v0.68：投递到本机某个会话，见 `REQ-AGENT-003`；不计 LLM 台账、由会话经 MCP 回写并收口；发出后画布切到本机 agent 面板看状态）。**选中它时通道选择器右侧多一个会话下拉**（`session-select`）：打开即取 `API-AGENT-010`，每项 = 名字（用户起过名的）或会话 UUID（派生名的）+ 目录名 + idle / busy 小标；「交给本机 Codex」时组标题写「本机 Codex 线程」，每项 = 名字或标题 + 目录名 + 应用（桌面版 / VS Code / 终端）+「已打开 / 未打开」小标（未打开的投递时由 Codex 桌面版打开）；当前项打勾；选择跨会话记忆（本机 `quilt:agent-session`，Codex 另记 `quilt:agent-session:codex`，两边互不串），同通道选择一样不必每条重选；记住的会话不在活列表里时触发器显示「选择会话」、发送钮不可用并说明「先选要投递的会话」，不自动换人（投错窗口比多点一下贵）；没有任何活会话时下拉里写明「没有正在运行的 Claude Code 会话——在终端开着 claude 再来」（Codex：「没有 Codex 线程——在 Codex 里开一个对话再来」）。
@@ -1760,14 +1944,12 @@ toast 浮在输入框上方（距底 = 输入框实际高度 + 32px，与 `--chr
 这样按视口或父宽定尺寸的组件（`h-dvh`、`h-[50vh]`、`max-h-[60vh]`、`w-1/2`）量到的就是它在一屏里的真实尺寸，根元素 `fixed bottom-0` 的底栏也照样露在卡片里。**视口不能跟着卡片走**：卡片一缩视口就缩，这类组件每上报一次再缩一截（`h-[50vh]` 422 → 211 → 106 → 53 → 32），几十毫秒内缩到下限，还会被记进本机。**量到之前不画整屏白板**（v0.76，此前没上报前按设备整屏 390×844 渲染、每次刷新白 0.5–2 s）：卡片先用本机记住的上次的框（`quilt:comp-size:<projectId>`，按组件 id 记 `{x, y, w, h}`，量到即写；读出来字段不全、不是有限数或宽高不为正的丢弃，读写容错），没记过的用紧凑占位（设备宽 × 64）；上报前卡片里是骨架（与屏卡片同一套：浅承载面 + 呼吸 + 扫光）、iframe 透明，第一次上报后 iframe 淡入、骨架等淡入走完再撤，外框尺寸不跳（版本升了仍先用记住的旧尺寸，新尺寸上报后再更新）。
 适配视图、小地图、框选命中与找屏跳转都用卡片此刻画出来的尺寸（此前一律按整屏算，框到的是一张 844 高的卡）。
 标签写「名字 · 用于 N 屏」；可拖（位置经 `PATCH /components/{id}` 持久化，`⌘Z` 同样可撤销）、可点选 / `Shift` 加选 / 框选，与屏一样进选中集合；**双击进交互态**（v0.53，与屏同一套手势：双击进、`Esc` 出、与屏的聚焦互斥；`Esc` 由运行时转发，焦点在组件 iframe 里时父页收不到键盘）——交互态摘掉手势罩把指针交给 iframe，卡片右上一个呼吸绿点表示「交互中」（v0.56；文字角标会被长组件名占满，而组件名已经在卡片标签里）。
-交互态里画布手势照常（v0.80）：捏合由运行时转发（`quilt:wheel`，与屏同一条）、绕指针缩放画布；普通滚轮落在组件里没有可滚区域的地方时同样转发、平移画布（运行时在组件文档里逐级查指针下有没有能朝这个方向滚的元素，组件内部可滚的列表照常滚）——此前卡片区域是死区，捏合连浏览器整页缩放一起被拦掉、画布不动。**但镜头不动**：组件卡本就按自身内容尺寸 1:1 渲染，没有屏那种「推到 1:1 居中」的理由，为看一眼组件把整块画布推走反而丢上下文。
+交互态里画布手势照常（v0.80）：捏合由运行时转发（`quilt:wheel`，与屏同一条）、绕指针缩放画布；普通滚轮落在组件里没有可滚区域的地方时同样转发、平移画布（运行时在组件文档里逐级查指针下有没有能朝这个方向滚的元素，组件内部可滚的列表照常滚）——此前卡片区域是死区，捏合连浏览器整页缩放一起被拦掉、画布不动。**镜头摆过去**（v1.23）：双击组件卡与双击屏一样，250 ms 把卡片摆到可用区正中，缩放取「装得下」与 1:1 的较小者；`Esc` 退出后镜头留在那儿。此前镜头不动，画布缩得很小时组件卡只有几十像素宽，进了交互态也点不中、得自己找过去。
 它仍不是屏——没有路由、没有屏内跳转与导航栈。**但选元素直改对它开放**（v0.57，见 `API-EDIT-005`）：交互态按 `⌘E` 就地转选择元素态，改完升版并回刷所有用它的屏；整块重写仍走输入框的「改组件」。**组件文档里的链接与表单一律惰性**（v0.55）：预览文档注入 `window.__quiltComponent`，运行时据此拦掉默认行为且不发 `quilt:navigate` / `quilt:dead`，所以组件里点任何链接都不跳、也不弹「去处还没设计」——那条提示是给屏的，组件的交互态只用来试它自己的状态。
 输入框目标区：组件目标是独立的标签「组件 · X」（`data-testid=component-chip`，可 ×，「清空」一起清）；动词行——只选 1 个组件时「改组件「X」 · 同步 N 屏」，屏 + 组件「改 N 屏 · 带组件 X」，造 + 组件「造 … · 用组件 X」；只选组件时没有屏数 / 版数档位；选了 ≥ 2 个组件而没有屏 → 挡住发送并就地写「一次只能改一个组件」（`REQ-CORE-020` 同一套 `aria-disabled` + 理由）；某组件已有在跑的 `edit_component` 时同样挡住并点名。
 工具栏第二组增「**新建组件**」（`⌥C`）：弹一个只有名字的小对话框（`useModal` 焦点陷阱），建一个空组件（`{ name, html: 占位 div }`）并把它设为目标、聚焦输入框——描述它长什么样就是第一次「改组件」；选中恰好 1 个组件且无屏时上下文组有「**删除组件**」（`Delete` 同），确认框写明「屏里已展开的那份留着，只是不再跟着改」。
 在跑作业行文案「改组件「X」」，进度「正在改组件…」→「已同步 N 屏，正在截图…」；修订面板来源标签 `component` = 「共享组件同步」。
 检查器（`REQ-EDIT-001` 面板）：选中元素在组件实例里（运行时 `quilt:select` 带 `component` 名）→ 不显示直改表单与「用 AI 重生成这块」，改为一段提示（`data-testid=el-component-lock`）「这是共享组件「X」的一部分——改它会同步到所有用它的屏」+ 两个出口：「**改组件**」（把该组件设为输入框唯一目标并聚焦输入框）与「**脱离共享**」（`detach` 操作，toast「已脱离共享，这一屏的这份归屏自己管」）；不在组件里 → 面板多一节「**记为共享组件**」：名字 + 「同时替换其他屏里对应的元素」勾选（默认勾）→ `POST components`，toast 报「已记为组件「X」，同步 N 屏，M 屏没找到对应元素」。
-批注面板：元素在组件里则标签写明「属于共享组件「X」，批注请改组件」并禁用输入。
-组件卡本身不开放批注（v0.80）：组件交互态下按 `⌥N`（或点工具栏「批注」）先退出组件交互态、再开批注模式，toast「共享组件不能批注，点任意一屏开始批注」；批注模式开着时双击组件卡进的是交互态、不是选元素态——此前组件 iframe 进了选元素态、能选中元素却不出任何面板，提示还写着「点任意一屏开始」。
 
 
 **组件交互契约**（v0.54 `REQ-EDIT-006` 补充）：组件要能在画布上被真的用起来，而不是一张写死选中态的图。三条硬约束，写进组件专属系统提示（`componentSystemPrompt`）：
@@ -1865,7 +2047,6 @@ canvas 不进无障碍树，供测试与排查读的数在它的属性上：`dat
 写设计系统只靠版本号乐观锁（`API-EDIT-002`，冲突时 `409 /errors/version-conflict`），与作业不冲突——设计系统面板的删约定、一句话改设计系统、套用预设，提案弹层的「确认写入」都照常可点。
 真冲突的才挡：「回刷所有屏」与提案弹层的「重生成 N 屏」要改全部屏，有作业在跑时不可点，就地写「有作业进行中：<作业行的写法>，等它结束再回刷」（提案弹层写「…，等它结束再重生成」；保存后问「回刷所有屏？」的那一问同样写原因、确认键不可点）；回刷按钮只在它自己发出的请求进行中时转圈。
 检查器所在的屏正在被改时，保存、删除、脱离共享、记为组件、重生成这块都不可点，面板里写「这一屏正在改，等这一轮完事」（组件写「这个组件正在改，等这一轮完事」）；此时按 `⌘S` / `Delete` 弹同样的提示。
-批注面板所在的屏正在被改时，「记下并立刻发送」「一起发送」「只发这条」不可点，面板里写「这一屏正在改，等这一轮完事再发」；「记下（不发送）」照常可用。
 「重生成这块」只在它自己发出的请求进行中时转圈。
 
 **提示条（toast）**（v1.04）：信息类 3.2 s、错误类 8 s 后消失。
@@ -1906,9 +2087,9 @@ canvas 不进无障碍树，供测试与排查读的数在它的属性上：`dat
 系统「降低透明度」打开时，毛玻璃换成实底、去掉模糊；「增强对比度」时实底加较重的外框。
 控件：主按钮与确认框里的危险按钮是胶囊；次按钮、输入框、下拉触发器、标签是填充底（正文色 7%）、圆角 10、不描边，列表行里的删除与取消同形、字用错误色；分段控件是填充轨道加浮起的滑块；状态标签是语义色 12% 混进抬起面的不透明底加语义色字（不透明是为了压在毛玻璃上时字仍 ≥ 4.5:1）。圆角四档：小件 6、控件 10、面板与卡片 16、对话框 22。标题 600 字重、字距收紧。
 
-**画布标记**：选中描边、框选、新屏锚点、批注钉、页面地图连线、小地图的视口框、候选当前格、屏内的选中框与悬停框用标记色（`mark.line`：浅色 `#0071E3`，深色 `#0A84FF`，其上的字用 `mark.onLine`，浅白深黑）。
+**画布标记**：选中描边、框选、新屏锚点、页面地图连线、小地图的视口框、候选当前格、屏内的选中框与悬停框用标记色（`mark.line`：浅色 `#0071E3`，深色 `#0A84FF`，其上的字用 `mark.onLine`，浅白深黑）。
 压在用户设计稿上的标记外面套一圈 halo（`mark.halo`：浅色白、深色纯黑）；用户设计稿大量用蓝时选中框会弱一些，halo 保证它仍看得见。
-卡片上的状态角标（交互中、候选 n、局部修改中）用反色标签；截图失败、加载失败、批注发送中这类要用户留意的角标用抬起面底 + 警告色字，不靠颜色单独表意。
+卡片上的状态角标（交互中、候选 n、局部修改中）用反色标签；截图失败、加载失败这类要用户留意的角标用抬起面底 + 警告色字，不靠颜色单独表意。
 屏内的标记由预览运行时画，运行时不写颜色：父页在 `quilt:mode` 里带上当前模式的标记色与成功色，切换模式时重发一次。
 修改标记角标上的字（「修改中…」「已更新」）同样由父页在 `quilt:mode` 的 `marks.labels`（`{ working, done }`，v1.20 `REQ-CORE-046`）里按界面语言给，换界面语言时同样重发；没给时运行时用中文。
 画在 `<canvas>` 上的颜色（页面地图连线、小地图）在模式切换时重读 CSS 变量、重画一次。
@@ -1937,11 +2118,11 @@ canvas 不进无障碍树，供测试与排查读的数在它的属性上：`dat
 | `/errors/validation` | 400（素材与附件校验、组件直改改坏结构、造变体的 `variantOf` 不对为 422，见 `API-CORE-032` / `API-CORE-019` / `API-EDIT-005` / `API-CORE-006`） | 请求参数不合法（附 `errors[]` 字段级）；v0.32 起本机 agent 命令不在 PATH 也在这里报（`errors[].path=runner`，message 含安装命令）；v0.77 起列表的 `cursor` 不是 ISO 时间也在这里报（此前 `new Date(cursor)` 得到 Invalid Date、序列化时 500） | 表单内联提示 / toast（前端只认 `type` 与 `errors[0].message`，不看状态码） |
 | `/errors/forbidden` | 403 | 签名 URL 校验失败（对象 / 上传直传）；v0.75 起也表示请求来源不在本机名单（`Host` / `Origin`，§15「本地服务」，`title` 点名是来源问题） | 提示并刷新；画布卡片截图取不到时静默重取 `API-CORE-004`（10 s 内至多一次，v0.76）。来源校验画布自己不会撞上；从名单外的地址（如局域网 IP）打开画布时它的请求全部 403，按 §15 设 `WEB_ORIGIN` |
 | `/errors/preview-token-invalid` | 403 | 预览签名无效或过期 | 静默重取 `API-CORE-004` 后重载 iframe（聚焦的 iframe 读不到状态码，按 `load` 后 2 s 没收到 `quilt:ready` 判定；父页取页时这条 403 不带 CORS 头、表现为网络错误，同样先重取再试一次，v0.76） |
-| `/errors/not-found` | 404 | 资源不存在或不属于本人；v0.77 起路径里的资源 id（`/projects/{id}`、`/screens/{id}`、`/jobs/{id}`、`/components/{id}`、`/annotations/{id}`、`/assets/{id}`、`/design-presets/{id}`、`/channels/{id}` 及其下的 `messages/{id}`、`revisions/{id}`）不是 UUID 时也回它，在路由处理之前统一判（此前参数原样进了 uuid 列的查询，Postgres 报 `22P02`，15 个端点都是 500 并在日志里打整段错误栈）；v0.82 起预览域 `/p/{projectId}/{screenId}`（含 `rev`）、`/c/{projectId}/{componentId}`、`/a/{projectId}/{assetId}` 同样在路由处理之前判（此前这三处仍是 500，`/a/` 不验签名、谁都打得到） | 提示并返回上一级；项目详情 404 = 画布区写「这个项目不存在或已被删除」并给「回到最近的项目」（v0.76） |
+| `/errors/not-found` | 404 | 资源不存在或不属于本人；v0.77 起路径里的资源 id（`/projects/{id}`、`/screens/{id}`、`/jobs/{id}`、`/components/{id}`、`/assets/{id}`、`/design-presets/{id}`、`/channels/{id}` 及其下的 `messages/{id}`、`revisions/{id}`）不是 UUID 时也回它，在路由处理之前统一判（此前参数原样进了 uuid 列的查询，Postgres 报 `22P02`，15 个端点都是 500 并在日志里打整段错误栈）；v0.82 起预览域 `/p/{projectId}/{screenId}`（含 `rev`）、`/c/{projectId}/{componentId}`、`/a/{projectId}/{assetId}` 同样在路由处理之前判（此前这三处仍是 500，`/a/` 不验签名、谁都打得到） | 提示并返回上一级；项目详情 404 = 画布区写「这个项目不存在或已被删除」并给「回到最近的项目」（v0.76） |
 | `/errors/element-not-found` | 404 | `qid` 在当前修订不存在 | 刷新屏幕后重选 |
 | `/errors/route-taken` | 409 | 路由在项目内已占用 | 内联提示，建议候选 |
 | `/errors/screen-busy` | 409 | 目标屏有进行中作业（造屏撞造屏的项目级冲突也映射到这里，见 §16） | 发送前按 `REQ-CORE-020` 的覆盖屏集预判并就地写出理由；真撞上时 toast 点名是哪一屏忙（problem 体不带屏信息，屏名由前端用本轮目标 ∩ 在跑作业覆盖屏集算，算不出退回通用文案），草稿与参考图保留 |
-| `/errors/component-locked` | 409 | 直改或批注落在共享组件实例里（v0.46 `REQ-EDIT-006`；体带 `component` 名） | 检查器不发请求就先挡住（运行时 `quilt:select` 带组件名），给「改组件 / 脱离共享」；真撞上（别的标签页刚把它记成组件）toast 点名组件并刷新 |
+| `/errors/component-locked` | 409 | 直改落在共享组件实例里（v0.46 `REQ-EDIT-006`；体带 `component` 名） | 检查器不发请求就先挡住（运行时 `quilt:select` 带组件名），给「改组件 / 脱离共享」；真撞上（别的标签页刚把它记成组件）toast 点名组件并刷新 |
 | `/errors/component-name-taken` | 409 | 组件名在项目内已占用 | 名字框内联提示 |
 | `/errors/revision-conflict` | 409 | `expectedRevisionId` 已非当前版 | 提示「已被更新」，刷新后重试 |
 | `/errors/version-conflict` | 409 | 设计系统版本冲突；v0.46 起共享组件的 `expectedVersion` 过期也是它 | 同上 |
@@ -1991,6 +2172,7 @@ v0.32 删除：`/errors/unauthorized`、`/errors/token-expired`（无登录）�
 | 安全 | 本地服务 | API / 预览域只绑 `127.0.0.1`（`BIND_HOST` 可改）。绑回环只挡远端 TCP，挡不住本机浏览器替任意网页发的请求，所以 **v0.75 起 `/v1/*` 与 `/mcp` 先过来源校验**：`Host` 必须在本机名单里；请求带 `Origin` 时它也必须在名单里（`Origin: null` 拒——沙箱 iframe、`about:blank` 文档、`no-referrer` 的表单都发它）；不合格 `403 /errors/forbidden`。不带 `Origin` 的放行：MCP 客户端、curl、e2e 与脚本都不带，而现代浏览器的跨源 POST 一律带。名单从 `WEB_ORIGIN` / `API_ORIGIN`（外加 `http://localhost:<API 端口>`）推出：它们本身，回环地址再展开成 `localhost` / `127.0.0.1` / `[::1]` 三种写法配同一端口——开发时 Vite 代理（`changeOrigin: false`）送来的 `Host` 与 `Origin` 都是画布地址，打包形态画布与 API 同源，端口改了名单跟着变。挡住的三类：DNS 重绑（`Host` 是攻击者域名）、跨站表单与 no-cors 盲写（`Origin` 是别人的）、预览域与截图里的屏（`Origin` 是预览域或 `null`）。MCP transport 另开 SDK 的 `enableDnsRebindingProtection`，名单同一份。**非回环 `Host` 默认拒绝**：Vite 配了 `host: true`，开发代理也监听局域网地址，从别的机器用 `http://<局域网 IP>:<画布端口>` 打开时请求全部 403；确要在局域网用，把 `WEB_ORIGIN` 设成那个地址（预览域 `frame-ancestors` 本来就要它）；名单里的画布地址随之换成它，本机也要用这个地址打开画布，从 `localhost` / `127.0.0.1:<画布端口>` 打开时请求会 403。预览域端口不做来源校验：它只下发签名预览与公开素材，不受理写请求 |
 | 安全 | 本机密钥文件（v1.03） | 打包形态的 `$QUILT_HOME` 目录 0700、`config.env` 0600（里面有 `QUILT_SECRETS_KEY`、`PREVIEW_SIGNING_SECRET` 与 API Key）：首次启动按这个权限建，之后每次启动对已有的目录与文件补一次 chmod。此前按默认 umask 落成 0755 / 0644，macOS 的本地账号同在 `staff` 组，同机其他账号读得到主密钥，`ADR-013` 的落库加密形同虚设 |
 | 安全 | 对象下发 | `/v1/objects/*` 挂在 API origin 上（打包形态即画布 origin），按签名校验。**v0.75 起 `.html` 一律附件**：`Content-Disposition: attachment; filename="<对象键末段>"`（如 `<revisionId>.html`）、`Content-Security-Policy: default-src 'none'; sandbox`、`X-Content-Type-Options: nosniff`——修订 HTML 与导出原型是不可信内容，在这个 origin 上渲染等于把屏脚本放回画布同源（`ADR-004` 的立论）。`htmlUrl` 与 `quilt.get_export` 的地址照常可 curl / fetch 取正文；浏览器里打开是下载。要在浏览器里看某一版走预览域（候选的 `previewUrl`、聚焦 iframe），导出原型下载后本地打开。截图 PNG、JSON、参考图的下发不变 |
+| 开销 | 本机使用记录（v1.22 `REQ-CORE-047`） | 浏览器端只用被动监听，不记指针移动与滚动，每条事件处理 < 1 ms；写库按批、每批 ≤ 200 条。记录失败不影响操作：事件留在缓冲里下次再发，模型调用与归档写不进去时作业与删除照常完成、服务日志记一行。单人重度使用估每天约 5 MB（事件约 1 MB、模型调用正文约 4 MB），不自动清理 |
 
 ## 16. 并发与一致性
 
@@ -2028,12 +2210,12 @@ v0.32 删除：`/errors/unauthorized`、`/errors/token-expired`（无登录）�
 | 同一屏同时发起两次编辑作业 | `API-CORE-010` × 2 | 先到 202；后到 `409 /errors/screen-busy` | 部分唯一索引（两边都以单屏落 `target_screen_id` 时；多屏改屏与回刷见下方真值表的缺口行） |
 | 用户在生成中回溯旧版 | `API-CORE-015` vs running job | 回溯被拒 `409 /errors/screen-busy`；作业完成后再回溯 | 同上 + 屏级检查 |
 | 两个标签页同时直改同一元素 | `API-EDIT-001` × 2 | 先到 201；后到 `409 /errors/revision-conflict` | 条件更新 current_revision_id |
-| 作业成功落库与用户取消同时到达 | worker vs `API-CORE-009` | 仅一方生效；落库成功后取消返回 `409 /errors/job-finished`；取消先生效时 worker 的条件更新命中 0 行，就此停下，不回写消息、不收口批注、不发 `succeeded` / `failed`（v1.03：此前照发，事件流里有两个终态） | 条件更新 WHERE status='running' |
+| 关掉记录时别的标签页还在发事件 | `API-CORE-050` vs `API-CORE-051` | 关掉之后到达的批次整批丢弃，照样 `204`；那个标签页 60 s 内重取开关后停止采集 | 写入前读开关，与写入同一事务 |
+| 作业成功落库与用户取消同时到达 | worker vs `API-CORE-009` | 仅一方生效；落库成功后取消返回 `409 /errors/job-finished`；取消先生效时 worker 的条件更新命中 0 行，就此停下，不回写消息、不发 `succeeded` / `failed`（v1.03：此前照发，事件流里有两个终态） | 条件更新 WHERE status='running' |
 | 网络重试重复创建作业 | `API-CORE-006` 同 `Idempotency-Key` × 2 | 第二次返回首次 202 同一 job | 幂等键唯一索引；两次并发到达时后到的撞上首个作业后按键重查（v0.77） |
 | 同一设计系统版本并发保存 | `API-EDIT-002` × N（同一 `expectedVersion`） | 只有一个 200；其余 `409 /errors/version-conflict` | 条件更新 `WHERE version = expectedVersion`（v0.77） |
 | 删屏 / 删项目时截图正在渲染 | `API-CORE-018` / `API-CORE-031` vs `screenshot.render` / 作业内截图 | 不留孤儿对象 | 写对象 → 条件回填 → 0 行即清那一屏（或整个项目）的前缀（v0.77） |
 | 同一上传位并发追加 | `quilt.append_upload` × N（同 `offset`） | 一段成功，其余 `409 /errors/upload-offset` 并回当前 `chars` | 按 `uploadId` 进程内串行（v0.77） |
-| 批注跨屏发送时某屏被占着 | `API-EDIT-003 send`（N 屏）vs 别的作业 | 整体 `409` / `429`，一个作业也不留、批注仍是 `open` | 建作业前预检全部屏锁与限流余量；预检之后仍撞上则取消已建的作业（v0.77） |
 | 设计系统回刷期间用户改同一屏 | `apply_design_system` job vs `API-EDIT-001` / `edit_screens` | 后端不挡（回刷的 `target_screen_id` 是 `null`）：两边都带 `expectedRevisionId`，谁先落库另一方失配——回刷输了静默跳过那屏、回执只报实际落地的屏数，改屏作业输了整个作业 `failed errorClass=validation`（`revision conflict`）。前端把在跑的回刷视为占住它的屏集（`screenIds='all'` = 项目全部屏）挡住发送 | 条件更新 `expectedRevisionId` + 前端覆盖屏集（`REQ-CORE-020`） |
 | 本机 agent 拿着旧基线回写（用户在它跑的时候用检查器直改了同屏——直改不受作业锁约束的路径已被锁住，但 agent 自己上一步 `update_screen` 之后再改同屏也会撞） | `quilt.update_screen(jobId, expectedRevisionId)` × 2 | 第二次 `409 /errors/revision-conflict`，agent 按提示 `get_screen` 重取后再改；current 只前进不倒退 | `expectedRevisionId` 必填 + 条件更新 |
 | 用户取消 agent 作业时子进程正在回写 | `API-CORE-009` vs `quilt.update_screen` | 先杀进程再置 `cancelled`；已落库的修订保留、`output.screenIds` 照记 | 条件更新 `WHERE status='running'` |
@@ -2071,7 +2253,7 @@ v0.32 删除：`/errors/unauthorized`、`/errors/token-expired`（无登录）�
 - read-after-write：写成功后同会话立即读（`API-CORE-004/013/014`、`API-PROTO-001`）必须可见（单主库读）。
 - 作业进度：SSE at-least-once（断线以 `Last-Event-ID` 续传，事件带 `seq`，FE 按 `seq` 去重）；`API-CORE-007` 轮询与 SSE 同源同口径。
 - 数据库连接池（v1.03）：外部 Postgres 时连接池挂 `error` 监听，空闲连接被对端断开（Postgres 或 docker 重启、休眠断网）只记一行日志、坏连接由 pg-pool 移出池，进程不退；此前没有监听，空闲连接一出错就是未捕获异常，API 进程直接退出。
-- 作业失败收尾统一（v1.03）：`runJob` 领取之后的任何异常（含查项目、落库事务里的数据库错误）、启动时上次进程没跑完的作业、`job.timeout` 扫到的超时作业，走同一个收尾——置 `failed`、回填空的助手消息、补做中断收尾（候选指过去、空屏删掉、重派生地图）、批注回落、发 `failed`；此前领取后、`try` 之前的异常让作业停在 `running`，31 分钟后被扫成失败时助手消息仍是空的，对话里一直显示「排队中…」。
+- 作业失败收尾统一（v1.03）：`runJob` 领取之后的任何异常（含查项目、落库事务里的数据库错误）、启动时上次进程没跑完的作业、`job.timeout` 扫到的超时作业，走同一个收尾——置 `failed`、回填空的助手消息、补做中断收尾（候选指过去、空屏删掉、重派生地图）、发 `failed`；此前领取后、`try` 之前的异常让作业停在 `running`，31 分钟后被扫成失败时助手消息仍是空的，对话里一直显示「排队中…」。
   建作业先入队再发 `queued` 事件，事件发不出去只记日志；agent 作业领取即开始计时。
 - 服务端的通知通道（v0.79）：外部 Postgres 时作业事件与项目事件共用一条 LISTEN 专用连接。
   它断开（Postgres 或 docker 重启、休眠断网）后按 1 s 起、翻倍、封顶 30 s 退避重连，重新 LISTEN 全部频道；断开期间的通知不会重放，所以重连成功后每条在开的作业流按 `seq` 补读一次、每条项目流推一条 `screen_changed{reason:"reconnected"}` 让画布整体重取。
@@ -2109,7 +2291,7 @@ v0.32 删除的依赖：Resend（无登录邮件）、pg-boss（进程内队列�
 | `screenshot.render` | 修订落库后入队（进程内）；作业里行内拍失败的修订也入队（v0.79） | 并发 4 / 按 revisionId 去重 | 单张 ≤ 40 s（分段上限见上表 Chromium 一行，v0.82） | 重试 2 次后交给 `screenshot.retry`；拍成后推 `screen_changed{screenshot:true}` | 积压 > 200 → `RB-004` |
 | `screenshot.retry` | 每 5 分钟定时器（启动 3 s 后先扫一轮） | 批 50，各屏当前版先扫、其余按新到旧 | 5 min | 同一修订失败第 n 次后 5 min × 2^(n−1) 内不再扫（封顶 6 h，进程内计数、重启清零），永久拍不成的修订不再占满每批 50 条、挤掉别的修订；补上后推 `screen_changed{screenshot:true}`（v0.79） | 同上 |
 | `upload.gc` | 每分钟定时器（v0.82） | 全量扫 `uploads/` | — | 最后一次写入早于 10 分钟（签名 PUT 地址的有效期）的上传位删掉：签发后没用的空位、写了一半被丢下的都在这里收；删失败的下一轮再扫 | 无 |
-| `storage.gc` | 每小时定时器（v1.03 落地，启动 1 分钟后先扫一轮） | 按项目扫 `exports/` 与 `attachments/` | — | 删超过 24 小时的导出产物（画布导出成功即下载，MCP 的 `get_export` 地址 5 分钟过期）；删上传超过 24 小时、没被任何消息引用的参考图附件；删失败的下一轮再扫 | 无 |
+| `storage.gc` | 每小时定时器（v1.03 落地，启动 1 分钟后先扫一轮） | 按项目扫 `exports/` 与 `attachments/` | — | 删超过 24 小时的导出产物（画布导出成功即下载，MCP 的 `get_export` 地址 5 分钟过期）；删上传超过 24 小时、没被任何消息引用的参考图附件（使用记录开着时改为移到 `records/archive/<日期>/attachments/`，v1.22）；不扫 `records/`；删失败的下一轮再扫 | 无 |
 | `job.archive` | 每日定时器 | 批 1000 | 30 min | 下轮补扫 | 无 |
 
 v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务）、`usage.rollup`（本地版直接按台账聚合）。
@@ -2361,7 +2543,7 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
     另外 5 条只覆盖最近几轮。
     Decision：
     ① **取什么**：每条是用户当时那句话，从那一轮作业的 `generation_jobs.input` 取，不读 `messages`、不带模型的改动摘要。
-    按作业类型：`edit_screens` 取 `prompt`；批注发出的（`input.annotations` 非空，`API-EDIT-003`）写成「批注：「锚点文字」→ 说明」，一轮多条用「；」连，锚点为空时只写「批注：说明」，不带 qid；补链 / 按新约定重生成（`prompt` 是 `LINK_REPAIR_PROMPT` / `CONVENTIONS_REGENERATE_PROMPT` 底稿）只取用户写的附加要求，没写就不进；`regenerate_subtree` 写成「局部重生成：<prompt>」；`chat` 取 `prompt`；`generate` 只对它造出来的那一屏算（这一轮的修订是链的根），取 `prompt`，造变体没写字（提示词是状态名底稿）不进、补缺失页只取附加要求；`apply_design_system`、`edit_component` 落到屏上的回流、`generate` 顺手改的入口屏补链、`ingest_screen` 不进。
+    按作业类型：`edit_screens` 取 `prompt`；补链 / 按新约定重生成（`prompt` 是 `LINK_REPAIR_PROMPT` / `CONVENTIONS_REGENERATE_PROMPT` 底稿）只取用户写的附加要求，没写就不进；`regenerate_subtree` 写成「局部重生成：<prompt>」；`chat` 取 `prompt`；`generate` 只对它造出来的那一屏算（这一轮的修订是链的根），取 `prompt`，造变体没写字（提示词是状态名底稿）不进、补缺失页只取附加要求；`apply_design_system`、`edit_component` 落到屏上的回流、`generate` 顺手改的入口屏补链、`ingest_screen` 不进。
     ② **屏取哪些轮**：沿 current 的 `parentRevisionId` 走到首版，每个作业只算一次；没有 `jobId` 的修订——零 LLM 的元素直改（`manual`，`REQ-EDIT-001`）、回溯（`restore`）、组件直改后的回流、不带 `jobId` 的 MCP 写入——本身不贡献，链照常往上走。
     回溯建的修订父修订改记被回溯到的那一版（`API-CORE-015`），已放弃的分支不在链上；采用候选只换 current，未选用的兄弟版同样不在链上。
     ③ **组件取哪些轮**：组件没有修订表、HTML 原地覆盖，取这个组件（`input.componentId`）此前 `succeeded` 的 `edit_component` 作业，按建作业时间排；失败、取消、还在跑的不算；`PATCH` 直改与提取没有作业，不贡献。
@@ -2492,6 +2674,15 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
   - Alternatives：全部文案按中文原文查英文词典（被否：带插值的句子与同字不同义的词对不上；只有 schema 里 zod 的自定义 message 必须是字符串，它们的英文按原文登记在 API 的 `ISSUE_EN` 表里）；语言放 cookie（被否：MCP 与脚本没有 cookie，还得区分谁是浏览器）；所有请求都按 `Accept-Language` 判（被否：界面里选了中文的人，浏览器头可能是英文，选择会失效）；生成内容总跟界面语言（被否：MCP 与脚本没有界面语言，它们的屏一直跟着提示词的语言走）。
   - Consequences：同一个概念在两种语言里各只有一个说法，英文按术语表定（造 → Generate、屏 → screen、草稿本 → Sketchbook…）；新增界面文字要同时写中英两边，缺一边编译不过。
     英文界面下生成的屏缺省是英文，用户写中文要求也一样，除非要求里点名语言；已有的屏与草稿不重译。
+- **`ADR-035` 本机使用记录：浏览器全局采集，事件与模型调用分两张表，正文与归档进对象存储，缺省关** — Status: Proposed（用户 2026-10-21 定：覆盖整个 Quilt；记界面操作、输入过程、完整提示词与原始回复；删除时留归档；设置里一个开关，缺省关）
+  - Context：用户要分析自己用 Quilt 的过程来改进流程。库里已有作业输入、修订与消息，但没有界面操作、发出前的输入过程、拼好的提示词与模型原始回复；删掉草稿或项目时它的修订也一并删掉。
+  - Decision：浏览器在文档上挂被动的点击、按键、输入与变更监听，按 §9 的规则取元素名，不逐个组件埋点；画布镜头、拖动、作业、提示条、预览消息这些没有点击的地方在各自的结束点各记一条。事件攒批写进 `record_events`。
+    worker 的 `llmCall` 是所有模型调用的唯一出口，在那里记 `model_calls`，正文进对象存储；MCP 在工具包装层记 `source=mcp` 的事件。删屏、删项目与 `storage.gc` 在动手前把行写成清单、对象拷进 `records/archive/`。
+    开关存在 `users.record_usage`，服务端写任何记录前都读它：前端只是不发，旧标签页发来的也会被丢弃。
+  - Alternatives：逐个组件手写埋点（被否：漏得多，新加的按钮默认不记）；记进 JSONL 文件（被否：PGlite 与外部 Postgres 都能直接 SQL 查，文件还要另写解析）；开关放 `localStorage`（被否：worker 与清理任务读不到）；删除改成软删（被否：每条读路径都要加过滤，界面上删除的含义也变了）。
+  - Consequences：记录里有用户写的全部文字与生成的全部内容，只在本机、不上传；密码框、通道密钥与签名地址不记（`INV-CORE-006`）。磁盘随使用一直涨，清理策略见 `Q-RECORD-1`。
+    新加的界面元素带 `data-testid` 就会被叫出名字，不用另外埋点；记录的写入失败一律不挡用户的操作。
+
 ## 19. 验收 / 测试
 
 人工评审门（M1 出口）：同一 5 个需求在 Stitch 与 Quilt 各生成一次，Owner 盲评一致性、完成度、画布手感，Quilt ≥ 3/5 不输 Stitch 方可进入 M2。以下为 AI 与人工共用的可执行口径。
@@ -2714,20 +2905,6 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
   When 全景下拖动一张卡
   Then rAF 帧间隔超过 33 ms 的不超过 5 帧
 
-场景: 批注多个元素后一起发送 (REQ-EDIT-004)
-  Given 聚焦某屏并进入批注态
-  When 依次点 3 个元素各写一条改动说明
-  Then 画布上出现 3 个编号气泡贴在对应元素旁，平移缩放画布时气泡跟随
-  When 点「一起发送」
-  Then 该屏产生 1 个 edit_screens 作业（不是 3 个），指令含 3 条批注与各自的 qid；3 条批注标为「已发送」
-  When 作业成功
-  Then 3 条批注标为「已处理」并从画布收起，该屏产生 1 个新修订
-
-场景: 批注的元素已被删除 (REQ-EDIT-004 / 边界)
-  Given 某条批注指向的元素在此期间已被重生成移除
-  When 发送该批注
-  Then 发送不被阻塞，指令里带上该批注记录的原文案片段，由模型自行判断；作业仍产生新修订
-
 场景: 双击放锚点后在输入框造一屏三版 (REQ-CORE-014 / REQ-CORE-015)
   Given 项目已有 5 屏，画布空白处双击
   Then 该点出现虚线锚点，底部输入框获得焦点，目标区显示「新屏 · 此处」药丸，动词行为「造 1 屏 · 此处」
@@ -2887,9 +3064,9 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
   When 对它再发一轮改组件
   Then 发给模型的提示词里有 EARLIER INSTRUCTIONS ALREADY APPLIED TO THIS COMPONENT 一块，依次是「切换加 200ms 过渡」「去掉高亮下面的小圆点」
   And 没有失败那一轮，也没有「改组件：」这类系统描述
-  Given 某屏依次经过对话改、批注改、MCP 改、设计系统回刷、不写附加要求的补链
+  Given 某屏依次经过对话改、MCP 改、设计系统回刷、不写附加要求的补链
   When 再改这屏
-  Then 历史块依次是 MCP 那句、「批注：「锚点文字」→ 说明」、对话那句，不含 qid、回刷与补链
+  Then 历史块依次是 MCP 那句、对话那句，不含回刷与补链
   When 对这屏改一轮「加横幅」，再回溯到改之前那一版，然后改这屏或局部重生成其中一个元素
   Then 两次发给模型的历史块里都没有「加横幅」
   And 本机 agent 投递给会话的提示词里有这屏的同一份历史
@@ -3233,6 +3410,23 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
   Given 看板上打开着草稿 D，开着「选元素」
   When 点中 D 里的按钮，输入「改成圆角胶囊」发送
   Then 建出 regenerate_subtree 作业，完成后 D 多一版，只有那个按钮变了
+
+场景: 打开使用记录后操作被记下 (REQ-CORE-047)
+  Given 设置里「使用记录」开着
+  When 在草稿本里点「选元素」，在输入框写一句后停 2 秒，再发送
+  Then record_events 依次有这次点击、这句话的快照与发送，model_calls 有这一轮的提示词与原始回复
+  When 关掉开关后再点一次
+  Then 不再新增记录，已有的还在
+
+场景: 密钥不进使用记录 (REQ-CORE-047)
+  Given 使用记录开着
+  When 在设置里添加通道并填写密钥
+  Then 记录里有这几次点击，没有密钥框里的内容；model_calls 的正文里也没有密钥
+
+场景: 删草稿留归档 (REQ-CORE-047)
+  Given 使用记录开着，草稿 D 有 3 版
+  When 删掉 D
+  Then 界面上 D 没了，records/archive 下有 D 的清单与 3 版 HTML、截图
 ```
 ## 20. 埋点 / 分析事件
 
@@ -3258,6 +3452,7 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
 | `EVT:draft_forked` | `API-CORE-048` 成功 | draft_id, project_id, from_screen_id, block（是否只带一块） | 诊断 |
 
 v0.32 删除：`EVT:agent_connected`（无 OAuth）、`EVT:agent_task_*`（并入上两条）、`EVT:quota_hit`（无硬上限）。本地版事件只写进程日志，不上报。
+v1.22 本机使用记录（`REQ-CORE-047`，`ADR-035`）是另一套：界面操作与 MCP 调用进 `record_events`、模型调用进 `model_calls`，只在设置里打开时写、只在本机；上表事件照旧只写进程日志。
 
 ## 21. 可观测性 (SLI/SLO/告警)
 
@@ -3285,6 +3480,7 @@ v0.32：本地版没有告警系统，本表是 SaaS 阶段的口径；本地版
 
 ## 23. 发布: Feature Flag / 灰度 / 回滚
 
+v1.22 本机使用记录的开关在设置里，缺省关；关掉即停，已记的不删。
 v0.32 本地版没有 feature flag 与灰度——发布 = 发 npm 版本（SemVer），用户 `npx quilt-canvas@latest` 即升级；回滚 = `npx quilt-canvas@<上一版>`；数据库迁移只前向（Drizzle 迁移在启动时自动应用），发版前必须在 `~/.quilt` 的副本上试跑一次迁移。
 下表与检查单是 SaaS 阶段的口径。
 
@@ -3321,6 +3517,8 @@ v0.32 本地版没有 feature flag 与灰度——发布 = 发 npm 版本（SemV
 ## 25. 迁移 / 数据回填
 
 迁移用 Drizzle Kit，正向迁移在进程启动时自动应用（`$QUILT_HOME/db` 的 PGlite 与 `DATABASE_URL` 的外部 Postgres 走同一组 SQL）。
+`0020`（v1.23）：删 `annotations` 表，已有的批注随之删除；旧作业 `input` 里的 `annotations` 键留在 jsonb 里、不再读。
+`0021`（v1.22 `REQ-CORE-047`）：`users` 加 `record_usage`（boolean not null default false）与 `record_since`（timestamptz，可空）；新建 `record_events`（`(session_id, seq)` 唯一、`(user_id, at)` 索引）与 `model_calls`（`(job_id, seq)` 索引）；两表的项目、屏、作业 id 都不建外键。存量用户开关是关的，不需要回填。
 v0.85（P1 落地；迁移编号取落地时的下一个号，本文写作时最新为 `0015`）：`projects` 加 `language`（text not null default `en`，存量行因此是 `en`，不需要单独的 update）；`design_systems` 与 `design_presets` 各加 `token_ext`（jsonb，可空，空 = 全部默认）；`tokens` 的新字段**由启动时的回填补齐**，与 v0.38 语义色回填同一套做法：扫 `tokens->'typography'->'scale'->0` 仍是字符串（或缺 `state`）的行，按行里存着的输入重算 tokens、只写 `tokens` 不动 `version`，幂等、失败只记一行日志不挡启动；重算用的 `normalizeTokens` 是纯函数，旧 `scale` 升成 7 档后数值等于 Tailwind 默认表，因此回填前后 prelude 输出的计算样式不变。
 已有修订里烤进去的 prelude 要靠 `apply_design_system` 回刷才带上新变量与 `lang`（回刷是用户动作，不自动触发）；不回刷也不影响存量屏——新变量只被新写的屏引用。
 `0011`（v0.40）新建 `design_presets` 与 `preset_assets` 两张表（账号级设计预设及其素材副本，随用户级联删除）。
@@ -3372,6 +3570,7 @@ M1 beta 4 周后对照 §3 指标复盘（生成成功率、首批屏时间、�
 | 风险 | 单屏上限 256 KB：带交互脚本的面板整页覆盖回去很容易贴着上限（2026-10-20 在预览项目里做的上游账号池页写回后 254 KB），写回会被拒；要么写回时提示拆分，要么放宽上限 | @bug | 第一次因超限写回失败时 |
 | Open Question（v1.20） | 项目语言（`REQ-CORE-037`、`ADR-026`，还没落地）与界面语言（`REQ-CORE-046`）都想决定生成内容的语言：落地项目语言时定谁优先。倾向项目语言优先——屏属于用户的产品，不随看画布的人换语言；界面语言只在项目没设语言时作缺省 | @bug | 做项目语言时 |
 | Open Question | 草稿本一次只能生成一张新草稿（占着项目级的造屏名额，`ADR-030`）；实测用户常想并排试几张时，再考虑给草稿本放开这把锁 | @bug | 草稿本上线 4 周后 |
+| 风险（v1.22） | 使用记录开着时磁盘一直涨（估每天约 5 MB，归档另算），且记录里有用户写的全部文字；只在本机、不上传，清理策略见 `Q-RECORD-1` | @bug | 占用第一次超过 1 GB 时 |
 | 已拍板（v0.85） | SPEC 落位：迁入 brand-design 仓并公开（用户 2026-10-01 确认），v1.2 在 `references/specimen-spec.md`（提交 4e7293e，已推送）；`~/Documents/Projects/Temp/specimen-standard/SPEC.md` 改为指向新路径的说明，v1.1 原文另存为同目录 `SPEC-v1.1.md`。v1.2 相对 v1.1：§2 改用 profile-2 的 14 个类别键、新增 typographyDisplay；§4.15 取自 `meta.notUsed`；§6 补「强调上的文字 → onPrimary」；§7 的语言设置改为已决说明；新增附录 A（状态层与焦点环，规范性）。四组 token 样件归 Quilt 自己的测试夹具。P0 四项默认（用户 2026-10-01 签字）：新项目语言缺省 `en`；画布样例卡只放概览，完整页另开标签页；双击样例卡进交互；z-index 与断点不进 token，样例页标「不适用」 | Quilt 在 `tests/fixtures/specimen/` 建四组样件并复制 Portsmith 满深度 tokens（记来源 SHA） | P2 开工前 |
 | Open Question（v0.85） | 导入品牌设计系统时 `brand/fonts/` 的字体文件怎么托管：现有字体来源 `google` / `system` / `url` 都不接本地文件。候选：作为项目素材上传、由预览域 `/a/` 下发并生成 `@font-face`（新增字体来源 `asset`） | 做 P5 时定 | P5 开工前 |
 | 风险（v0.85） | Apple 类系统用 `system-ui` 字体栈（SF Pro 的授权只允许为 Apple 平台软件做界面稿），非 Apple 机器上渲染成别的字体；这类截图与 macOS 基准按 C9 标「不可比」，不做差异判定 | 接受；brand-design 自己的品牌用内联子集字体，换机器截图照样可比 | — |

@@ -60,7 +60,7 @@ export async function updateProject(ownerId: string, projectId: string, patch: {
   return updated;
 }
 
-// API-CORE-031：删项目——行级联（屏 / 修订 / 作业 / 消息 / 连线 / 批注 / 设计系统都挂在 projects 上），对象文件按前缀清；
+// API-CORE-031：删项目——行级联（屏 / 修订 / 作业 / 消息 / 连线 / 设计系统都挂在 projects 上），对象文件按前缀清；
 // 有进行中的作业先拒（worker 还在往里写，删了它会撞外键）
 export async function deleteProject(ownerId: string, projectId: string): Promise<void> {
   const project = await ownedProject(ownerId, projectId);
@@ -136,10 +136,9 @@ export async function getProjectDetail(ownerId: string, projectId: string): Prom
   const linkRows = await db.select().from(schema.links).where(eq(schema.links.projectId, projectId));
   const activeJobs = await db.select().from(schema.generationJobs).where(and(eq(schema.generationJobs.projectId, projectId), inArray(schema.generationJobs.status, ['queued', 'running'])));
   const links: LinkDto[] = linkRows.map((l) => ({ fromScreenId: l.fromScreenId, qid: l.elementQid, href: l.href, toScreenId: l.toScreenId }));
-  const { listOpenForProject } = await import('./annotations.ts');
   const { componentRows, componentDtos } = await import('./components.ts');
   const { assetsOf } = await import('./assets.ts');
   // 素材随详情一起给（v0.35 REQ-CORE-019）：风格指南卡片与设计系统面板用的是同一份，分两次取会各刷各的
   // 共享组件也随详情走（v0.46 REQ-EDIT-006）：画布上的组件卡与输入框的目标标签都从这一份读
-  return { project: projectDto(project), designSystem: designSystemDto(ds), screens: await screenDtos(project, rows), links, activeJobs: activeJobs.map(jobDto), annotations: await listOpenForProject(projectId), assets: await assetsOf(project.id), components: await componentDtos(project, await componentRows(project.id)) };
+  return { project: projectDto(project), designSystem: designSystemDto(ds), screens: await screenDtos(project, rows), links, activeJobs: activeJobs.map(jobDto), assets: await assetsOf(project.id), components: await componentDtos(project, await componentRows(project.id)) };
 }

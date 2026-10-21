@@ -17,7 +17,7 @@ export function useFocusedFrame(p: CanvasProps, propsRef: { current: CanvasProps
   // 重挂 iframe 用：从交互态切到选择元素态时，要把屏内导航过的 DOM 丢掉、回到这张卡片自己的那一屏
   const [reloadKey, setReloadKey] = useState(0);
   // 聚焦期间钉住 iframe 的 src：previewUrl 是签名 URL，每次 refresh 都会换一串新签名，
-  // src 一变 iframe 就静默重载、回到 interact 模式，选择元素/批注态当场失效（且丢掉屏内滚动位置）。
+  // src 一变 iframe 就静默重载、回到 interact 模式，选择元素态当场失效（且丢掉屏内滚动位置）。
   const [focusedSrc, setFocusedSrc] = useState<string | null>(null);
   // iframe 这一次实际加载的是哪一版（v0.76）：钉 src 时一并记下，就绪后作为热更新的基线——取「就绪那一刻的当前修订」的话，
   // 加载期间落地的新修订会被直接当成已显示，屏里停在旧版、检查器却按新版改

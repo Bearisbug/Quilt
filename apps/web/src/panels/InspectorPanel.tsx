@@ -21,7 +21,7 @@ const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator
 
 // 元素检查器（REQ-EDIT-001 / REQ-EDIT-002）：本地直改零 token；AI 只重生成选中子树。
 // component（REQ-EDIT-006）：元素所在的共享组件名——在组件里的元素不直改，给「改组件 / 脱离共享」两个出口
-export type ElementSel = { qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; rect: { x: number; y: number; w: number; h: number }; path?: ElementPathItem[] };
+export type ElementSel = { qid: string; tag: string; text: string; classes: string; href: string | null; component: string | null; path?: ElementPathItem[] };
 // classes 按行存（v0.96 一行一个）：打到一半的空行、带空格的行要能留着，保存时才规范化
 type ElementDraft = { base: string; text?: string; classes?: string[]; link?: string; prompt?: string };
 // 直改落库后报给画布的撤销栈（v0.95）：屏的直改记下改前改后两版，⌘Z 回溯到改前那一版；组件的直改撤不了，只报一声占住这一步
@@ -65,7 +65,7 @@ function ElementPath({ sel, onPick, onPeek }: { sel: ElementSel; onPick?: (qid: 
 
 // 目标是一张屏，或一个共享组件（v0.57 `REQ-EDIT-006`）——组件也能选元素直改，op 与屏同一套，
 // 只是落在组件自己的 HTML 上、乐观并发用版本号，改完由服务端回刷所有用它的屏。
-// 组件没有 AI 子树重生成（整块重写走输入框的「改组件」）、没有批注、也不能再「记为共享组件」。
+// 组件没有 AI 子树重生成（整块重写走输入框的「改组件」），也不能再「记为共享组件」。
 export function InspectorPanel({ screen, component, sel, routes, busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent, onForkToSketch, forking = false, keysRef, onDirectEdit, onUndo, tokens, onPathPick, onPathPeek }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void; onForkToSketch?: (qid: string) => void; forking?: boolean; keysRef?: { current: InspectorKeys | null }; onDirectEdit?: (e: DirectEdit) => void; onUndo?: () => void; tokens?: Tokens; onPathPick?: (qid: string) => void; onPathPeek?: (qid: string | null) => void }) {
   const toast = useToast();
   const t = useT(inspectMessages);

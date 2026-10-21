@@ -50,7 +50,6 @@ export default defineMessages('canvas-parts', {
     generating: '生成中',
     shotRetry: '截图没取到 · 重试',
     working: '局部修改中…',
-    belowFold: '{{note}}（元素在折叠区域内）',
     danglingTitle: '点击生成：{{hrefs}}',
     dangling_one: '断链 {{count}}：{{href}}', dangling_other: '断链 {{count}}：{{href}}',
     candidates_one: '{{count}} 版 · 展开', candidates_other: '{{count}} 版 · 展开',
@@ -65,8 +64,8 @@ export default defineMessages('canvas-parts', {
     variants: '状态变体',
     defaultVariant: '默认',
     frameRetry: '加载失败 · 重试',
-    badge: { loading: '加载中', annotating: '批注中', inspecting: '选择元素中', clickElement: '点屏里的元素', inspectKey: '选元素按 {{shortcut}}' },
-    armed: { annotate: '批注模式：点任意一屏开始 · Esc 退出', inspect: '选择元素模式：点任意一屏开始 · Esc 退出' },
+    badge: { loading: '加载中', inspecting: '选择元素中', clickElement: '点屏里的元素', inspectKey: '选元素按 {{shortcut}}' },
+    armed: { inspect: '选择元素模式：点任意一屏开始 · Esc 退出' },
   },
   // 风格指南卡（StyleGuideCard.tsx）：标题、色板来源与素材行；字阶、按钮、列表的样例文字是排版样张，不进语言资源
   guide: {
@@ -229,7 +228,6 @@ export default defineMessages('canvas-parts', {
     generating: 'Generating',
     shotRetry: 'Screenshot didn’t load · Retry',
     working: 'Editing a block…',
-    belowFold: '{{note}} (element is below the fold)',
     danglingTitle: 'Click to generate: {{hrefs}}',
     dangling_one: '{{count}} broken link: {{href}}', dangling_other: '{{count}} broken links: {{href}}',
     candidates_one: '{{count}} version · Expand', candidates_other: '{{count}} versions · Expand',
@@ -243,8 +241,8 @@ export default defineMessages('canvas-parts', {
     variants: 'State variants',
     defaultVariant: 'Default',
     frameRetry: 'Couldn’t load · Retry',
-    badge: { loading: 'Loading', annotating: 'Annotating', inspecting: 'Selecting element', clickElement: 'Click an element', inspectKey: '{{shortcut}} to select an element' },
-    armed: { annotate: 'Annotation mode: click any screen to start · Esc to exit', inspect: 'Select element mode: click any screen to start · Esc to exit' },
+    badge: { loading: 'Loading', inspecting: 'Selecting element', clickElement: 'Click an element', inspectKey: '{{shortcut}} to select an element' },
+    armed: { inspect: 'Select element mode: click any screen to start · Esc to exit' },
   },
   guide: {
     title: '{{name}} · Style guide',

@@ -133,14 +133,14 @@ await step('TC-CORE-073', async () => {
   const rest: [string, string][] = [
     ['GET', `/v1/projects/${X}`], ['PATCH', `/v1/projects/${X}`], ['DELETE', `/v1/projects/${X}`],
     ...['app-map', 'assets', 'events', 'jobs', 'messages'].map((s): [string, string] => ['GET', `/v1/projects/${X}/${s}`]),
-    ...['annotations/send', 'assets', 'attachments', 'components', 'design-preset', 'jobs', 'messages', 'uploads', `messages/${X}/retry`].map((s): [string, string] => ['POST', `/v1/projects/${X}/${s}`]),
+    ...['assets', 'attachments', 'components', 'design-preset', 'jobs', 'messages', 'uploads', `messages/${X}/retry`].map((s): [string, string] => ['POST', `/v1/projects/${X}/${s}`]),
     ['PUT', `/v1/projects/${X}/design-system`],
     ...['', '/candidates', '/events', '/export'].map((s): [string, string] => ['GET', `/v1/jobs/${X}${s}`]),
     ['POST', `/v1/jobs/${X}/cancel`], ['POST', `/v1/jobs/${X}/candidates/adopt`],
-    ...['screens', 'components', 'annotations', 'channels'].flatMap((k): [string, string][] => [['PATCH', `/v1/${k}/${X}`], ['DELETE', `/v1/${k}/${X}`]]),
+    ...['screens', 'components', 'channels'].flatMap((k): [string, string][] => [['PATCH', `/v1/${k}/${X}`], ['DELETE', `/v1/${k}/${X}`]]),
     ['DELETE', `/v1/assets/${X}`], ['DELETE', `/v1/design-presets/${X}`],
-    ...['annotations', 'revisions', `revisions/${X}`].map((s): [string, string] => ['GET', `/v1/screens/${X}/${s}`]),
-    ['POST', `/v1/screens/${X}/annotations`], ['POST', `/v1/screens/${X}/elements/q1`], ['POST', `/v1/components/${X}/elements/q1`],
+    ...['revisions', `revisions/${X}`].map((s): [string, string] => ['GET', `/v1/screens/${X}/${s}`]),
+    ['POST', `/v1/screens/${X}/elements/q1`], ['POST', `/v1/components/${X}/elements/q1`],
     ['POST', `/v1/screens/${X}/revisions/${X}/adopt`], ['POST', `/v1/screens/${X}/revisions/${X}/restore`],
   ];
   for (const [method, p] of rest) {

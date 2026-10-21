@@ -41,7 +41,7 @@ async function buildPrompt(job: JobRow): Promise<string> {
     ? screens.map((s) => `- ${s.name} (${s.route}) screenId=${s.id} expectedRevisionId=${s.currentRevisionId ?? 'none'}${s.presentation === 'overlay' ? ' — an OVERLAY screen: keep its root transparent (bg-transparent) and its close action linking back' : ''}`).join('\n')
     : '- none: create new screen(s) with quilt.create_screen (pick routes that do not collide with the app map)';
   const scope = job.kind === 'regenerate_subtree' && input.qid ? subtreeScope(input.qid, 'screen') : '';
-  // 每个目标屏此前已生效的用户指令（ADR-012 v0.87）：别的通道、批注、MCP 改过的轮次不在这个会话的记忆里
+  // 每个目标屏此前已生效的用户指令（ADR-012 v0.87）：别的通道、MCP 改过的轮次不在这个会话的记忆里
   const history = job.kind === 'edit_screens' || job.kind === 'regenerate_subtree'
     ? (await Promise.all(screens.map(async (s) => priorInstructionsBlock(`SCREEN "${s.name}" (${s.route})`, await priorInstructions(s.id, s.currentRevisionId)).trim()))).filter(Boolean).join('\n\n')
     : '';

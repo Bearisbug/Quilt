@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
-import { updateScreenSchema, restoreRevisionSchema, applyElementEditSchema, updateDesignSystemSchema, createAnnotationSchema, updateAnnotationSchema, sendAnnotationsSchema, L } from '@quilt/core';
+import { updateScreenSchema, restoreRevisionSchema, applyElementEditSchema, updateDesignSystemSchema, L } from '@quilt/core';
 import { applyElementEdit, updateDesignSystem } from '../../services/edit.ts';
 import { db, schema } from '../../db/client.ts';
 import { problems, isUniqueViolation } from '../../lib/errors.ts';
@@ -11,8 +11,6 @@ import { ownedScreen, hasActiveJob, createRevision, deriveLinks, listRevisions, 
 import { screenDtos, ownedProject } from '../../services/projects.ts';
 import { isSketchbook } from '../../services/sketchbook.ts';
 import { enqueueScreenshot } from '../../services/jobs.ts';
-import { jobDto } from '../../services/projects.ts';
-import * as annotations from '../../services/annotations.ts';
 
 export const screenRoutes = new Hono<Env>();
 
@@ -126,37 +124,4 @@ screenRoutes.post('/v1/screens/:screenId/revisions/:revisionId/restore', async (
   await enqueueScreenshot(rev.id);
   await notifyCanvas(project.id, { reason: 'revision', screenId: screen.id, revisionId: rev.id });
   return c.json({ revision: await revisionDto(rev) }, 201);
-});
-
-// API-EDIT-003 元素批注（REQ-EDIT-004）
-screenRoutes.get('/v1/screens/:screenId/annotations', async (c) => {
-  const user = requireUser(c);
-  c.header('Cache-Control', 'no-store');
-  return c.json({ items: await annotations.listForScreen(user.id, c.req.param('screenId')) });
-});
-
-screenRoutes.post('/v1/screens/:screenId/annotations', async (c) => {
-  const user = requireUser(c);
-  const body = await parseBody(c, createAnnotationSchema);
-  return c.json({ annotation: await annotations.create(user.id, c.req.param('screenId'), body) }, 201);
-});
-
-screenRoutes.patch('/v1/annotations/:id', async (c) => {
-  const user = requireUser(c);
-  const body = await parseBody(c, updateAnnotationSchema);
-  return c.json({ annotation: await annotations.update(user.id, c.req.param('id'), body) });
-});
-
-screenRoutes.delete('/v1/annotations/:id', async (c) => {
-  const user = requireUser(c);
-  await annotations.remove(user.id, c.req.param('id'));
-  return c.body(null, 204);
-});
-
-// 按屏合并发送：每屏一条 edit_screens 作业
-screenRoutes.post('/v1/projects/:projectId/annotations/send', async (c) => {
-  const user = requireUser(c);
-  const { annotationIds } = await parseBody(c, sendAnnotationsSchema);
-  const { jobs } = await annotations.send(user, c.req.param('projectId'), annotationIds, c.get('requestId'));
-  return c.json({ jobs: jobs.map(jobDto) }, 202);
 });

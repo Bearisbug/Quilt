@@ -60,7 +60,7 @@ export function registerProjectTools(c: ToolCtx) {
   // agent 用的投影（v0.65）：画布那份详情带每屏签名 URL、整份设计系统、全部链接与素材，42 屏的项目约 78 K 字符，
   // 而 agent 拿它多半只为取 currentRevisionId。链接走 get_app_map、设计系统走 get_design_contract、结构走 get_outline
   server.registerTool('quilt.get_project', {
-    description: 'Compact project overview: screens (id, name, route, currentRevisionId, presentation, variant, deviations, pending candidates, dangling link count, position), shared components, design system version, active jobs and open annotation count. Links are in quilt.get_app_map, the design system in quilt.get_design_contract, screen structure in quilt.get_outline.',
+    description: 'Compact project overview: screens (id, name, route, currentRevisionId, presentation, variant, deviations, pending candidates, dangling link count, position), shared components, design system version and active jobs. Links are in quilt.get_app_map, the design system in quilt.get_design_contract, screen structure in quilt.get_outline.',
     inputSchema: { projectId: z.string().uuid() },
   }, wrap(async (a) => {
     read();
@@ -79,7 +79,6 @@ export function registerProjectTools(c: ToolCtx) {
       })),
       components: d.components.map((c) => ({ id: c.id, name: c.name, version: c.version, nav: c.nav, usedBy: c.usedBy, x: c.x, y: c.y })),
       activeJobs: d.activeJobs.map((j) => ({ id: j.id, kind: j.kind, status: j.status, runner: j.runner })),
-      openAnnotations: d.annotations.filter((x) => x.status === 'open').length,
     };
   }));
 

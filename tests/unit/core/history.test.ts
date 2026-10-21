@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   screenInstructionHistory, componentInstructionHistory, MAX_PRIOR_INSTRUCTIONS, MAX_PRIOR_INSTRUCTION_CHARS,
-  editUserPrompt, subtreeUserPrompt, componentUserPrompt, presetPrompt, variantPrompt, missingPagePrompt, annotationsPrompt,
+  editUserPrompt, subtreeUserPrompt, componentUserPrompt, presetPrompt, variantPrompt, missingPagePrompt,
   LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, type HistoryJob, type HistoryRevision,
 } from '@quilt/core';
 
@@ -52,14 +52,6 @@ test('系统动作不进：设计系统回刷、组件回流、入口屏补链�
   ];
   const { revisions, current } = chain(jobs);
   assert.deepEqual(screenInstructionHistory(current, revisions, jobs), ['按钮统一用胶囊形', '把标题改成「我的订单」', '一个外卖应用的首页']);
-});
-
-test('批注轮次写成「批注：「锚点」→ 说明」，不带 qid；锚点为空只写说明', () => {
-  const items = [{ qid: 'q12', note: '按钮圆角改小', anchorText: 'Primary action' }, { qid: 'q3', note: '标题加粗', anchorText: '' }];
-  const jobs: HistoryJob[] = [{ id: 'a', kind: 'edit_screens', input: { prompt: annotationsPrompt(items), screenIds: ['s'], annotations: items.map(({ note, anchorText }) => ({ note, anchorText })) } }];
-  const out = screenInstructionHistory('r0', chain(jobs).revisions, jobs);
-  assert.deepEqual(out, ['批注：「Primary action」→ 按钮圆角改小；标题加粗']);
-  assert.ok(!out[0].includes('q12') && !out[0].includes('data-qid'));
 });
 
 test('回溯：父修订是被回溯到的那一版，已放弃分支上的指令不在；没有作业的修订跳过、链照常往上走', () => {

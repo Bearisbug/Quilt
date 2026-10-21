@@ -196,8 +196,6 @@ export const links = pgTable('links', {
   toScreenId: uuid('to_screen_id'),
 }, (t) => [index('links_project_idx').on(t.projectId)]);
 
-// 元素批注（REQ-EDIT-004）：挂在某屏某个 qid 上的一条自然语言改动说明。
-// rect 是批注那一刻元素在屏文档里的矩形，父页据此在画布层画气泡（见 ADR-003）。
 // 设计预设（v0.40 REQ-CORE-021）：账号级，存设计系统的输入；套用是按值复制，与项目解耦
 export const designPresets = pgTable('design_presets', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -238,19 +236,6 @@ export const assets = pgTable('assets', {
   height: integer('height').notNull().default(0),
   createdAt: ts('created_at').notNull().default(now()),
 }, (t) => [index('assets_project_idx').on(t.projectId, t.createdAt)]);
-
-export const annotations = pgTable('annotations', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  screenId: uuid('screen_id').notNull().references(() => screens.id, { onDelete: 'cascade' }),
-  qid: text('qid').notNull(),
-  note: text('note').notNull(),
-  anchorText: text('anchor_text').notNull().default(''),
-  rect: jsonb('rect').notNull(),
-  status: text('status').notNull().default('open'),
-  sentJobId: uuid('sent_job_id'),
-  createdAt: ts('created_at').notNull().default(now()),
-  updatedAt: ts('updated_at').notNull().default(now()),
-}, (t) => [index('annotations_screen_status_idx').on(t.screenId, t.status)]);
 
 export const usageEntries = pgTable('usage_entries', {
   id: uuid('id').primaryKey().defaultRandom(),

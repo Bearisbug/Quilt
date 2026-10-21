@@ -53,7 +53,7 @@ export function createApp() {
     if (!Object.values(c.req.param()).every((v) => UUID.test(v))) throw problems.notFound();
     await next();
   };
-  for (const p of ['projects', 'screens', 'jobs', 'components', 'annotations', 'assets', 'design-presets', 'channels', 'sketchbook/drafts']) app.use(`/v1/${p}/:id/*`, uuidParams);
+  for (const p of ['projects', 'screens', 'jobs', 'components', 'assets', 'design-presets', 'channels', 'sketchbook/drafts']) app.use(`/v1/${p}/:id/*`, uuidParams);
   app.use('/v1/projects/:projectId/messages/:id/*', uuidParams);
   app.use('/v1/screens/:screenId/revisions/:id/*', uuidParams);
 
