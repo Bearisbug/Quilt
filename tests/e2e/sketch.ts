@@ -52,6 +52,12 @@ const LANDING = `<div data-frame="desktop" class="min-h-dvh bg-white text-zinc-9
 <header class="h-16 px-10 flex items-center justify-between border-b border-zinc-200"><span class="font-semibold">Northwind</span><nav class="flex gap-8 text-sm text-zinc-600"><a href="#">产品</a><a href="#">价格</a><a href="#">博客</a></nav></header>
 <section class="px-10 py-24 max-w-3xl"><h1 class="text-5xl font-semibold tracking-tight">让每一次发货都准时</h1><p class="mt-4 text-lg text-zinc-600">从下单到签收，一张面板看全。</p><a href="#" class="mt-8 inline-flex h-11 px-6 items-center rounded-md bg-zinc-900 text-white">免费试用 14 天</a></section>
 </div>`;
+// 带一个收起的底部抽屉的账单页（TC-CORE-158）：抽屉的遮罩是全屏、全透明，父层 pointer-events:none 放行点击
+const DRAWER = `<div data-frame="mobile" class="min-h-dvh bg-stone-100 text-stone-900 p-6 space-y-4">
+<h1 class="text-2xl font-semibold">本月账单</h1><p class="text-sm text-stone-500">点「筛选」打开底部抽屉</p>
+<button type="button" class="h-10 px-4 rounded-full bg-stone-900 text-white">筛选</button>
+<div class="fixed inset-0 z-50 pointer-events-none"><div class="absolute inset-0 bg-black/40 opacity-0"></div><div class="absolute inset-x-0 bottom-0 translate-y-full rounded-t-3xl bg-white p-6"><p>筛选条件</p></div></div>
+</div>`;
 // 交给本机会话时，脚本扮演会话写的草稿：写死的色值、没有设计系统
 const WEATHER = '<div data-frame="mobile" class="min-h-dvh bg-[#0b1020] text-white p-6 space-y-2"><h1 class="text-2xl font-semibold">东京</h1><p class="text-6xl font-light">18°</p><p class="text-sm text-[#9fb3ff]">多云 · 体感 16°</p></div>';
 const LOGIN = '<form data-frame="component" style="width:320px" class="rounded-xl bg-white p-6 space-y-3 shadow-lg"><h1 class="text-lg font-semibold">登录</h1><input class="w-full h-10 px-3 rounded-md border border-[#d4d4d8]" placeholder="邮箱"><button type="button" class="w-full h-10 rounded-md bg-[#18181b] text-white">继续</button></form>';
@@ -72,6 +78,7 @@ function draftReply(hit: StubHit): string {
   if (instr.includes('圆形')) return PLAYER(true);
   if (instr.includes('记账')) return LEDGER;
   if (instr.includes('官网')) return LANDING;
+  if (instr.includes('抽屉')) return DRAWER;
   const size = /\[size:(\d+)x(\d+)\]/.exec(instr);
   if (size) return `<div style="width:${size[1]}px;height:${size[2]}px;background:#0b1020"></div>`;
   const current = hit.user.split('\nCURRENT HTML:\n')[1];
@@ -1998,6 +2005,36 @@ await step('TC-EDIT-041', async () => {
   } catch (e) { S.fail(e); }
   S.done();
   return 'Shift 加选减选、每块一枚胶囊、Shift+↑ 走到整行时合并到外层；两块一次发出（一次调用、原 HTML、一版、副标题原样）；少回一块补问后失败不落版；qids 超 8、互相包含、不含 qid 都 400';
+});
+
+// ---------- TC-CORE-158 选元素时跳过全透明的遮罩（源自缺陷 2026-10-22） ----------
+await step('TC-CORE-158', async () => {
+  await ensureChannel();
+  const sb = await sketchbook();
+  const d = await newDraft(sb, '一个带抽屉的账单页', { runner: CHANNEL() });
+  const html = await currentHtml(d.id);
+  const h1 = qidOf(html, /<h1[^>]*data-qid="(q\d+)"/);
+  const btn = qidOf(html, /<button[^>]*data-qid="(q\d+)"/);
+  await openSketch(d.id);
+  await waitStage('draft', 10000);
+  const fl = page.frameLocator('[data-testid="draft-iframe"]');
+  await fl.locator(`[data-qid="${btn}"]`).waitFor({ timeout: 10000 });
+  await sleep(800);
+  // 选中框左上角的标签写「tag · qid」
+  const selected = () => fl.locator('[data-quilt-ui]').evaluateAll((els) => els.map((e) => (e.textContent ?? '').trim()).filter((t) => /^[a-z0-9]+ · q\d+$/.test(t)));
+  await page.getByTestId('draft-pick').click();
+  // 1 点标题：选中的是 h1，不是盖在最上面的遮罩
+  await clickInScaled('[data-testid="draft-iframe"]', fl.locator(`[data-qid="${h1}"]`));
+  await eventually(async () => expect((await selected()).includes(`h1 · ${h1}`), `① 应选中标题 h1 · ${h1}：${JSON.stringify(await selected())}`), 3000);
+  // 2 点「筛选」按钮：选中按钮
+  await clickInScaled('[data-testid="draft-iframe"]', fl.locator(`[data-qid="${btn}"]`));
+  await eventually(async () => expect((await selected()).includes(`button · ${btn}`), `② 应选中按钮 button · ${btn}：${JSON.stringify(await selected())}`), 3000);
+  // 3 关掉选元素：遮罩照旧放行点击（交互态按设计自己的命中规则），点按钮不选任何东西
+  await page.getByTestId('draft-pick').click();
+  await eventually(async () => expect((await selected()).length === 0, `③ 关掉选元素后不该留选中框：${JSON.stringify(await selected())}`), 3000);
+  const hit = await fl.locator('body').evaluate((_b, q) => { const el = document.querySelector(`[data-qid="${q}"]`)!.getBoundingClientRect(); return document.elementFromPoint(el.x + el.width / 2, el.y + el.height / 2)?.closest('[data-qid]')?.getAttribute('data-qid'); }, btn);
+  expect(hit === btn, `③ 交互态下按钮上方的命中应是按钮本身：${hit}`);
+  return `标题与按钮都选得中（${h1}、${btn}），全透明的抽屉遮罩不挡；关掉选元素后命中照旧`;
 });
 
 await browser.close();

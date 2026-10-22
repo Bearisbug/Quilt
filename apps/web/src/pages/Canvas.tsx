@@ -23,6 +23,10 @@ import { ArrangeBar } from '@/canvas/ArrangeBar';
 import { usePositionDrafts, usePositionUndo } from '@/canvas/positions';
 import { useUndoStack } from '@/canvas/undo';
 import { coveredScreens, jobLabel, type JobInput } from '@/canvas/jobs';
+import { collabColor, distinctPeople, useFollow, useMe, usePresence, type Peer } from '@/lib/collab';
+import { NameDialog } from '@/collab/NameDialog';
+import { PeerAvatars } from '@/collab/PeerAvatars';
+import collabMessages from '@/i18n/locales/collab';
 import { reconcileJobs, settleJob, progressText } from '@/canvas/jobTracker';
 import { DeleteDialog, MissingDialog, NewComponentDialog, VariantDialog } from '@/canvas/dialogs';
 import { applySelect, type SelectMessage } from '@/canvas/frameMessages';
@@ -89,6 +93,7 @@ function CanvasPage() {
   const toast = useToast();
   const t = useT(canvasPageMessages);
   const tc = useT(commonMessages);
+  const tk = useT(collabMessages);
   const locale = useLocale();
   // 造屏名额是项目级的（REQ-CORE-020）：锚点造屏、工具栏「新建屏幕」、断链补屏建的都是 generate，互相排队但不挡改屏
   const generateBusy = t('generateBusy');
@@ -129,6 +134,15 @@ function CanvasPage() {
   // 组件卡的交互态（REQ-EDIT-006）：与屏的聚焦互斥——两边都是「活 iframe 吃掉指针」，同时开会分不清点的是谁
   const [focusedComponentId, setFocusedComponentId] = useState<string | null>(null);
   const [navStack, setNavStack] = useState<string[]>([]);
+  // 协作显示（v1.32 REQ-CORE-048）：这个浏览器的身份、同一项目里的其他人、正在跟随谁、这个标签页发出的作业
+  const me = useMe();
+  const { presence, peers } = usePresence(projectId, me);
+  const presenceRef = useRef(presence); presenceRef.current = presence;
+  const people = useMemo(() => distinctPeople(peers), [peers]);
+  // 跟随（链式跟随、跟随连成一圈的处理在 useFollow）：跟随的人离开、或圈里该自己让时停下并说一声
+  const follow = useFollow(presence, peers, me, { left: (name) => toast(tk('left', { name })), yielded: (name) => toast(tk('yielded', { name })) });
+  const following = follow.following;
+  const mineJobs = useRef(new Set<string>());
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [missing, setMissing] = useState<{ fromScreenId: string; hrefs: string[] } | null>(null);
   // 候选就地展开（REQ-CORE-015）：一次只展开一屏；展开层不是弹窗，不拦画布快捷键，只吃 Esc
@@ -286,8 +300,9 @@ function CanvasPage() {
     setFeed(st);
     // 事件不续传：断过之后重新连上就整体重取一次，补上断线期间丢掉的作业终态、截图就绪与回写
     if (st !== 'open') { feedBroken.current = true; return; }
+    presenceRef.current?.reset();
     if (feedBroken.current) { feedBroken.current = false; void refresh({ quiet: true }); }
-  }), [projectId, scheduleRefresh, refresh, feedEpoch, gone]);
+  }, (e) => presenceRef.current?.handle(e)), [projectId, scheduleRefresh, refresh, feedEpoch, gone]);
   // 处理器放 ref：闭包每帧刷新，订阅不动
   const onJobEvent = useRef<(job: JobDto, e: JobEventDto) => void>(() => {});
   onJobEvent.current = (job, e) => {
@@ -386,6 +401,35 @@ function CanvasPage() {
     const ids = screens.map((s) => s.id);
     return new Set(guardJobs.flatMap((j) => coveredScreens(j, ids, components)));
   }, [guardJobs, screens, components]);
+  // ---- 协作显示（v1.32 REQ-CORE-048）：把自己的选中、聚焦与发出的作业发出去；别人的作业覆盖了哪些卡；跟随的开停 ----
+  useEffect(() => {
+    const sel = [...selectedIds, ...selectedComponentIds];
+    presence?.set({ selected: sel.length ? sel.slice(0, 200) : undefined });
+  }, [presence, selectedIds, selectedComponentIds]);
+  useEffect(() => {
+    const mode = inspectMode ? 'inspect' as const : 'interact' as const;
+    const route = focusedId ? (navStack.length ? navStack[navStack.length - 1] : screens.find((x) => x.id === focusedId)?.route) : undefined;
+    presence?.set({ focus: focusedId ? { id: focusedId, kind: 'screen', mode, route } : focusedComponentId ? { id: focusedComponentId, kind: 'component', mode } : undefined });
+  }, [presence, focusedId, focusedComponentId, inspectMode, navStack, screens]);
+  useEffect(() => {
+    const mine = activeJobs.filter((j) => mineJobs.current.has(j.id)).map((j) => j.id);
+    presence?.set({ jobs: mine.length ? mine.slice(0, 20) : undefined });
+  }, [presence, activeJobs]);
+  const jobTargets = useCallback((jobId: string) => {
+    const j = guardJobs.find((x) => x.id === jobId);
+    if (!j) return [];
+    const comp = j.kind === 'edit_component' ? (j.input as { componentId?: string } | null)?.componentId : undefined;
+    return [...coveredScreens(j, screens.map((x) => x.id), components), ...(comp ? [comp] : [])];
+  }, [guardJobs, screens, components]);
+  const describePeer = useCallback((x: Peer) => {
+    const g = x.state.following;
+    if (g) return g.id === me?.id ? tk('doing.followingYou') : tk('doing.following', { name: people.find((y) => y.person.id === g.id)?.person.name ?? '' });
+    const f = x.state.focus;
+    if (f) return f.mode === 'inspect' ? tk('doing.inspect', { route: f.route ?? '' }).trim() : tk('doing.interact', { route: f.route ?? '' }).trim();
+    const n = x.state.selected?.length ?? 0;
+    return n ? tk('doing.selected', { count: n }) : tk('doing.idle');
+  }, [tk, me?.id, people]);
+  const followed = follow.target;
   // 正在被 edit_component 作业改的组件：改它的元素会撞版本，检查器先挡住（与屏的 busyScreens 同义）
   const busyComponents = useMemo(() => new Set(guardJobs.filter((j) => j.kind === 'edit_component').map((j) => (j.input as { componentId?: string } | null)?.componentId).filter(Boolean) as string[]), [guardJobs]);
   const focusedComponent = useMemo(() => components.find((c) => c.id === focusedComponentId) ?? null, [components, focusedComponentId]);
@@ -432,6 +476,7 @@ function CanvasPage() {
   };
   // 追加而不是替换：并行作业各自一枚 chip，且 job.input 里带着目标屏，冲突判定不必等下一次 refresh
   const trackJob = (job: JobDto) => {
+    mineJobs.current.add(job.id);
     recordEvent('job', job.kind, { jobId: job.id, status: job.status });
     if (!beforeRef.current.has(job.id)) beforeRef.current.set(job.id, new Set(screensRef.current.map((s) => s.id)));
     if (!trackedAt.current.has(job.id)) trackedAt.current = new Map(trackedAt.current).set(job.id, detailSeq.current);
@@ -724,6 +769,7 @@ function CanvasPage() {
     focused: !!focusedId || !!focusedComponentId, exitFocus: () => { setFocusedId(null); setFocusedComponentId(null); },
     inspecting: inspectMode, climb: (dir: 'up' | 'down') => canvasApi.current?.climb(dir),
     panel: !!panel, closePanel: () => setPanel(null),
+    following: !!following, stopFollow: follow.stop,
     selection: selectedIds.length > 0 || selectedComponentIds.length > 0, clearSelection: () => { setSelectedIds([]); setSelectedComponentIds([]); },
     // ⌘A 全选屏与共享组件卡（组件卡与屏一样进选中集合，REQ-EDIT-006）
     selectAll: () => { setSelectedIds(screens.map((x) => x.id)); setSelectedComponentIds(components.map((c) => c.id)); },
@@ -743,6 +789,7 @@ function CanvasPage() {
         // 面板里的输入框（检查器、设计系统……）只失焦，草稿留着；底部输入框自己处理 Esc 并拦下冒泡
         const field = (e.target as HTMLElement | null)?.closest<HTMLElement>('input, textarea, select, [contenteditable]');
         if (field) { field.blur(); return; }
+        if (k.following) { k.stopFollow(); return; }
         if (k.expanded) { setCandidates(null); return; }
         if (k.focused) { k.exitFocus(); return; }
         if (k.panel) { k.closePanel(); return; }
@@ -871,12 +918,24 @@ function CanvasPage() {
       </>}>
         <ProjectSwitcher current={detail?.project ?? null} placeholder={failure?.kind === 'not-found' ? t('switcher.notFound') : failure ? t('load.failed') : t('switcher.loading')} onRenamed={(id) => { if (id === projectId) refresh(); }} />
       </TopNav>
+      {/* 协作者头像（v1.32 REQ-CORE-048）：顶栏右侧那一行、工具栏上方；跟随时视口四周描他的颜色，顶部中央写正在跟随谁 */}
+      <PeerAvatars className="absolute right-3 top-3 z-30" people={people} following={following} onFollow={follow.toggle} describe={describePeer} />
+      {followed && (
+        <div aria-hidden="true" data-testid="follow-frame" className="pointer-events-none absolute inset-0 z-20 shadow-[inset_0_0_0_2px_var(--c)]" style={{ ['--c' as string]: collabColor(followed.person.color) }}>
+          <span className="chrome absolute left-1/2 top-16 inline-flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-md px-3 py-1.5 type-label font-medium text-text-primary">
+            <span className="size-2 rounded-full" style={{ background: 'var(--c)' }} />
+            {follow.leader && follow.leader.person.id !== followed.person.id ? tk('followingVia', { name: followed.person.name, leader: follow.leader.person.name }) : tk('following', { name: followed.person.name })}
+          </span>
+        </div>
+      )}
+      {!me && <NameDialog taken={peers.map((x) => x.person.color)} />}
       <div className="absolute inset-0">
         {ready && detail && tokens && previewOrigin ? (
           <CanvasView
             projectId={projectId} safeAreaRef={safeAreaRef}
             projectName={detail.project.name} tokens={tokens} palette={detail.designSystem.palette} colorMode={detail.designSystem.colorMode} assets={detail.assets} screens={screens} links={detail.links} previewOrigin={previewOrigin}
             selectedIds={selectedIds} focusedId={focusedId} styleGuideSelected={panel === 'design'} inspectMode={inspectMode} armed={inspectArmed} showLinks={showLinks}
+            presence={presence} peers={peers} jobTargets={jobTargets} following={follow.leader?.person.id ?? null} onUserCamera={follow.stop}
             anchor={anchor} screenSize={DEVICE_SIZE[detail.project.deviceType]} exemplarScreenId={detail.project.exemplarScreenId}
             onSelect={setSelectedId}
             onSelectMany={(ids, compIds, additive) => { setSelectedIds((prev) => (additive ? [...new Set([...prev, ...ids])] : ids)); setSelectedComponentIds((prev) => (additive ? [...new Set([...prev, ...compIds])] : compIds)); }}

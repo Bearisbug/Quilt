@@ -23,6 +23,10 @@ import { useSettingsSection } from '@/settings/sections';
 import { getLocale, tOf, useLocale, useT, type Locale } from '@/i18n';
 import sketchMessages from '@/i18n/locales/sketch';
 import commonMessages from '@/i18n/locales/common';
+import collabMessages from '@/i18n/locales/collab';
+import { distinctPeople, useFollow, useMe, usePresence, type Peer, type Presence } from '@/lib/collab';
+import { NameDialog } from '@/collab/NameDialog';
+import { PeerAvatars } from '@/collab/PeerAvatars';
 
 const RAIL_KEY = 'quilt:sketch-rail';
 // 窄视口断点，与 styles.css 里 .sketch-shell 的同一条
@@ -136,8 +140,19 @@ export function SketchRoute() {
     // 失败的原因写在作业 chip 上（v1.17），不再弹提示条
     if (blockGone) setPick(null);
   };
-  const book = useSketchbook(onEvent);
+  // 协作显示（v1.32 REQ-CORE-048）：草稿本是一个项目，协作通道按它的 id 建
+  const presenceRef = useRef<Presence | null>(null);
+  const book = useSketchbook(onEvent, presenceRef);
   const { projectId, detail, jobs, progress, refresh, applyScreen } = book;
+  const me = useMe();
+  const { presence, peers } = usePresence(projectId, me);
+  presenceRef.current = presence;
+  const people = useMemo(() => distinctPeople(peers), [peers]);
+  const mineJobs = useRef(new Set<string>());
+  const tk = useT(collabMessages);
+  // 跟随（链式跟随、跟随连成一圈的处理在 useFollow，同画布）：跟着领头人正看的草稿换
+  const follow = useFollow(presence, peers, me, { left: (name) => toast(tk('left', { name })), yielded: (name) => toast(tk('yielded', { name })) });
+  const following = follow.following;
   const screens = detail?.screens;
   screensRef.current = screens ?? [];
   useEffect(() => { if (pendingNew?.screenId && screens?.some((s) => s.id === pendingNew.screenId)) setPendingNew(null); }, [screens, pendingNew]);
@@ -193,6 +208,33 @@ export function SketchRoute() {
   const picking = !!open && pickingFor === open.id;
   const activePick = picking && open && pick?.draftId === open.id && pick.revisionId === open.currentRevisionId ? pick : null;
   const picks = useMemo(() => activePick?.sels ?? [], [activePick]);
+  // ---- 协作显示（v1.32 REQ-CORE-048，PAGE-SKETCH「协作者」）：把自己在看哪张草稿、选中的块、发出的作业发出去；跟随的人换草稿就跟着换 ----
+  useEffect(() => { presence?.set({ draft: open?.id ?? undefined }); }, [presence, open?.id]);
+  useEffect(() => { const qs = picks.map((x) => x.qid); presence?.set({ blocks: qs.length ? qs.slice(0, 8) : undefined }); }, [presence, picks]);
+  useEffect(() => { const mine = jobs.filter((j) => mineJobs.current.has(j.id)).map((j) => j.id); presence?.set({ jobs: mine.length ? mine.slice(0, 20) : undefined }); }, [presence, jobs]);
+  // 记录栏小头像与「正在改」按标签页算、按人去重：他开着两个标签页时，看着这张草稿或在改它的是哪一个都算
+  const viewers = useMemo(() => { const m: Record<string, Peer[]> = {}; for (const x of peers) if (x.state.draft) (m[x.state.draft] ??= []).push(x); for (const k of Object.keys(m)) m[k] = distinctPeople(m[k]); return m; }, [peers]);
+  const peersHere = useMemo(() => peers.filter((x) => !!open && x.state.draft === open.id), [peers, open]);
+  const editors = useMemo(() => !open ? [] : distinctPeople(peers.filter((x) => (x.state.jobs ?? []).some((id) => { const j = jobs.find((y) => y.id === id); return !!j && coveredScreens(j, [open.id]).includes(open.id); }))), [peers, jobs, open]);
+  const describePeer = useCallback((x: Peer) => {
+    const g = x.state.following;
+    if (g) return g.id === me?.id ? tk('doing.followingYou') : tk('doing.following', { name: people.find((y) => y.person.id === g.id)?.person.name ?? '' });
+    const d = x.state.draft && (screens ?? []).find((y) => y.id === x.state.draft);
+    return d ? tk('doing.draft', { name: d.name }) : tk('doing.sketch');
+  }, [screens, tk, me?.id, people]);
+  // 跟着领头人（按人算）：开始时跟他最近更新的那个标签页正看的草稿，之后他哪个标签页换了草稿就跟到哪；领头人换了从头记
+  const leaderId = follow.leader?.person.id ?? null;
+  const followDrafts = useRef({ leader: null as string | null, tabs: new Map<string, string | undefined>() });
+  useEffect(() => {
+    const mem = followDrafts.current;
+    if (mem.leader !== leaderId) { mem.leader = leaderId; mem.tabs = new Map(); }
+    if (!leaderId) return;
+    const tabs = peers.filter((x) => x.person.id === leaderId);
+    const moved = mem.tabs.size ? tabs.find((x) => mem.tabs.get(x.clientId) !== x.state.draft) : distinctPeople(tabs)[0];
+    for (const x of tabs) mem.tabs.set(x.clientId, x.state.draft);
+    const d = moved?.state.draft;
+    if (d && d !== dRef.current) openDraft(d);
+  }, [peers, leaderId]); // eslint-disable-line react-hooks/exhaustive-deps
   const openId = open?.id ?? null;
   useEffect(() => { setPickingFor(null); setPick(null); }, [openId]);
   // 胶囊只在「选元素」开着时有：开关一换就去掉
@@ -240,12 +282,12 @@ export function SketchRoute() {
     try {
       if (target && block) {
         const { job } = await api.projects.createJob(projectId, { kind: 'regenerate_subtree', input: { screenId: target.id, qid: block.qids[block.qids.length - 1], ...(block.qids.length > 1 ? { qids: block.qids } : null), prompt: content, expectedRevisionId: block.revisionId, runner: prefs.sendRunner }, attachmentIds: attachmentIds.length ? attachmentIds : undefined });
-        book.track(job);
+        book.track(job); mineJobs.current.add(job.id);
         if (job.runner === 'agent') toast(agentNote);
         return true;
       }
       const r = await api.projects.send(projectId, { content, runner: prefs.sendRunner, attachmentIds: attachmentIds.length ? attachmentIds : undefined, ...(target ? { targetScreenIds: [target.id] } : { frame, ...(refProjectId ? { refProjectId } : null) }) });
-      book.track(r.job);
+      book.track(r.job); mineJobs.current.add(r.job.id);
       if (!target) setPendingNew({ jobId: r.job.id, frame });
       if (r.job.runner === 'agent') toast(agentNote);
       return true;
@@ -263,7 +305,7 @@ export function SketchRoute() {
       const user = (await api.projects.messages(projectId)).items.find((m) => m.role === 'user' && m.jobId === id);
       if (!user) { toast(t('page.retry.lost'), 'error'); return; }
       const { job } = await api.projects.retry(projectId, user.id, failed.kind === 'chat' ? undefined : prefs.sendRunner);
-      book.track(job);
+      book.track(job); mineJobs.current.add(job.id);
       if (job.kind === 'generate' && !dRef.current) setPendingNew({ jobId: job.id, frame: (job.input as { frame?: DraftFrameChoice }).frame ?? 'auto' });
       dismissJob(id);
     } catch (e) {
@@ -297,7 +339,8 @@ export function SketchRoute() {
     composerRef.current?.focus();
   }, [openDraft]);
   // Esc 的先后（PAGE-SKETCH）：下拉与弹层自己先拦下；然后一次去掉全部胶囊回到改整张；最后才按 Q-SKETCH-3 收起看板
-  const escape = () => { if (activePick) setPick(null); else collapse(); };
+  // 跟随中先停止跟随（v1.32），再撤选中的块，最后收起看板
+  const escape = () => { if (following) follow.stop(); else if (activePick) setPick(null); else collapse(); };
 
   const [copyFor, setCopyFor] = useState<ScreenDto | null>(null);
   const [deleting, setDeleting] = useState<ScreenDto | null>(null);
@@ -404,6 +447,9 @@ export function SketchRoute() {
       )}>
         <ProjectSwitcher current={null} placeholder={t('page.switcher')} sketchbook />
       </TopNav>
+      {/* 协作者头像（v1.32 REQ-CORE-048）：右上角记录栏开关的左边 */}
+      <PeerAvatars className="absolute right-14 top-3 z-30" people={people} following={following} onFollow={follow.toggle} describe={describePeer} />
+      {!me && <NameDialog taken={peers.map((x) => x.person.color)} />}
       {detail && book.previewOrigin ? (
         <DraftStage
           state={stageState} draft={open} pendingFrame={pendingNew?.frame ?? null} progress={stageProgress} busy={openBusy} previewOrigin={book.previewOrigin}
@@ -419,9 +465,10 @@ export function SketchRoute() {
           onStale={() => refresh({ quiet: true })}
           refs={refs} onRef={(id) => void changeRef(id)}
           picking={picking} onPicking={changePicking} pickQids={picks.map((x) => x.qid)} onPick={onPick} climbRef={climbRef}
+          presence={presence} peersHere={peersHere} editors={editors}
         />
       ) : <StagePending failure={book.failure} onRetry={book.retry} />}
-      <DraftRail open={railOpen} onToggle={toggleRail} drafts={drafts} openId={open?.id ?? null} generating={generating} onPick={(id) => { if (id !== dRef.current) openDraft(id); if (narrow()) setRailOpen(false); }} onShotError={onShotError} />
+      <DraftRail open={railOpen} onToggle={toggleRail} drafts={drafts} openId={open?.id ?? null} generating={generating} viewers={viewers} onPick={(id) => { follow.stop(); if (id !== dRef.current) openDraft(id); if (narrow()) setRailOpen(false); }} onShotError={onShotError} />
       <SketchComposer
         handle={composerRef} laneRef={laneRef} draft={open} jobs={chips} blockedReason={blockedReason} prefs={prefs}
         refs={refs} picking={picking} picks={picks} onRemovePick={removePick} onClimb={(dir) => climbRef.current?.(dir)}

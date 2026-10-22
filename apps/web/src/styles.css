@@ -342,6 +342,20 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
 /* 卡片上的状态角标（交互中 / 选择元素中、局部修改中、候选 n）：反色标签 */
 .card .badge, .card .working, .cand-badge { background: var(--semantic-color-surface-inverse); color: var(--semantic-color-text-on-inverse); font-size: var(--semantic-typography-caption-font-size); font-weight: var(--primitive-font-weight-medium); padding: 2px 8px; border-radius: var(--semantic-radius-sm); }
 .card .badge { position: absolute; right: 8px; top: 8px; pointer-events: none; }
+/* 协作者（v1.32 REQ-CORE-048）：世界层里、全部卡片之上，坐标是世界坐标；描边宽度、标签与光标按 --canvas-zoom 反算成屏幕像素。
+   描边外扩 12 px：在自己的选中描边（4 px）与键盘焦点环（8 px）外面，三层分得开 */
+.presence-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 40; pointer-events: none; }
+.peer-outline { position: absolute; left: 0; top: 0; border-radius: var(--semantic-radius-lg); outline: calc(2px / var(--canvas-zoom, 1)) solid var(--c); outline-offset: calc(12px / var(--canvas-zoom, 1)); }
+.peer-chips { position: absolute; left: 0; top: 0; }
+.peer-chips-row { position: absolute; right: 0; bottom: 0; display: flex; gap: 4px; white-space: nowrap; transform: scale(calc(1 / var(--canvas-zoom, 1))) translateY(-14px); transform-origin: right bottom; }
+.peer-chip, .peer-cursor-name { font-size: var(--semantic-typography-caption-font-size); font-weight: var(--primitive-font-weight-semibold); line-height: 16px; padding: 2px 8px; border-radius: var(--semantic-radius-pill); box-shadow: var(--semantic-elevation-raised); }
+.peer-cursor { position: absolute; left: 0; top: 0; transition: opacity var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard); }
+.peer-cursor[data-idle="true"] { opacity: 0; }
+.peer-cursor-body { display: flex; align-items: flex-start; transform: scale(calc(1 / var(--canvas-zoom, 1))); transform-origin: 0 0; }
+.peer-cursor svg { flex: none; overflow: visible; }
+.peer-cursor svg path { fill: var(--c); stroke: var(--semantic-color-mark-halo); stroke-width: 1.5; stroke-linejoin: round; }
+.peer-cursor-name { margin: 14px 0 0 -4px; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .peer-cursor { transition: none; } }
 /* 要用户留意的角标（加载失败、截图没取到、断链）：警告色 12% 叠在抬起面上的不透明底 + 警告色字，不描边；文案写明发生了什么，不靠颜色单独表意。
    底必须不透明：角标压在用户设计稿上，半透明的 .tint-warning 会让底下的内容透出来 */
 .card .badge.failed, .card .shot-retry, .card .warn { background: color-mix(in srgb, var(--semantic-color-feedback-warning) 12%, var(--semantic-color-surface-raised)); color: var(--semantic-color-feedback-warning); font-weight: var(--primitive-font-weight-semibold); box-shadow: var(--semantic-elevation-raised); }
@@ -429,10 +443,25 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
   .phrase-in, .menu[data-state="open"] { animation: tip-in var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
   .menu[data-state="closed"] { animation: none; }
 }
-/* 成功的作业 chip（PAGE-CANVAS「作业 chip」）：写「完成」停 1 s 再淡出，Composer 在 1.2 s 时撤掉它（JobChips 的 DONE_MS）。
-   只动 opacity，减弱动态下照样淡出（MOTION-004 的「少而柔」）；写在上面那段之后，盖过 .fade-up 在减弱动态下的 animation: none */
-@keyframes job-chip-out { to { opacity: 0; } }
-.job-chip-out { animation: job-chip-out var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard) 1s forwards; }
+/* 作业完成（PAGE-CANVAS「作业 chip」v1.33）：在跑的 chip 原地转成「任务完成」——圆形对勾放大弹出、文字从下方淡入、底下一层成功色闪一下；
+   悬停或键盘获焦时右端的 × 才显出来（一直占着位置，chip 不变宽）；10 s 后 JobChips 标 .job-chip-leaving 淡出 200 ms 再撤掉。
+   减弱动态时不弹不移，只留透明度（MOTION-004 的「少而柔」）；写在上面那段之后，盖过 .fade-up 在减弱动态下的 animation: none */
+@keyframes job-done-pop { 0% { transform: scale(0.4); opacity: 0; } 60% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(1); } }
+@keyframes job-done-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes job-done-flash { from { opacity: 1; } to { opacity: 0; } }
+@keyframes job-chip-leave { to { opacity: 0; transform: translateY(4px); } }
+.job-chip-done { position: relative; }
+.job-chip-done::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: color-mix(in srgb, var(--semantic-color-feedback-success) 16%, transparent); opacity: 0; animation: job-done-flash var(--semantic-motion-duration-slow) var(--semantic-motion-easing-standard) var(--semantic-motion-duration-fast) both; }
+.job-done-icon { animation: job-done-pop var(--semantic-motion-duration-slow) var(--semantic-motion-easing-emphasized) both; }
+.job-done-text { display: inline-block; animation: job-done-in var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard) both; }
+.job-chip-done .job-done-close { opacity: 0; transition: opacity var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
+.job-chip-done:hover .job-done-close, .job-chip-done:focus-within .job-done-close { opacity: 1; }
+.job-chip-leaving { animation: job-chip-leave var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard) forwards; }
+@media (prefers-reduced-motion: reduce) {
+  .job-done-icon, .job-done-text, .job-chip-done::before { animation: none; }
+  @keyframes job-chip-leave-fade { to { opacity: 0; } }
+  .job-chip-leaving { animation: job-chip-leave-fade var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard) forwards; }
+}
 
 /* 叠层屏（REQ-PROTO-005 v0.63）：截图带 alpha，卡片铺 45% 黑，与播放时预览运行时画的遮罩同值——那是用户原型里遮罩的示意，不随外观变 */
 .card.overlay { background: rgb(0 0 0 / 0.45); }

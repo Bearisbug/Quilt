@@ -55,8 +55,8 @@ await step('TC-CORE-005', async () => {
   await page.keyboard.press('Enter');
   const t0 = Date.now();
   await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 40000 });
-  // 这一批造完 = 它的作业 chip 撤掉（成功的写「完成」停 1 s 再淡出）
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="job-chip"]').length === 0, null, { timeout: 150000 });
+  // 这一批造完 = 它的作业 chip 转成完成态（v1.33 成功的写「任务完成」，10 s 后淡出）
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="job-chip"]:not([data-state="succeeded"])').length === 0 && document.querySelectorAll('[data-testid="job-chip"][data-state="succeeded"]').length > 0, null, { timeout: 150000 });
   await page.waitForFunction(() => { const cards = document.querySelectorAll('[data-testid="screen-card"]'); return cards.length >= 5 && document.querySelectorAll('[data-testid="screen-card"] img').length === cards.length; }, null, { timeout: 60000 });
   const secs = Math.round((Date.now() - t0) / 1000);
   const { body } = await apiJson<{ screens: { id: string; route: string; name: string; lintPassed: boolean; screenshotUrl: string | null; currentRevisionId: string }[] }>(`/v1/projects/${petProjectId}`);

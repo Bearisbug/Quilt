@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import type { Viewport } from '@xyflow/system';
-import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type ComponentDto } from '@quilt/core/browser';
+import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type ComponentDto, type PresenceState } from '@quilt/core/browser';
 import { StyleGuideCard, STYLE_GUIDE_SIZE, styleGuideSize } from '@/canvas/StyleGuideCard';
 import { Minimap, type MiniRect } from '@/canvas/Minimap';
 import { mergeEdges, focusWires, drawWires, cubicBezier, cssMs, type Wire, type WireColors } from '@/canvas/edges';
-import { toWorld, wantsThumb, fullShotIds, inMarquee, fitViewport, focusViewport, revealViewport, panToViewport, ensureVisibleViewport, zoomAround } from '@/canvas/geometry';
+import { MIN_ZOOM, MAX_ZOOM, toWorld, wantsThumb, fullShotIds, inMarquee, fitViewport, focusViewport, revealViewport, panToViewport, ensureVisibleViewport, zoomAround } from '@/canvas/geometry';
 import { useViewport, WHEEL_PAN_SPEED } from '@/canvas/useViewport';
 import { frameSide } from '@/lib/frameZoom';
 import { useFocusedFrame } from '@/canvas/useFocusedFrame';
@@ -12,6 +12,8 @@ import { ScreenCard, ComponentCard, keepPointerFocus, type CardActions, type Car
 import { keyAction, type SelectMessage } from '@/canvas/frameMessages';
 import { markPalette, useResolvedMode } from '@/lib/theme';
 import { recordEvent, recordPreview } from '@/lib/recorder';
+import { distinctPeople, type Peer, type Presence } from '@/lib/collab';
+import { PresenceLayer } from '@/collab/PresenceLayer';
 import { useLocale, useT } from '@/i18n';
 import canvasMessages from '@/i18n/locales/canvas-parts';
 
@@ -92,6 +94,12 @@ export type CanvasProps = {
   onShotError?: () => void;
   /** 屏内跳转 / 切变体 / 后退重摆 / 热更新取不到目标屏（重取签名后仍失败）：父页 toast 说明 */
   onPreviewError?: (screen: ScreenDto) => void;
+  /** 协作显示（v1.32 REQ-CORE-048）：协作通道、此刻同一项目里的其他人、一个作业覆盖了哪些卡、镜头要跟着谁的视野（跟随链的领头人，null = 不跟）；自己动镜头时 onUserCamera（停止跟随） */
+  presence?: Presence | null;
+  peers?: Peer[];
+  jobTargets?: (jobId: string) => string[];
+  following?: string | null;
+  onUserCamera?: () => void;
 };
 
 // 画布对外 API（Canvas.tsx 经 registerApi 取）：reveal 把一张卡摆到可用区中央（找屏 / 屏列表用）
@@ -157,6 +165,7 @@ export function CanvasView(p: CanvasProps) {
       if (fullRef.current.size && wantsThumb(v.zoom, dpr())) settleShots(v);
     },
     onStop: (v) => { settleShots(v); unscaleFrame(frameBoxRef.current, v.zoom); },
+    onUser: () => propsRef.current.onUserCamera?.(),
   });
   const { viewportRef, worldRef, vp, spaceDown, panReady, moveTo, safeArea, onView, isMoving, touched, autoMove, placeFirstFrame, savedView } = view;
   const [dragPos, setDragPos] = useState<Record<string, { x: number; y: number }>>({});
@@ -192,8 +201,27 @@ export function CanvasView(p: CanvasProps) {
   const measureFit = useRef(!savedView && p.components.some((c) => !compSize[c.id]));
   const compFrames = useRef(new Map<string, HTMLIFrameElement>());
 
-  const pos = useCallback((s: ScreenDto) => dragPos[s.id] ?? { x: s.x, y: s.y }, [dragPos]);
-  const compPos = useCallback((c: ComponentDto) => compDrag[c.id] ?? { x: c.x, y: c.y }, [compDrag]);
+  // 协作者拖着的卡（v1.32）：按他发来的位置显示；他松手后到落库位置刷新回来之前（至多 3 s）留在松手处，不跳回原位
+  const remoteLive = useMemo(() => {
+    const m: Record<string, { x: number; y: number }> = {};
+    for (const peer of p.peers ?? []) for (const d of peer.state.drag ?? []) m[d.id] = { x: d.x, y: d.y };
+    return m;
+  }, [p.peers]);
+  const [remoteSettle, setRemoteSettle] = useState<Record<string, { x: number; y: number }>>({});
+  const prevRemote = useRef(remoteLive);
+  useEffect(() => {
+    const gone = Object.entries(prevRemote.current).filter(([id]) => !remoteLive[id]);
+    prevRemote.current = remoteLive;
+    if (!gone.length) return;
+    setRemoteSettle((m) => ({ ...m, ...Object.fromEntries(gone) }));
+    setTimeout(() => setRemoteSettle((m) => omit(m, gone.map(([id]) => id))), 3000);
+  }, [remoteLive]);
+  const remoteAt = useCallback((id: string, x: number, y: number) => {
+    const live = remoteLive[id]; if (live) return live;
+    const st = remoteSettle[id]; return st && (st.x !== x || st.y !== y) ? st : null;
+  }, [remoteLive, remoteSettle]);
+  const pos = useCallback((s: ScreenDto) => dragPos[s.id] ?? remoteAt(s.id, s.x, s.y) ?? { x: s.x, y: s.y }, [dragPos, remoteAt]);
+  const compPos = useCallback((c: ComponentDto) => compDrag[c.id] ?? remoteAt(c.id, c.x, c.y) ?? { x: c.x, y: c.y }, [compDrag, remoteAt]);
   // 卡片此刻画出来的尺寸：适配视图、小地图、框选、找屏跳转都按它算——没上报时按设备整屏算的话，框到的是一张 844 高的卡。
   // 只给宽高：调用处与卡片位置展开在一起，框里的 x / y 是根元素在 iframe 里的偏移，混进去就把卡片位置盖掉了
   const compBox = useCallback((c: ComponentDto) => { const b = compSize[c.id]; return b ? { w: b.w, h: b.h } : { w: p.screenSize.w, h: COMP_PLACEHOLDER_H }; }, [compSize, p.screenSize.w]);
@@ -288,6 +316,7 @@ export function CanvasView(p: CanvasProps) {
     return fitViewport(rects, safeArea());
   }, [p.screens, p.components, p.assets?.length, pos, compPos, compBox, safeArea, viewportRef]);
   const fitView = useCallback(() => {
+    propsRef.current.onUserCamera?.();
     const t = fitTarget();
     if (t) moveTo(t.v, { duration: 300 });
     return t?.fits ?? true;
@@ -327,6 +356,7 @@ export function CanvasView(p: CanvasProps) {
   const focusCard = useCallback((id: string) => {
     const s = byId[id]; const node = viewportRef.current;
     if (!s || !node || !s.previewUrl) return;
+    propsRef.current.onUserCamera?.();
     const v = focusViewport({ ...pos(s), w: s.width, h: s.height }, safeArea(), node.clientHeight);
     window.getSelection()?.removeAllRanges();
     beginFocus(s);
@@ -339,6 +369,7 @@ export function CanvasView(p: CanvasProps) {
   const focusComponent = useCallback((id: string) => {
     const c = propsRef.current.components.find((x) => x.id === id); const node = viewportRef.current;
     if (!c || !node) return;
+    propsRef.current.onUserCamera?.();
     const v = focusViewport({ ...compPos(c), ...compBox(c) }, safeArea(), node.clientHeight);
     propsRef.current.onFocusComponent?.(id);
     setTimeout(() => moveTo(v, { duration: 250 }), 0);
@@ -385,23 +416,71 @@ export function CanvasView(p: CanvasProps) {
   }, [p.focusedComponentId, p.inspectMode, themeMode, locale]);
 
   // panTo：镜头中心平移到世界坐标（缩放不变）；reveal：把一张卡（屏或组件）摆到可用区中央，缩放取「装得下」与 1:1 的较小者（REQ-CORE-024）
-  const panTo = useCallback((x: number, y: number) => moveTo(panToViewport(x, y, vp.current.zoom, safeArea()), { duration: 200 }), [safeArea, moveTo, vp]);
+  const panTo = useCallback((x: number, y: number) => { propsRef.current.onUserCamera?.(); moveTo(panToViewport(x, y, vp.current.zoom, safeArea()), { duration: 200 }); }, [safeArea, moveTo, vp]);
   // 小地图拖视口框：直接设平移量（缩放不变、不带动画），拖动全程 1:1 跟手
-  const moveView = useCallback((x: number, y: number) => { moveTo({ x, y, zoom: vp.current.zoom }); }, [moveTo, vp]);
+  const moveView = useCallback((x: number, y: number) => { propsRef.current.onUserCamera?.(); moveTo({ x, y, zoom: vp.current.zoom }); }, [moveTo, vp]);
   // 一张卡（屏或组件）此刻画出来的世界矩形
   const cardRect = useCallback((id: string) => {
     const s = byId[id]; const c = propsRef.current.components.find((x) => x.id === id);
     return s ? { ...pos(s), w: s.width, h: s.height } : c ? { ...compPos(c), ...compBox(c) } : null;
   }, [byId, pos, compPos, compBox]);
+  // ---- 协作显示（v1.32 REQ-CORE-048，PAGE-CANVAS「协作者」）：把自己的光标、视野、拖动发出去；跟随时镜头按对方视野摆 ----
+  const onViewportPointerMove = (e: ReactPointerEvent) => {
+    const node = viewportRef.current;
+    if (!p.presence || !node) return;
+    const r = node.getBoundingClientRect(); const w = toWorld(vp.current, e.clientX - r.left, e.clientY - r.top);
+    p.presence.set({ cursor: { x: Math.round(w.x), y: Math.round(w.y) } });
+  };
+  const onViewportPointerLeave = () => p.presence?.set({ cursor: undefined });
+  useEffect(() => {
+    const pr = p.presence;
+    if (!pr) return;
+    return onView((v) => pr.set({ view: { x: Math.round(-v.x / v.zoom), y: Math.round(-v.y / v.zoom), w: Math.max(1, Math.round(v.w / v.zoom)), h: Math.max(1, Math.round(v.h / v.zoom)) } }));
+  }, [p.presence, onView]);
+  useEffect(() => {
+    const drag = [...Object.entries(dragPos), ...Object.entries(compDrag)].map(([id, q]) => ({ id, x: Math.round(q.x), y: Math.round(q.y) }));
+    p.presence?.set({ drag: drag.length ? drag.slice(0, 200) : undefined });
+  }, [dragPos, compDrag, p.presence]);
+  // 跟随（following = 跟随链领头人的 person.id，Canvas 经 useFollow 算出；圈没解开时为 null、镜头不动）：他的视野装进自己的可用区
+  // （中心对齐、缩放取放得下的倍率），之后他的视野每变一次就跟一次，不带动画。他开着几个标签页时跟视野最近变过的那个（只发心跳、视野没变的标签页不算）
+  useEffect(() => {
+    const pr = p.presence; const id = p.following;
+    if (!pr || !id) return;
+    const seen = new Map<string, string>();
+    let shown = '';
+    const show = (v: NonNullable<PresenceState['view']>) => {
+      const key = JSON.stringify(v);
+      if (key === shown) return;
+      shown = key;
+      const a = safeArea();
+      const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(a.w / v.w, a.h / v.h)));
+      moveTo({ x: a.x + a.w / 2 - (v.x + v.w / 2) * zoom, y: a.y + a.h / 2 - (v.y + v.h / 2) * zoom, zoom });
+    };
+    for (const x of pr.getPeers()) if (x.person.id === id && x.state.view) seen.set(x.clientId, JSON.stringify(x.state.view));
+    const latest = distinctPeople(pr.getPeers()).find((x) => x.person.id === id);
+    if (latest?.state.view) show(latest.state.view);
+    return pr.onPeer((x) => {
+      const v = x?.state.view;
+      if (!x || !v || x.person.id !== id) return;
+      const key = JSON.stringify(v);
+      if (seen.get(x.clientId) === key) return;
+      seen.set(x.clientId, key);
+      show(v);
+    });
+  }, [p.presence, p.following, safeArea, moveTo]);
+  const noTargets = useCallback(() => [] as string[], []);
+
   const reveal = useCallback((id: string) => {
     const rect = cardRect(id);
-    if (rect) moveTo(revealViewport(rect, safeArea()), { duration: 250 });
+    if (!rect) return;
+    propsRef.current.onUserCamera?.();
+    moveTo(revealViewport(rect, safeArea()), { duration: 250 });
   }, [cardRect, safeArea, moveTo]);
   // 键盘把焦点移到一张卡上（v0.80）：它不完整在可用区里就把镜头中心平移过去（缩放不变）——视口只裁不滚，焦点落在视口外等于消失。
   // 键盘触发不带动画（MOTION-010）：连按方向键时上一段平移还没走完，按半路的镜头判断下一张在不在视野里会判错
   const ensureVisible = useCallback((r: { x: number; y: number; w: number; h: number }) => {
     const v = ensureVisibleViewport(r, vp.current, safeArea());
-    if (v) moveTo(v);
+    if (v) { propsRef.current.onUserCamera?.(); moveTo(v); }
   }, [safeArea, moveTo, vp]);
   // 键盘进入交互（v0.80）：记下是哪张卡——屏的 iframe 就绪、组件卡进了交互态就把焦点移进 iframe，退出后还给这张卡（A11Y-013）
   const kbEntered = useRef<string | null>(null);
@@ -443,9 +522,15 @@ export function CanvasView(p: CanvasProps) {
 
   // iframe 里转发来的滚轮（ADR-003）：捏合换算成画布坐标后围绕指针缩放（geometry.ts 的 zoomAround）；
   // pan = 组件文档里指针下没有可滚区域的普通滚轮（v0.80），按画布滚轮的速度平移
+  // 协作显示（v1.32 REQ-CORE-048）：屏内转发来的指针换成世界坐标当自己的光标；离开 iframe 先撤，回到画布上由视口的 pointermove 接上
+  const frameCursor = (m: { x?: number; y?: number; left?: true }, origin: { x: number; y: number } | undefined) => {
+    if (m.left || !origin || m.x === undefined || m.y === undefined) { p.presence?.set({ cursor: undefined }); return; }
+    p.presence?.set({ cursor: { x: Math.round(origin.x + m.x), y: Math.round(origin.y + m.y) } });
+  };
   const frameWheel = (el: HTMLIFrameElement | null | undefined, msg: { deltaY: number; deltaX?: number; x: number; y: number; pan?: boolean }) => {
     const node = viewportRef.current;
     if (!node || !el) return;
+    p.onUserCamera?.();
     const v = vp.current;
     if (msg.pan) { moveTo({ x: v.x - (msg.deltaX ?? 0) * WHEEL_PAN_SPEED, y: v.y - msg.deltaY * WHEEL_PAN_SPEED, zoom: v.zoom }); return; }
     const nr = node.getBoundingClientRect(); const fr = el.getBoundingClientRect();
@@ -489,6 +574,8 @@ export function CanvasView(p: CanvasProps) {
       if (m.type === 'quilt:key') { const a = keyAction(m, false); if (a?.kind === 'exit') p.onFocusComponent?.(null); else if (a?.kind === 'shortcut') p.onShortcut?.(a.code, a.alt); }
       // 交互态组件卡上的捏合与滚轮（v0.80）：与屏同一条 quilt:wheel，按这张卡的 iframe 换算
       if (m.type === 'quilt:wheel') frameWheel(compFrames.current.get(p.focusedComponentId), m);
+      // 屏内光标（v1.32）：组件 iframe 按整个设备渲染、平移到根元素左上角，换回世界坐标要减掉这段平移
+      if (m.type === 'quilt:pointer') { const c = p.components.find((x) => x.id === p.focusedComponentId); const at = compSize[p.focusedComponentId]; frameCursor(m, c && { ...compPos(c), x: compPos(c).x - (at?.x ?? 0), y: compPos(c).y - (at?.y ?? 0) }); }
       if (m.type === 'quilt:select') p.onElementSelect(m);
       if (m.type === 'quilt:deselect') p.onElementDeselect(m.qid);
       return;
@@ -513,6 +600,8 @@ export function CanvasView(p: CanvasProps) {
     }
     if (m.type === 'quilt:dead') p.onDeadLink();
     if (m.type === 'quilt:wheel') frameWheel(iframeRef.current, m);
+    // 屏内光标（v1.32）：iframe 视口的 CSS 像素就是世界坐标里这张卡的偏移
+    if (m.type === 'quilt:pointer') { const s = p.focusedId ? byId[p.focusedId] : undefined; frameCursor(m, s && pos(s)); }
   };
   const frameMessage = useRef(onFrameMessage);
   frameMessage.current = onFrameMessage;
@@ -691,7 +780,7 @@ export function CanvasView(p: CanvasProps) {
 
   const { lingerOn, family, shownId, frameFailed } = frame;
   return (
-    <div ref={viewportRef} className={`viewport${panReady ? ' pan-ready' : ''}${view.dragging ? ' dragging' : ''}${p.armed && !p.focusedId ? ' armed' : ''}`} onPointerDown={onViewportPointerDown} onDoubleClick={onViewportDoubleClick} data-testid="canvas">
+    <div ref={viewportRef} className={`viewport${panReady ? ' pan-ready' : ''}${view.dragging ? ' dragging' : ''}${p.armed && !p.focusedId ? ' armed' : ''}`} onPointerDown={onViewportPointerDown} onPointerMove={onViewportPointerMove} onPointerLeave={onViewportPointerLeave} onDoubleClick={onViewportDoubleClick} data-testid="canvas">
       {/* 首帧的 transform 写在这里，不等 panzoom 的 effect：effect 跑在绘制之后，画布会先按未变换的原点画一帧。
           值取自惰性初值、之后不再变（后续变换由 applyTransform 直接改 style），React 不会回头覆盖它 */}
       {/* 聚焦屏或组件时不画小地图：它压在可用区左上角，会挡住聚焦屏上那一块的点击 */}
@@ -767,6 +856,8 @@ export function CanvasView(p: CanvasProps) {
             {p.candidateStack.node}
           </div>
         )}
+        {/* 协作者的光标、描边与标签（v1.32）：世界层里、全部卡片之上 */}
+        {p.presence && <PresenceLayer presence={p.presence} peers={p.peers ?? []} rectOf={cardRect} jobTargets={p.jobTargets ?? noTargets} />}
       </div>
       {/* 待命提示压在卡片上也得读得出（v0.80）：chrome 材质——透明强调色底（15%）压在白卡上对比度只有约 1.1:1；组件卡在交互态时不显示 */}
       {p.armed && !p.focusedId && !p.focusedComponentId && (

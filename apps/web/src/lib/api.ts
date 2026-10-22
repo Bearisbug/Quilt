@@ -1,4 +1,4 @@
-import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, DesignSystemDto, ElementOp, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, Runner, ChannelDto, UsageStatsDto, UsageRange, RecordingDto, RecordEventInput, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, DraftFrame, DraftFrameChoice, SketchbookDto, CopyDraftInput, CreateDraftInput, CopyDraftResultDto } from '@quilt/core/browser';
+import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, DesignSystemDto, ElementOp, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, PresenceEventDto, Runner, ChannelDto, UsageStatsDto, UsageRange, RecordingDto, RecordEventInput, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, DraftFrame, DraftFrameChoice, SketchbookDto, CopyDraftInput, CreateDraftInput, CopyDraftResultDto } from '@quilt/core/browser';
 
 import { getLocale } from '@/i18n';
 import { uuid } from '@/lib/uuid';
@@ -156,7 +156,8 @@ const MAX_RETRIES = 20;
 // 假死（v0.88）：服务端每 15 s 写一个 ping。经 Vite 代理时 API 重启，代理不关浏览器这一侧，EventSource 一直停在 open、
 // 什么都收不到，onerror 也不来——35 s（两个 ping 加余量）里什么都没收到就当这条流已死，关掉重建，按断线处理
 const STALE_MS = 35_000;
-export function subscribeProjectEvents(projectId: string, onEvent: (e: ProjectEventDto) => void, onState?: (s: LiveState) => void): () => void {
+// 协作事件（v1.32 API-CORE-053）交给 onPresence：每秒十几条，不能走 onEvent 那条「收到就整体重取」的路
+export function subscribeProjectEvents(projectId: string, onEvent: (e: ProjectEventDto) => void, onState?: (s: LiveState) => void, onPresence?: (e: PresenceEventDto) => void): () => void {
   let es: EventSource | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let watchdog: ReturnType<typeof setTimeout> | undefined;
@@ -171,6 +172,8 @@ export function subscribeProjectEvents(projectId: string, onEvent: (e: ProjectEv
     };
     const handler = (ev: MessageEvent) => { alive(); try { onEvent(JSON.parse(ev.data) as ProjectEventDto); } catch { /* ignore */ } };
     for (const t of ['screen_changed', 'job_changed']) cur.addEventListener(t, handler as EventListener);
+    const presence = (ev: MessageEvent) => { alive(); try { onPresence?.(JSON.parse(ev.data) as PresenceEventDto); } catch { /* ignore */ } };
+    for (const t of ['presence', 'presence_left']) cur.addEventListener(t, presence as EventListener);
     cur.addEventListener('ping', alive);
     cur.onopen = () => { failures = 0; alive(); onState?.('open'); };
     alive();

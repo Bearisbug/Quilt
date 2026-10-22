@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { and, eq, desc, asc, lt, inArray, isNull } from 'drizzle-orm';
-import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, ROUND_PRESET_PROMPTS, missingPagePrompt, variantPrompt, presetPrompt, presetNote, createProjectSchema, createJobRequestSchema, jobInputSchemas, createMessageSchema, retryMessageSchema, createAttachmentSchema, updateProjectSchema, cursorQuerySchema, listJobsQuerySchema, type MessageDto, type LinkDto, type CreateJobInput, type JobKind, type ProjectEventDto, type Runner, createPresetSchema, applyPresetSchema, L } from '@quilt/core';
+import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, ROUND_PRESET_PROMPTS, missingPagePrompt, variantPrompt, presetPrompt, presetNote, createProjectSchema, createJobRequestSchema, jobInputSchemas, createMessageSchema, retryMessageSchema, createAttachmentSchema, updateProjectSchema, cursorQuerySchema, listJobsQuerySchema, type MessageDto, type LinkDto, type CreateJobInput, type JobKind, type ProjectEventDto, type Runner, createPresetSchema, applyPresetSchema, L, presenceInputSchema } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
 import { parseBody, parseQuery, requireUser, type Env } from '../app.ts';
 import { createProject, deleteProject, getProjectDetail, listProjects, ownedProject, updateProject, projectDto, designSystemDto, jobDto } from '../../services/projects.ts';
@@ -28,6 +28,7 @@ import { problems } from '../../lib/errors.ts';
 import { findSession } from '../../lib/claudeSessions.ts';
 import { findCodexThread } from '../../lib/codexSessions.ts';
 import { subscribeProject } from '../../lib/events.ts';
+import { leavePresence, presenceSnapshot, subscribePresence, updatePresence } from '../../lib/presence.ts';
 import { countEn, tr } from '../../lib/locale.ts';
 
 // 本机 agent 作业的助手回执：写明投给了谁。Claude Code 会话没起过名时显示 UUID；Codex 线程没起过名时 name 就是标题，照用（v0.68）
@@ -237,34 +238,61 @@ projectRoutes.delete('/v1/projects/:projectId', async (c) => {
 });
 
 // API-CORE-030（v0.34）：项目级事件流——本机会话经 MCP 回写、别处建的作业、截图就绪都从这里通知画布。
-// 不落表不续传：事件只是「有变化」的提示，画布收到就整体刷新；断线后画布重连，每次重连成功再整体重取一次补上断线期间的变化
+// 不落表不续传：事件只是「有变化」的提示，画布收到就整体刷新；断线后画布重连，每次重连成功再整体重取一次补上断线期间的变化。
+// 协作显示（v1.32 API-CORE-053）的 presence / presence_left 走进程内广播，开流先补上此刻在线的人；有事件就写（光标按批推会一顿一顿的）。
+// 同一个标签页的 presence / presence_left 在队列里只留最新一条：连接卡在写上（对方合盖、TCP 没断）时队列不会按光标频率一直涨
 projectRoutes.get('/v1/projects/:projectId/events', async (c) => {
   const user = requireUser(c);
   const project = await ownedProject(user.id, c.req.param('projectId'));
   return streamSSE(c, async (stream) => {
     let open = true;
-    const queue: ProjectEventDto[] = [];
-    const unsubscribe = await subscribeProject(project.id, (e) => { queue.push(e); });
-    stream.onAbort(() => { open = false; unsubscribe(); });
+    const queue: { type: string; data: unknown }[] = [];
+    let wake: (() => void) | null = null;
+    const clientOf = (e: { type: string; data: unknown }) => (e.type === 'presence' || e.type === 'presence_left' ? (e.data as { clientId: string }).clientId : null);
+    const push = (e: { type: string; data: unknown }) => {
+      const id = clientOf(e);
+      if (id) { const i = queue.findIndex((x) => clientOf(x) === id); if (i >= 0) queue.splice(i, 1); }
+      queue.push(e); wake?.();
+    };
+    const unsubscribe = await subscribeProject(project.id, push);
+    const unsubscribePresence = subscribePresence(project.id, push);
+    stream.onAbort(() => { open = false; unsubscribe(); unsubscribePresence(); wake?.(); });
     // 先写一行注释：经 Vite 代理时响应头要等第一次写才发出去，不写的话 EventSource 的 open 要等第一个 ping（15 s）
     await stream.write(': open\n\n');
-    let idle = 0;
+    for (const e of presenceSnapshot(project.id)) push(e);
     while (open) {
-      await stream.sleep(250);
-      if (queue.length) {
-        idle = 0;
-        for (const e of queue.splice(0)) {
-          await stream.writeSSE({ event: e.type, data: JSON.stringify(e) });
-          // 项目被删（v0.77）：这是最后一条，写完就结束；EventSource 重连拿到 404 后不再重连
-          if ((e.data as { reason?: string } | null)?.reason === 'project_deleted') open = false;
-        }
-        continue;
+      if (!queue.length) {
+        // 等下一条事件或 15 s，到点还没有就写 ping
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(() => { wake = null; resolve(); }, 15_000);
+          wake = () => { clearTimeout(timer); wake = null; resolve(); };
+        });
+        if (!open) break;
+        if (!queue.length) { await stream.writeSSE({ event: 'ping', data: '' }); continue; }
       }
-      idle += 250;
-      if (idle >= 15_000) { idle = 0; await stream.writeSSE({ event: 'ping', data: '' }); }
+      for (const e of queue.splice(0)) {
+        await stream.writeSSE({ event: e.type, data: JSON.stringify(e) });
+        // 项目被删（v0.77）：这是最后一条，写完就结束；EventSource 重连拿到 404 后不再重连
+        if ((e.data as { reason?: string } | null)?.reason === 'project_deleted') open = false;
+      }
     }
-    unsubscribe();
+    unsubscribe(); unsubscribePresence();
   });
+});
+
+// API-CORE-053（v1.32）：协作者的在线状态。只进内存、推给同一项目的其他连接；状态每秒至多 15 次，项目归属查一次缓存 60 s
+const presenceProjects = new Map<string, number>();
+projectRoutes.post('/v1/projects/:projectId/presence', async (c) => {
+  const user = requireUser(c);
+  const projectId = c.req.param('projectId');
+  if ((presenceProjects.get(projectId) ?? 0) < Date.now()) {
+    await ownedProject(user.id, projectId);
+    presenceProjects.set(projectId, Date.now() + 60_000);
+  }
+  const body = await parseBody(c, presenceInputSchema);
+  if ('left' in body) leavePresence(projectId, body.clientId);
+  else updatePresence(projectId, body.clientId, body.person, body.state);
+  return c.body(null, 204);
 });
 
 projectRoutes.get('/v1/projects/:projectId/jobs', async (c) => {

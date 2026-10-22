@@ -3,6 +3,7 @@ import type { JobDto, JobEventDto, ProjectDetailDto, ScreenDto } from '@quilt/co
 import { api, ApiError, loadConfig, subscribeProjectEvents, type LiveState } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { recordEvent } from '@/lib/recorder';
+import type { Presence } from '@/lib/collab';
 import { progressText } from '@/canvas/jobTracker';
 import { tOf, useLocale, type Locale } from '@/i18n';
 import sketchMessages from '@/i18n/locales/sketch';
@@ -25,7 +26,8 @@ const stageText = (s: Stage, lng: Locale) => (s.type === 'progress' ? progressTe
 // 与画布同一套口径的精简版：事件只是「有变化」，收到就防抖 250 ms 整体重取；详情按发起序号只丢早于已应用的回包；
 // 断线由 subscribeProjectEvents 退避重建，断过之后重新连上就整体重取一次（事件不续传）。
 // 在跑作业 = 详情里的进行中作业 ∪ 本页刚建、详情还没列出的；宣告过终态的记进 finished，晚到的旧详情不把它带回来
-export function useSketchbook(onEvent: (e: SketchEvent) => void) {
+// presenceRef（v1.32 REQ-CORE-048）：协作事件交给它，事件流重连时先清空它记着的人
+export function useSketchbook(onEvent: (e: SketchEvent) => void, presenceRef?: { current: Presence | null }) {
   const toast = useToast();
   const [projectId, setProjectId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ProjectDetailDto | null>(null);
@@ -136,8 +138,9 @@ export function useSketchbook(onEvent: (e: SketchEvent) => void) {
   }, (st) => {
     setFeed(st);
     if (st !== 'open') { feedBroken.current = true; return; }
+    presenceRef?.current?.reset();
     if (feedBroken.current) { feedBroken.current = false; void refresh({ quiet: true }); }
-  }) : undefined, [projectId, scheduleRefresh, refresh, settle, feedEpoch]);
+  }, (e) => presenceRef?.current?.handle(e)) : undefined, [projectId, scheduleRefresh, refresh, settle, feedEpoch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 改名、换画框的回包（API-CORE-012）直接写回详情：不等下一次整体重取，工具条上不闪一下旧值
   const applyScreen = useCallback((screen: ScreenDto) => setDetail((d) => d && { ...d, screens: d.screens.map((x) => (x.id === screen.id ? screen : x)) }), []);

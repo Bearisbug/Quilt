@@ -11,8 +11,13 @@ import { DraftVersions } from '@/sketch/DraftVersions';
 import { RefSelect, type RefProjects } from '@/sketch/RefSelect';
 import { useLocale, useT } from '@/i18n';
 import sketchMessages from '@/i18n/locales/sketch';
+import collabMessages from '@/i18n/locales/collab';
+import { COLLAB_ON, collabColor, type Peer, type Presence } from '@/lib/collab';
+import { PresenceLayer } from '@/collab/PresenceLayer';
 
 export type StageState = 'empty' | 'generating' | 'draft';
+const noRect = () => null;
+const noTargets = () => [] as string[];
 type Size = { w: number; h: number };
 
 // 画框只在页面之间换（API-CORE-012 v1.17）：组件按自身大小、页面按视口排，两者不能互换，组件草稿不显示这一项
@@ -41,6 +46,10 @@ const frameSize = (frame: DraftFrameChoice | null | undefined): Size => (frame =
 const fit = (nat: Size, room: Size | null) => (room ? Math.max(0.05, Math.min(1, room.w / nat.w, room.h / nat.h)) : 1);
 
 type StageProps = {
+  /** 协作显示（v1.32 REQ-CORE-048）：协作通道、和你开着同一张草稿的人、正在改这张草稿的人 */
+  presence?: Presence | null;
+  peersHere?: Peer[];
+  editors?: Peer[];
   state: StageState;
   /** 看板上打开的草稿；null = 看板空着（或本页刚发的新草稿还没落成屏） */
   draft: ScreenDto | null;
@@ -122,6 +131,14 @@ export function DraftStage(p: StageProps) {
     for (const el of [bar, stage, head]) if (el) ro.observe(el);
     return () => ro.disconnect();
   }, [draftId, onTopRow]);
+  // 协作显示（v1.32）：看板上的指针按画框的位置与缩放（画框上的 data-scale）换回草稿的原始尺寸坐标，框外的看板上同样算
+  const onStagePointer = (e: React.PointerEvent) => {
+    const frame = ref.current?.querySelector<HTMLElement>('.draft-frame');
+    const scale = Number(frame?.dataset.scale);
+    if (!p.presence || !frame || !scale) return;
+    const r = frame.getBoundingClientRect();
+    p.presence.set({ cursor: { x: Math.round((e.clientX - r.left) / scale), y: Math.round((e.clientY - r.top) / scale) } });
+  };
   const [room, setRoom] = useState<Size | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -135,13 +152,13 @@ export function DraftStage(p: StageProps) {
   return (
     <>
     {p.draft && <DraftToolbar key={p.draft.id} {...p} draft={p.draft} barRef={barRef} />}
-    <main ref={ref} data-testid="sketch-stage" data-state={p.state} aria-label={t('stage.label')} className="absolute bottom-[var(--stage-bottom)] left-[var(--stage-left)] right-[var(--stage-right)] top-[var(--chrome-top)] grid place-items-center">
+    <main ref={ref} data-testid="sketch-stage" data-state={p.state} aria-label={t('stage.label')} onPointerMove={onStagePointer} onPointerLeave={() => p.presence?.set({ cursor: undefined })} className="absolute bottom-[var(--stage-bottom)] left-[var(--stage-left)] right-[var(--stage-right)] top-[var(--chrome-top)] grid place-items-center">
       {p.draft ? (
         <section data-testid="draft-view" data-draft-id={p.draft.id} data-frame={p.draft.frame ?? ''} aria-label={t('stage.draft', { name: p.draft.name })}>
           {/* 换一张草稿、新草稿第一版落地才整个重挂（之前没有地址可载）；之后出新版、换画框都在 DraftFrameView 里原地换（PAGE-SKETCH「看板」） */}
           <DraftFrameView
             key={`${p.draft.id}|${p.draft.currentRevisionId ? 'live' : 'pending'}`} draft={p.draft} avail={room} progress={p.progress} previewOrigin={p.previewOrigin} onEscape={p.onEscape} onShortcut={p.onShortcut} onStale={p.onStale}
-            picking={p.picking} pickQids={p.pickQids} onPick={p.onPick} climbRef={p.climbRef}
+            picking={p.picking} pickQids={p.pickQids} onPick={p.onPick} climbRef={p.climbRef} presence={p.presence} peersHere={p.peersHere} editors={p.editors}
           />
         </section>
       ) : p.state === 'generating' ? (
@@ -246,10 +263,10 @@ function Skeleton({ nat, scale, label }: { nat: Size; scale: number; label: stri
 // 只认这个 iframe 发来、来源是预览域、形状过 previewMessageSchema 的消息。
 // 手机页 / 桌面页给对应视口；组件画框（画框还没定的按组件）的视口就是 quilt:draft-size 报的根元素框，iframe 透明，四周露出看板底色。
 // 就绪看门同画布：load 后 2 s 还没 quilt:ready 多半是签名过期，重取详情换新地址重载一次，仍不行给「重试」
-type FrameProps = Pick<StageProps, 'previewOrigin' | 'onEscape' | 'onShortcut' | 'onStale' | 'picking' | 'pickQids' | 'onPick' | 'climbRef'> & {
+type FrameProps = Pick<StageProps, 'previewOrigin' | 'onEscape' | 'onShortcut' | 'onStale' | 'picking' | 'pickQids' | 'onPick' | 'climbRef' | 'presence' | 'peersHere' | 'editors'> & {
   draft: ScreenDto; avail: Size | null; progress: string | null;
 };
-function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onShortcut, onStale, picking, pickQids, onPick, climbRef }: FrameProps) {
+function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onShortcut, onStale, picking, pickQids, onPick, climbRef, presence, peersHere, editors }: FrameProps) {
   const t = useT(sketchMessages);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   // 地址钉住：签名每 30 分钟换一个窗口，换了也不重载正在看的草稿；新的一版经 quilt:swap 送进去（见下），换画框只改视口
@@ -282,12 +299,24 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
   const shown = live && ready && (!component || !!box);
 
   const post = (msg: ParentToPreview) => { if (previewOrigin) iframeRef.current?.contentWindow?.postMessage(msg, previewOrigin); };
+  const tk = useT(collabMessages);
+  const presenceRef = useRef(presence); presenceRef.current = presence;
+  const bleedRef = useRef(bleed); bleedRef.current = bleed;
+  // 协作者选中的块（v1.32）：颜色按当前外观解析成具体值交给运行时（它读不到父页的 CSS 变量）；换外观、草稿重载后重发
+  const peerBlocks = JSON.stringify((peersHere ?? []).flatMap((x) => (x.state.blocks ?? []).map((qid) => [qid, x.person.name, x.person.color])));
   const themeMode = useResolvedMode();
   const locale = useLocale();
   // 换外观、换界面语言时重发一次：屏内的标记跟着换色、换字（§13.1）
   useEffect(() => { if (ready) post({ type: 'quilt:mode', mode: picking ? 'inspect' : 'interact', marks: markPalette() }); }, [ready, readySeq, themeMode, locale, picking]); // eslint-disable-line react-hooks/exhaustive-deps
   // 草稿里框着哪几块由父页定：输入框里的胶囊。运行时点中就先框上（按着 Shift 点的等这里画），
   // 每次点中之后按父页的决定再对一次——点在草稿根上不出胶囊（等同改整张），框要撤掉；合并到外层、超过上限时框跟着胶囊走
+  useEffect(() => {
+    if (!ready) return;
+    const root = getComputedStyle(document.documentElement);
+    const on = root.getPropertyValue('--semantic-color-collab-on').trim();
+    const blocks = (JSON.parse(peerBlocks) as [string, string, number][]).map(([qid, name, n]) => ({ qid, name, color: root.getPropertyValue(`--semantic-color-collab-${n}`).trim(), on }));
+    post({ type: 'quilt:peers', blocks });
+  }, [ready, readySeq, peerBlocks, themeMode]); // eslint-disable-line react-hooks/exhaustive-deps
   const [selSeq, setSelSeq] = useState(0);
   const framed = picking ? pickQids.join(',') : '';
   useEffect(() => {
@@ -331,6 +360,8 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
         if (pickingRef.current) pickRef.current(m);
       }
       // 焦点在草稿里时父页收不到键盘：Esc 与 ⌘ 组合键靠运行时转发，交给页面同一套处理
+      // 草稿 iframe 里的指针（v1.32）：视口坐标就是草稿的原始尺寸坐标，组件画框要减掉那圈透明边
+      if (m.type === 'quilt:pointer') { const pad = bleedRef.current ? DRAFT_PAD : 0; presenceRef.current?.set({ cursor: m.left || m.x === undefined || m.y === undefined ? undefined : { x: Math.round(m.x - pad), y: Math.round(m.y - pad) } }); }
       if (m.type === 'quilt:key' && m.key === 'Escape') escape.current();
       else if (m.type === 'quilt:key' && m.code && (m.metaKey || m.ctrlKey)) shortcutRef.current(m.code);
     };
@@ -384,7 +415,7 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
   };
 
   return (
-    <div className="draft-frame" data-frame={component ? 'component' : 'page'} style={{ width: nat.w * scale, height: nat.h * scale }}>
+    <div className="draft-frame" data-frame={component ? 'component' : 'page'} data-scale={scale} style={{ width: nat.w * scale, height: nat.h * scale }}>
       {/* 按看板缩小用 zoom，不用 transform：iframe 在里面仍按草稿的视口排版，按目标倍率原生绘制。Chromium 在带缩放变换的跨域 iframe 里用 GPU 合成时，
           会把同时带 backdrop-filter 与 box-shadow 的元素画错——一片灰色渐变盖住邻近的内容（2026-10-20 有头 Edge 实测，无头复现不出） */}
       <div className={cn('absolute left-0 top-0', bleed ? 'overflow-visible' : 'overflow-hidden')} style={{ width: nat.w, height: nat.h, zoom: scale }}>
@@ -404,6 +435,17 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
         <span className="absolute left-1/2 top-1/2 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-sm px-3 py-1.5 type-label inverse">
           <span className="sk-dot shrink-0" aria-hidden="true" /><span className="truncate" role="status">{!draft.currentRevisionId ? progress ?? t('stage.generating') : t('stage.loading')}</span>
         </span>
+      )}
+      {/* 协作者（v1.32）：光标按草稿的原始尺寸坐标画在一层同样缩放、不裁切的容器里（框外的看板上也画）；--canvas-zoom 让光标保持屏幕像素大小 */}
+      {presence && !!peersHere?.length && (
+        <div aria-hidden="true" className="pointer-events-none absolute left-0 top-0" style={{ width: nat.w, height: nat.h, zoom: scale, ['--canvas-zoom' as string]: scale }}>
+          <PresenceLayer presence={presence} peers={peersHere} rectOf={noRect} jobTargets={noTargets} />
+        </div>
+      )}
+      {!!editors?.length && (
+        <div className="pointer-events-none absolute bottom-full right-0 mb-2 flex gap-1">
+          {editors.map((x) => <span key={x.clientId} data-testid="peer-chip" className="peer-chip" style={{ background: collabColor(x.person.color), color: COLLAB_ON }}>{tk('card.working', { name: x.person.name })}</span>)}
+        </div>
       )}
       {failed && (
         <button type="button" data-testid="draft-retry" onClick={() => { setFailed(false); void reloadFresh(); }}

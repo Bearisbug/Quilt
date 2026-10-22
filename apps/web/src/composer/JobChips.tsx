@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, TriangleAlert, X } from 'lucide-react';
+import { CircleCheck, TriangleAlert, X } from 'lucide-react';
 import type { JobKind } from '@quilt/core/browser';
 import { cn, IconButton } from '@/ui/ui';
 import { useT } from '@/i18n';
 import composerMessages from '@/i18n/locales/composer';
 import commonMessages from '@/i18n/locales/common';
 
-/** 作业 chip（PAGE-CANVAS「作业 chip」v1.17，REQ-CORE-020 / REQ-CORE-026）：在跑的写在做什么与进度；失败的写原因、可重试；成功的写「完成」后淡出 */
+/** 作业 chip（PAGE-CANVAS「作业 chip」v1.17，REQ-CORE-020 / REQ-CORE-026）：在跑的写在做什么与进度；失败的写原因、可重试；成功的原地转成「任务完成」，10 s 后淡出（v1.33） */
 export type JobChip = { id: string; createdAt: string; label: string } & (
   | { state: 'running'; progress: string }
   | { state: 'failed'; reason: string; retryable: boolean }
@@ -14,15 +14,18 @@ export type JobChip = { id: string; createdAt: string; label: string } & (
 );
 /** 页面交来的在跑作业：label = 它在做什么，progress = 当前阶段 */
 export type RunningJob = { id: string; createdAt: string; label: string; progress: string };
-/** 已结束、还要留一会儿的作业：失败的留到用户关掉，成功的留到淡出完 */
+/** 已结束、还要留一会儿的作业：失败的留到用户关掉，成功的留到它自己淡出或用户关掉 */
 export type EndedJob = { id: string; createdAt: string; label: string; kind: JobKind } & ({ state: 'failed'; reason: string } | { state: 'succeeded' });
 
 // 能原样再发一轮的作业种类：与 API-CORE-034 服务端的口径一致（其余种类没有可重发的那一轮，回原入口再点一次）
 const RETRYABLE: readonly JobKind[] = ['generate', 'edit_screens', 'edit_component', 'chat'];
 /** 最多摆几枚，其余折成一枚「还有 N 个」 */
 const MAX_CHIPS = 3;
-// 成功的 chip：写「完成」停 1 s，再用 200 ms 淡出（styles.css 的 .job-chip-out），淡完撤掉
-const DONE_MS = 1200;
+// 成功的 chip（v1.33）：原地转成「任务完成」停 10 s，悬停、键盘获焦与页面在后台时暂停计时（COMP-009：按截止时刻算剩余）；
+// 到点用 200 ms 淡出（styles.css 的 .job-chip-leaving），淡完撤掉。折进「还有 N 个」的没有挂载、计不了时，30 s 后由 useEndedJobs 兜底撤掉
+const DONE_MS = 10_000;
+const FADE_MS = 200;
+const FOLDED_MS = 30_000;
 
 /** 页面上已结束作业的那一份状态：end 在作业终态事件里调，dismiss 是失败 chip 的 ×、或重试发出去之后撤掉旧的那枚 */
 export function useEndedJobs() {
@@ -33,7 +36,7 @@ export function useEndedJobs() {
   const end = useCallback((job: EndedJob) => {
     setEnded((xs) => [...xs.filter((x) => x.id !== job.id), job]);
     if (job.state !== 'succeeded') return;
-    const t = window.setTimeout(() => { timers.current.delete(t); dismiss(job.id); }, DONE_MS);
+    const t = window.setTimeout(() => { timers.current.delete(t); dismiss(job.id); }, FOLDED_MS);
     timers.current.add(t);
   }, [dismiss]);
   return { ended, end, dismiss };
@@ -87,23 +90,24 @@ function Chip({ chip: c, esc, onCancel, onRetry, onDismiss }: { chip: JobChip; e
     inflight.current = true; setRetrying(true);
     try { await onRetry(c.id); } finally { inflight.current = false; setRetrying(false); }
   };
+  const leaving = useDoneTimer(c.state === 'succeeded', () => onDismiss(c.id));
   const shape = c.state === 'failed'
     ? 'tint-warning items-start rounded-lg py-0.5 pl-3 pr-0.5 shadow-(--semantic-elevation-panel)'
-    : cn('chrome h-9 items-center rounded-pill pl-3', c.state === 'running' ? 'pr-0.5' : 'job-chip-out pr-3');
+    : cn('chrome h-9 items-center rounded-pill pl-3 pr-0.5', c.state === 'succeeded' && 'job-chip-done', leaving.on && 'job-chip-leaving');
   return (
-    <li data-testid="job-chip" data-job-id={c.id} data-state={c.state} className={cn('fade-up pointer-events-auto flex gap-2 type-label', shape)}>
+    <li data-testid="job-chip" data-job-id={c.id} data-state={c.state} className={cn('fade-up pointer-events-auto flex gap-2 type-label', shape)} {...leaving.hold}>
       {c.state === 'running' ? <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" aria-hidden="true" />
         : c.state === 'failed' ? <TriangleAlert size={14} className="mt-[9px] shrink-0" aria-hidden="true" />
-        : <Check size={14} className="shrink-0 text-success" aria-hidden="true" />}
+        : <CircleCheck size={16} className="job-done-icon shrink-0 text-success" aria-hidden="true" />}
       {c.state === 'running' && (
         <span className="min-w-0 flex-1 truncate">
           <span className="font-medium text-text-primary">{c.label}</span>
           <span className="text-text-secondary"> · {c.progress}</span>
         </span>
       )}
-      <span role="status" className={c.state === 'running' ? 'sr-only' : c.state === 'failed' ? 'min-w-0 flex-1 py-1.5 [overflow-wrap:anywhere]' : 'min-w-0 flex-1 truncate'}>
+      <span role="status" className={c.state === 'running' ? 'sr-only' : c.state === 'failed' ? 'min-w-0 flex-1 py-1.5 [overflow-wrap:anywhere]' : 'min-w-0 flex-1 truncate pr-1'}>
         {c.state === 'failed' && <><span className="font-medium">{c.label}</span> · {c.retryable ? dropNext(c.reason) : c.reason}</>}
-        {c.state === 'succeeded' && <><span className="font-medium text-text-primary">{c.label}</span><span className="text-text-secondary"> · {t('jobs.done')}</span></>}
+        {c.state === 'succeeded' && <span className="job-done-text"><span className="font-medium text-text-primary">{t('jobs.done')}</span><span className="text-text-secondary"> · {c.label}</span></span>}
       </span>
       {c.state === 'running' && (
         // 画布上按 Esc（没有更近的一层可关时）取消的正是最新的在跑作业，它的 × 提示标出 Esc
@@ -124,6 +128,42 @@ function Chip({ chip: c, esc, onCancel, onRetry, onDismiss }: { chip: JobChip; e
           </IconButton>
         </span>
       )}
+      {c.state === 'succeeded' && (
+        // 完成态的 ×：悬停或键盘获焦时才显出来（.job-done-close），一直占着位置，显出来时 chip 不变宽
+        <IconButton size="xs" tip="top-end" label={t('jobs.dismissDone', { label: c.label })} className="job-done-close rounded-pill" data-testid="dismiss-job" onClick={() => onDismiss(c.id)}>
+          <X size={14} aria-hidden="true" />
+        </IconButton>
+      )}
     </li>
   );
+}
+
+// 完成态的计时（v1.33）：开始时算出截止时刻，悬停、获焦、页面在后台时停表、折回剩余时长，恢复时按新的此刻重算（COMP-009）；
+// 到点先标 leaving 淡出 200 ms，再撤掉
+function useDoneTimer(active: boolean, onGone: () => void) {
+  const [on, setOn] = useState(false);
+  const goneRef = useRef(onGone); goneRef.current = onGone;
+  const ctl = useRef<{ hold: (why: string, held: boolean) => void }>({ hold: () => {} });
+  useEffect(() => {
+    if (!active) return;
+    let left = DONE_MS; let due = 0; let timer = 0; let fading = false;
+    const held = new Set<string>();
+    const fire = () => { fading = true; setOn(true); timer = window.setTimeout(() => goneRef.current(), FADE_MS); };
+    const run = () => { if (held.size || timer || fading) return; due = Date.now() + left; timer = window.setTimeout(() => { timer = 0; fire(); }, left); };
+    const stop = () => { if (!timer || fading) return; window.clearTimeout(timer); timer = 0; left = Math.max(1000, due - Date.now()); };
+    const c = ctl.current;
+    c.hold = (why, on) => { if (on) { held.add(why); stop(); } else { held.delete(why); run(); } };
+    const vis = () => c.hold('hidden', document.hidden);
+    vis();
+    document.addEventListener('visibilitychange', vis);
+    return () => { document.removeEventListener('visibilitychange', vis); window.clearTimeout(timer); c.hold = () => {}; };
+  }, [active]);
+  return {
+    on,
+    hold: active ? {
+      onPointerEnter: () => ctl.current.hold('hover', true), onPointerLeave: () => ctl.current.hold('hover', false),
+      onFocus: () => ctl.current.hold('focus', true),
+      onBlur: (e: React.FocusEvent) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) ctl.current.hold('focus', false); },
+    } : {},
+  };
 }

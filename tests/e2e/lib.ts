@@ -79,15 +79,24 @@ export async function eventually(check: () => unknown, timeoutMs = 5000, interva
 
 // 页面语言固定 zh-CN（REQ-CORE-046）：界面缺省跟浏览器语言，套件里的断言都是中文。macOS 上的无头 Edge 不认 --lang
 // （navigator.language 跟着系统，本机实测是 en-CN），只有 context 的 locale 生效——这里给 newContext / newPage 补上缺省的 locale，
-// 套件里直接 browser.newContext / newPage 的也是中文；显式传了 locale 的照传。自己 chromium.launch 的地方同样包一层
+// 套件里直接 browser.newContext / newPage 的也是中文；显式传了 locale 的照传。自己 chromium.launch 的地方同样包一层。
+// 协作者身份（v1.32 REQ-CORE-048）也在这里预置：没有名字时画布与草稿本先弹「你叫什么」、挡住其余操作。
+// 所有上下文用同一个身份，同一个人的几个标签页互不算协作者，套件里并开的页面不会互相出现光标与头像；
+// 要测填名字对话框或两个人的，用 bareContext 开不带身份的上下文
 export const E2E_LOCALE = 'zh-CN';
+export const E2E_ME = { id: 'e2e00000-0000-4000-8000-000000000000', name: '测试', color: 1 };
+const bare = new WeakMap<Browser, Browser['newContext']>();
 export function zhCN(browser: Browser): Browser {
   const newContext = browser.newContext.bind(browser);
   const newPage = browser.newPage.bind(browser);
-  browser.newContext = (options = {}) => newContext({ locale: E2E_LOCALE, ...options });
-  browser.newPage = (options = {}) => newPage({ locale: E2E_LOCALE, ...options });
+  const withMe = async (c: import('playwright').BrowserContext) => { await c.addInitScript((me) => { try { if (!localStorage.getItem('quilt:me')) localStorage.setItem('quilt:me', me); } catch { /* about:blank 等没有 localStorage 的文档 */ } }, JSON.stringify(E2E_ME)); return c; };
+  bare.set(browser, (options = {}) => newContext({ locale: E2E_LOCALE, ...options }));
+  browser.newContext = async (options = {}) => withMe(await newContext({ locale: E2E_LOCALE, ...options }));
+  browser.newPage = async (options = {}) => { const p = await newPage({ locale: E2E_LOCALE, ...options }); await withMe(p.context()); return p; };
   return browser;
 }
+/** 不预置协作者身份的上下文（填名字对话框、两个人同开一个项目） */
+export const bareContext = (browser: Browser, options: Parameters<Browser['newContext']>[0] = {}) => (bare.get(browser) ?? browser.newContext.bind(browser))(options);
 
 export async function launch(): Promise<Browser> {
   await assertTestApi();

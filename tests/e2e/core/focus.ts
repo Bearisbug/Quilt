@@ -170,9 +170,9 @@ await step('TC-CORE-032', async () => {
     expect((await page.locator('.card.focused .badge').innerText()).includes('交互中'), '热更新后角标不是「交互中」');
     const y1 = await fl.locator('body').evaluate(() => Math.round(window.scrollY));
     expect(Math.abs(y1 - y0) <= 2, `滚动位置未保持：${y0} → ${y1}`);
-    // 等改屏作业收口：v0.36 起输入框不再随作业禁用，改问后端还有没有在跑的作业；页面上的作业 chip 要等它自己收到终态事件才撤（成功的写「完成」停一下再淡出）
+    // 等改屏作业收口：v0.36 起输入框不再随作业禁用，改问后端还有没有在跑的作业；页面上的作业 chip 要等它自己收到终态事件才转成完成态（v1.33 完成态要停 10 s，只等在跑的没了）
     for (let i = 0; i < 30; i++) { if (!(await apiJson<{ activeJobs: unknown[] }>(`/v1/projects/${r.projectId}`)).body.activeJobs.length) break; await page.waitForTimeout(1000); }
-    await page.locator('[data-testid="job-chip"]').first().waitFor({ state: 'detached', timeout: 10000 });
+    await page.locator('[data-testid="job-chip"][data-state="running"]').first().waitFor({ state: 'detached', timeout: 10000 });
     // 3 跳到 /s2 后回刷（<head> 变了）：正显示的 /s2 原地换色、src 不变
     await fl.locator('a[href="/s2"]').first().click();
     await page.locator('.card.focused .badge', { hasText: '/s2' }).waitFor({ timeout: 10000 });
@@ -220,9 +220,9 @@ await step('TC-CORE-012', async () => {
   expect((await verbLine(page)).includes('改 1 屏'), `动词行应为「改 1 屏」：${await verbLine(page)}`);
   await page.fill('#chat-input', 'Turn this page into a grouped list with section headers');
   await page.keyboard.press('Enter');
-  // 这一轮跑完 = 它的作业 chip 撤掉（成功的写「完成」停 1 s 再淡出）
+  // 这一轮跑完 = 它的作业 chip 不再是在跑态（v1.33 成功的转成「任务完成」停 10 s）
   await page.locator('[data-testid="job-chip"]').first().waitFor({ timeout: 15000 });
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="job-chip"]').length === 0, null, { timeout: 120000 });
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="job-chip"][data-state="running"]').length === 0, null, { timeout: 120000 });
   const after = await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${projectId}`);
   const s3 = screens[2].id;
   expect(after.body.screens.find((s) => s.id === s3)!.currentRevisionId !== before.body.screens.find((s) => s.id === s3)!.currentRevisionId, '/s3 未产生新修订');

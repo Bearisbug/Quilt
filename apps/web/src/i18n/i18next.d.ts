@@ -1,6 +1,7 @@
 import 'i18next';
 import type canvasPage from './locales/canvas-page';
 import type canvasParts from './locales/canvas-parts';
+import type collab from './locales/collab';
 import type common from './locales/common';
 import type composer from './locales/composer';
 import type panelsDesign from './locales/panels-design';
@@ -23,6 +24,7 @@ declare module 'i18next' {
     resources: {
       'canvas-page': typeof canvasPage.zh;
       'canvas-parts': typeof canvasParts.zh;
+      collab: typeof collab.zh;
       common: typeof common.zh;
       composer: typeof composer.zh;
       'panels-design': typeof panelsDesign.zh;

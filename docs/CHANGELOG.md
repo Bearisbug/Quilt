@@ -2,10 +2,13 @@
 
 `docs/DESIGN.md` 与 `docs/TEST.md` 的变更记录只留最近几版，更早的按原文搬到这里，格式与来源表一致、内容不改。当前状态以两份文档正文为准，本文件只回答「某条规则是哪一版、为什么定下来的」。
 
-## DESIGN.md 变更记录（v1.13–v1.26）
+## DESIGN.md 变更记录（v1.13–v1.29）
 
 | 日期 | 版本 | 涉及 ID | 一句话 | 类型 |
 | --- | --- | --- | --- | --- |
+| 2026-10-22 | v1.29 | REQ-PROTO-002、PAGE-CANVAS、ADR-008、ADR-029、ADR-037 | 连线只在交互时画、换成彩色端口画法；连线差量写，截图编码提速，记请求日志 | 功能 |
+| 2026-10-22 | v1.28 | REQ-EDIT-001、PAGE-CANVAS、PAGE-SKETCH、API-CORE-052、API-AGENT-010、ENT-UsageEntry、ADR-037 | 逐级选改用 Shift+↑ / Shift+↓；用量看板不把导出算给模型，截图编码限 2 路，会话列表去重 | 功能 |
+| 2026-10-22 | v1.27 | ENT-ScreenRevision、API-CORE-015、ADR-037 | 截图改存无损 WebP，旧版本只留缩略图，回到旧版复用原版的文件 | 功能 |
 | 2026-10-22 | v1.26 | REQ-EDIT-002、FLOW-SKETCH-REFINE、PAGE-CANVAS、PAGE-SKETCH、API-CORE-006、API-AGENT-002 | 选元素时按住 Shift 多选，选中的几块一句话一次改完、只出一版 | 功能 |
 | 2026-10-22 | v1.25 | FLOW-SKETCH、PAGE-SKETCH、PAGE-CANVAS、REQ-EDIT-001 | 草稿本按 ⌘Z 回到上一版；逐级选不再被焦点按钮吃掉 | 功能 |
 | 2026-10-21 | v1.24 | REQ-CORE-008、REQ-CORE-011、REQ-CORE-013、FLOW-USAGE、FLOW-SETTINGS、FLOW-RECORD、ENT-UsageEntry、API-CORE-017、API-CORE-021、API-CORE-031、API-CORE-052、ADR-035、ADR-036、PAGE-CANVAS | 设置改成用量、模型、系统三节并加用量看板，界面上「通道」改叫「模型」；本机使用记录确认 | 功能 |
@@ -139,6 +142,8 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-10-22 | 设计文档 v1.28（用量看板不把导出算给模型）：`TC-CORE-140` 加第 9 步（导出不记驱动与模型，计入作业次数与任务类型、不归任何模型），`TC-CORE-141` 加第 9 步（「导出」那行是一整条中性灰，提示只写合计）；后置加删掉 UsageExport | @bug |
+| 2026-10-22 | 设计文档 v1.28（逐级选改用 Shift+↑ / Shift+↓）：`TC-EDIT-031`、`040`、`041`、`042` 的按键跟着改；`TC-EDIT-031` 第 3 步加「`Enter` 不换层」；`TC-EDIT-040` 第 1 步不再要求焦点离开路径按钮（新键不是按钮的激活键） | @bug |
 | 2026-10-22 | 设计文档 v1.27（截图存无损 WebP、旧版本只留缩略图、回到旧版共用对象）：新增 `TC-CORE-151`（在 `tests/e2e/core/backend.ts`）；截图键从 `.png` 改成 `.webp`：`TC-CORE-041` 第 6b 步、`TC-CORE-085` 前置、`TC-CORE-103` 第 4 步、`TC-AGENT-018` 第 2 步跟着改 | @bug |
 | 2026-10-22 | 设计文档 v1.26（选元素时按住 Shift 多选，几块一次改完）：新增 `TC-EDIT-041`（草稿本，在 `tests/e2e/sketch.ts`）与 `TC-EDIT-042`（画布与 MCP，在 `tests/e2e/edit.ts`） | @bug |
 | 2026-10-22 | 设计文档 v1.25（草稿本按 ⌘Z 回到上一版；逐级选不被焦点控件的默认动作吃掉）：新增 `TC-EDIT-040`（源自缺陷）与 `TC-CORE-150`（草稿本按 `⌘Z` 回到上一版，在 `tests/e2e/sketch.ts`）；`TC-EDIT-031` 第 5 步的脚本去掉点路径后先把焦点挪回检查器那一步，照用例原文点完就按 | @bug |

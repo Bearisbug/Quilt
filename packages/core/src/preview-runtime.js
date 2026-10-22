@@ -108,6 +108,16 @@
     e.preventDefault();
     send({ type: 'quilt:wheel', deltaY: e.deltaY, x: e.clientX, y: e.clientY });
   }, { passive: false });
+  // 协作显示（v1.32 REQ-CORE-048）：指针在文档里移动时按帧节流把视口坐标发给父页，父页换算成世界坐标当作自己的光标；指针离开文档发 left
+  /** @type {{ x: number, y: number } | null} */
+  var pointerAt = null;
+  document.addEventListener('pointermove', function (e) {
+    var queued = !!pointerAt;
+    pointerAt = { x: e.clientX, y: e.clientY };
+    if (queued) return;
+    requestAnimationFrame(function () { if (pointerAt) send({ type: 'quilt:pointer', x: pointerAt.x, y: pointerAt.y }); pointerAt = null; });
+  }, { passive: true });
+  document.addEventListener('pointerout', function (e) { if (e.relatedTarget) return; pointerAt = null; send({ type: 'quilt:pointer', left: true }); });
   document.addEventListener('submit', function (e) {
     e.preventDefault();
     if (win.__quiltComponent) return;
@@ -285,11 +295,76 @@
     working.forEach(function (q) { mark(q, 'working'); });
     done.forEach(function (q) { mark(q, 'done'); });
   }
-  function replaceBadges() { Object.keys(marks).forEach(function (q) { placeBadge(marks[q]); }); placeSels(); }
+  // 协作者选中的块（v1.32 REQ-CORE-048）：与选中框同一种画法，颜色与名字由父页给；比选中框再往外让 4px，同一块被自己也选中时两层分得开
+  /** @type {{ el: Element, box: HTMLElement }[]} */
+  var peerBoxes = [];
+  /** @param {{ el: Element, box: HTMLElement }} p */
+  function placePeer(p) {
+    var r = p.el.getBoundingClientRect();
+    p.box.style.left = r.left - 6 + 'px'; p.box.style.top = r.top - 6 + 'px'; p.box.style.width = r.width + 12 + 'px'; p.box.style.height = r.height + 12 + 'px';
+    // 名字标签挂在框的右上角外侧；框顶上不够放（贴着页面顶）就收进框里，免得被画框裁掉
+    var tag = /** @type {HTMLElement} */ (p.box.firstChild);
+    var inside = r.top - 6 < 20;
+    tag.style.top = inside ? '2px' : '-20px'; tag.style.right = inside ? '2px' : '-2px';
+  }
+  /** @param {{ qid: string, name: string, color: string, on: string }[]} blocks */
+  function setPeers(blocks) {
+    peerBoxes.forEach(function (p) { p.box.remove(); });
+    peerBoxes = [];
+    blocks.forEach(function (b) {
+      var el = byQid(b.qid);
+      if (!el) return;
+      var box = document.createElement('div');
+      box.setAttribute('data-quilt-ui', ''); box.setAttribute('data-quilt-peer', b.name);
+      box.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483645;border:2px solid ' + b.color + ';border-radius:6px';
+      var tag = document.createElement('span');
+      tag.style.cssText = 'position:absolute;font:600 11px/16px system-ui,sans-serif;padding:1px 7px;border-radius:999px;white-space:nowrap;background:' + b.color + ';color:' + b.on;
+      tag.textContent = b.name;
+      box.appendChild(tag);
+      document.body.appendChild(box);
+      var p = { el: el, box: box };
+      peerBoxes.push(p); placePeer(p);
+    });
+  }
+  function placePeers() { peerBoxes.forEach(function (p) { if (p.el.isConnected) placePeer(p); else p.box.remove(); }); peerBoxes = peerBoxes.filter(function (p) { return p.el.isConnected; }); }
+  function replaceBadges() { Object.keys(marks).forEach(function (q) { placeBadge(marks[q]); }); placeSels(); placePeers(); }
   window.addEventListener('scroll', replaceBadges, true);
   window.addEventListener('resize', replaceBadges);
-  /** @param {Event} e */
-  function targetOf(e) { var el = /** @type {Element | null} */ (e.target); var t = el && el.closest && el.closest('[data-qid]'); return t && !t.hasAttribute('data-quilt-ui') ? t : null; }
+  // 选元素态下每个元素都可命中（setPierce），连设计里本来不可点的透明层也是：常见的是收起时全透明的全屏遮罩（底部抽屉、弹窗的底板）
+  // 和装它的 fixed inset-0 空容器，它们叠在最上面，点哪都落在它们身上。所以按指针位置自上而下取：看不见的（自身或祖先全透明、
+  // visibility:hidden）跳过；本来不可点（关掉穿透规则时 pointer-events 为 none）又什么都不画的也跳过，取到的第一个就是目标。
+  // 本来不可点、但画了东西的（装饰层、label 里的字）照样选得中，这是穿透规则要的
+  /** @param {Element} el */
+  function seen(el) { for (var n = /** @type {Element | null} */ (el); n; n = n.parentElement) { var cs = getComputedStyle(n); if (cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) return false; } return true; }
+  /** @param {string} c */
+  function clear(c) { return !c || c === 'transparent' || /(,|\/)\s*0(\.0+)?\s*\)$/.test(c); }
+  /** @param {string} v */
+  function none(v) { return !v || v === 'none'; }
+  /** 这个元素自己画了东西：字、背景、边框、阴影，或本身是图片、控件 @param {Element} el */
+  function paints(el) {
+    if (!(el instanceof HTMLElement) || /^(IMG|VIDEO|CANVAS|PICTURE|INPUT|TEXTAREA|SELECT|BUTTON|IFRAME)$/.test(el.tagName)) return true;
+    var cs = getComputedStyle(el);
+    if (!none(cs.backgroundImage) || !none(cs.boxShadow) || !clear(cs.backgroundColor)) return true;
+    var sides = ['Top', 'Right', 'Bottom', 'Left'];
+    for (var i = 0; i < 4; i++) { var k = /** @type {'borderTopWidth'} */ ('border' + sides[i] + 'Width'); if (parseFloat(cs[k]) > 0 && !clear(cs.getPropertyValue('border-' + sides[i].toLowerCase() + '-color'))) return true; }
+    for (var n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 3 && /\S/.test(n.nodeValue || '')) return true;
+    return false;
+  }
+  /** @param {MouseEvent} e */
+  function targetOf(e) {
+    var hits = document.elementsFromPoint ? document.elementsFromPoint(e.clientX, e.clientY) : [/** @type {Element} */ (e.target)];
+    // 关掉穿透规则读一次各层本来的 pointer-events，再打开
+    var inert = hits.map(function () { return false; });
+    if (pierce) { var on = pierce; on.remove(); inert = hits.map(function (h) { return getComputedStyle(h).pointerEvents === 'none'; }); document.head.appendChild(on); }
+    for (var i = 0; i < hits.length; i++) {
+      var t = hits[i].closest('[data-qid]');
+      if (!t) continue;
+      if (t.hasAttribute('data-quilt-ui')) return null;
+      if (!seen(hits[i]) || (inert[i] && !paints(hits[i]))) continue;
+      return t;
+    }
+    return null;
+  }
   // 逐级选（v1.00 REQ-EDIT-001）：指针下取到的是最里层元素。锚点 = 最近一次悬停 / 点中的最里层元素，当前层 = 锚点自身或它的某个
   // 带 data-qid 的祖先（最高到屏根）。上一级 = 最近的带 data-qid 的祖先；下一级 = 沿锚点那条链往下一步。选中与悬停各记一份
   /** @type {{ anchor: Element | null, cur: Element | null }} */
@@ -378,6 +453,7 @@
     var msg = /** @type {Incoming} */ (e.data || {});
     if (msg.type === 'quilt:mode') { if (msg.marks) { pal = msg.marks; paintBox(); sels.forEach(paintSel); Object.keys(marks).forEach(function (q) { paintMark(marks[q]); }); } mode = msg.mode === 'inspect' ? 'inspect' : 'interact'; if (mode !== 'inspect') { highlight(null); setSelection(null); hov = { anchor: null, cur: null }; anchors = {}; } setPierce(mode === 'inspect'); document.body.style.cursor = mode === 'inspect' ? 'crosshair' : ''; return; }
     // 父页的选中状态是事实源：选中 / 清空都同步到常驻框。qids（v1.26 多选）是选中的全部几块，qid 是其中最后点中的那一块；不带 qids 就只有 qid 这一块
+    if (msg.type === 'quilt:peers') { setPeers(msg.blocks || []); return; }
     if (msg.type === 'quilt:highlight') {
       var qs = msg.qids && msg.qids.length ? msg.qids : msg.qid ? [msg.qid] : [];
       /** @type {Element[]} */

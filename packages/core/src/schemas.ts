@@ -473,6 +473,36 @@ export type RunnerOptionDto = {
 export type JobDto = { id: string; projectId: string; kind: JobKind; status: JobStatus; runner: JobRunner; input: unknown; output: unknown; createdAt: string; startedAt: string | null; finishedAt: string | null };
 /** 项目级事件（API-CORE-030）：只是「有变化」的提示——screen_changed 带 screenId / revisionId，job_changed 带 jobId 与作业事件类型 */
 export type ProjectEventDto = { type: 'screen_changed' | 'job_changed'; data: unknown; at: string };
+
+// 协作显示（v1.32 REQ-CORE-048，API-CORE-053）：每个标签页一个 clientId，每个浏览器一个协作者身份；状态只存在服务进程内存里
+export const COLLAB_COLORS = 8;
+const finite = z.number().finite();
+export const presencePersonSchema = z.object({ id: z.uuid(), name: z.string().trim().min(1).max(24), color: z.number().int().min(1).max(COLLAB_COLORS) });
+export const presenceStateSchema = z.object({
+  /** 指针：画布上是世界坐标，草稿本里是草稿画框的原始尺寸坐标 */
+  cursor: z.object({ x: finite, y: finite }).optional(),
+  /** 视口在世界坐标里的框（跟随用；草稿本不发） */
+  view: z.object({ x: finite, y: finite, w: finite.positive(), h: finite.positive() }).optional(),
+  selected: z.array(z.uuid()).max(200).optional(),
+  focus: z.object({ id: z.uuid(), kind: z.enum(['screen', 'component']), mode: z.enum(['interact', 'inspect']), route: z.string().max(200).optional() }).optional(),
+  drag: z.array(z.object({ id: z.uuid(), x: finite, y: finite })).max(200).optional(),
+  /** 这个标签页发出、还在跑的作业 */
+  jobs: z.array(z.uuid()).max(20).optional(),
+  /** 草稿本：正看的草稿与草稿里选中的块 */
+  draft: z.uuid().optional(),
+  blocks: z.array(z.string().min(1).max(40)).max(8).optional(),
+  /** 正在跟随的人（person.id）与开始跟随的时刻（ms）：顺着它找跟随链的领头人，连成一圈时按它决定谁停下 */
+  following: z.object({ id: z.uuid(), since: z.number().int().nonnegative() }).optional(),
+});
+export const presenceInputSchema = z.union([
+  z.object({ clientId: z.uuid(), left: z.literal(true) }),
+  z.object({ clientId: z.uuid(), person: presencePersonSchema, state: presenceStateSchema }),
+]);
+export type PresencePerson = z.infer<typeof presencePersonSchema>;
+export type PresenceState = z.infer<typeof presenceStateSchema>;
+export type PresenceInput = z.infer<typeof presenceInputSchema>;
+/** API-CORE-030 推的协作事件：presence 是某个标签页的全量状态，presence_left 是它离开了 */
+export type PresenceEventDto = { type: 'presence'; data: { clientId: string; person: PresencePerson; state: PresenceState; at: string } } | { type: 'presence_left'; data: { clientId: string } };
 /** 本机会话（API-AGENT-010）：Claude Code 正在运行的会话，或 Codex 线程库里的用户线程（v0.68）。
  *  named=false：Claude Code 是派生名（目录 + 后缀，前端显示 UUID），Codex 是没起过名、name 取的是标题。
  *  open：Claude Code 恒为 true；Codex = 线程此刻在某个 Codex 窗口里打开着。app：Codex 线程开在哪（桌面版 / VS Code / 终端）。

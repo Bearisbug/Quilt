@@ -2,6 +2,7 @@ import type { ScreenDto } from '@quilt/core/browser';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { cn, IconButton } from '@/ui/ui';
 import { relTime, useNow } from '@/sketch/relTime';
+import { COLLAB_ON, collabColor, type Peer } from '@/lib/collab';
 import { useT } from '@/i18n';
 import sketchMessages from '@/i18n/locales/sketch';
 
@@ -9,8 +10,10 @@ import sketchMessages from '@/i18n/locales/sketch';
 // 正打开的那张铺选中高亮色；点一项把它摆上看板。开合是本机的视图偏好（页面记在 localStorage）。
 // 开合钮常驻右上角同一个位置（与左上的切换器 chip 同一圈 12 px 外边距）；列表浮在看板上（v1.17），开合不改看板，上沿与看板上沿齐平，
 // 不压顶部那一行里的草稿工具条；窄视口下连输入框也盖住
-export function DraftRail({ open, onToggle, drafts, openId, generating, onPick, onShotError }: {
+export function DraftRail({ open, onToggle, drafts, openId, generating, onPick, onShotError, viewers }: {
   open: boolean; onToggle: () => void;
+  /** 协作显示（v1.32）：每张草稿此刻有谁在看 */
+  viewers?: Record<string, Peer[]>;
   /** null = 草稿本还在加载 */
   drafts: ScreenDto[] | null;
   openId: string | null;
@@ -49,10 +52,22 @@ export function DraftRail({ open, onToggle, drafts, openId, generating, onPick, 
                     <button type="button" data-testid="rail-item" data-draft-id={s.id} data-generating={busy ? 'true' : undefined} aria-current={current ? 'true' : undefined} onClick={() => onPick(s.id)}
                       className={cn('state-layer focus-ring flex w-full items-center gap-2.5 rounded-md p-1.5 text-left', current && 'bg-(--semantic-color-surface-selected)')}>
                       {/* 组件画框的截图是透明底（API-CORE-016 草稿）：垫看板底色，与看板上看到的一致；页面垫设计稿的白 */}
-                      <span className={cn('grid size-12 shrink-0 place-items-center overflow-hidden rounded-sm border border-border-subtle', s.frame === 'component' ? 'bg-(--semantic-color-surface-canvas)' : 'bg-neutral-0')}>
-                        {thumb
-                          ? <img src={thumb} alt="" loading="lazy" draggable={false} onError={onShotError} className={cn('size-full', s.frame === 'component' ? 'object-contain' : 'object-cover object-top')} />
-                          : <span className="size-full bg-(--semantic-color-surface-sunken)" />}
+                      <span className="relative shrink-0">
+                        <span className={cn('grid size-12 place-items-center overflow-hidden rounded-sm border border-border-subtle', s.frame === 'component' ? 'bg-(--semantic-color-surface-canvas)' : 'bg-neutral-0')}>
+                          {thumb
+                            ? <img src={thumb} alt="" loading="lazy" draggable={false} onError={onShotError} className={cn('size-full', s.frame === 'component' ? 'object-contain' : 'object-cover object-top')} />
+                            : <span className="size-full bg-(--semantic-color-surface-sunken)" />}
+                        </span>
+                        {/* 正在看这张草稿的人（v1.32）：至多 3 个小头像叠在缩略图右下角；名字给读屏 */}
+                        {!!viewers?.[s.id]?.length && (
+                          <span data-testid="rail-viewers" className="absolute -bottom-1 -right-1 flex -space-x-1">
+                            {viewers[s.id].slice(0, 3).map((x) => (
+                              <span key={x.person.id} title={x.person.name} className="grid size-4 place-items-center rounded-full text-[9px] font-semibold ring-2 ring-(--semantic-color-surface-raised)" style={{ background: collabColor(x.person.color), color: COLLAB_ON }}>
+                                <span aria-hidden="true">{Array.from(x.person.name)[0]}</span><span className="sr-only">{x.person.name}</span>
+                              </span>
+                            ))}
+                          </span>
+                        )}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate type-body text-text-primary">{s.name}</span>

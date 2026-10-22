@@ -25,7 +25,7 @@ function readView(key: string): Viewport | null {
  * 画布镜头（ADR-002 / ADR-006，v1.07 从 CanvasView.tsx 抽出）：世界层 transform 由 @xyflow/system 驱动，镜头按项目落盘，
  * 空格按住是平移就绪。onFrame 每次变换都调（平移缩放逐帧），onStop 在手势停下 200 ms 后调；两者都按调用方最近一次渲染给的取
  */
-export function useViewport(o: { projectId: string; safeAreaRef?: { current: HTMLElement | null }; onFrame: (v: Viewport) => void; onStop: (v: Viewport) => void }) {
+export function useViewport(o: { projectId: string; safeAreaRef?: { current: HTMLElement | null }; onFrame: (v: Viewport) => void; onStop: (v: Viewport) => void; onUser?: () => void }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const panZoom = useRef<PanZoomInstance | null>(null);
@@ -128,7 +128,7 @@ export function useViewport(o: { projectId: string; safeAreaRef?: { current: HTM
     const node = viewportRef.current!;
     // 用户手势开始（滚轮、捏合、空格拖拽带着原始事件；程序化的 setViewport 没有）：打断进行中的自动适配，这一段要落盘
     const inst = XYPanZoom({ domNode: node, minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, viewport: vp.current, translateExtent: [[-Infinity, -Infinity], [Infinity, Infinity]], onDraggingChange: setDragging,
-      onPanZoomStart: (ev) => { if (ev) { autoView.current = false; scheduleSave(); } } });
+      onPanZoomStart: (ev) => { if (ev) { autoView.current = false; scheduleSave(); opts.current.onUser?.(); } } });
     panZoom.current = inst;
     updatePanZoom();
     // 首帧镜头要么是记住的、要么是自动适配出来的，都不是这一次手摆的：不落盘
@@ -161,6 +161,7 @@ export function useViewport(o: { projectId: string; safeAreaRef?: { current: HTM
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey || (e.target as Element | null)?.closest?.('.nowheel')) return;
       e.preventDefault(); e.stopImmediatePropagation();
+      opts.current.onUser?.();
       const r = node.getBoundingClientRect();
       moveTo(zoomAround(vp.current, e.clientX - r.left, e.clientY - r.top, e.deltaMode === 1 ? e.deltaY * 25 : e.deltaY));
     };

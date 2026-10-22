@@ -15,6 +15,8 @@ export const previewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('quilt:overlay-dismiss') }),
   // 捏合（ctrl+wheel）；pan = 组件预览里落在没有可滚区域处的普通滚轮（v0.80），父页平移画布
   z.object({ type: z.literal('quilt:wheel'), deltaY: z.number(), x: z.number(), y: z.number(), deltaX: z.number().optional(), pan: z.boolean().optional() }),
+  // 协作显示（v1.32 REQ-CORE-048）：指针在文档里的位置（iframe 视口里的 CSS 像素），按帧节流；离开文档发 left
+  z.object({ type: z.literal('quilt:pointer'), x: z.number().optional(), y: z.number().optional(), left: z.literal(true).optional() }),
   // component：元素所在的共享组件名（自身或祖先带 data-component，REQ-EDIT-006），检查器据此挡住直改、给「改组件 / 脱离共享」
   // path（v1.00 逐级选）：从屏根到锚点（最近一次悬停 / 点中的最里层元素）的祖先链，当前选中是其中一级
   // additive（v1.26 多选）：按着 Shift 点的，父页加选或减选；replace：这一份换掉选中里的哪一块——逐级选、路径点选换的是最后点中的那块，
@@ -53,7 +55,9 @@ export type ParentToPreview =
     // peek = 路径上悬停 / 聚焦某一级，在屏上画悬停框（null 撤掉）
   | { type: 'quilt:climb'; dir: 'up' | 'down' }
   | { type: 'quilt:pick'; qid: string }
-  | { type: 'quilt:peek'; qid: string | null };
+  | { type: 'quilt:peek'; qid: string | null }
+    // 协作者选中的块（v1.32 REQ-CORE-048，草稿本）：每块一个框加名字标签；颜色由父页按协作者色解析好给（运行时读不到父页的 CSS 变量）。空数组撤掉全部
+  | { type: 'quilt:peers'; blocks: { qid: string; name: string; color: string; on: string }[] };
 
 export type ElementPathItem = z.infer<typeof elementPathItemSchema>;
 

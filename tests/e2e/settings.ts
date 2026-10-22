@@ -363,11 +363,11 @@ await step('TC-CORE-142', async () => {
     await openSettings(pg, demoId, q);
     await S.check(() => eventually(async () => expect((await selectedTab(pg)) === `settings-tab-${tab}` && new URL(pg.url()).searchParams.get('settings') === url, `① ?settings=${q} 应开「${tab}」、地址换成 settings=${url}：${await selectedTab(pg)} ${pg.url()}`), 5000));
   }
-  // 2 「系统」三组：外观、语言、使用记录；选深色、选 English 当场生效、不刷新
+  // 2 「系统」四组：外观、语言、协作、使用记录；选深色、选 English 当场生效、不刷新
   await openSettings(pg, demoId, 'system');
   await pg.evaluate(() => { (window as unknown as { __noReload: number }).__noReload = 1; });
   const heads = (await pg.getByTestId('system').locator('section > h4').allInnerTexts()).map((s) => s.trim());
-  await S.check(() => expect(JSON.stringify(heads) === JSON.stringify(['外观', '语言', '使用记录']), `② 三组小标题应依次是 外观 / 语言 / 使用记录：${JSON.stringify(heads)}`));
+  await S.check(() => expect(JSON.stringify(heads) === JSON.stringify(['外观', '语言', '协作', '使用记录']), `② 四组小标题应依次是 外观 / 语言 / 协作 / 使用记录：${JSON.stringify(heads)}`));
   await pg.getByTestId('theme-dark').click();
   await S.check(() => eventually(async () => expect((await htmlTheme(pg)) === 'dark', `② 选深色后 <html> 应带 data-theme=dark：${await htmlTheme(pg)}`), 3000));
   await pg.getByTestId('locale-en').click();

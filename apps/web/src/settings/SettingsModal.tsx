@@ -15,6 +15,8 @@ import { setLocale, useLocale, useT, type Locale } from '@/i18n';
 import settingsMessages from '@/i18n/locales/settings';
 import commonMessages from '@/i18n/locales/common';
 import { copyText } from '@/lib/copy';
+import { CollabSettings } from '@/collab/CollabSettings';
+import collabMessages from '@/i18n/locales/collab';
 
 // 设置弹层（§13 设置弹层，v1.24 用量 / 模型 / 系统三节）：左栏分节、右栏只放当前节。分节即视图标识（INT-020）——进 URL 的 ?settings=<id>，读写在 sections.ts。
 const SECTION_ICONS = { usage: Gauge, models: Cpu, system: MonitorCog } as const;
@@ -22,6 +24,7 @@ const SECTION_ICONS = { usage: Gauge, models: Cpu, system: MonitorCog } as const
 export function SettingsModal({ section, onSection, onClose, returnTo, onCatalog }: { section: SettingsSection; onSection: (s: SettingsSection) => void; onClose: () => void; returnTo?: React.RefObject<HTMLElement | null>; onCatalog?: (items: RunnerOptionDto[], defaultId: string) => void }) {
   const toast = useToast();
   const t = useT(settingsMessages);
+  const tk = useT(collabMessages);
   const tc = useT(commonMessages);
   // 长内容弹层：初始焦点落容器（A11Y-004 ③），Tab 再进左栏当前节 → 右栏内容 → 关闭
   const ref = useModal<HTMLDivElement>(onClose, returnTo, undefined, { initialFocus: 'self' });
@@ -66,11 +69,12 @@ export function SettingsModal({ section, onSection, onClose, returnTo, onCatalog
               <div className="mt-2 flex items-center gap-2"><code className="fill flex-1 truncate rounded-md px-3 py-2 font-mono type-label" data-testid="codex-mcp-add">{codexMcpAdd}</code><Button size="sm" aria-label={t('mcp.copyCodex')} onClick={() => copy(codexMcpAdd)}>{tc('copy')}</Button></div>
             </Tabs.Content>
 
-            {/* 系统：外观、语言、使用记录三组，各一个小标题，从上到下排；组间一道发丝线 */}
+            {/* 系统：外观、语言、协作、使用记录四组，各一个小标题，从上到下排；组间一道发丝线 */}
             <Tabs.Content value="system" className={pane} data-testid="system">
               <h3 className="type-heading3 font-semibold">{t('sections.system')}</h3>
               <Group id="system-appearance" title={t('system.appearance')} testId="appearance" first><Appearance legend={t('system.appearance')} /></Group>
               <Group id="system-language" title={t('system.language')} testId="language"><Language legend={t('system.language')} /></Group>
+              <Group id="system-collab" title={tk('settings.title')} testId="collab"><CollabSettings /></Group>
               <Group id="system-record" title={t('system.record')} testId="record"><RecordSection titleId="system-record" /></Group>
             </Tabs.Content>
           </div>

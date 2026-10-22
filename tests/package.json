@@ -21,6 +21,7 @@
     "e2e:i18n": "tsx e2e/i18n.ts",
     "e2e:settings": "tsx e2e/settings.ts",
     "e2e:record": "tsx e2e/record.ts",
+    "e2e:collab": "tsx e2e/collab.ts",
     "mcp:call": "tsx e2e/mcp-call.ts"
   },
   "devDependencies": {

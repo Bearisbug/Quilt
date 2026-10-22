@@ -134,10 +134,11 @@ export default defineMessages('composer', {
   jobs: {
     label: '作业',
     more: '还有 {{count}} 个',
-    done: '完成',
+    done: '任务完成',
     cancel: '取消{{label}}',
     retry: '重试{{label}}',
     dismiss: '关掉「{{label}}」的失败提示',
+    dismissDone: '关掉「{{label}}」的完成提示',
   },
 }, {
   inputLabel: 'Message',
@@ -269,9 +270,10 @@ export default defineMessages('composer', {
   jobs: {
     label: 'Jobs',
     more: '{{count}} more',
-    done: 'Done',
+    done: 'Task complete',
     cancel: 'Cancel: {{label}}',
     retry: 'Retry: {{label}}',
     dismiss: 'Dismiss failure notice: {{label}}',
+    dismissDone: 'Dismiss: {{label}}',
   },
 });

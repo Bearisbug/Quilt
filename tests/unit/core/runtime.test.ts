@@ -185,6 +185,54 @@ test('组件预览：链接惰性，落在不可滚处的普通滚轮转成 pan'
   await p.close();
 });
 
+test('协作显示：指针移动按帧只发最后一个位置，离开文档发 left（v1.32）', async () => {
+  const p = preview(SCREEN);
+  const move = (x: number, y: number) => p.win.document.body.dispatchEvent(new p.win.MouseEvent('pointermove', { bubbles: true, clientX: x, clientY: y }));
+  move(10, 20); move(30, 40);
+  await new Promise((r) => setTimeout(r, 60));
+  p.win.document.body.dispatchEvent(new p.win.MouseEvent('pointerout', { bubbles: true }));
+  for (const m of p.sent) assert.ok(previewMessageSchema.safeParse(m).success, JSON.stringify(m));
+  assert.deepEqual(p.sent.filter((m) => (m as { type: string }).type === 'quilt:pointer'), [{ type: 'quilt:pointer', x: 30, y: 40 }, { type: 'quilt:pointer', left: true }]);
+  await p.close();
+});
+
+test('选元素：指针下最上面是全透明的遮罩、不画东西的空容器时往下取，画了东西的装饰层照样选得中（源自缺陷 TC-CORE-158）', async () => {
+  const p = preview(`<div data-qid="q1"><h1 data-qid="q2">本月账单</h1>
+<div data-qid="q3" style="position:fixed;inset:0;pointer-events:none"><div data-qid="q4" style="position:absolute;inset:0;background:rgba(0,0,0,.4);opacity:0"></div></div>
+<div data-qid="q5" style="position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(red,blue)"></div></div>`);
+  p.post({ type: 'quilt:mode', mode: 'inspect', marks: LIGHT });
+  const at = (...qids: string[]) => { (p.win.document as unknown as { elementsFromPoint: () => unknown[] }).elementsFromPoint = () => qids.map((q) => p.$(`[data-qid="${q}"]`)); };
+  // 遮罩（全透明）→ 空容器（本来不可点、不画东西）→ 标题：选中标题
+  at('q4', 'q3', 'q2', 'q1');
+  p.$('[data-qid="q4"]').click();
+  assert.deepEqual(boxes(p), ['q2=h1 · q2']);
+  // 渐变装饰层（本来不可点，但画了东西）盖在标题上：选中装饰层
+  at('q5', 'q2', 'q1');
+  p.$('[data-qid="q5"]').click();
+  assert.deepEqual(boxes(p), ['q5=div · q5']);
+  await p.close();
+});
+
+test('协作者选中的块：每块一个他颜色的框加名字，空数组撤掉（v1.32）', async () => {
+  const p = preview(SCREEN);
+  p.post({ type: 'quilt:peers', blocks: [{ qid: 'q1', name: '乙', color: 'rgb(1, 2, 3)', on: 'rgb(255, 255, 255)' }, { qid: 'nope', name: '丙', color: 'red', on: 'white' }] });
+  const boxes = () => [...p.win.document.querySelectorAll('[data-quilt-peer]')] as unknown as HTMLElement[];
+  assert.equal(boxes().length, 1, '找不到的 qid 不画');
+  assert.equal(boxes()[0].getAttribute('data-quilt-peer'), '乙');
+  assert.match(boxes()[0].style.border, /rgb\(1, 2, 3\)/);
+  assert.equal(boxes()[0].textContent, '乙');
+  // 名字标签：块贴着页面顶时收进框里，下面有空就挂在框外（滚动时重摆）
+  const tag = () => boxes()[0].firstChild as HTMLElement;
+  assert.equal(tag().style.top, '2px');
+  const q1 = p.win.document.querySelector('[data-qid="q1"]') as unknown as HTMLElement;
+  q1.getBoundingClientRect = () => ({ top: 120, left: 10, width: 100, height: 40, right: 110, bottom: 160, x: 10, y: 120, toJSON: () => ({}) }) as DOMRect;
+  p.win.dispatchEvent(new p.win.Event('scroll'));
+  assert.equal(tag().style.top, '-20px');
+  p.post({ type: 'quilt:peers', blocks: [] });
+  assert.equal(boxes().length, 0);
+  await p.close();
+});
+
 test('isPreviewMessage：形状不对的 quilt:* 消息一律不认（屏脚本可以伪造）', () => {
   assert.equal(isPreviewMessage({ type: 'quilt:wheel', x: 1, y: 2 }), false);
   assert.equal(isPreviewMessage({ type: 'quilt:wheel', deltaY: Number.NaN, x: 1, y: 2 }), false);
