@@ -2,10 +2,11 @@
 
 `docs/DESIGN.md` 与 `docs/TEST.md` 的变更记录只留最近几版，更早的按原文搬到这里，格式与来源表一致、内容不改。当前状态以两份文档正文为准，本文件只回答「某条规则是哪一版、为什么定下来的」。
 
-## DESIGN.md 变更记录（v1.13–v1.25）
+## DESIGN.md 变更记录（v1.13–v1.26）
 
 | 日期 | 版本 | 涉及 ID | 一句话 | 类型 |
 | --- | --- | --- | --- | --- |
+| 2026-10-22 | v1.26 | REQ-EDIT-002、FLOW-SKETCH-REFINE、PAGE-CANVAS、PAGE-SKETCH、API-CORE-006、API-AGENT-002 | 选元素时按住 Shift 多选，选中的几块一句话一次改完、只出一版 | 功能 |
 | 2026-10-22 | v1.25 | FLOW-SKETCH、PAGE-SKETCH、PAGE-CANVAS、REQ-EDIT-001 | 草稿本按 ⌘Z 回到上一版；逐级选不再被焦点按钮吃掉 | 功能 |
 | 2026-10-21 | v1.24 | REQ-CORE-008、REQ-CORE-011、REQ-CORE-013、FLOW-USAGE、FLOW-SETTINGS、FLOW-RECORD、ENT-UsageEntry、API-CORE-017、API-CORE-021、API-CORE-031、API-CORE-052、ADR-035、ADR-036、PAGE-CANVAS | 设置改成用量、模型、系统三节并加用量看板，界面上「通道」改叫「模型」；本机使用记录确认 | 功能 |
 | 2026-10-21 | v1.23 | REQ-EDIT-001、REQ-EDIT-002、REQ-EDIT-004、REQ-CORE-045、REQ-AGENT-002、FLOW-ELEMENT、FLOW-ANNOTATE、FLOW-SKETCH-REFINE、ENT-Annotation、API-EDIT-003、API-CORE-006、API-CORE-018、API-CORE-030、API-CORE-031、PAGE-CANVAS、PAGE-SKETCH、ADR-012 | 撤下批注：画布与草稿本的入口、接口、MCP 的 4 个工具与批注表一并删除；双击组件卡与双击屏一样把镜头摆过去 | 功能 |
@@ -138,6 +139,7 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-10-22 | 设计文档 v1.27（截图存无损 WebP、旧版本只留缩略图、回到旧版共用对象）：新增 `TC-CORE-151`（在 `tests/e2e/core/backend.ts`）；截图键从 `.png` 改成 `.webp`：`TC-CORE-041` 第 6b 步、`TC-CORE-085` 前置、`TC-CORE-103` 第 4 步、`TC-AGENT-018` 第 2 步跟着改 | @bug |
 | 2026-10-22 | 设计文档 v1.26（选元素时按住 Shift 多选，几块一次改完）：新增 `TC-EDIT-041`（草稿本，在 `tests/e2e/sketch.ts`）与 `TC-EDIT-042`（画布与 MCP，在 `tests/e2e/edit.ts`） | @bug |
 | 2026-10-22 | 设计文档 v1.25（草稿本按 ⌘Z 回到上一版；逐级选不被焦点控件的默认动作吃掉）：新增 `TC-EDIT-040`（源自缺陷）与 `TC-CORE-150`（草稿本按 `⌘Z` 回到上一版，在 `tests/e2e/sketch.ts`）；`TC-EDIT-031` 第 5 步的脚本去掉点路径后先把焦点挪回检查器那一步，照用例原文点完就按 | @bug |
 | 2026-10-21 | 设计文档 v1.24（设置改成用量、模型、系统三节，用量看板，台账快照，界面上「通道」改叫「模型」；v1.22 本机使用记录实现）：新增 `TC-CORE-140`～`143`（在 `tests/e2e/settings.ts`）与 `TC-CORE-144`～`149`（在 `tests/e2e/record.ts`），§3、§5 的全量轮在 `i18n` 之后加 `settings`、`record` 两套；废弃 `TC-CORE-022`（脚本删掉）；旧用例只改叫法与定位（设置三节、界面上叫「模型」、失败文案改说模型、对象目录按被测栈 `/v1/config` 的 `home`）：`TC-CORE-025` 第 3 步，`028` 第 7～9 步（第 7 步另按设计文档 v1.24 改看本机 agent 行：可用时写「找到 claude 命令」、不可用时才有「如何配置」），`048` 前置与第 1、3、4 步，`097` 第 1、3 步，`131` 第 1～3 步，`132` 第 5 步，`133` 第 1～3 步，`045` 第 3 步，`033` 第 3 步，`063` 第 4 步，`090` 前置，`TC-AGENT-001` 第 4 步，`TC-AGENT-012` 第 8 步；新用例补前置：`140` 台账先删空、第 7 步用假会话，`144` 先清空使用记录，`146` 建桩通道，`147` 两条桩通道与假会话，`149` 第 6 步要 `QUILT_E2E_RESTART`；`149` 第 2 步改为经接口发新草稿并取消，第 6 步写明触发 `storage.gc` 的做法 | @bug |

@@ -212,19 +212,20 @@ await step('TC-PROTO-014', async () => {
   // 逐帧记 data-state 的变化（只记变了的），看线是不是先长出来
   const recordStates = () => page.evaluate(`window.__states = []; (function tick() { const c = document.querySelector('[data-testid="link-edges"]'); const v = c && c.dataset.state; if (v && window.__states[window.__states.length - 1] !== v) window.__states.push(v); window.__statesRaf = requestAnimationFrame(tick); })()`);
   const states = async () => { const v = await page.evaluate('(cancelAnimationFrame(window.__statesRaf), window.__states)') as string[]; return v; };
-  // canvas 上每种数据可视化色的像素数（容差 40；抗锯齿与柔光边上混出来的色不算）
+  // canvas 上链去的线（标记色）与链进来的线（三级文字色）各有多少像素（容差 30；抗锯齿边上混出来的色不算）
   const inks = () => edgesEl.evaluate((c) => {
     const el = c as HTMLCanvasElement; const cs = getComputedStyle(el);
-    const series = [1, 2, 3, 4, 5, 6].map((i) => cs.getPropertyValue(`--semantic-color-data-viz-series-${i}`).trim()).map((h) => [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16)));
-    const d = el.getContext('2d')!.getImageData(0, 0, el.width, el.height).data; const n = series.map(() => 0);
-    for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 230) series.forEach((c3, k) => { if (Math.abs(d[i] - c3[0]) + Math.abs(d[i + 1] - c3[1]) + Math.abs(d[i + 2] - c3[2]) < 40) n[k]++; });
+    // 页面里执行的函数不能再声明具名函数（tsx 会给它包 __name，页面里没有）
+    const want = Object.fromEntries((['out', 'in'] as const).map((k) => [k, ((h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)))(cs.getPropertyValue(k === 'out' ? '--semantic-color-mark-line' : '--semantic-color-text-tertiary').trim())])) as Record<'out' | 'in', number[]>;
+    const d = el.getContext('2d')!.getImageData(0, 0, el.width, el.height).data; const n = { out: 0, in: 0 };
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 230) for (const k of ['out', 'in'] as const) { const w = want[k]; if (Math.abs(d[i] - w[0]) + Math.abs(d[i + 1] - w[1]) + Math.abs(d[i + 2] - w[2]) < 30) n[k]++; }
     return n;
   });
   // 1 平时不画连线；断链标记照常
   await page.waitForTimeout(500);
   expect((await edgesEl.count()) === 0, '① 平时不该画连线');
   expect((await page.locator('[data-testid="screen-card"][data-route="/s1"] .warn').count()) === 1, '① /s1 的断链标记不见了');
-  // 2 进交互：画 /s1 进出的；先 growing、1 s 内 done；至少两种颜色
+  // 2 进交互：画 /s1 进出的；先 growing、1 s 内 done；链去的是标记色、链进来的是三级文字色
   await recordStates();
   const fl = await focus('/s1');
   await eventually(async () => expect((await edgesEl.getAttribute('data-state')) === 'done', '② 连线 1 s 内没长完'), 1000);
@@ -233,7 +234,7 @@ await step('TC-PROTO-014', async () => {
   expect(st[0] === 'growing' && st[st.length - 1] === 'done', `② data-state 应先 growing 再 done：${JSON.stringify(st)}`);
   expect((await edgesEl.getAttribute('data-screen')) === s1.id && Number(await edgesEl.getAttribute('data-drawn')) === want1, `② 应画 /s1 进出的 ${want1} 条：${await edgesEl.getAttribute('data-drawn')}`);
   const ink = await inks();
-  expect(ink.filter((n) => n > 20).length >= 2, `② 应至少两种数据可视化色：${JSON.stringify(ink)}`);
+  expect(ink.out > 20 && ink.in > 20, `② 应既有标记色（链去）也有三级文字色（链进来）的像素：${JSON.stringify(ink)}`);
   // 3 屏内跳到 /s2：换成 /s2 进出、另一端不是 /s1 的
   await fl.locator('input[name="email"]').fill('a@b.co');
   await fl.locator('button[type="submit"]', { hasText: 'Sign in' }).click();
@@ -269,7 +270,7 @@ await step('TC-PROTO-014', async () => {
   await page.emulateMedia({ reducedMotion: null });
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
-  return `/s1 ${want1} 条（${st.join('→')}）、${ink.filter((n) => n > 20).length} 种颜色；跳到 /s2 ${want2} 条；Esc 撤掉；开关关时不画、刷新保持；减弱动态直接 done`;
+  return `/s1 ${want1} 条（${st.join('→')}）（链去 ${ink.out}、链进来 ${ink.in} 像素）；跳到 /s2 ${want2} 条；Esc 撤掉；开关关时不画、刷新保持；减弱动态直接 done`;
 });
 
 await step('TC-PROTO-009', async () => {

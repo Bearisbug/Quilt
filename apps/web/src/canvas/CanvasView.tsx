@@ -3,7 +3,7 @@ import type { Viewport } from '@xyflow/system';
 import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type ComponentDto } from '@quilt/core/browser';
 import { StyleGuideCard, STYLE_GUIDE_SIZE, styleGuideSize } from '@/canvas/StyleGuideCard';
 import { Minimap, type MiniRect } from '@/canvas/Minimap';
-import { mergeEdges, focusWires, drawWires, cubicBezier, cssMs, type Wire } from '@/canvas/edges';
+import { mergeEdges, focusWires, drawWires, cubicBezier, cssMs, type Wire, type WireColors } from '@/canvas/edges';
 import { toWorld, wantsThumb, fullShotIds, inMarquee, fitViewport, focusViewport, revealViewport, panToViewport, ensureVisibleViewport, zoomAround } from '@/canvas/geometry';
 import { useViewport, WHEEL_PAN_SPEED } from '@/canvas/useViewport';
 import { frameSide } from '@/lib/frameZoom';
@@ -224,8 +224,8 @@ export function CanvasView(p: CanvasProps) {
   const wires = useMemo(() => (p.showLinks && linkScreen && p.focusedId ? focusWires(edges, linkScreen, p.focusedId, (id) => { const s = byId[id]; return s && { ...pos(s), w: s.width, h: s.height }; }) : []),
     [p.showLinks, linkScreen, p.focusedId, edges, byId, pos]);
   const edgeCanvas = useRef<HTMLCanvasElement | null>(null);
-  const edgeDraw = useRef<{ wires: Wire[]; series: string[] | null; motion: { ms: number; ease: (x: number) => number } | null; start: number; frame: number }>({ wires: [], series: null, motion: null, start: 0, frame: 0 });
-  // 按当前镜头重画：平移缩放每次变换都会调到，同一帧里只画一次；线在生长或波纹没放完时下一帧接着画
+  const edgeDraw = useRef<{ wires: Wire[]; colors: WireColors | null; motion: { ms: number; ease: (x: number) => number } | null; start: number; frame: number }>({ wires: [], colors: null, motion: null, start: 0, frame: 0 });
+  // 按当前镜头重画：平移缩放每次变换都会调到，同一帧里只画一次；线还没画完时下一帧接着画
   const paintEdges = useCallback(() => {
     const d = edgeDraw.current;
     if (d.frame || !edgeCanvas.current) return;
@@ -235,30 +235,29 @@ export function CanvasView(p: CanvasProps) {
       if (!c || !node) return;
       const ratio = dpr(); const w = node.clientWidth; const h = node.clientHeight;
       if (c.width !== Math.round(w * ratio) || c.height !== Math.round(h * ratio)) { c.width = Math.round(w * ratio); c.height = Math.round(h * ratio); }
-      if (!d.series || !d.motion) {
-        const cs = getComputedStyle(c);
-        d.series = [1, 2, 3, 4, 5, 6].map((i) => cs.getPropertyValue(`--semantic-color-data-viz-series-${i}`).trim()).filter(Boolean);
-        const bez = cs.getPropertyValue('--semantic-motion-easing-standard').match(/[-\d.]+/g)?.map(Number);
-        d.motion = { ms: cssMs(cs.getPropertyValue('--semantic-motion-duration-slow'), 320), ease: bez?.length === 4 ? cubicBezier(bez[0], bez[1], bez[2], bez[3]) : (x) => x };
+      if (!d.colors || !d.motion) {
+        const cs = getComputedStyle(c); const v = (k: string) => cs.getPropertyValue(k).trim();
+        d.colors = { out: v('--semantic-color-mark-line'), in: v('--semantic-color-text-tertiary'), halo: v('--semantic-color-mark-halo') };
+        const bez = v('--semantic-motion-easing-standard').match(/[-\d.]+/g)?.map(Number);
+        d.motion = { ms: cssMs(v('--semantic-motion-duration-base'), 200), ease: bez?.length === 4 ? cubicBezier(bez[0], bez[1], bez[2], bez[3]) : (x) => x };
       }
-      // 减弱动态：直接画完成态，没有生长与波纹（MOTION-004）
+      // 减弱动态：直接画完成态（MOTION-004）
       const t = matchMedia('(prefers-reduced-motion: reduce)').matches ? Infinity : (performance.now() - d.start) / d.motion.ms;
-      const frame = { grow: d.motion.ease(Math.min(1, t)), ripple: Math.max(0, Math.min(1, t - 1)) };
       const g = c.getContext('2d');
-      if (g) drawWires(g, d.wires, vp.current, { w, h }, ratio, d.series, frame);
-      const done = t >= 2;
+      if (g) drawWires(g, d.wires, vp.current, { w, h }, ratio, d.colors, d.motion.ease(Math.min(1, t)));
+      const done = t >= 1;
       c.dataset.state = done ? 'done' : 'growing';
       if (!done) paintEdges();
     });
   }, [viewportRef, vp]);
-  const edgeCanvasRef = useCallback((el: HTMLCanvasElement | null) => { edgeCanvas.current = el; edgeDraw.current.series = null; edgeDraw.current.motion = null; if (el) paintEdges(); }, [paintEdges]);
+  const edgeCanvasRef = useCallback((el: HTMLCanvasElement | null) => { edgeCanvas.current = el; edgeDraw.current.colors = null; edgeDraw.current.motion = null; if (el) paintEdges(); }, [paintEdges]);
   useEffect(() => { edgeDraw.current.wires = wires; paintEdges(); }, [wires, paintEdges]);
-  // 进交互、屏内换了正显示的屏：线重新从起点长出来
+  // 进交互、屏内换了正显示的屏：线重新从起点画出来
   useEffect(() => { edgeDraw.current.start = performance.now(); paintEdges(); }, [p.focusedId, linkScreen, p.showLinks, paintEdges]);
   // 连线颜色是 CSS 变量的快照：换外观后丢掉重读（VIS-010）
   const themeMode = useResolvedMode();
   const locale = useLocale();
-  useEffect(() => { edgeDraw.current.series = null; paintEdges(); }, [themeMode, paintEdges]);
+  useEffect(() => { edgeDraw.current.colors = null; paintEdges(); }, [themeMode, paintEdges]);
   useEffect(() => {
     const node = viewportRef.current;
     const d = edgeDraw.current;

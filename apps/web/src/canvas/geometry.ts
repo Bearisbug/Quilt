@@ -68,9 +68,14 @@ export function ensureVisibleViewport(card: Rect, v: Viewport, area: Rect): View
   return panToViewport(card.x + card.w / 2, card.y + card.h / 2, v.zoom, area);
 }
 
-/** 围绕视口坐标 (px, py) 按滚轮缩放（捏合；系数同 d3-zoom 的 ctrl+wheel），钳在 [MIN_ZOOM, MAX_ZOOM] */
+/** 捏合与 Ctrl+滚轮的缩放速度（v1.31）：每个事件按 2^(−deltaY × PINCH_RATE) 变化，一次最多 ±25%（鼠标滚轮按住 Ctrl 一格的 deltaY 上百） */
+export const PINCH_RATE = 0.01;
+const PINCH_STEP_MAX = 1.25;
+
+/** 围绕视口坐标 (px, py) 按捏合缩放，钳在 [MIN_ZOOM, MAX_ZOOM] */
 export function zoomAround(v: Viewport, px: number, py: number, deltaY: number): Viewport {
-  const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.zoom * Math.pow(2, -deltaY * 0.02)));
+  const step = Math.min(PINCH_STEP_MAX, Math.max(1 / PINCH_STEP_MAX, Math.pow(2, -deltaY * PINCH_RATE)));
+  const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.zoom * step));
   const k = zoom / v.zoom;
   return { x: px - (px - v.x) * k, y: py - (py - v.y) * k, zoom };
 }

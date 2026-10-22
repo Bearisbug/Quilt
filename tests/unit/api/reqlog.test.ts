@@ -30,9 +30,12 @@ test('慢请求与 5xx 逐条写，只写路由模板不写地址与查询串；
   const text = await readFile(log.requestLogFile(), 'utf8');
   const lines = text.trim().split('\n');
   assert.equal(lines.length, 3, text);
-  assert.match(lines[0], /\[req\] preview GET \/p\/:projectId\/:screenId 200 2\d\d -$/);
+  // 慢的那次至少 200 ms（机器忙时会更久，不设上限）
+  const slow = lines[0].match(/\[req\] preview GET \/p\/:projectId\/:screenId 200 (\d+) -$/);
+  assert.ok(slow && Number(slow[1]) >= 200, lines[0]);
   assert.match(lines[1], /\[req\] preview GET \/boom 500 \d+ -$/);
-  assert.match(lines[2], /\[req\] 5m preview n=4 4xx=1 5xx=1 p50=\d+ p95=2\d\d$/);
+  const sum = lines[2].match(/\[req\] 5m preview n=4 4xx=1 5xx=1 p50=\d+ p95=(\d+)$/);
+  assert.ok(sum && Number(sum[1]) >= 200, lines[2]);
   assert.ok(!text.includes('secret-token') && !text.includes('proj-1'), '日志里不该有实际地址与签名');
 });
 

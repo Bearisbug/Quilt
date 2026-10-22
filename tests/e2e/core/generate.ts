@@ -403,8 +403,11 @@ await step('TC-CORE-086', async () => {
     // 5 放大到 100% 左右停住：视口里的卡换原图、视口外的仍是缩略图；缩回全景当帧降回缩略图
     await hi.keyboard.press('Escape');
     await hi.mouse.move(cx, cy);
+    // 每步的缩放量由 zoomAround 定（v1.31 调慢过一次），按缩放比例停、不按固定步数：放大到 0.9 以上停住，记下步数，缩回时走同样的步数
+    const zoomNow = () => hi.evaluate(`Number(document.querySelector('.world').style.transform.match(/scale\\(([-\\d.]+)\\)/)[1])`) as Promise<number>;
     await hi.keyboard.down('Control');
-    for (let i = 0; i < 30; i++) { await hi.mouse.wheel(0, -12); await hi.waitForTimeout(8); }
+    let steps = 0;
+    while (steps < 200 && (steps % 5 || (await zoomNow()) < 0.9)) { await hi.mouse.wheel(0, -12); await hi.waitForTimeout(8); steps++; }
     await hi.keyboard.up('Control');
     await eventually(async () => { const s = await shown(); expect(s.some((x) => x.on && !x.thumb), '放大停住后视口里的卡还没换上原图'); }, 10_000).catch(() => {});
     const s5 = await shown();
@@ -412,7 +415,7 @@ await step('TC-CORE-086', async () => {
     check(s5.some((x) => x.on) && !wrong.length, `放大后应只有视口里的卡用原图：视口里 ${s5.filter((x) => x.on).length} 张，档位不对 ${wrong.length} 张`);
     await hi.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-core-086-zoomed.png`) });
     await hi.keyboard.down('Control');
-    for (let i = 0; i < 30; i++) { await hi.mouse.wheel(0, 12); await hi.waitForTimeout(8); }
+    for (let i = 0; i < steps; i++) { await hi.mouse.wheel(0, 12); await hi.waitForTimeout(8); }
     await hi.keyboard.up('Control');
     await eventually(async () => expect((await shown()).every((x) => x.thumb), '缩回全景后应全部降回缩略图'), 5_000).catch(() => check(false, '缩回全景后应全部降回缩略图'));
     // 7 双击视口中央那张卡进交互：画这一屏进出的、长完；Esc 撤掉

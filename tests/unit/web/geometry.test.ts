@@ -84,12 +84,14 @@ test('revealViewport / panToViewport / ensureVisibleViewport', () => {
   assert.deepEqual(ensureVisibleViewport({ x: 3000, y: 0, w: 400, h: 800 }, v, area), panToViewport(3200, 400, 0.5, area));
 });
 
-test('zoomAround：指针下的世界点不动，钳在上下限', () => {
+test('zoomAround：指针下的世界点不动；每个事件按 2^(−deltaY × 0.01)、最多 ±25%；钳在上下限', () => {
   const v = { x: 100, y: 100, zoom: 1 };
-  const z = zoomAround(v, 400, 300, -50);   // 放大一倍
-  near(z.zoom, 2);
+  const z = zoomAround(v, 400, 300, -20);
+  near(z.zoom, Math.pow(2, 0.2));
   const before = toWorld(v, 400, 300); const after = toWorld(z, 400, 300);
   near(before.x, after.x); near(before.y, after.y);
-  assert.equal(zoomAround(v, 0, 0, -1000).zoom, 2);
-  assert.equal(zoomAround({ x: 0, y: 0, zoom: 0.03 }, 0, 0, 1000).zoom, MIN_ZOOM);
+  near(zoomAround(v, 400, 300, -200).zoom, 1.25);
+  near(zoomAround(v, 400, 300, 200).zoom, 0.8);
+  assert.equal(zoomAround({ x: 0, y: 0, zoom: 1.9 }, 0, 0, -100).zoom, 2);
+  assert.equal(zoomAround({ x: 0, y: 0, zoom: 0.021 }, 0, 0, 100).zoom, MIN_ZOOM);
 });

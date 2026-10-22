@@ -417,6 +417,26 @@ await step('TC-CORE-058', '12', async () => {
   return '框选中途按空格再拖进 iframe，选框仍跟手、松手即结算';
 });
 
+// 13 缩放速度（v1.31）：每个事件按 2^(−deltaY × 0.01)，一次最多 ±25%，绕指针
+await step('TC-CORE-058', '13', async () => {
+  const page = await open(ptrPid, { view: { x: 200, y: 100, zoom: 0.5 } });
+  const box = (await page.locator('[data-testid="canvas"]').boundingBox())!;
+  const px = box.x + box.width / 2; const py = box.y + box.height / 2;
+  await page.mouse.move(px, py);
+  const wheel = async (dy: number) => { await page.keyboard.down('Control'); await page.mouse.wheel(0, dy); await page.keyboard.up('Control'); await sleep(300); return world(page); };
+  const w0 = await world(page);
+  const w1 = await wheel(-20);
+  const w2 = await wheel(-300);
+  const r1 = w1.zoom / w0.zoom; const r2 = w2.zoom / w1.zoom;
+  expect(Math.abs(r1 - Math.pow(2, 0.2)) < 0.012, `deltaY −20 一次应缩放 2^0.2 ≈ 1.149 倍：${r1.toFixed(4)}`);
+  expect(Math.abs(r2 - 1.25) < 0.0125, `deltaY −300 一次应只放大 25%：${r2.toFixed(4)}`);
+  // 指针下的世界点不动
+  const at = (w: { x: number; y: number; zoom: number }) => ({ x: (px - box.x - w.x) / w.zoom, y: (py - box.y - w.y) / w.zoom });
+  const a0 = at(w0); const a2 = at(w2);
+  expect(Math.abs(a0.x - a2.x) < 1 && Math.abs(a0.y - a2.y) < 1, `指针下的世界点动了：${JSON.stringify(a0)} → ${JSON.stringify(a2)}`);
+  return `缩放 ${w0.zoom.toFixed(3)} → ${w1.zoom.toFixed(3)}（×${r1.toFixed(3)}）→ ${w2.zoom.toFixed(3)}（×${r2.toFixed(3)}）`;
+});
+
 // ---------- TC-CORE-059 键盘、工具栏几何、iframe 里的 ⌥ 快捷键、减少动态效果（canvas-6 / 12 / 13、cross-12 / 13 / 17） ----------
 const keys = seedProject('Keys', '--device', 'mobile', '--screens', '4', '--no-shot');
 const keysPid = keys.projectId;
@@ -642,13 +662,11 @@ await step('TC-CORE-079', '3', async () => {
 });
 
 // ---------- TC-CORE-097 外观三选一（v1.08，REQ-CORE-039）：切换即时生效、记在本机、跟随系统；画布标记与 canvas 颜色跟着换 ----------
-// 颜色取 brand/ 的值（v1.15）：画布底浅 #EAEAEF / 深 #0A0A0B，标记色浅 #0071E3 / 深 #0A84FF（小地图的视口框用它）；
-// 连线用数据可视化色、只在交互时画（v1.29）：series-2 浅 #7C22A6 / 深 #BD6614（series-1 深浅同色，分不出来）
+// 颜色取 brand/ 的值（v1.15）：画布底浅 #EAEAEF / 深 #0A0A0B，标记色浅 #0071E3 / 深 #0A84FF（链去的连线与小地图的视口框都用它；连线只在交互时画，v1.29）
 const THEME = {
   light: { canvas: 'rgb(234, 234, 239)', mark: 'rgb(0, 113, 227)', markRgb: [0, 113, 227] },
   dark: { canvas: 'rgb(10, 10, 11)', mark: 'rgb(10, 132, 255)', markRgb: [10, 132, 255] },
 } as const;
-const SERIES2 = { light: [124, 34, 166], dark: [189, 102, 20] } as const;
 const themePid = seedProject('Theme', '--device', 'mobile', '--screens', '3').projectId;
 const shell = (page: Page) => page.evaluate(() => ({
   theme: document.documentElement.getAttribute('data-theme'), stored: localStorage.getItem('quilt:theme'),
@@ -689,11 +707,11 @@ await step('TC-CORE-097', '1', async () => {
   expect(outline === THEME.dark.mark, `深色下选中描边是 ${outline}，应是 ${THEME.dark.mark}`);
   const miniDark = await inkOn(page, '[data-testid="minimap"]', THEME.dark.markRgb);
   expect(miniDark > 0, '小地图的视口框没按深色重画');
-  // 再按 Enter 进交互：连线按深色的数据可视化色画（v1.29）
+  // 再按 Enter 进交互：链去的连线按深色的标记色画
   await page.keyboard.press('Enter');
   await page.locator('.viewport > .edges[data-state="done"]').waitFor({ timeout: 10000 });
-  const edgesDark = await inkOn(page, '.viewport > .edges', SERIES2.dark); const edgesLightGone = await inkOn(page, '.viewport > .edges', SERIES2.light);
-  expect(edgesDark > 0 && edgesLightGone === 0, `连线没按深色画：深色 series-2 ${edgesDark} 像素、浅色 series-2 ${edgesLightGone} 像素`);
+  const edgesDark = await inkOn(page, '.viewport > .edges', THEME.dark.markRgb); const edgesLightGone = await inkOn(page, '.viewport > .edges', THEME.light.markRgb);
+  expect(edgesDark > 0 && edgesLightGone === 0, `连线没按深色重画：深色标记色 ${edgesDark} 像素、浅色标记色 ${edgesLightGone} 像素`);
   await page.keyboard.press('Escape');
   return `跟随系统（浅）→ 选深色：data-theme=dark、记在本机、画布底 ${s1.canvas}、描边 ${outline}、连线 ${edgesDark} 像素、卡片白底不变`;
 });

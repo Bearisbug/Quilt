@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { XYPanZoom, PanOnScrollMode, type PanZoomInstance, type Viewport } from '@xyflow/system';
 import type { ViewInfo } from '@/canvas/Minimap';
-import { MIN_ZOOM, MAX_ZOOM } from '@/canvas/geometry';
+import { MIN_ZOOM, MAX_ZOOM, zoomAround } from '@/canvas/geometry';
 import { recordEvent } from '@/lib/recorder';
 
 // 滚轮平移速度：画布上的滚轮（panzoom）与交互态组件卡转发来的滚轮（v0.80）同一个值
@@ -153,6 +153,20 @@ export function useViewport(o: { projectId: string; safeAreaRef?: { current: HTM
 
   // 用户动作带来的镜头移动（适配视图、找屏跳转、小地图、聚焦推镜头、屏内捏合）：先撤掉自动适配标记，否则被它打断的那段自动适配会让这一次也不落盘
   const moveTo = useCallback((v: Viewport, opt?: { duration?: number }) => { autoView.current = false; void panZoom.current?.setViewport(v, opt?.duration && reducedMotion() ? { duration: 0 } : opt); }, []);
+  // 画布上的捏合与 Ctrl+滚轮（v1.31 调慢）：先于平移缩放库接住，按 zoomAround 的速度绕指针缩放（库的系数是它的两倍、不设单次上限）；
+  // .nowheel 里的交给上面 window 上的监听只拦浏览器整页缩放
+  useEffect(() => {
+    const node = viewportRef.current;
+    if (!node) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey || (e.target as Element | null)?.closest?.('.nowheel')) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      const r = node.getBoundingClientRect();
+      moveTo(zoomAround(vp.current, e.clientX - r.left, e.clientY - r.top, e.deltaMode === 1 ? e.deltaY * 25 : e.deltaY));
+    };
+    node.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    return () => node.removeEventListener('wheel', onWheel, { capture: true });
+  }, [moveTo, viewportRef]);
   // 自动适配：变换照常施加，只是不落盘（见 autoView）；用户手势打断时由 onPanZoomStart 撤标记
   const autoMove = useCallback((v: Viewport, ms: number) => {
     const pz = panZoom.current;
