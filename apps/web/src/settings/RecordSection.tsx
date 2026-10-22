@@ -8,6 +8,7 @@ import { Switch } from '@/ui/Switch';
 import { intlLocale, useT } from '@/i18n';
 import settingsMessages from '@/i18n/locales/settings';
 import commonMessages from '@/i18n/locales/common';
+import { copyText } from '@/lib/copy';
 
 // 设置「系统」的使用记录组（FLOW-RECORD S1、S7；API-CORE-049 / 050）：开关、记什么不记什么、已记的条数与占用、存放位置。
 // 读不出来时只这一组写错误，不挡同一节里的外观与语言
@@ -44,7 +45,7 @@ export function RecordSection({ titleId }: { titleId: string }) {
       (e: unknown) => setSaveError(errText(e)),
     ).finally(() => setPending(null));
   };
-  const copy = async (text: string) => { try { await navigator.clipboard.writeText(text); toast(t('mcp.copied')); } catch { toast(t('mcp.copyFailed'), 'error'); } };
+  const copy = async (text: string) => { try { await copyText(text); toast(t('mcp.copied')); } catch { toast(t('mcp.copyFailed'), 'error'); } };
 
   if (loadError !== null) {
     return (

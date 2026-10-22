@@ -10,6 +10,7 @@ import { useT } from '@/i18n';
 import composerMessages from '@/i18n/locales/composer';
 import type { ComposerDock, DockEdge } from './useComposerDock';
 import { JobChips, type JobChip } from './JobChips';
+import { uuid } from '@/lib/uuid';
 
 /** fill（草稿本空看板的示例，REQ-CORE-040）：只换文字、参考图留着，并聚焦输入框 */
 export type ComposerHandle = { focus: () => void; fill: (text: string) => void };
@@ -370,7 +371,7 @@ export function Composer(p: ComposerProps) {
       if (file.size <= MAX_ATTACHMENT_BYTES) return true;
       p.onError(t('shots.tooLarge', { name: file.name, mb: MAX_ATTACHMENT_BYTES / 1024 / 1024 }));
       return false;
-    }).map((file) => ({ file, shot: { key: crypto.randomUUID(), url: URL.createObjectURL(file), name: file.name, id: null } as Shot }));
+    }).map((file) => ({ file, shot: { key: uuid(), url: URL.createObjectURL(file), name: file.name, id: null } as Shot }));
     if (!batch.length) return;
     shotsRef.current = [...shotsRef.current, ...batch.map((b) => b.shot)];
     setShots((prev) => [...prev, ...batch.map((b) => b.shot)]);

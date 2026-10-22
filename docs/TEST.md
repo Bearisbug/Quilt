@@ -6,11 +6,11 @@
 
 | 字段 | 值 |
 | --- | --- |
-| 状态 | 生效（设计文档 v1.29，全量轮 RUN-293（2026-10-22）失败 4 条：§7 登记的 `TC-CORE-023`，`TC-CORE-058` 第 5、6 步、`TC-CORE-100`、`TC-EDIT-001` 是三栈并行满载下的超时，复测轮 RUN-294 全部通过；需真实模型的 5 条与 `006`（单独执行）跳过；`TC-CORE-020` / `TC-AGENT-010` 待人工） |
+| 状态 | 生效（设计文档 v1.30，复测轮 RUN-297 通过，源自缺陷的 `TC-CORE-152` 在修复前的 RUN-295 失败；设计文档 v1.29 的全量轮 RUN-293（2026-10-22）失败 4 条：§7 登记的 `TC-CORE-023`，`TC-CORE-058` 第 5、6 步、`TC-CORE-100`、`TC-EDIT-001` 是三栈并行满载下的超时，复测轮 RUN-294 全部通过；需真实模型的 5 条与 `006`（单独执行）跳过；`TC-CORE-020` / `TC-AGENT-010` 待人工） |
 | Owner | @bug |
 | 关联设计文档 | `docs/DESIGN.md` |
 | 被测系统 | `~/Documents/Projects/Quilt`（Web 画布 + API/MCP 服务 + Worker + 预览域服务） |
-| 最后更新 | 2026-10-22（设计文档 v1.29，登记 RUN-293～294） |
+| 最后更新 | 2026-10-22（设计文档 v1.30，登记 RUN-295～297） |
 
 变更记录（登用例增改，不登执行轮次）：
 
@@ -18,11 +18,11 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-10-22 | 设计文档 v1.30（局域网 IP 用 http 打开不再白屏）：新增源自缺陷用例 `TC-CORE-152`（在 `tests/e2e/canvas.ts`） | @bug |
 | 2026-10-22 | 设计文档 v1.29（连线只在交互时画、换成彩色端口画法；连线差量写；截图编码压缩档 4；请求日志）：新增 `TC-PROTO-014`（在 `tests/e2e/proto.ts`），废弃 `TC-PROTO-008`（脚本删掉）；`TC-CORE-086` 第 1、4 步改成平时与选中屏都不画连线，加第 7 步进交互画这一屏进出的；`TC-CORE-097` 第 1 步的连线改在进交互后按深色 series-2 查；`TC-PROTO-002`、`003` 第 3 步改说进交互时画 | @bug |
 | 2026-10-22 | 设计文档 v1.28（用量看板不把导出算给模型）：`TC-CORE-140` 加第 9 步（导出不记驱动与模型，计入作业次数与任务类型、不归任何模型），`TC-CORE-141` 加第 9 步（「导出」那行是一整条中性灰，提示只写合计）；后置加删掉 UsageExport | @bug |
 | 2026-10-22 | 设计文档 v1.28（逐级选改用 Shift+↑ / Shift+↓）：`TC-EDIT-031`、`040`、`041`、`042` 的按键跟着改；`TC-EDIT-031` 第 3 步加「`Enter` 不换层」；`TC-EDIT-040` 第 1 步不再要求焦点离开路径按钮（新键不是按钮的激活键） | @bug |
 | 2026-10-22 | 设计文档 v1.27（截图存无损 WebP、旧版本只留缩略图、回到旧版共用对象）：新增 `TC-CORE-151`（在 `tests/e2e/core/backend.ts`）；截图键从 `.png` 改成 `.webp`：`TC-CORE-041` 第 6b 步、`TC-CORE-085` 前置、`TC-CORE-103` 第 4 步、`TC-AGENT-018` 第 2 步跟着改 | @bug |
-| 2026-10-22 | 设计文档 v1.26（选元素时按住 Shift 多选，几块一次改完）：新增 `TC-EDIT-041`（草稿本，在 `tests/e2e/sketch.ts`）与 `TC-EDIT-042`（画布与 MCP，在 `tests/e2e/edit.ts`） | @bug |
 
 ## 2. 测试范围 / 不测什么
 
@@ -1993,6 +1993,20 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 「页面上的中文」的数法：文字节点（含读屏专用的 sr-only）与 `aria-label` / `title` / `placeholder` / `alt` 里的中文字符与中文标点（含全角符号）；标了 `lang="zh…"` 的元素（设置里的语言名「中文」）与屏的 iframe 不算。
 「请求带的语言」只看页面发往 `/v1/` 的 fetch / xhr 请求；项目事件流是 `EventSource`，带不了自定义头，按设计文档 §8 不算在内。
 
+#### `TC-CORE-152` 局域网 IP 用 http 打开画布 — 对应 `REQ-CORE-004`（§15「局域网访问」，v1.30）· 级别: 回归 · 执行者: AI（`LLM_DRIVER=stub`）· 源自缺陷 2026-10-22 从局域网 IP 用 http 打开画布整页白屏
+
+前置：`pnpm seed:project --name Lan --device mobile --screens 2 --no-shot`；新开一个 1440×900 的浏览器上下文，每个文档加载前删掉 `crypto.randomUUID` 与 `navigator.clipboard`：浏览器在非安全上下文里就是这样，只有 HTTPS 与 localhost 算安全上下文，局域网 IP 走 http 不算。
+脚本 `tests/e2e/canvas.ts`（`ONLY=TC-CORE-152`）。
+
+| # | 操作 | 预期 |
+| --- | --- | --- |
+| 1 | 打开项目 | 两张屏卡出现，页面没有未捕获的异常 |
+| 2 | 点工具栏「接上跳转」 | 提示「正在为 2 屏接上跳转」，`GET /v1/projects/<id>/jobs` 多出一个 `edit_screens` 作业 |
+| 3 | 点输入框的「加参考图」选一张 PNG | 输入框里出现这张图的缩略图 |
+| 4 | 打开设置「模型」节，点 Claude Code 接入命令旁的「复制」 | 提示「已复制」，不是「复制失败」 |
+
+后置：无（项目随下一次 `pnpm seed` 清掉）。
+
 #### `TC-CORE-130` 缺省语言跟随浏览器 — 对应 `REQ-CORE-046`（`PAGE-CANVAS` 设置弹层「语言」、§13.1 字体与字阶，v1.20）· 级别: 回归 · 执行者: AI
 
 前置：`pnpm seed:project --name Locale --device mobile --screens 2 --no-shot`；每一步新开浏览器上下文、按步骤给浏览器语言，视口 1440×900，打开该项目。脚本在 `tests/e2e/i18n.ts`（`ONLY=TC-CORE-130`）。
@@ -3190,9 +3204,6 @@ AI 轮次登记「待人工」——投递进真实会话要在那个终端里�
 
 | 轮次 | 日期 | 被测版本 | 执行者 | 范围 | 结果 |
 | --- | --- | --- | --- | --- | --- |
-| RUN-285 | 2026-10-21 | 同 RUN-284 的构建；`tests/e2e/canvas.ts` 的 `TC-CORE-058` 双击组件卡后先等镜头停稳 | AI(Claude Code) | 复测(RUN-284:TC-CORE-058、TC-CORE-080、TC-CORE-100、TC-EDIT-001、TC-PROTO-010 + 冒烟级至 TC-CORE-139、TC-PROTO-013、TC-EDIT-039、TC-AGENT-024) | 通过 12/14 · 跳过 2 |
-| RUN-286 | 2026-10-22 | 未提交工作树（设计文档 v1.24：设置三节、用量看板、台账快照、「通道」改叫「模型」；v1.22 本机使用记录） | AI(Claude Code) | 全量至 TC-CORE-149、TC-PROTO-013、TC-EDIT-039、TC-AGENT-024 | 通过 182/198 · 失败 4 · 待人工 2 · 跳过 10 |
-| RUN-287 | 2026-10-22 | 同 RUN-286 的构建（修复前：逐级选在焦点按钮上被吃掉） | AI(Claude Code) | 局部(TC-EDIT-040) | 通过 0/1 · 失败 1 |
 | RUN-288 | 2026-10-22 | 未提交工作树（设计文档 v1.25：草稿本按 ⌘Z 回到上一版、逐级选不再被焦点按钮吃掉） | AI(Claude Code) | 复测(RUN-286:TC-CORE-058、TC-CORE-100、TC-EDIT-001 + 冒烟级至 TC-CORE-150、TC-PROTO-013、TC-EDIT-040、TC-AGENT-024) + 局部(TC-EDIT-031、TC-EDIT-040、TC-CORE-059、TC-CORE-150 与整套 SKETCH) | 通过 40/44 · 失败 2 · 跳过 2 |
 | RUN-289 | 2026-10-22 | 未提交工作树（设计文档 v1.24～v1.27：设置三节与用量看板、本机使用记录、⌘Z 与逐级选、Shift 多选、截图存储瘦身） | AI(Claude Code) | 全量至 TC-CORE-151、TC-PROTO-013、TC-EDIT-042、TC-AGENT-024 | 通过 186/203 · 失败 5 · 待人工 2 · 跳过 10 |
 | RUN-290 | 2026-10-22 | 同 RUN-289 的构建；`tests/e2e/sketch.ts` 的 `TC-EDIT-041` 用桩通道前先确认它在 | AI(Claude Code) | 复测(RUN-289:TC-EDIT-028、TC-CORE-058、TC-CORE-100、TC-EDIT-041 + 冒烟级至 TC-CORE-151、TC-PROTO-013、TC-EDIT-042、TC-AGENT-024) | 通过 11/14 · 失败 1 · 跳过 2 |
@@ -3200,12 +3211,9 @@ AI 轮次登记「待人工」——投递进真实会话要在那个终端里�
 | RUN-292 | 2026-10-22 | 未提交工作树（设计文档 v1.28：用量看板不把导出算给模型、截图编码限 2 路、会话列表去重） | AI(Claude Code) | 局部(TC-CORE-140、TC-CORE-141、TC-CORE-142、TC-CORE-143、TC-CORE-151、TC-CORE-041、TC-CORE-085、TC-AGENT-009 + 冒烟级至 TC-CORE-151、TC-PROTO-013、TC-EDIT-042、TC-AGENT-024) | 通过 14/16 · 跳过 2 |
 | RUN-293 | 2026-10-22 | 未提交工作树（设计文档 v1.29：连线只在交互时画、彩色端口画法；连线与组件引用差量写；截图编码压缩档 4；请求日志） | AI(Claude Code) | 全量至 TC-CORE-151、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024 | 通过 186/198 · 失败 4 · 待人工 2 · 跳过 6 |
 | RUN-294 | 2026-10-22 | 同 RUN-293 的构建 | AI(Claude Code) | 复测(RUN-293:TC-CORE-058、TC-CORE-100、TC-EDIT-001 + 冒烟级至 TC-CORE-151、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024) | 通过 9/11 · 跳过 2 |
-
-RUN-285 证据：RUN-284 之后的复测轮，同一构建，只开 l1 一条隔离栈（21:59～22:05），按 §5 跑上一轮除 `TC-CORE-023` 外的五条失败加冒烟级；`TC-PROTO-010` 用 `TC-PROTO-007` 建的项目，007 一起跑并计入本轮；停栈后跑 install。`TC-CORE-058` 换成双击组件卡后先等世界层 `transform` 停稳再量的脚本，12 步全过。五条全部通过。日志 `.e2e/l1/run-285.log`（本机，不进仓库）。
-
-RUN-286 证据：v1.24 与 v1.22 合在一起的全量轮：改到数据模型（迁移 `0021` 记录两张表、`0022` 台账快照列与回填）与设置弹层的全部三节，按 §5 跑全量。构建前端，单测轮 199/199，五个包类型检查与 web lint 0 处，构建产物 `check-tokens --lint` PASS。十三套分五条隔离栈并行跑（00:00～00:56）：main 跑 CORE、LOAD，l1 跑 CANVAS、PROTO，l2 跑 EDIT、COMPONENTS、SETTINGS，l3 跑 AGENT、MCP、CHAT、RECORD，l4 跑 SKETCH、I18N；停栈后跑 install。新套件 SETTINGS 4/4、RECORD 6/6。四条失败里 `TC-CORE-023` 是 §7 登记项；`TC-CORE-058`（第 7、10、12 步等组件卡量完超时）、`TC-EDIT-001`（10 s 内截图没更新）、`TC-CORE-100`（记录栏没多出这一张）与 RUN-284 同样只在五栈并行时出现。日志 `.e2e/{main,l1,l2,l3,l4}/run-286.log`、`.e2e/main/run-286-install.log`（本机，不进仓库）。
-
-RUN-287 证据：用户报告「选择元素时 Shift+Enter / Enter 很容易被浏览器自带的按键动作干扰」，在 l5 隔离栈上复现：点过检查器路径里的一级之后焦点停在那个按钮上，两个键都被浏览器当作按下它，选中不动。补写源自缺陷用例 `TC-EDIT-040`，在修复前的构建上单跑：第 1 步焦点停在路径按钮上，第 2 步 `Enter` / `Shift+Enter` 都没换层，与报告一致。同时查出 `TC-EDIT-031` 第 5 步的脚本在点完路径后先把焦点挪回检查器再按键，绕过了这个缺陷，已按用例原文改掉。日志 `.e2e/l5/run-287.log`（本机，不进仓库）。
+| RUN-295 | 2026-10-22 | 7ad78fc（设计文档 v1.29；修复前：从局域网 IP 用 http 打开画布白屏） | AI(Claude Code) | 局部(TC-CORE-152) | 通过 0/1 · 失败 1 |
+| RUN-296 | 2026-10-22 | 未提交工作树（设计文档 v1.30：前端不再依赖只在安全上下文里有的接口） | AI(Claude Code) | 复测(RUN-295:TC-CORE-152 + 冒烟级至 TC-CORE-152、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024) | 通过 5/8 · 失败 1 · 跳过 2 |
+| RUN-297 | 2026-10-22 | 同 RUN-296 的构建；`tests/e2e/canvas.ts` 的 `TC-CORE-152` 读作业列表改用 `items` | AI(Claude Code) | 复测(RUN-296:TC-CORE-152 + 冒烟级至 TC-CORE-152、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024) | 通过 7/9 · 跳过 2 |
 
 RUN-288 证据：v1.25（草稿本 `⌘Z` 回到上一版；逐级选：`Shift+Enter` 一律走层级并拦掉浏览器默认动作，`Enter` 只在 `Tab` 走到的控件上留给它，路径按钮按下不抢焦点）之后的一轮，两条隔离栈（l5、l6）并行，停栈后跑 install。`TC-EDIT-040` 修复后通过（承接 RUN-287），`TC-EDIT-031` 按改正的脚本通过；RUN-286 的 `TC-CORE-058`、`TC-CORE-100` 本轮通过。`TC-CORE-150` 失败是脚本问题：用的模型通道已被同一套里更早的用例删掉，改用桩驱动后单跑通过；`TC-EDIT-001` 仍是截图超时，同一构建在空闲的 l5 上冷启动与热启动各单跑一次都通过（`RUN=dbg`，不计轮次），本轮跑的时候另有两路子 agent 在本机编译与起服务。日志 `.e2e/l5/run-288.log`、`.e2e/l6/run-288.log`、`.e2e/main/run-288-install.log`（本机，不进仓库）。
 
@@ -3221,29 +3229,16 @@ RUN-293 证据：v1.29 的全量轮。改到连线与组件引用的写入路径
 
 RUN-294 证据：RUN-293 之后的复测轮，同一构建，只开 l5 一条隔离栈（13:49～13:56，负载均值 9），复测上一轮除 `TC-CORE-023` 外的三条失败加冒烟级，停栈后跑 install。三条都通过，`TC-CORE-058` 第 8 步也通过。`TC-CORE-031` 冷启动 5.0 s、二次 1.0 s；RUN-292 在负载均值 35～58 时是 14.9 s / 7.2 s，这次回到正常范围。日志 `.e2e/l5/run-294.log`（本机，不进仓库）。
 
+RUN-295 证据：用户问能否让局域网里的人直接用本机 Quilt。按 §15「局域网访问」的配置在 l4 测试库上起一套服务（绑 `0.0.0.0`，三个地址设成局域网 IP），从 `http://192.168.1.22:3450` 打开整页白屏，页面异常「crypto.randomUUID is not a function」：浏览器只在 HTTPS 与 localhost 下提供它，前端 4 处用到，使用记录模块一加载就调用。补写源自缺陷用例 `TC-CORE-152`（浏览器上下文里删掉 `crypto.randomUUID` 与 `navigator.clipboard`，与非安全上下文一致），在修复前的构建 7ad78fc 上单跑：第 1 步画布没出来，与现象一致。日志 `.e2e/l5/run-295.log`（本机，不进仓库）。
+
+RUN-296 证据：v1.30 修复后的复测轮：前端的 id 改用 `crypto.getRandomValues` 拼 v4 UUID，复制在没有 clipboard 接口时退回 `execCommand`。单测 233/233，五个包类型检查与 web lint 通过，重新构建前端，l5 一条隔离栈。`TC-CORE-152` 第 1 步通过（画布出来、没有异常），第 2 步是脚本问题（见明细）；冒烟级里的 install 放到 RUN-297。日志 `.e2e/l5/run-296.log`（本机，不进仓库）。
+
+RUN-297 证据：改正脚本后的复测轮，同一构建、l5 一条隔离栈，停栈后跑 install。`TC-CORE-152` 四步都通过。另在 l4 测试库上按 §15 的配置起一套服务，用真实局域网地址 `http://192.168.1.22:3450` 打开、不做任何模拟（不计用例）：`isSecureContext=false`，两个接口都不存在；3 张截图加载，进交互正常，「接上跳转」建出作业，MCP 接入命令显示局域网地址，复制提示「已复制」，没有页面异常，截图 `docs/test-runs/run-297-lan.png`（本机）。`TC-CORE-031` 冷启动 5.0 s、二次 1.0 s。日志 `.e2e/l5/run-297.log`（本机，不进仓库）。
+
 明细（仅登非「通过」项）：
 
 | 轮次 | 用例 | 结果 | 现象 / 证据 | 跟进 |
 | --- | --- | --- | --- | --- |
-| RUN-285 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-285 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-286 | TC-CORE-058 | 失败 | 第 7、10、12 步等 `Tab Bar` 量完（`data-ready`）超过 20 s；五栈并行（证据：`.e2e/l1/run-286.log`，本机） | RUN-288 复测通过 |
-| RUN-286 | TC-EDIT-001 | 失败 | 「10 s 内截图未更新」；五栈并行（证据：`.e2e/l2/run-286.log`，本机） | RUN-288 仍失败，见该轮 |
-| RUN-286 | TC-CORE-100 | 失败 | 「记录栏应多出这一张」；五栈并行（证据：`.e2e/l4/run-286.log`，本机） | RUN-288 复测通过 |
-| RUN-286 | TC-CORE-023 | 失败 | 预期失败（§7 登记项）（证据：`.e2e/main/run-286.log`，本机） | §7 跟进 |
-| RUN-286 | TC-CORE-020 | 待人工 | 对标 Stitch 盲评 | 待人工 |
-| RUN-286 | TC-AGENT-010 | 待人工 | 投递到真实 Claude Code 会话要在终端确认接收 | 待人工 |
-| RUN-286 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-286 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-286 | TC-PROTO-004 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-286 | TC-PROTO-009 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-286 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-286 | TC-CORE-006 | 跳过 | 要以 `LLM_STUB=503` 重启 worker，由 `core-stub.ts` 单独执行，本轮没跑 | 基线 |
-| RUN-286 | TC-CORE-084 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
-| RUN-286 | TC-EDIT-037 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
-| RUN-286 | TC-CORE-038 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
-| RUN-286 | TC-AGENT-013 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
-| RUN-287 | TC-EDIT-040 | 失败 | 源自缺陷，修复前：第 1 步焦点停在路径按钮上；第 2 步 Enter / Shift+Enter 后当前层仍是 li（证据：`.e2e/l5/run-287.log`，本机） | 产品缺陷，已修：RUN-288 通过 |
 | RUN-288 | TC-CORE-150 | 失败 | 「出新草稿 404」：脚本用的模型通道已被同一套里更早的用例删掉（证据：`.e2e/l6/run-288.log`，本机） | 脚本更正：改用桩驱动；单跑通过，下一轮复测 |
 | RUN-288 | TC-EDIT-001 | 失败 | 「10 s 内截图未更新」；同一构建在空闲的 l5 上冷、热各单跑一次都通过（证据：`.e2e/l5/run-288.log`，本机） | 判为负载下截图慢；下一轮单栈复测 |
 | RUN-288 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
@@ -3286,6 +3281,12 @@ RUN-294 证据：RUN-293 之后的复测轮，同一构建，只开 l5 一条隔
 | RUN-293 | TC-PROTO-009 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-294 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-294 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-295 | TC-CORE-152 | 失败 | 第 1 步「画布没出来：crypto.randomUUID is not a function」，与用户场景一致（证据：`.e2e/l5/run-295.log`，本机） | 修复后 RUN-296 第 1 步通过，RUN-297 全部通过 |
+| RUN-296 | TC-CORE-152 | 失败 | 第 1 步通过；第 2 步「Cannot read properties of undefined (reading 'filter')」：脚本把作业列表的响应读成 `jobs`，接口返回的是 `items`（`API-CORE-029` listJobs）（证据：`.e2e/l5/run-296.log`，本机） | 脚本问题，不是产品缺陷：改正后 RUN-297 通过 |
+| RUN-296 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-296 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-297 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-297 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 
 ## 7. 遗留问题
 

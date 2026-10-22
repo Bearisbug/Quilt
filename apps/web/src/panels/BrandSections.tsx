@@ -10,6 +10,7 @@ import { SWATCH_EDGE } from './designOptions';
 import { useT } from '@/i18n';
 import panelsMessages from '@/i18n/locales/panels-design';
 import commonMessages from '@/i18n/locales/common';
+import { copyText } from '@/lib/copy';
 
 // 品牌色板（REQ-EDIT-005）：26 个 token 色键的色块表，逐键标出「派生 / 品牌」，可就地改一个键、可整份清空。
 // 色块底色是数据（用户的品牌色），只能走 inline style；工具自己的外壳仍然只用 token 类。
@@ -170,7 +171,7 @@ export function AssetsSection({ projectId, items, colors, onChanged }: { project
                 <span className="block truncate type-caption text-text-secondary">{a.mediaType.replace('image/', '').replace('+xml', '')} · {a.width && a.height ? `${a.width}×${a.height} · ` : ''}{Math.max(1, Math.round(a.bytes / 1024))} KB</span>
               </span>
               <button type="button" aria-label={t('assets.copyLabel', { name: a.name })} data-testid="asset-copy"
-                onClick={() => { void navigator.clipboard.writeText(a.url).then(() => toast(t('assets.copied')), () => toast(t('assets.copyFailed'), 'error')); }}
+                onClick={() => { void copyText(a.url).then(() => toast(t('assets.copied')), () => toast(t('assets.copyFailed'), 'error')); }}
                 className="shrink-0 rounded-md p-1 text-text-secondary state-layer focus-ring"><Copy size={14} aria-hidden="true" /></button>
               <button type="button" aria-label={t('assets.deleteLabel', { name: a.name })} data-testid="asset-delete" onClick={() => setPendingDelete(a)}
                 className="shrink-0 rounded-md p-1 text-text-secondary state-layer focus-ring"><Trash2 size={14} aria-hidden="true" /></button>

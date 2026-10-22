@@ -970,6 +970,47 @@ await step('TC-CORE-139', '3', async () => {
   return `0.3 下卡片在右下角 (${Math.round(b1.x)}, ${Math.round(b1.y)})，双击后宽 ${r.after.width.toFixed(0)}（自然宽 ${r.natural}），中心偏差 (${Math.round(r.off.dx)}, ${Math.round(r.off.dy)})`;
 });
 
+// ---------- TC-CORE-152 局域网 IP 用 http 打开画布（v1.30 §15「局域网访问」，源自缺陷）：非安全上下文里没有 crypto.randomUUID 与 navigator.clipboard ----------
+// 无头浏览器从 localhost 打开时是安全上下文，这里在每个文档加载前把这两个接口删掉，与从 http://<局域网 IP> 打开时一致
+const lanPid = seedProject('Lan', '--device', 'mobile', '--screens', '2', '--no-shot').projectId;
+const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+await stepOf('TC-CORE-152', async () => {
+  await ctx?.close().catch(() => {});
+  ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN' });
+  await ctx.addInitScript('window.__name = window.__name || ((f) => f);');
+  await ctx.addInitScript(() => {
+    delete (Crypto.prototype as { randomUUID?: unknown }).randomUUID;
+    Object.defineProperty(Navigator.prototype, 'clipboard', { get: () => undefined, configurable: true });
+  });
+  const page = await ctx.newPage();
+  current = page;
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  // 1 打开：屏卡出现、没有未捕获的异常
+  await page.goto(`${WEB}/p/${lanPid}`);
+  await page.locator('[data-testid="screen-card"]').first().waitFor({ timeout: 15000 }).catch(() => { throw new Error(`① 画布没出来：${errors.join(' | ') || '没有屏卡'}`); });
+  expect((await page.locator('[data-testid="screen-card"]').count()) === 2 && !errors.length, `① 应有 2 张屏卡、没有异常：${errors.join(' | ')}`);
+  // 2 接上跳转：建作业要生成幂等键
+  const jobs = async () => (await apiJson<{ items: { kind: string }[] }>(`/v1/projects/${lanPid}/jobs`)).body.items.filter((j) => j.kind === 'edit_screens').length;
+  const before = await jobs();
+  await page.getByTestId('repair-links').click();
+  await page.getByText('正在为 2 屏接上跳转').waitFor({ timeout: 5000 });
+  await eventually(async () => expect((await jobs()) === before + 1, `② 应多出一个 edit_screens 作业：${before} → ${await jobs()}`));
+  // 3 参考图：缩略图的键要生成 id
+  await page.setInputFiles('input[type=file]', { name: 'ref.png', mimeType: 'image/png', buffer: PNG_1PX });
+  await page.locator('ul[aria-label="本次参考图"] img').first().waitFor({ timeout: 10000 }).catch(() => { throw new Error(`③ 没出现参考图缩略图：${errors.join(' | ')}`); });
+  // 4 复制：没有 clipboard 接口时退回旧的复制方式，提示已复制
+  await page.goto(`${WEB}/p/${lanPid}?settings=models`);
+  await page.getByTestId('mcp-add').waitFor({ timeout: 15000 });
+  await page.getByTestId('mcp-add').locator('xpath=following-sibling::button').click();
+  const toast = page.locator('[data-testid="toast"]');
+  await toast.first().waitFor({ timeout: 3000 });
+  const text = (await toast.allInnerTexts()).join(' | ');
+  expect(text.includes('已复制') && !text.includes('复制失败'), `④ 应提示已复制：${text}`);
+  expect(!errors.length, `出现未捕获的异常：${errors.join(' | ')}`);
+  return '画布、接上跳转、参考图、复制在非安全上下文里都正常';
+});
+
 await (ctx as BrowserContext | null)?.close().catch(() => {});
 const counts = summary();
 await browser.close();

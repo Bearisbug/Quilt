@@ -272,6 +272,9 @@
 | RUN-282 | 2026-10-21 | 同 RUN-281 的构建 | AI(Claude Code) | 局部(TC-CORE-098、TC-CORE-099、TC-CORE-100、TC-CORE-101、TC-CORE-102、TC-CORE-103、TC-CORE-104、TC-CORE-105、TC-CORE-106、TC-CORE-107、TC-CORE-108、TC-CORE-109、TC-CORE-110、TC-CORE-111、TC-CORE-112、TC-CORE-113、TC-CORE-114、TC-CORE-115、TC-CORE-116、TC-CORE-117、TC-CORE-118、TC-CORE-119、TC-CORE-120、TC-CORE-121、TC-CORE-122、TC-CORE-123、TC-CORE-125、TC-CORE-128、TC-CORE-129、TC-CORE-138、TC-AGENT-011、TC-AGENT-023、TC-CORE-027、TC-CORE-092、TC-EDIT-003、TC-EDIT-004、TC-EDIT-014、TC-EDIT-019、TC-EDIT-026、TC-EDIT-033、TC-CORE-003、TC-CORE-005、TC-CORE-010、TC-CORE-012、TC-CORE-018、TC-PROTO-001、TC-AGENT-001) | 通过 43/47 · 失败 1 · 跳过 3 |
 | RUN-283 | 2026-10-21 | 同 RUN-281 的构建 | AI(Claude Code) | 复测(RUN-282:TC-EDIT-001、TC-EDIT-004 + 冒烟级至 TC-CORE-138、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 8/10 · 跳过 2 |
 | RUN-284 | 2026-10-21 | 未提交工作树（设计文档 v1.23：撤下批注、双击组件卡把镜头摆过去） | AI(Claude Code) | 全量至 TC-CORE-139、TC-PROTO-013、TC-EDIT-039、TC-AGENT-024 | 通过 171/189 · 失败 6 · 待人工 2 · 跳过 10 |
+| RUN-285 | 2026-10-21 | 同 RUN-284 的构建；`tests/e2e/canvas.ts` 的 `TC-CORE-058` 双击组件卡后先等镜头停稳 | AI(Claude Code) | 复测(RUN-284:TC-CORE-058、TC-CORE-080、TC-CORE-100、TC-EDIT-001、TC-PROTO-010 + 冒烟级至 TC-CORE-139、TC-PROTO-013、TC-EDIT-039、TC-AGENT-024) | 通过 12/14 · 跳过 2 |
+| RUN-286 | 2026-10-22 | 未提交工作树（设计文档 v1.24：设置三节、用量看板、台账快照、「通道」改叫「模型」；v1.22 本机使用记录） | AI(Claude Code) | 全量至 TC-CORE-149、TC-PROTO-013、TC-EDIT-039、TC-AGENT-024 | 通过 182/198 · 失败 4 · 待人工 2 · 跳过 10 |
+| RUN-287 | 2026-10-22 | 同 RUN-286 的构建（修复前：逐级选在焦点按钮上被吃掉） | AI(Claude Code) | 局部(TC-EDIT-040) | 通过 0/1 · 失败 1 |
 
 ## 明细（仅登非「通过」项）
 
@@ -780,6 +783,25 @@
 | RUN-284 | TC-EDIT-037 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
 | RUN-284 | TC-CORE-038 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
 | RUN-284 | TC-AGENT-013 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
+| RUN-285 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-285 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-286 | TC-CORE-058 | 失败 | 第 7、10、12 步等 `Tab Bar` 量完（`data-ready`）超过 20 s；五栈并行（证据：`.e2e/l1/run-286.log`，本机） | RUN-288 复测通过 |
+| RUN-286 | TC-EDIT-001 | 失败 | 「10 s 内截图未更新」；五栈并行（证据：`.e2e/l2/run-286.log`，本机） | RUN-288 仍失败，见该轮 |
+| RUN-286 | TC-CORE-100 | 失败 | 「记录栏应多出这一张」；五栈并行（证据：`.e2e/l4/run-286.log`，本机） | RUN-288 复测通过 |
+| RUN-286 | TC-CORE-023 | 失败 | 预期失败（§7 登记项）（证据：`.e2e/main/run-286.log`，本机） | §7 跟进 |
+| RUN-286 | TC-CORE-020 | 待人工 | 对标 Stitch 盲评 | 待人工 |
+| RUN-286 | TC-AGENT-010 | 待人工 | 投递到真实 Claude Code 会话要在终端确认接收 | 待人工 |
+| RUN-286 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-286 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-286 | TC-PROTO-004 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-286 | TC-PROTO-009 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-286 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-286 | TC-CORE-006 | 跳过 | 要以 `LLM_STUB=503` 重启 worker，由 `core-stub.ts` 单独执行，本轮没跑 | 基线 |
+| RUN-286 | TC-CORE-084 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
+| RUN-286 | TC-EDIT-037 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
+| RUN-286 | TC-CORE-038 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
+| RUN-286 | TC-AGENT-013 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
+| RUN-287 | TC-EDIT-040 | 失败 | 源自缺陷，修复前：第 1 步焦点停在路径按钮上；第 2 步 Enter / Shift+Enter 后当前层仍是 li（证据：`.e2e/l5/run-287.log`，本机） | 产品缺陷，已修：RUN-288 通过 |
 
 
 RUN-267 证据：地基变更（界面视觉换成苹果风方向 E，跨全部界面）的全量轮。构建前端后跑 `scripts/e2e-all.sh` 前九套（CORE、LOAD、CANVAS、PROTO、EDIT、COMPONENTS、AGENT、MCP、CHAT）；单测轮 144/144，构建产物 `check-tokens --lint` 通过。SKETCH 与 install 两套没跑：本轮中途 `tests/e2e/sketch.ts` 已按 v1.14 写回前端改写，与被测构建对不上，SKETCH 开跑即停，改在 RUN-268 随新构建再跑全量。`TC-CORE-008` 在毛玻璃开着时 100 屏 2 倍屏 60 fps、每帧 GPU 主线程 1.4 ms（门槛 4 ms）。完整日志 `.e2e/main/run-267.log`（本机，不进仓库）。
@@ -818,3 +840,9 @@ RUN-282 证据：v1.21 的局部轮。改到建作业接口（`API-CORE-006`，�
 RUN-283 证据：RUN-282 之后的复测轮，同一构建、l1 隔离栈：`TC-EDIT-004` 带上建项目的 `TC-EDIT-001` 一起跑（001 计入本轮），加冒烟级；停栈后跑 install。日志 `.e2e/l1/run-283.log`、`.e2e/main/run-283-install.log`（本机，不进仓库）。
 
 RUN-284 证据：v1.23 的全量轮：撤下批注（画布与草稿本的入口、5 个 REST 接口、4 个 MCP 工具，迁移 `0020` 删 `annotations` 表），双击组件卡把镜头摆过去。改到数据模型，按 §5 跑全量。构建前端，单测轮 168/168，五个包类型检查与 web lint 0 处，构建产物 `check-tokens --lint` PASS。十一套分五条隔离栈并行跑（21:23～21:58）：main 跑 CORE、LOAD，l1 跑 CANVAS、PROTO，l2 跑 EDIT、COMPONENTS，l3 跑 AGENT、MCP、CHAT，l4 跑 SKETCH、I18N；全部停栈后跑 install。新用例 `TC-CORE-139`（双击后卡片宽 144 → 390、中心偏差 2 px）、`TC-EDIT-038`、`TC-EDIT-039` 通过，`TC-AGENT-011` 数到 53 个工具。六条失败里 `TC-CORE-023` 是 §7 登记项；其余五条都是等待或采样超时，出现在五栈并行、机器满载时，`TC-CORE-058` 另有脚本问题（见明细）。`TC-CORE-047` 本轮通过（§7「⌘K 找屏连按 ↓ 到底后选中行跳回」时过时不过，不据此撤销登记）。日志 `.e2e/{main,l1,l2,l3,l4}/run-284.log`、`.e2e/main/run-284-install.log`（本机，不进仓库）。
+
+RUN-285 证据：RUN-284 之后的复测轮，同一构建，只开 l1 一条隔离栈（21:59～22:05），按 §5 跑上一轮除 `TC-CORE-023` 外的五条失败加冒烟级；`TC-PROTO-010` 用 `TC-PROTO-007` 建的项目，007 一起跑并计入本轮；停栈后跑 install。`TC-CORE-058` 换成双击组件卡后先等世界层 `transform` 停稳再量的脚本，12 步全过。五条全部通过。日志 `.e2e/l1/run-285.log`（本机，不进仓库）。
+
+RUN-286 证据：v1.24 与 v1.22 合在一起的全量轮：改到数据模型（迁移 `0021` 记录两张表、`0022` 台账快照列与回填）与设置弹层的全部三节，按 §5 跑全量。构建前端，单测轮 199/199，五个包类型检查与 web lint 0 处，构建产物 `check-tokens --lint` PASS。十三套分五条隔离栈并行跑（00:00～00:56）：main 跑 CORE、LOAD，l1 跑 CANVAS、PROTO，l2 跑 EDIT、COMPONENTS、SETTINGS，l3 跑 AGENT、MCP、CHAT、RECORD，l4 跑 SKETCH、I18N；停栈后跑 install。新套件 SETTINGS 4/4、RECORD 6/6。四条失败里 `TC-CORE-023` 是 §7 登记项；`TC-CORE-058`（第 7、10、12 步等组件卡量完超时）、`TC-EDIT-001`（10 s 内截图没更新）、`TC-CORE-100`（记录栏没多出这一张）与 RUN-284 同样只在五栈并行时出现。日志 `.e2e/{main,l1,l2,l3,l4}/run-286.log`、`.e2e/main/run-286-install.log`（本机，不进仓库）。
+
+RUN-287 证据：用户报告「选择元素时 Shift+Enter / Enter 很容易被浏览器自带的按键动作干扰」，在 l5 隔离栈上复现：点过检查器路径里的一级之后焦点停在那个按钮上，两个键都被浏览器当作按下它，选中不动。补写源自缺陷用例 `TC-EDIT-040`，在修复前的构建上单跑：第 1 步焦点停在路径按钮上，第 2 步 `Enter` / `Shift+Enter` 都没换层，与报告一致。同时查出 `TC-EDIT-031` 第 5 步的脚本在点完路径后先把焦点挪回检查器再按键，绕过了这个缺陷，已按用例原文改掉。日志 `.e2e/l5/run-287.log`（本机，不进仓库）。

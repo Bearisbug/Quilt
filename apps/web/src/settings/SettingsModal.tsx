@@ -14,6 +14,7 @@ import { Trans } from 'react-i18next';
 import { setLocale, useLocale, useT, type Locale } from '@/i18n';
 import settingsMessages from '@/i18n/locales/settings';
 import commonMessages from '@/i18n/locales/common';
+import { copyText } from '@/lib/copy';
 
 // 设置弹层（§13 设置弹层，v1.24 用量 / 模型 / 系统三节）：左栏分节、右栏只放当前节。分节即视图标识（INT-020）——进 URL 的 ?settings=<id>，读写在 sections.ts。
 const SECTION_ICONS = { usage: Gauge, models: Cpu, system: MonitorCog } as const;
@@ -26,7 +27,7 @@ export function SettingsModal({ section, onSection, onClose, returnTo, onCatalog
   const ref = useModal<HTMLDivElement>(onClose, returnTo, undefined, { initialFocus: 'self' });
   // 用量的数据与范围放在弹层这一级：换节再回来不重取，读取失败的「重试」还在（FLOW-USAGE S2）
   const usage = useUsageStats();
-  const copy = async (text: string) => { try { await navigator.clipboard.writeText(text); toast(t('mcp.copied')); } catch { toast(t('mcp.copyFailed'), 'error'); } };
+  const copy = async (text: string) => { try { await copyText(text); toast(t('mcp.copied')); } catch { toast(t('mcp.copyFailed'), 'error'); } };
   // MCP 接入命令（API-AGENT-002）：本地版免鉴权，地址就是本机 API；Codex 一条另给（v0.68），接入后要新开线程才加载
   const mcpUrl = `${window.location.origin.replace(/:6688$/, ':3100')}/mcp`;
   const mcpAdd = `claude mcp add --transport http quilt ${mcpUrl}`;

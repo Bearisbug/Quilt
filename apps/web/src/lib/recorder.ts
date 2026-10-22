@@ -4,13 +4,14 @@
 // 记录本身的任何失败都不打断用户操作、不在界面上报错：发不出去的留在缓冲里下次再发
 import type { PreviewToParent, RecordEventType } from '@quilt/core/browser';
 import { api, ApiError } from '@/lib/api';
+import { uuid } from '@/lib/uuid';
 import {
   BATCH_SIZE, EDITABLE, FLUSH_MS, INPUT_IDLE_MS, KEEPALIVE_BYTES, SEND_MAX, SWITCH_POLL_MS, RecordQueue, buildEvent, clickable, describeChange,
   describeClick, describePreview, fieldValue, keyCombo, optionOf, placeOf, recordOff, retryable, targetName, textField,
 } from '@/lib/recordRules';
 
 // 每打开一次页面一个会话（§9 record_events.session_id），seq 在 queue 里从 1 递增
-const sessionId = crypto.randomUUID();
+const sessionId = uuid();
 const queue = new RecordQueue();
 let enabled = false;
 // 开关每变一次加一：在途的重取与发送回来时开关已经变过，就不再按它们改状态（设置里刚打开时，之前发出的重取回来说「关」不算数；

@@ -1,6 +1,7 @@
 import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, DesignSystemDto, ElementOp, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, Runner, ChannelDto, UsageStatsDto, UsageRange, RecordingDto, RecordEventInput, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, DraftFrame, DraftFrameChoice, SketchbookDto, CopyDraftInput, CreateDraftInput, CopyDraftResultDto } from '@quilt/core/browser';
 
 import { getLocale } from '@/i18n';
+import { uuid } from '@/lib/uuid';
 
 // API 客户端：同源 /v1（开发时 Vite 代理 → API；打包后 API 进程自己托管前端），错误统一为 ApiError（RFC 9457 信封）。
 // v0.32 本地版没有登录：所有请求都是默认用户。每个请求带 X-Quilt-Locale（REQ-CORE-046）：服务端按它出错误文案，建的写屏作业按它定生成内容的语言
@@ -48,10 +49,10 @@ export const api = {
     // targetComponentIds（REQ-EDIT-006）：只有组件没有屏 = 改这个组件；与屏 / 锚点同发 = 它们的完整 HTML 进上下文
     // frame（REQ-CORE-040）、refProjectId（REQ-CORE-042）：只对草稿本的新草稿有效
     send: (id: string, body: { content: string; targetScreenIds?: string[]; targetComponentIds?: string[]; count?: ScreenCount; versions?: number; anchor?: { x: number; y: number }; runner?: Runner; attachmentIds?: string[]; frame?: DraftFrameChoice; refProjectId?: string }) =>
-      call<{ userMessage: MessageDto; assistantMessage: MessageDto; job: JobDto }>(`/v1/projects/${id}/messages`, { method: 'POST', body: JSON.stringify(body), idempotencyKey: crypto.randomUUID() }),
+      call<{ userMessage: MessageDto; assistantMessage: MessageDto; job: JobDto }>(`/v1/projects/${id}/messages`, { method: 'POST', body: JSON.stringify(body), idempotencyKey: uuid() }),
     // 重试一轮（API-CORE-034）：服务端复制原作业输入，只换通道
     retry: (id: string, messageId: string, runner?: Runner) =>
-      call<{ userMessage: MessageDto; assistantMessage: MessageDto; job: JobDto }>(`/v1/projects/${id}/messages/${messageId}/retry`, { method: 'POST', body: JSON.stringify({ runner }), idempotencyKey: crypto.randomUUID() }),
+      call<{ userMessage: MessageDto; assistantMessage: MessageDto; job: JobDto }>(`/v1/projects/${id}/messages/${messageId}/retry`, { method: 'POST', body: JSON.stringify({ runner }), idempotencyKey: uuid() }),
     // 删项目（API-CORE-031）：行级联 + 对象文件清理；有进行中作业时 409 /errors/project-busy
     remove: (id: string) => call<void>(`/v1/projects/${id}`, { method: 'DELETE' }),
     // 应用简介 / 样板屏（API-CORE-027）
@@ -64,7 +65,7 @@ export const api = {
       if (!r.ok) throw new Error(`上传失败 ${r.status}`);
       return attachmentId;
     },
-    createJob: (id: string, body: unknown) => call<{ job: JobDto }>(`/v1/projects/${id}/jobs`, { method: 'POST', body: JSON.stringify(body), idempotencyKey: crypto.randomUUID() }),
+    createJob: (id: string, body: unknown) => call<{ job: JobDto }>(`/v1/projects/${id}/jobs`, { method: 'POST', body: JSON.stringify(body), idempotencyKey: uuid() }),
     // 作业列表（API-CORE-029）：本机 agent 面板
     jobs: (id: string, runner: JobRunner) => call<{ items: JobDto[] }>(`/v1/projects/${id}/jobs?runner=${runner}`),
   },
@@ -121,8 +122,8 @@ export const api = {
   // 从项目的一屏或其中一块建草稿（API-CORE-048）
   sketchbook: {
     get: () => call<SketchbookDto>('/v1/sketchbook'),
-    copyDraft: (screenId: string, body: CopyDraftInput) => call<CopyDraftResultDto>(`/v1/sketchbook/drafts/${screenId}/copy`, { method: 'POST', body: JSON.stringify(body), idempotencyKey: crypto.randomUUID() }),
-    createDraft: (body: CreateDraftInput) => call<{ screen: ScreenDto }>('/v1/sketchbook/drafts', { method: 'POST', body: JSON.stringify(body), idempotencyKey: crypto.randomUUID() }),
+    copyDraft: (screenId: string, body: CopyDraftInput) => call<CopyDraftResultDto>(`/v1/sketchbook/drafts/${screenId}/copy`, { method: 'POST', body: JSON.stringify(body), idempotencyKey: uuid() }),
+    createDraft: (body: CreateDraftInput) => call<{ screen: ScreenDto }>('/v1/sketchbook/drafts', { method: 'POST', body: JSON.stringify(body), idempotencyKey: uuid() }),
   },
   runners: () => call<{ items: RunnerOptionDto[]; default: string }>('/v1/runners'),
   // 本机正在运行的 Claude Code 会话（API-AGENT-010）：会话下拉打开时取
