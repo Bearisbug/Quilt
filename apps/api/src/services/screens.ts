@@ -10,6 +10,7 @@ import { signPreview, stableExpiry } from '../lib/signing.ts';
 import { extractLinks, extractBody, outlineBody, componentNamesIn, screenInstructionHistory, shotSpecFor, type RevisionDto, type SourceKind, type CandidatesDto, DEVICE_SIZE, type DeviceType, type Presentation, type DraftFrame } from '@quilt/core';
 import { ownedProject, type ScreenRow, type RevisionRow, type ProjectRow } from './projects.ts';
 import { archiveScreen, saveArchive } from './record.ts';
+import { diffRows } from '../lib/rowDiff.ts';
 
 type Tx = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
 
@@ -148,10 +149,17 @@ export async function deriveLinks(tx: Tx, projectId: string): Promise<void> {
     for (const l of links) rows.push({ projectId, fromScreenId: rev.screenId, elementQid: l.qid, href: l.href, toScreenId: byRoute.get(l.href) ?? null });
     for (const name of names) uses.push({ projectId, screenId: rev.screenId, name });
   }
-  await tx.delete(schema.links).where(eq(schema.links.projectId, projectId));
-  if (rows.length) await tx.insert(schema.links).values(rows);
-  await tx.delete(schema.componentUses).where(eq(schema.componentUses.projectId, projectId));
-  if (uses.length) await tx.insert(schema.componentUses).values(uses);
+  // 按内容差量写（v1.29）：没变的行原样留着。此前每次整项目删光重插，表一直膨胀（外部 Postgres 的自动清理只复用空间、不缩表）
+  const L = schema.links;
+  const links = diffRows(await tx.select({ id: L.id, projectId: L.projectId, fromScreenId: L.fromScreenId, elementQid: L.elementQid, href: L.href, toScreenId: L.toScreenId }).from(L).where(eq(L.projectId, projectId)),
+    rows, (r) => [r.fromScreenId, r.elementQid, r.href, r.toScreenId ?? ''].join('\n'));
+  if (links.drop.length) await tx.delete(L).where(inArray(L.id, links.drop));
+  if (links.add.length) await tx.insert(L).values(links.add);
+  const U = schema.componentUses;
+  const used = diffRows(await tx.select({ id: U.id, projectId: U.projectId, screenId: U.screenId, name: U.name }).from(U).where(eq(U.projectId, projectId)),
+    uses, (r) => `${r.screenId}\n${r.name}`);
+  if (used.drop.length) await tx.delete(U).where(inArray(U.id, used.drop));
+  if (used.add.length) await tx.insert(U).values(used.add);
 }
 
 export async function listRevisions(screenId: string): Promise<RevisionDto[]> {

@@ -2,10 +2,11 @@
 
 `docs/DESIGN.md` 与 `docs/TEST.md` 的变更记录只留最近几版，更早的按原文搬到这里，格式与来源表一致、内容不改。当前状态以两份文档正文为准，本文件只回答「某条规则是哪一版、为什么定下来的」。
 
-## DESIGN.md 变更记录（v1.13–v1.23）
+## DESIGN.md 变更记录（v1.13–v1.24）
 
 | 日期 | 版本 | 涉及 ID | 一句话 | 类型 |
 | --- | --- | --- | --- | --- |
+| 2026-10-21 | v1.24 | REQ-CORE-008、REQ-CORE-011、REQ-CORE-013、FLOW-USAGE、FLOW-SETTINGS、FLOW-RECORD、ENT-UsageEntry、API-CORE-017、API-CORE-021、API-CORE-031、API-CORE-052、ADR-035、ADR-036、PAGE-CANVAS | 设置改成用量、模型、系统三节并加用量看板，界面上「通道」改叫「模型」；本机使用记录确认 | 功能 |
 | 2026-10-21 | v1.23 | REQ-EDIT-001、REQ-EDIT-002、REQ-EDIT-004、REQ-CORE-045、REQ-AGENT-002、FLOW-ELEMENT、FLOW-ANNOTATE、FLOW-SKETCH-REFINE、ENT-Annotation、API-EDIT-003、API-CORE-006、API-CORE-018、API-CORE-030、API-CORE-031、PAGE-CANVAS、PAGE-SKETCH、ADR-012 | 撤下批注：画布与草稿本的入口、接口、MCP 的 4 个工具与批注表一并删除；双击组件卡与双击屏一样把镜头摆过去 | 功能 |
 | 2026-10-21 | v1.22 | REQ-CORE-047、FLOW-RECORD、ENT-RecordEvent、ENT-ModelCall、API-CORE-049、API-CORE-050、API-CORE-051、API-CORE-006、API-CORE-018、API-CORE-031、API-AGENT-002、ADR-035、INV-CORE-006、INV-CORE-007、PAGE-CANVAS | 新增本机使用记录：设置里打开后记下界面操作、输入过程与每次模型调用，删掉的东西留归档 | 功能 |
 | 2026-10-21 | v1.21 | FLOW-SKETCH-REFINE、PAGE-SKETCH、API-CORE-006 | 草稿里只改一块也能带参考图，图跟着这一块的模型调用发出 | 功能 |
@@ -136,6 +137,7 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-10-22 | 设计文档 v1.25（草稿本按 ⌘Z 回到上一版；逐级选不被焦点控件的默认动作吃掉）：新增 `TC-EDIT-040`（源自缺陷）与 `TC-CORE-150`（草稿本按 `⌘Z` 回到上一版，在 `tests/e2e/sketch.ts`）；`TC-EDIT-031` 第 5 步的脚本去掉点路径后先把焦点挪回检查器那一步，照用例原文点完就按 | @bug |
 | 2026-10-21 | 设计文档 v1.24（设置改成用量、模型、系统三节，用量看板，台账快照，界面上「通道」改叫「模型」；v1.22 本机使用记录实现）：新增 `TC-CORE-140`～`143`（在 `tests/e2e/settings.ts`）与 `TC-CORE-144`～`149`（在 `tests/e2e/record.ts`），§3、§5 的全量轮在 `i18n` 之后加 `settings`、`record` 两套；废弃 `TC-CORE-022`（脚本删掉）；旧用例只改叫法与定位（设置三节、界面上叫「模型」、失败文案改说模型、对象目录按被测栈 `/v1/config` 的 `home`）：`TC-CORE-025` 第 3 步，`028` 第 7～9 步（第 7 步另按设计文档 v1.24 改看本机 agent 行：可用时写「找到 claude 命令」、不可用时才有「如何配置」），`048` 前置与第 1、3、4 步，`097` 第 1、3 步，`131` 第 1～3 步，`132` 第 5 步，`133` 第 1～3 步，`045` 第 3 步，`033` 第 3 步，`063` 第 4 步，`090` 前置，`TC-AGENT-001` 第 4 步，`TC-AGENT-012` 第 8 步；新用例补前置：`140` 台账先删空、第 7 步用假会话，`144` 先清空使用记录，`146` 建桩通道，`147` 两条桩通道与假会话，`149` 第 6 步要 `QUILT_E2E_RESTART`；`149` 第 2 步改为经接口发新草稿并取消，第 6 步写明触发 `storage.gc` 的做法 | @bug |
 | 2026-10-21 | 设计文档 v1.23（撤下批注、双击组件卡把镜头摆过去）：新增 `TC-CORE-139`（双击组件卡居中并按装得下与 1:1 的较小者显示，`Esc` 后镜头留着，在 `tests/e2e/canvas.ts`）、`TC-EDIT-038`（检查器按元素暂存，从 `TC-EDIT-014` 第 6 步拆出）、`TC-EDIT-039`（批注的界面、接口与 MCP 工具都没有了）；废弃 `TC-EDIT-008`、`TC-EDIT-014`；去掉批注那几步：`TC-CORE-057` 第 5 步、`TC-CORE-117` 第 4 步、`TC-CORE-122` 第 4～5 步（第 6 步改看 `⌥N` 不开任何东西）、`TC-EDIT-026` 第 2 步（历史块少一条）、`TC-EDIT-032` 第 4 步、`TC-EDIT-035` 第 3 步、`TC-AGENT-011` 第 10 步（工具数 56 改为 53）、`TC-AGENT-018` 第 4～6 步（随之不再以每分钟 10 次重启 API）；`TC-CORE-059` 改量「选择元素」、改按 `⌥S`，`TC-CORE-064` 改用改简介触发重取，`TC-CORE-062`、`073` 的端点清单去掉批注（带路径参数的端点 42 个改为 37 个，`062` 第 5 步探测 15 个改为 14 个）；`TC-EDIT-012` 第 9 步改为镜头摆到卡片上（判定引 `TC-CORE-139`）；`TC-CORE-058` 第 5 步双击后先等镜头停稳再量（第 6、7、10、12 步沿用） | @bug |
 | 2026-10-21 | 设计文档 v1.21（草稿里只改一块也能带参考图）：新增 `TC-CORE-138`（点选一块带 1 张图发出：请求带 `attachmentIds`、作业输入带 `imageKeys`、用户消息挂附件、「草稿桩」收到带图的调用；不收图的作业种类与取不到的附件 `400`；MCP `quilt.regenerate_subtree` 收 `attachmentIds`，在 `tests/e2e/sketch.ts`） | @bug |

@@ -3,7 +3,7 @@ import type { Viewport } from '@xyflow/system';
 import { isPreviewMessage, type AssetDto, type ScreenDto, type LinkDto, type Tokens, type Palette, type ColorMode, type ParentToPreview, type ComponentDto } from '@quilt/core/browser';
 import { StyleGuideCard, STYLE_GUIDE_SIZE, styleGuideSize } from '@/canvas/StyleGuideCard';
 import { Minimap, type MiniRect } from '@/canvas/Minimap';
-import { EDGE_LIMIT, mergeEdges, shownEdges, edgeCurves, drawEdges, type Curve, type EdgeColors } from '@/canvas/edges';
+import { mergeEdges, focusWires, drawWires, cubicBezier, cssMs, type Wire } from '@/canvas/edges';
 import { toWorld, wantsThumb, fullShotIds, inMarquee, fitViewport, focusViewport, revealViewport, panToViewport, ensureVisibleViewport, zoomAround } from '@/canvas/geometry';
 import { useViewport, WHEEL_PAN_SPEED } from '@/canvas/useViewport';
 import { frameSide } from '@/lib/frameZoom';
@@ -217,14 +217,15 @@ export function CanvasView(p: CanvasProps) {
     for (const l of p.links) if (!l.toScreenId) m.set(l.fromScreenId, [...(m.get(l.fromScreenId) ?? []), l.href]);
     return m;
   }, [p.links]);
-  // 页面地图连线（REQ-PROTO-002）：画在视口 canvas 上（v1.02 ADR-029，见 edges.ts）；超过 EDGE_LIMIT 条只画选中屏与聚焦屏进出的
+  // 页面地图连线（REQ-PROTO-002）：只在一屏进入交互时画聚焦卡里正显示的那一屏进出的（v1.29，见 edges.ts）。
+  // 正显示的那一屏随屏内跳转、切变体、叠层变（useFocusedFrame 的 shownId）；选择元素态不画
   const edges = useMemo(() => mergeEdges(p.links), [p.links]);
-  const edgeSel = useMemo(() => new Set([...p.selectedIds, ...(p.focusedId ? [p.focusedId] : [])]), [p.selectedIds, p.focusedId]);
-  const edgeShown = useMemo(() => shownEdges(edges, edgeSel), [edges, edgeSel]);
-  const edgeCurveList = useMemo(() => edgeCurves(edgeShown, edges, (id) => { const s = byId[id]; return s && { ...pos(s), w: s.width, h: s.height }; }), [edgeShown, edges, byId, pos]);
+  const linkScreen = p.focusedId && !p.inspectMode ? frame.shownId : null;
+  const wires = useMemo(() => (p.showLinks && linkScreen && p.focusedId ? focusWires(edges, linkScreen, p.focusedId, (id) => { const s = byId[id]; return s && { ...pos(s), w: s.width, h: s.height }; }) : []),
+    [p.showLinks, linkScreen, p.focusedId, edges, byId, pos]);
   const edgeCanvas = useRef<HTMLCanvasElement | null>(null);
-  const edgeDraw = useRef<{ curves: Curve[]; colors: EdgeColors | null; frame: number }>({ curves: [], colors: null, frame: 0 });
-  // 按当前镜头重画：平移缩放每次变换都会调到，同一帧里只画一次
+  const edgeDraw = useRef<{ wires: Wire[]; series: string[] | null; motion: { ms: number; ease: (x: number) => number } | null; start: number; frame: number }>({ wires: [], series: null, motion: null, start: 0, frame: 0 });
+  // 按当前镜头重画：平移缩放每次变换都会调到，同一帧里只画一次；线在生长或波纹没放完时下一帧接着画
   const paintEdges = useCallback(() => {
     const d = edgeDraw.current;
     if (d.frame || !edgeCanvas.current) return;
@@ -234,20 +235,30 @@ export function CanvasView(p: CanvasProps) {
       if (!c || !node) return;
       const ratio = dpr(); const w = node.clientWidth; const h = node.clientHeight;
       if (c.width !== Math.round(w * ratio) || c.height !== Math.round(h * ratio)) { c.width = Math.round(w * ratio); c.height = Math.round(h * ratio); }
-      if (!d.colors) {
-        const cs = getComputedStyle(c); const line = cs.getPropertyValue('--semantic-color-mark-line').trim();
-        d.colors = { line, badge: line, badgeText: cs.getPropertyValue('--semantic-color-mark-on-line').trim(), font: cs.fontFamily };
+      if (!d.series || !d.motion) {
+        const cs = getComputedStyle(c);
+        d.series = [1, 2, 3, 4, 5, 6].map((i) => cs.getPropertyValue(`--semantic-color-data-viz-series-${i}`).trim()).filter(Boolean);
+        const bez = cs.getPropertyValue('--semantic-motion-easing-standard').match(/[-\d.]+/g)?.map(Number);
+        d.motion = { ms: cssMs(cs.getPropertyValue('--semantic-motion-duration-slow'), 320), ease: bez?.length === 4 ? cubicBezier(bez[0], bez[1], bez[2], bez[3]) : (x) => x };
       }
+      // 减弱动态：直接画完成态，没有生长与波纹（MOTION-004）
+      const t = matchMedia('(prefers-reduced-motion: reduce)').matches ? Infinity : (performance.now() - d.start) / d.motion.ms;
+      const frame = { grow: d.motion.ease(Math.min(1, t)), ripple: Math.max(0, Math.min(1, t - 1)) };
       const g = c.getContext('2d');
-      if (g) drawEdges(g, d.curves, vp.current, { w, h }, ratio, d.colors);
+      if (g) drawWires(g, d.wires, vp.current, { w, h }, ratio, d.series, frame);
+      const done = t >= 2;
+      c.dataset.state = done ? 'done' : 'growing';
+      if (!done) paintEdges();
     });
   }, [viewportRef, vp]);
-  const edgeCanvasRef = useCallback((el: HTMLCanvasElement | null) => { edgeCanvas.current = el; edgeDraw.current.colors = null; if (el) paintEdges(); }, [paintEdges]);
-  useEffect(() => { edgeDraw.current.curves = edgeCurveList; paintEdges(); }, [edgeCurveList, paintEdges]);
-  // 连线颜色是 CSS 变量的快照：换外观后丢掉重读（VIS-010）；徽标字体随 <html lang> 的字阶覆盖变，换界面语言同样重读
+  const edgeCanvasRef = useCallback((el: HTMLCanvasElement | null) => { edgeCanvas.current = el; edgeDraw.current.series = null; edgeDraw.current.motion = null; if (el) paintEdges(); }, [paintEdges]);
+  useEffect(() => { edgeDraw.current.wires = wires; paintEdges(); }, [wires, paintEdges]);
+  // 进交互、屏内换了正显示的屏：线重新从起点长出来
+  useEffect(() => { edgeDraw.current.start = performance.now(); paintEdges(); }, [p.focusedId, linkScreen, p.showLinks, paintEdges]);
+  // 连线颜色是 CSS 变量的快照：换外观后丢掉重读（VIS-010）
   const themeMode = useResolvedMode();
   const locale = useLocale();
-  useEffect(() => { edgeDraw.current.colors = null; paintEdges(); }, [themeMode, locale, paintEdges]);
+  useEffect(() => { edgeDraw.current.series = null; paintEdges(); }, [themeMode, paintEdges]);
   useEffect(() => {
     const node = viewportRef.current;
     const d = edgeDraw.current;
@@ -687,10 +698,7 @@ export function CanvasView(p: CanvasProps) {
       {/* 聚焦屏或组件时不画小地图：它压在可用区左上角，会挡住聚焦屏上那一块的点击 */}
       {p.minimap && !p.focusedId && !p.focusedComponentId && <Minimap rects={miniRects} onView={onView} onPanTo={panTo} onMoveView={moveView} />}
       {/* 连线（v1.02 ADR-029）：压在世界层下面，卡片盖住它；不进无障碍树，供测试读的数在 data-* 上 */}
-      {p.showLinks && edges.length > 0 && <canvas ref={edgeCanvasRef} className="edges" aria-hidden="true" data-testid="link-edges" data-total={edges.length} data-drawn={edgeShown.length} data-max-count={Math.max(0, ...edgeShown.map((e) => e.count))} />}
-      {p.showLinks && edges.length > EDGE_LIMIT && !p.focusedId && p.selectedIds.length === 0 && (
-        <p data-testid="links-hint" className="pointer-events-none absolute left-0 right-[var(--chrome-right)] top-16 z-20 mx-auto w-max max-w-[calc(100%-2rem)] truncate chrome rounded-md px-3 py-1.5 type-label text-text-secondary">{tr('view.linksHint', { n: edges.length })}</p>
-      )}
+      {wires.length > 0 && <canvas ref={edgeCanvasRef} className="edges" aria-hidden="true" data-testid="link-edges" data-total={edges.length} data-drawn={wires.length} data-max-count={Math.max(0, ...wires.map((e) => e.count))} data-screen={linkScreen ?? undefined} />}
       <div ref={worldRef} className="world" style={view.initialWorldStyle}>
         {/* 按住空格时从风格指南卡上起手同样是平移（v0.80）：不带 nopan、不接住按下；获焦（只会来自键盘）时镜头把它摆进可用区 */}
         <div className={`styleguide${panReady ? '' : ' nopan'}${p.styleGuideSelected ? ' selected' : ''}`} style={{ transform: `translate(${STYLE_GUIDE_POS.x}px, ${STYLE_GUIDE_POS.y}px)` }}

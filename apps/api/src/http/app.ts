@@ -4,6 +4,7 @@ import { Problem, problems, problemResponse } from '../lib/errors.ts';
 import { localUser, type UserRow } from '../services/user.ts';
 import { requestSource } from '../lib/origin.ts';
 import { localeMiddleware } from '../lib/locale.ts';
+import { requestLog } from '../lib/reqlog.ts';
 import { L, type Locale } from '@quilt/core';
 
 // locale：这个请求的界面语言（REQ-CORE-046）；uiLocale：请求带的 X-Quilt-Locale，没带为 null（见 lib/locale.ts）
@@ -21,6 +22,8 @@ export function createApp() {
     await next();
     c.header('X-Request-Id', rid);
   });
+  // 请求日志（§21 v1.29）：慢请求与 5xx 逐条写，每 5 分钟一行汇总
+  app.use('*', requestLog('api'));
   // 界面语言（REQ-CORE-046）：先于来源校验定下来，被拒的请求也按它出文案
   app.use('*', localeMiddleware);
 

@@ -103,7 +103,7 @@ export default defineMessages('canvas-page', {
     find: { label: '找屏', desc: '按名字、路由或用途搜屏与组件，Enter 跳过去并选中' },
     screens: { label: '屏列表', desc: '按画布顺序列出全部屏，可按断链 / 待选候选 / 有偏离 / 正在改筛选，点一行跳过去' },
     minimap: { label: '小地图', desc: '左上角的缩略图：画出全部屏与当前视口，点哪儿镜头就到哪儿' },
-    links: { label: '连线', desc: '在画布上画出屏与屏之间的跳转关系；指向不存在路由的会标成断链' },
+    links: { label: '连线', desc: '进入交互时画出这一屏链去哪些屏、从哪些屏链过来' },
     composer: {
       hide: '收起输入框',
       show: '显示输入框',
@@ -273,7 +273,7 @@ export default defineMessages('canvas-page', {
     find: { label: 'Find screen', desc: 'Search screens and components by name, route or purpose; Enter jumps there and selects it' },
     screens: { label: 'Screen list', desc: 'List every screen in canvas order, filter by broken links / pending candidates / deviations / being edited, and click a row to jump there' },
     minimap: { label: 'Minimap', desc: 'The thumbnail in the top-left corner: shows every screen and the current viewport; click anywhere to move there' },
-    links: { label: 'Links', desc: 'Show the navigation between screens on the canvas; links to routes that don’t exist are marked as broken links' },
+    links: { label: 'Links', desc: 'While interacting with a screen, show which screens it links to and which link to it' },
     composer: {
       hide: 'Collapse composer',
       show: 'Show composer',

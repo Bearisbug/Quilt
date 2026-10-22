@@ -227,7 +227,7 @@ async function webpInBrowser(image: Buffer, scale: number, quality: number, capM
 
 export const thumbnailOf = (image: Buffer): Promise<Buffer> => webpInBrowser(image, 1 / 4, 0.8, 5_000);
 
-// 整屏截图存成无损 WebP（v1.27 ADR-037）：sharp（libvips）压缩档最高，逐像素不变（exact：透明像素的颜色也照存）。
+// 整屏截图存成无损 WebP（v1.27 ADR-037）：sharp（libvips）压缩档 4（比最高档 6 大 0.69%、快 22.7%，ADR-037 v1.29），逐像素不变（exact：透明像素的颜色也照存）。
 // sharp 加载失败（这个平台没有预编译包）时退回浏览器自带的无损 WebP：压缩率低得多，色块简单的屏可能比 PNG 还大；加载结果记一次，启动日志里写明用的是哪个
 type Sharp = (typeof import('sharp'))['default'];
 let sharpLoad: Promise<Sharp | null> | null = null;
@@ -248,7 +248,7 @@ export async function losslessWebp(png: Buffer): Promise<Buffer> {
   let last: Error = new Error('WebP 编码失败');
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const { work } = await encodeSlot(() => (sharp ? sharp(png).webp({ lossless: true, effort: 6, exact: true }).toBuffer() : webpInBrowser(png, 1, 1, 10_000)));
+      const { work } = await encodeSlot(() => (sharp ? sharp(png).webp({ lossless: true, effort: 4, exact: true }).toBuffer() : webpInBrowser(png, 1, 1, 10_000)));
       const out = await within(work, 10_000, '编码 WebP');
       if (!imageHead(out)?.lossless) throw new Error('编出来的不是无损 WebP');
       return out;

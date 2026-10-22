@@ -356,13 +356,11 @@ await step('TC-CORE-086', async () => {
   try {
     await hi.goto(`${WEB}/p/${projectId}`);
     await hi.locator('[data-testid="screen-card"]').first().waitFor();
-    // 1 全景：有截图的卡都出图且都是缩略图；连线一条不画，顶部提示
+    // 1 全景：有截图的卡都出图且都是缩略图；平时不画连线（v1.29）
     await eventually(async () => expect((await shown()).length === withShot, `全景下 ${withShot} 张截图还没都显示（${(await shown()).length}）`), 60_000);
     const s1 = await shown();
     check(s1.every((x) => x.thumb), `全景下应全部用缩略图：原图 ${s1.filter((x) => !x.thumb).length} 张`);
-    const e1 = await edges();
-    check(e1 && e1.total === pairs.size && e1.drawn === 0, `${pairs.size} 条连线、没选屏时一条不画：${JSON.stringify(e1)}`);
-    check(((await hi.getByTestId('links-hint').textContent().catch(() => '')) ?? '').includes(`共 ${pairs.size} 条连线`), `没选屏时顶部应提示「共 ${pairs.size} 条连线，选中屏后只显示它进出的」`);
+    check((await edges()) === null, '平时不该画连线（v1.29 只在交互时画）');
     await hi.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-core-086-fit.png`) });
     const box = (await hi.locator('[data-testid="canvas"]').boundingBox())!;
     const cx = box.x + box.width / 2; const cy = box.y + box.height / 2;
@@ -393,18 +391,14 @@ await step('TC-CORE-086', async () => {
     await hi.mouse.up();
     const drag = await rafStop();
     check(drag.slow <= 5, `拖卡 ${drag.frames} 帧里 ${drag.slow} 帧超过 33 ms（> 5）`);
-    // 4 依次点选 12 张卡：超过 33 ms 的帧 ≤ 3；只画最后选中的那屏进出的连线，提示消失
+    // 4 依次点选 12 张卡：超过 33 ms 的帧 ≤ 3；选中屏也不画连线
     await hi.waitForTimeout(500);
     const picks = (await cardCenters()).slice(0, 12);
     await rafStart();
     for (const p of picks) { await hi.mouse.click(p.x, p.y); await hi.waitForTimeout(120); }
     const sel = await rafStop();
     check(sel.slow <= 3, `点选 ${sel.frames} 帧里 ${sel.slow} 帧超过 33 ms（> 3）`);
-    const e4 = await edges();
-    const pickedRoute = await hi.locator('.card.selected').getAttribute('data-route');
-    const picked = detail.screens.find((s) => s.route === pickedRoute)!;
-    check(e4 && e4.drawn === touching(picked.id), `选中 ${picked.route} 后只画它进出的 ${touching(picked.id)} 条：${JSON.stringify(e4)}`);
-    check((await hi.getByTestId('links-hint').count()) === 0, '选中屏后提示应消失');
+    check((await edges()) === null, '选中屏后不该画连线');
     await hi.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-core-086-selected.png`) });
     // 5 放大到 100% 左右停住：视口里的卡换原图、视口外的仍是缩略图；缩回全景当帧降回缩略图
     await hi.keyboard.press('Escape');
@@ -421,8 +415,17 @@ await step('TC-CORE-086', async () => {
     for (let i = 0; i < 30; i++) { await hi.mouse.wheel(0, 12); await hi.waitForTimeout(8); }
     await hi.keyboard.up('Control');
     await eventually(async () => expect((await shown()).every((x) => x.thumb), '缩回全景后应全部降回缩略图'), 5_000).catch(() => check(false, '缩回全景后应全部降回缩略图'));
+    // 7 双击视口中央那张卡进交互：画这一屏进出的、长完；Esc 撤掉
+    const mid = await hi.locator('[data-testid="screen-card"][data-onscreen]').evaluateAll((els, [x, y]) => els.map((e) => { const r = e.getBoundingClientRect(); return { route: e.getAttribute('data-route')!, d: Math.hypot(r.x + r.width / 2 - x, r.y + r.height / 2 - y), x: r.x + r.width / 2, y: r.y + r.height / 2 }; }).sort((a, b) => a.d - b.d)[0], [cx, cy]);
+    const target = detail.screens.find((s) => s.route === mid.route)!;
+    await hi.locator(`[data-testid="screen-card"][data-route="${mid.route}"] .gesture`).dblclick();
+    await eventually(async () => { const e = await edges(); expect(e && e.total === pairs.size && e.drawn === touching(target.id), `进 ${mid.route} 交互后应画它进出的 ${touching(target.id)} 条：${JSON.stringify(e)}`); }, 10_000).catch((err) => check(false, String(err.message ?? err)));
+    await eventually(async () => expect((await hi.locator('[data-testid="link-edges"]').getAttribute('data-state')) === 'done', '连线没长完'), 2_000).catch(() => check(false, `进交互后 2 s 连线还没长完`));
+    await hi.screenshot({ path: path.join(EVIDENCE, `run-${RUN}-core-086-interact.png`) });
+    await hi.keyboard.press('Escape');
+    await eventually(async () => expect((await edges()) === null, 'Esc 后连线应撤掉'), 3_000).catch(() => check(false, 'Esc 后连线应撤掉'));
     if (bad.length) throw new Error(bad.join('；'));
-    return `${pairs.size} 条连线、${withShot} 张截图；缩放一个来回解码 ${Math.round(decodeMs)} ms、长任务 ${long}；拖卡 ${drag.slow}/${drag.frames}、点选 ${sel.slow}/${sel.frames} 帧超过 33 ms；放大后视口里 ${s5.filter((x) => x.on).length} 张换原图`;
+    return `${pairs.size} 条连线（进 ${mid.route} 交互画 ${touching(target.id)} 条）、${withShot} 张截图；缩放一个来回解码 ${Math.round(decodeMs)} ms、长任务 ${long}；拖卡 ${drag.slow}/${drag.frames}、点选 ${sel.slow}/${sel.frames} 帧超过 33 ms；放大后视口里 ${s5.filter((x) => x.on).length} 张换原图`;
   } finally { await hiCtx.close(); }
 });
 

@@ -13,12 +13,15 @@ import { sketchbookName } from '../lib/locale.ts';
 import { readAsset } from '../services/assets.ts';
 import { componentPreviewDocument } from '../services/components.ts';
 import { DRAFT_ROOT_JS } from '../lib/screenshot.ts';
+import { requestLog } from '../lib/reqlog.ts';
 
 // 预览域服务（ADR-004 / API-CORE-016）：独立 origin、无 cookie、HMAC 签名。
 // CSP 在 v0.43 放开到任意 https: 源——屏里允许用 Chart.js 这类开源库（REQ-CORE-022）；v0.75 补 form-action 'none'（SCREEN_CSP）。
 // 安全边界：独立 origin、无 cookie、拿不到主站 storage，也写不了主站 API，屏里的脚本只能影响它自己那张屏。
 // 下发时把修订里存的运行时脚本换成当前版本（v0.34）：运行时是 Quilt 的代码，修复不该等每张屏再出一版修订。
 export const previewApp = new Hono();
+// 请求日志（§21 v1.29）：预览域的 4xx/5xx 率与 P95 按它的 5 分钟汇总算
+previewApp.use('*', requestLog('preview'));
 
 previewApp.get('/healthz', (c) => c.text('ok'));
 

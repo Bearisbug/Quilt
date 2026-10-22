@@ -9,7 +9,7 @@ AI 原生的无限画布设计工具：自然语言生成 APP 多屏 HTML 设计
 本项目任何前端改动——新建页面/组件、调样式、修 UI 缺陷、按截图还原、逐条体验优化——动码前必须加载 `ui-constraints` 技能，按其 `references/00-catalog.md` 命中的规则卡执行，交付前按其 `flow-verification` 做真实浏览器验证。适用范围看**改到哪个文件**、不看措辞：碰 `.tsx/.jsx/.vue/.svelte/.css/.scss/.html` 或任何组件、样式文件即适用，「就改一行」「随手调一下」同样适用，拿不准时按适用处理。长会话中每进入一次新的前端改动都要重新按 catalog 查一遍，不要凭上一轮的记忆推进；把前端工作派给 subagent 时，任务提示里必须显式要求它加载本技能（subagent 不继承）。技能不可用时停下告知用户，不要凭记忆拼一套前端约束。
 
 ## 开发库不是跑测试的地方（硬性）
-`:3100` 上那套 API 背后是开发库 `quilt`，里面是用户的真实项目。**任何会写库的自动化——e2e 套件、MCP 写工具、批量脚本——一律对测试库 `quilt_test` 跑**，要么把 API 指过去，要么另起一套（`DATABASE_URL=…/quilt_test API_PORT=3200 PREVIEW_PORT=3201 pnpm --filter @quilt/api dev` + `QUILT_E2E_API=http://localhost:3200`）。`tests/e2e/lib.ts` 的 `assertTestApi()` 会在套件动手前问 `GET /v1/health` 的 `database` 字段，不是测试库就当场停；别去绕它，要故意对开发库跑就显式 `ALLOW_E2E_DEV=1` 并想清楚。
+`:3100` 上那套 API 背后是开发库 `quilt`，里面是用户的真实项目。**任何会写库的自动化——e2e 套件、MCP 写工具、批量脚本——一律对测试库 `quilt_test` 跑**，要么把 API 指过去，要么另起一套（`DATABASE_URL=…/quilt_test QUILT_DATA_DIR=$PWD/.e2e/manual/data API_PORT=3200 PREVIEW_PORT=3201 pnpm --filter @quilt/api dev` + `QUILT_E2E_API=http://localhost:3200`；不设 `QUILT_DATA_DIR` 时测试写的截图与对象落进开发实例的 `.data/objects`，测试库一重置就成了孤儿文件），或直接用 `scripts/e2e-stack.sh <lane> start`。`tests/e2e/lib.ts` 的 `assertTestApi()` 会在套件动手前问 `GET /v1/health` 的 `database` 字段，不是测试库就当场停；别去绕它，要故意对开发库跑就显式 `ALLOW_E2E_DEV=1` 并想清楚。
 起因不是假设：2026-09-21 有并行会话把 e2e 打到 3100 上，逐屏写删绕过了 `pnpm seed` 那道守卫，开发库里四个项目的屏被清空（项目壳还在，因为 seed 被拦住了）。**多个会话同时开工时先确认各自的库与端口**，别共用 3100。
 
 ## 浏览器验证纪律

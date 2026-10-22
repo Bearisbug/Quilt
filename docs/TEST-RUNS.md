@@ -270,6 +270,8 @@
 | RUN-280 | 2026-10-21 | 未提交工作树（设计文档 v1.20 加「草稿本的名字跟着界面语言」） | AI(Claude Code) | 局部(TC-AGENT-011、TC-AGENT-018、TC-AGENT-022、TC-CORE-098、TC-CORE-099、TC-CORE-100、TC-CORE-101、TC-CORE-102、TC-CORE-103、TC-CORE-104、TC-CORE-105、TC-CORE-106、TC-CORE-107、TC-CORE-108、TC-CORE-109、TC-CORE-110、TC-CORE-111、TC-CORE-112、TC-CORE-113、TC-CORE-114、TC-CORE-115、TC-CORE-116、TC-CORE-117、TC-CORE-118、TC-CORE-119、TC-CORE-120、TC-CORE-121、TC-CORE-122、TC-CORE-123、TC-CORE-125、TC-CORE-128、TC-CORE-129、TC-CORE-130、TC-CORE-131、TC-CORE-132、TC-CORE-133、TC-CORE-134、TC-CORE-135、TC-CORE-136、TC-CORE-137 + 冒烟级至 TC-CORE-137、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 46/48 · 跳过 2 |
 | RUN-281 | 2026-10-21 | 未提交工作树（设计文档 v1.21：草稿里只改一块也能带参考图） | AI(Claude Code) | 局部(TC-CORE-138) | 通过 1/1 |
 | RUN-282 | 2026-10-21 | 同 RUN-281 的构建 | AI(Claude Code) | 局部(TC-CORE-098、TC-CORE-099、TC-CORE-100、TC-CORE-101、TC-CORE-102、TC-CORE-103、TC-CORE-104、TC-CORE-105、TC-CORE-106、TC-CORE-107、TC-CORE-108、TC-CORE-109、TC-CORE-110、TC-CORE-111、TC-CORE-112、TC-CORE-113、TC-CORE-114、TC-CORE-115、TC-CORE-116、TC-CORE-117、TC-CORE-118、TC-CORE-119、TC-CORE-120、TC-CORE-121、TC-CORE-122、TC-CORE-123、TC-CORE-125、TC-CORE-128、TC-CORE-129、TC-CORE-138、TC-AGENT-011、TC-AGENT-023、TC-CORE-027、TC-CORE-092、TC-EDIT-003、TC-EDIT-004、TC-EDIT-014、TC-EDIT-019、TC-EDIT-026、TC-EDIT-033、TC-CORE-003、TC-CORE-005、TC-CORE-010、TC-CORE-012、TC-CORE-018、TC-PROTO-001、TC-AGENT-001) | 通过 43/47 · 失败 1 · 跳过 3 |
+| RUN-283 | 2026-10-21 | 同 RUN-281 的构建 | AI(Claude Code) | 复测(RUN-282:TC-EDIT-001、TC-EDIT-004 + 冒烟级至 TC-CORE-138、TC-PROTO-013、TC-EDIT-037、TC-AGENT-024) | 通过 8/10 · 跳过 2 |
+| RUN-284 | 2026-10-21 | 未提交工作树（设计文档 v1.23：撤下批注、双击组件卡把镜头摆过去） | AI(Claude Code) | 全量至 TC-CORE-139、TC-PROTO-013、TC-EDIT-039、TC-AGENT-024 | 通过 171/189 · 失败 6 · 待人工 2 · 跳过 10 |
 
 ## 明细（仅登非「通过」项）
 
@@ -758,6 +760,26 @@
 | RUN-282 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-282 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-282 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-283 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-283 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-284 | TC-CORE-058 | 失败 | 第 5、6、12 步等 `Tab Bar` 量完（`data-ready`）超过 20 s；第 8 步松手后小地图视口框 `22.4 16.0 153.6 96.0 → 11.2 8.0 153.6 96.0`。五栈并行、机器满载；另外 v1.23 起双击组件卡后镜头会移动，脚本双击后紧接着量框，可能读到动画中途的位置（证据：`.e2e/l1/run-284.log`，本机） | 脚本更正：双击后先等世界层 `transform` 停稳（第 5 步写明，第 6、7、10、12 步沿用）；RUN-285 复测通过 |
+| RUN-284 | TC-CORE-080 | 失败 | 「合成层静止 20、手势中 -1」：-1 是手势中 3 s 内没收到 `LayerTree.layerTreeDidChange`，没有采到层数，不是层数变了；五栈并行满载（证据：`.e2e/main/run-284.log`，本机） | 判为负载下采样超时；RUN-285 单栈复测通过 |
+| RUN-284 | TC-CORE-100 | 失败 | 「记录栏应多出这一张」：五栈并行满载（证据：`.e2e/l4/run-284.log`，本机） | 判为偶发；RUN-285 复测通过 |
+| RUN-284 | TC-EDIT-001 | 失败 | 等直改后的「已更新」角标（`data-quilt-mark`）8 s 超时。同一构建在空闲的 l5 栈上单跑 2 次（`RUN=0`，不计轮次）：一次「10 s 内截图未更新」、一次通过；RUN-269 有过同样的负载下失败（证据：`.e2e/l2/run-284.log`，本机） | 判为负载下偶发；RUN-285 复测通过 |
+| RUN-284 | TC-PROTO-010 | 失败 | 「单步超过 10 min 没有结束」，与 RUN-278 `TC-PROTO-007` 同一类现象；没有 trace（证据：`.e2e/l1/run-284.log`，本机） | 判为偶发；RUN-285 复测通过 |
+| RUN-284 | TC-CORE-023 | 失败 | 预期失败（§7 登记项）：「叫回后安全区底部没复原」（证据：`.e2e/main/run-284.log`，本机） | §7 跟进 |
+| RUN-284 | TC-CORE-020 | 待人工 | 对标 Stitch 盲评 | 待人工 |
+| RUN-284 | TC-AGENT-010 | 待人工 | 投递到真实 Claude Code 会话要在终端确认接收 | 待人工 |
+| RUN-284 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-284 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-284 | TC-PROTO-004 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-284 | TC-PROTO-009 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-284 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-284 | TC-CORE-006 | 跳过 | 要以 `LLM_STUB=503` 重启 worker，由 `core-stub.ts` 单独执行，本轮没跑 | 基线 |
+| RUN-284 | TC-CORE-084 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
+| RUN-284 | TC-EDIT-037 | 跳过 | 提示词轮用例，要真实模型，不进全量轮（§5） | 基线 |
+| RUN-284 | TC-CORE-038 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
+| RUN-284 | TC-AGENT-013 | 跳过 | 没有自动化脚本，本轮没有执行 | 基线 |
 
 
 RUN-267 证据：地基变更（界面视觉换成苹果风方向 E，跨全部界面）的全量轮。构建前端后跑 `scripts/e2e-all.sh` 前九套（CORE、LOAD、CANVAS、PROTO、EDIT、COMPONENTS、AGENT、MCP、CHAT）；单测轮 144/144，构建产物 `check-tokens --lint` 通过。SKETCH 与 install 两套没跑：本轮中途 `tests/e2e/sketch.ts` 已按 v1.14 写回前端改写，与被测构建对不上，SKETCH 开跑即停，改在 RUN-268 随新构建再跑全量。`TC-CORE-008` 在毛玻璃开着时 100 屏 2 倍屏 60 fps、每帧 GPU 主线程 1.4 ms（门槛 4 ms）。完整日志 `.e2e/main/run-267.log`（本机，不进仓库）。
@@ -792,3 +814,7 @@ RUN-280 证据：用户要求草稿本的名字跟着界面语言变（此前按
 RUN-281 证据：用户在草稿本里点选一块、带着参考图发送，被「只改一块时不带参考图」挡下，要求只改一块也能带图。v1.21 改为建作业接口收 `attachmentIds`、子树重生成带图调用模型、MCP `quilt.regenerate_subtree` 收 `attachmentIds`，前端去掉这道挡，新增 `TC-CORE-138`。单测 169/169，五个包类型检查与 web lint 通过；重新构建前端后在 main 隔离栈单跑通过（输出未落盘）。
 
 RUN-282 证据：v1.21 的局部轮。改到建作业接口（`API-CORE-006`，草稿本借用的公共分支点）与 MCP 工具面，按 §5 整套 SKETCH 加 `TC-AGENT-011`；建作业接口也是画布上「重生成这块」与参考图的入口，另加 `REQ-EDIT-002` 的用例、`TC-CORE-027`、`TC-CORE-092`、`TC-AGENT-023` 与冒烟级（除 `TC-CORE-031`）。两条隔离栈并行：main 跑 SKETCH，30/30；l1 跑其余；`TC-CORE-031` 要停栈，放到 RUN-283。`TC-EDIT-004` 失败是执行时漏了前置（见明细）。日志 `.e2e/main/run-282.log`、`.e2e/l1/run-282.log`（本机，不进仓库）。
+
+RUN-283 证据：RUN-282 之后的复测轮，同一构建、l1 隔离栈：`TC-EDIT-004` 带上建项目的 `TC-EDIT-001` 一起跑（001 计入本轮），加冒烟级；停栈后跑 install。日志 `.e2e/l1/run-283.log`、`.e2e/main/run-283-install.log`（本机，不进仓库）。
+
+RUN-284 证据：v1.23 的全量轮：撤下批注（画布与草稿本的入口、5 个 REST 接口、4 个 MCP 工具，迁移 `0020` 删 `annotations` 表），双击组件卡把镜头摆过去。改到数据模型，按 §5 跑全量。构建前端，单测轮 168/168，五个包类型检查与 web lint 0 处，构建产物 `check-tokens --lint` PASS。十一套分五条隔离栈并行跑（21:23～21:58）：main 跑 CORE、LOAD，l1 跑 CANVAS、PROTO，l2 跑 EDIT、COMPONENTS，l3 跑 AGENT、MCP、CHAT，l4 跑 SKETCH、I18N；全部停栈后跑 install。新用例 `TC-CORE-139`（双击后卡片宽 144 → 390、中心偏差 2 px）、`TC-EDIT-038`、`TC-EDIT-039` 通过，`TC-AGENT-011` 数到 53 个工具。六条失败里 `TC-CORE-023` 是 §7 登记项；其余五条都是等待或采样超时，出现在五栈并行、机器满载时，`TC-CORE-058` 另有脚本问题（见明细）。`TC-CORE-047` 本轮通过（§7「⌘K 找屏连按 ↓ 到底后选中行跳回」时过时不过，不据此撤销登记）。日志 `.e2e/{main,l1,l2,l3,l4}/run-284.log`、`.e2e/main/run-284-install.log`（本机，不进仓库）。

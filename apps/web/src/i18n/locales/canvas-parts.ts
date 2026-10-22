@@ -59,7 +59,6 @@ export default defineMessages('canvas-parts', {
   },
   // 画布视图（CanvasView.tsx）
   view: {
-    linksHint: '共 {{n}} 条连线，选中屏后只显示它进出的',
     styleGuide: '风格指南',
     anchor: '新屏落点 · 在下方输入框描述它',
     variants: '状态变体',
@@ -237,7 +236,6 @@ export default defineMessages('canvas-parts', {
     skeleton: { failed: 'Screenshot didn’t load', shooting: 'Taking screenshot', loading: 'Loading screenshot' },
   },
   view: {
-    linksHint: '{{n}} links. Select a screen to show only its links',
     styleGuide: 'Style guide',
     anchor: 'New screen goes here · Describe it in the composer below',
     variants: 'State variants',

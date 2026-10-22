@@ -199,26 +199,77 @@ await step('TC-PROTO-007', async () => {
   await page.waitForTimeout(300);
 });
 
-await step('TC-PROTO-008', async () => {
+// TC-PROTO-014 连线只在交互时显示（v1.29 PAGE-CANVAS「连线」）：平时不画；进交互画正显示的那一屏进出的、线先长出来；屏内跳转跟着换；Esc 撤掉；开关管交互时画不画
+await step('TC-PROTO-014', async () => {
   await page.goto(`${WEB}/p/${formProject}`);
-  await page.locator('[data-testid="screen-card"]').first().waitFor();
-  await page.locator('[data-testid="link-edges"]').waitFor({ timeout: 5000 });
-  // v1.02 起连线画在视口 canvas 上（ADR-029）：条数与最大计数读它的 data-*，另数一遍画出来的像素，确认真的画了
-  const edges = await page.locator('[data-testid="link-edges"]').evaluate((c) => {
-    const el = c as HTMLCanvasElement; const px = el.getContext('2d')!.getImageData(0, 0, el.width, el.height).data;
-    let ink = 0; for (let i = 3; i < px.length; i += 4) if (px[i] > 0) ink++;
-    return { drawn: Number(el.dataset.drawn), max: Number(el.dataset.maxCount), ink };
+  await page.locator('[data-testid="screen-card"] img').first().waitFor({ timeout: 15000 });
+  const { body: map } = await apiJson<{ edges: { fromScreenId: string; toScreenId: string | null }[] }>(`/v1/projects/${formProject}/app-map`);
+  const pairs = [...new Set(map.edges.filter((e) => e.toScreenId && e.toScreenId !== e.fromScreenId).map((e) => `${e.fromScreenId}>${e.toScreenId}`))];
+  // 正显示 shown、聚焦卡 focused 时要画的条数：shown 进出的屏对，另一端是聚焦卡的不算
+  const expected = (shown: string, focused: string) => pairs.filter((k) => { const [a, b] = k.split('>'); return (a === shown || b === shown) && (a === shown ? b : a) !== focused; }).length;
+  const [s1, s2] = formScreens;
+  const edgesEl = page.locator('[data-testid="link-edges"]');
+  // 逐帧记 data-state 的变化（只记变了的），看线是不是先长出来
+  const recordStates = () => page.evaluate(`window.__states = []; (function tick() { const c = document.querySelector('[data-testid="link-edges"]'); const v = c && c.dataset.state; if (v && window.__states[window.__states.length - 1] !== v) window.__states.push(v); window.__statesRaf = requestAnimationFrame(tick); })()`);
+  const states = async () => { const v = await page.evaluate('(cancelAnimationFrame(window.__statesRaf), window.__states)') as string[]; return v; };
+  // canvas 上每种数据可视化色的像素数（容差 40；抗锯齿与柔光边上混出来的色不算）
+  const inks = () => edgesEl.evaluate((c) => {
+    const el = c as HTMLCanvasElement; const cs = getComputedStyle(el);
+    const series = [1, 2, 3, 4, 5, 6].map((i) => cs.getPropertyValue(`--semantic-color-data-viz-series-${i}`).trim()).map((h) => [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16)));
+    const d = el.getContext('2d')!.getImageData(0, 0, el.width, el.height).data; const n = series.map(() => 0);
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 230) series.forEach((c3, k) => { if (Math.abs(d[i] - c3[0]) + Math.abs(d[i + 1] - c3[1]) + Math.abs(d[i + 2] - c3[2]) < 40) n[k]++; });
+    return n;
   });
-  expect(edges.drawn >= 4, `连线条数 ${edges.drawn}，应 ≥ 4（s1→s2、s1→s3、s2→s3、s3→s1）`);
-  expect(edges.max >= 3, `合并计数最大 ${edges.max}，应 ≥ 3`);
-  expect(edges.ink > 0, '连线 canvas 上一个像素都没画');
+  // 1 平时不画连线；断链标记照常
+  await page.waitForTimeout(500);
+  expect((await edgesEl.count()) === 0, '① 平时不该画连线');
+  expect((await page.locator('[data-testid="screen-card"][data-route="/s1"] .warn').count()) === 1, '① /s1 的断链标记不见了');
+  // 2 进交互：画 /s1 进出的；先 growing、1 s 内 done；至少两种颜色
+  await recordStates();
+  const fl = await focus('/s1');
+  await eventually(async () => expect((await edgesEl.getAttribute('data-state')) === 'done', '② 连线 1 s 内没长完'), 1000);
+  const st = await states();
+  const want1 = expected(s1.id, s1.id);
+  expect(st[0] === 'growing' && st[st.length - 1] === 'done', `② data-state 应先 growing 再 done：${JSON.stringify(st)}`);
+  expect((await edgesEl.getAttribute('data-screen')) === s1.id && Number(await edgesEl.getAttribute('data-drawn')) === want1, `② 应画 /s1 进出的 ${want1} 条：${await edgesEl.getAttribute('data-drawn')}`);
+  const ink = await inks();
+  expect(ink.filter((n) => n > 20).length >= 2, `② 应至少两种数据可视化色：${JSON.stringify(ink)}`);
+  // 3 屏内跳到 /s2：换成 /s2 进出、另一端不是 /s1 的
+  await fl.locator('input[name="email"]').fill('a@b.co');
+  await fl.locator('button[type="submit"]', { hasText: 'Sign in' }).click();
+  await page.locator('.card.focused .badge', { hasText: '/s2' }).waitFor({ timeout: 10000 });
+  const want2 = expected(s2.id, s1.id);
+  await eventually(async () => {
+    if (want2 === 0) expect((await edgesEl.count()) === 0, '③ /s2 没有要画的线，canvas 应撤掉');
+    else expect((await edgesEl.getAttribute('data-screen')) === s2.id && Number(await edgesEl.getAttribute('data-drawn')) === want2, `③ 应换成 /s2 进出的 ${want2} 条：${await edgesEl.getAttribute('data-screen')} ${await edgesEl.getAttribute('data-drawn')}`);
+  });
+  // 4 Esc 退出：连线撤掉
+  await page.keyboard.press('Escape');
+  await eventually(async () => expect((await edgesEl.count()) === 0, '④ 退出交互后连线仍在'));
+  // 5 关掉开关：进交互也不画；断链标记仍在；刷新后仍是关
   await page.getByTestId('toggle-links').click();
-
-  await eventually(async () => expect((await page.locator('[data-testid="link-edges"]').count()) === 0, '关闭后连线仍显示'));
-  expect((await page.locator('[data-testid="screen-card"][data-route="/s1"] .warn').count()) === 1, '关闭连线后断链标记消失');
+  await focus('/s1');
+  await page.waitForTimeout(1000);
+  expect((await edgesEl.count()) === 0, '⑤ 关掉「连线」后进交互仍画了');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  expect((await page.locator('[data-testid="screen-card"][data-route="/s1"] .warn').count()) === 1, '⑤ 关掉连线后断链标记消失');
+  await page.reload();
+  await page.locator('[data-testid="screen-card"]').first().waitFor();
+  expect((await page.getByTestId('toggle-links').getAttribute('aria-pressed')) === 'false', '⑤ 刷新后「连线」开关没保持关');
+  // 6 打开；减弱动态下第一次出现就是 done
   await page.getByTestId('toggle-links').click();
-  await page.locator('[data-testid="link-edges"]').waitFor({ timeout: 5000 });
-  return `${edges.drawn} 条连线，最大计数 ${edges.max}，画出 ${edges.ink} 个像素`;
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await recordStates();
+  await focus('/s1');
+  await eventually(async () => expect((await edgesEl.count()) === 1, '⑥ 连线没出现'));
+  await page.waitForTimeout(300);
+  const rm = await states();
+  expect(rm.length >= 1 && !rm.includes('growing'), `⑥ 减弱动态下不该有 growing：${JSON.stringify(rm)}`);
+  await page.emulateMedia({ reducedMotion: null });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  return `/s1 ${want1} 条（${st.join('→')}）、${ink.filter((n) => n > 20).length} 种颜色；跳到 /s2 ${want2} 条；Esc 撤掉；开关关时不画、刷新保持；减弱动态直接 done`;
 });
 
 await step('TC-PROTO-009', async () => {

@@ -642,19 +642,21 @@ await step('TC-CORE-079', '3', async () => {
 });
 
 // ---------- TC-CORE-097 外观三选一（v1.08，REQ-CORE-039）：切换即时生效、记在本机、跟随系统；画布标记与 canvas 颜色跟着换 ----------
-// 颜色取 brand/ 的值（v1.15）：画布底浅 #EAEAEF / 深 #0A0A0B，标记色浅 #0071E3 / 深 #0A84FF（连线与小地图的视口框都用它）
+// 颜色取 brand/ 的值（v1.15）：画布底浅 #EAEAEF / 深 #0A0A0B，标记色浅 #0071E3 / 深 #0A84FF（小地图的视口框用它）；
+// 连线用数据可视化色、只在交互时画（v1.29）：series-2 浅 #7C22A6 / 深 #BD6614（series-1 深浅同色，分不出来）
 const THEME = {
   light: { canvas: 'rgb(234, 234, 239)', mark: 'rgb(0, 113, 227)', markRgb: [0, 113, 227] },
   dark: { canvas: 'rgb(10, 10, 11)', mark: 'rgb(10, 132, 255)', markRgb: [10, 132, 255] },
 } as const;
+const SERIES2 = { light: [124, 34, 166], dark: [189, 102, 20] } as const;
 const themePid = seedProject('Theme', '--device', 'mobile', '--screens', '3').projectId;
 const shell = (page: Page) => page.evaluate(() => ({
   theme: document.documentElement.getAttribute('data-theme'), stored: localStorage.getItem('quilt:theme'),
   canvas: getComputedStyle(document.querySelector('.viewport')!).backgroundColor,
   card: getComputedStyle(document.querySelector('[data-testid="screen-card"]')!).backgroundColor,
 }));
-// 画在 <canvas> 上的颜色：数离目标色很近的像素（连线与它的计数徽标、小地图的视口框）。容差 12：深浅两套标记色都是蓝、通道和只差 57，
-// 徽标里的字压在标记色上，抗锯齿边混出来的颜色离另一套标记色只有 15 左右，容差放宽就会被数成另一套
+// 画在 <canvas> 上的颜色：数离目标色很近的像素（连线、小地图的视口框）。容差 12：深浅两套标记色都是蓝、通道和只差 57，
+// 抗锯齿边混出来的颜色离另一套标记色只有 15 左右，容差放宽就会被数成另一套
 const inkOn = (page: Page, sel: string, rgb: readonly number[]) => page.evaluate(([s, c]) => {
   const el = document.querySelector(s) as HTMLCanvasElement | null; if (!el) return -1;
   const d = el.getContext('2d')!.getImageData(0, 0, el.width, el.height).data; let n = 0;
@@ -680,15 +682,19 @@ await step('TC-CORE-097', '1', async () => {
   expect(s0.card === 'rgb(255, 255, 255)' && s1.card === 'rgb(255, 255, 255)', `卡片白底应不随外观变：${s0.card} → ${s1.card}`);
   await page.keyboard.press('Escape');
   await sleep(300);
-  // 选中一屏：描边是深色的标记色；连线与小地图按深色重画
+  // 选中一屏：描边是深色的标记色；小地图按深色重画
   await card(page, '/s1').locator('.gesture').click();
   await sleep(400);
   const outline = await card(page, '/s1').evaluate((el) => getComputedStyle(el).outlineColor);
   expect(outline === THEME.dark.mark, `深色下选中描边是 ${outline}，应是 ${THEME.dark.mark}`);
-  const edgesDark = await inkOn(page, '.viewport > .edges', THEME.dark.markRgb); const edgesLightGone = await inkOn(page, '.viewport > .edges', THEME.light.markRgb);
   const miniDark = await inkOn(page, '[data-testid="minimap"]', THEME.dark.markRgb);
-  expect(edgesDark > 0 && edgesLightGone === 0, `连线没按深色重画：深色标记色 ${edgesDark} 像素、浅色标记色 ${edgesLightGone} 像素`);
   expect(miniDark > 0, '小地图的视口框没按深色重画');
+  // 再按 Enter 进交互：连线按深色的数据可视化色画（v1.29）
+  await page.keyboard.press('Enter');
+  await page.locator('.viewport > .edges[data-state="done"]').waitFor({ timeout: 10000 });
+  const edgesDark = await inkOn(page, '.viewport > .edges', SERIES2.dark); const edgesLightGone = await inkOn(page, '.viewport > .edges', SERIES2.light);
+  expect(edgesDark > 0 && edgesLightGone === 0, `连线没按深色画：深色 series-2 ${edgesDark} 像素、浅色 series-2 ${edgesLightGone} 像素`);
+  await page.keyboard.press('Escape');
   return `跟随系统（浅）→ 选深色：data-theme=dark、记在本机、画布底 ${s1.canvas}、描边 ${outline}、连线 ${edgesDark} 像素、卡片白底不变`;
 });
 
