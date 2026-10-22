@@ -12,7 +12,7 @@ import { applyPreset, createPreset, deletePreset, listPresets } from '../../serv
 import { listChannels } from '../../services/channels.ts';
 import { assertSketchbookMessage, isSketchbook } from '../../services/sketchbook.ts';
 // 聊天通道（REQ-CORE-023）：Agent SDK 只认 Claude——必须是 agent-sdk 通道；缺省取第一条已验证的，一条都没有就点名去设置页加
-const CHAT_CHANNEL_HINT = L('聊天需要「本机 Claude 订阅」通道：去设置页添加并验证一条', 'Chat needs a Local Claude subscription channel: add and verify one in Settings');
+const CHAT_CHANNEL_HINT = L('聊天需要「本机 Claude 订阅」的模型：去设置页添加并验证一个', 'Chat needs a Local Claude subscription model: add and verify one in Settings');
 async function chatRunner(userId: string, runner: Runner | undefined): Promise<Runner> {
   const mine = await listChannels(userId);
   if (runner) {

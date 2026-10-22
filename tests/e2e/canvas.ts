@@ -670,7 +670,7 @@ await step('TC-CORE-097', '1', async () => {
   expect(s0.theme === null && s0.stored === null && s0.canvas === THEME.light.canvas, `没选过外观时应跟随系统浅色：${JSON.stringify(s0)}`);
   await page.evaluate(() => { (window as unknown as { __sameDoc: boolean }).__sameDoc = true; });
   await page.getByTestId('open-settings').click();
-  await page.getByTestId('settings-tab-appearance').click();
+  await page.getByTestId('settings-tab-system').click();
   await page.getByTestId('theme-options').waitFor({ timeout: 8000 });
   await page.getByTestId('theme-dark').click();
   await sleep(500);
@@ -720,7 +720,7 @@ await step('TC-CORE-097', '3', async () => {
   // 改回「跟随系统」：data-theme 与本机记录都清掉，外壳跟着系统偏好变
   const page = await open(themePid);
   await page.evaluate(() => localStorage.setItem('quilt:theme', 'light'));
-  await page.goto(`${WEB}/p/${themePid}?settings=appearance`);
+  await page.goto(`${WEB}/p/${themePid}?settings=system`);
   await page.getByTestId('theme-options').waitFor({ timeout: 8000 });
   await page.emulateMedia({ colorScheme: 'dark' });
   const forced = await shell(page);

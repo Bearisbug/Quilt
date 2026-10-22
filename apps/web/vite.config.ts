@@ -13,7 +13,7 @@ export default defineConfig({
     strictPort: true,
     // 本机 Vite 8 原生文件监听丢事件（M0 实证），开发用轮询
     watch: { usePolling: true, interval: 300 },
-    // 同源代理到 API：会话 cookie 无需跨站
-    proxy: { '/v1': { target: 'http://localhost:3100', changeOrigin: false } },
+    // 同源代理到 API：会话 cookie 无需跨站。QUILT_API_PROXY 让另起的 Vite 指到隔离测试栈（开发库 3100 不是跑测试的地方）
+    proxy: { '/v1': { target: process.env.QUILT_API_PROXY ?? 'http://localhost:3100', changeOrigin: false } },
   },
 });

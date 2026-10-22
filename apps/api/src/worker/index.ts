@@ -1,11 +1,13 @@
-import { and, eq, lt, isNull, isNotNull, sql, inArray, notInArray, desc } from 'drizzle-orm';
+import { and, eq, lt, isNull, isNotNull, sql, inArray, notInArray, desc, or, like } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
 import { jobQueue, shotQueue } from '../services/jobs.ts';
 import { emitProjectEvent, notifyCanvas } from '../lib/events.ts';
 import { storage } from '../lib/storage.ts';
-import { storeRevisionShot, storeThumb } from '../services/screens.ts';
-import { screenshotHtml } from '../lib/screenshot.ts';
+import { storeRevisionShot, storeThumb, deleteUnreferenced } from '../services/screens.ts';
+import { archiveAttachment } from '../services/record.ts';
+import { screenshotHtml, losslessWebp, loadWebpEncoder } from '../lib/screenshot.ts';
+import { SHOT_KEEP_MS, keepsScreenshot, prunePlan, shotKeyVariant } from '../lib/shots.ts';
 import { shotSpecFor, type Presentation } from '@quilt/core';
 import { runJob } from './pipeline.ts';
 import { startAgentDelivery, deliverAgentJob } from './agentDelivery.ts';
@@ -29,6 +31,7 @@ export async function renderRevisionScreenshot(revisionId: string): Promise<bool
 }
 
 // screenshot.retry（§17）：补扫缺截图的修订（创建超过 30 s、每轮最多 50 条），各屏当前版先扫——历史版与候选缺图只影响修订面板。
+// v1.27（ADR-037）只补当前版与待采用候选的截图；历史修订只为缺的缩略图拍（一次都没拍成的），被 screenshot.prune 清掉截图的旧版留着缩略图，不补。
 // 同一修订失败第 n 次后 5 min × 2^(n−1) 内不再扫（封顶 6 h，进程内计数）：永久拍不成的修订（对象丢了、页面本身坏了）
 // 不能占满每轮的 50 个名额、把别的修订挤出去
 const shotFailures = new Map<string, { n: number; until: number }>();
@@ -42,7 +45,8 @@ export async function retryScreenshots(): Promise<number> {
     const rows = await db.select({ id: schema.screenRevisions.id })
       .from(schema.screenRevisions)
       .innerJoin(schema.screens, eq(schema.screens.id, schema.screenRevisions.screenId))
-      .where(and(isNull(schema.screenRevisions.screenshotKey), lt(schema.screenRevisions.createdAt, new Date(now - 30_000)), waiting.length ? notInArray(schema.screenRevisions.id, waiting) : undefined))
+      .where(and(isNull(schema.screenRevisions.screenshotKey), lt(schema.screenRevisions.createdAt, new Date(now - 30_000)), waiting.length ? notInArray(schema.screenRevisions.id, waiting) : undefined,
+        or(eq(schema.screens.currentRevisionId, schema.screenRevisions.id), and(isNotNull(schema.screenRevisions.candidateIndex), isNull(schema.screenRevisions.candidateSettledAt)), isNull(schema.screenRevisions.thumbKey))))
       .orderBy(sql`(${schema.screens.currentRevisionId} = ${schema.screenRevisions.id}) is true desc`, desc(schema.screenRevisions.createdAt))
       .limit(50);
     let n = 0;
@@ -77,8 +81,8 @@ async function backfillThumbs() {
   for (const r of rows) {
     try {
       // 呈现方式与画框按截图键认：键里带 .overlay 的就是按叠层拍的（§16 v1.03；之前的叠层截图键不带，按整屏命名缩略图），草稿的键带画框（REQ-CORE-040）
-      const [, overlay, frame] = r.screenshotKey!.match(/(\.overlay)?(?:\.(component|mobile|desktop))?\.png$/) ?? [];
-      const thumbKey = await storeThumb(r.projectId, r.screenId, r.id, await storage.get(r.screenshotKey!), overlay ? 'overlay' : 'push', frame ?? null);
+      const v = shotKeyVariant(r.screenshotKey!);
+      const thumbKey = await storeThumb(r.projectId, r.screenId, r.id, await storage.get(r.screenshotKey!), v?.overlay ? 'overlay' : 'push', v?.frame ?? null);
       const done = await db.update(schema.screenRevisions).set({ thumbKey })
         .where(and(eq(schema.screenRevisions.id, r.id), eq(schema.screenRevisions.screenshotKey, r.screenshotKey!))).returning({ id: schema.screenRevisions.id });
       if (done.length) { touched.add(r.projectId); n++; }
@@ -89,6 +93,73 @@ async function backfillThumbs() {
   }
   for (const projectId of touched) await notifyCanvas(projectId, { reason: 'thumbnail' });
   if (rows.length) console.log(`[thumbnail.retry] backfilled ${n}/${rows.length}`);
+}
+
+// screenshot.prune（§17 v1.27 ADR-037）：每小时一轮、批 200——不是当前版、不是待采用候选、建出来超过 24 小时的修订只留缩略图。
+// 还没有缩略图的先从整屏截图补一张，补不成的这一轮不清。锁住这几屏、按键收齐全部引用（回到旧版在同一把锁下决定沿用哪个键），
+// 只把键置空；对象等没有任何修订再引用这个键才删。使用记录开着也不归档：缩略图与 HTML 都还在
+let pruning = false;
+export async function pruneScreenshots(now = Date.now()): Promise<number> {
+  if (pruning) return 0;
+  pruning = true;
+  try {
+    const rows = await db.select({ id: schema.screenRevisions.id, key: schema.screenRevisions.screenshotKey, thumbKey: schema.screenRevisions.thumbKey, screenId: schema.screens.id, projectId: schema.screens.projectId })
+      .from(schema.screenRevisions)
+      .innerJoin(schema.screens, eq(schema.screens.id, schema.screenRevisions.screenId))
+      .where(and(isNotNull(schema.screenRevisions.screenshotKey), lt(schema.screenRevisions.createdAt, new Date(now - SHOT_KEEP_MS)),
+        sql`${schema.screens.currentRevisionId} is distinct from ${schema.screenRevisions.id}`,
+        sql`not (${schema.screenRevisions.candidateIndex} is not null and ${schema.screenRevisions.candidateSettledAt} is null)`))
+      .orderBy(schema.screenRevisions.createdAt)
+      .limit(200);
+    if (!rows.length) return 0;
+    for (const r of rows) {
+      if (r.thumbKey) continue;
+      try {
+        const v = shotKeyVariant(r.key!);
+        const thumbKey = await storeThumb(r.projectId, r.screenId, r.id, await storage.get(r.key!), v?.overlay ? 'overlay' : 'push', v?.frame ?? null);
+        const done = await db.update(schema.screenRevisions).set({ thumbKey })
+          .where(and(eq(schema.screenRevisions.id, r.id), eq(schema.screenRevisions.screenshotKey, r.key!), isNull(schema.screenRevisions.thumbKey))).returning({ id: schema.screenRevisions.id });
+        if (!done.length) await deleteUnreferenced([thumbKey]);
+      } catch (e) { console.warn(`[screenshot.prune] ${r.id} 补缩略图没成，这一轮不清：${(e as Error).message}`); }
+    }
+    const keys = [...new Set(rows.map((r) => r.key!))];
+    const screenIds = [...new Set(rows.map((r) => r.screenId))].sort();
+    const plan = await db.transaction(async (tx) => {
+      await tx.select({ id: schema.screens.id }).from(schema.screens).where(inArray(schema.screens.id, screenIds)).orderBy(schema.screens.id).for('update');
+      const refs = await tx.select({ id: schema.screenRevisions.id, key: schema.screenRevisions.screenshotKey, thumbKey: schema.screenRevisions.thumbKey, candidateIndex: schema.screenRevisions.candidateIndex, candidateSettledAt: schema.screenRevisions.candidateSettledAt, createdAt: schema.screenRevisions.createdAt, current: schema.screens.currentRevisionId })
+        .from(schema.screenRevisions)
+        .innerJoin(schema.screens, eq(schema.screens.id, schema.screenRevisions.screenId))
+        .where(inArray(schema.screenRevisions.screenshotKey, keys));
+      const p = prunePlan(refs.map((r) => ({ id: r.id, key: r.key!, hasThumb: !!r.thumbKey, keep: keepsScreenshot({ isCurrent: r.current === r.id, candidateIndex: r.candidateIndex, candidateSettledAt: r.candidateSettledAt, createdAt: r.createdAt }, now) })));
+      if (p.clear.length) await tx.update(schema.screenRevisions).set({ screenshotKey: null }).where(inArray(schema.screenRevisions.id, p.clear));
+      return p;
+    });
+    await deleteUnreferenced(plan.deleteKeys);
+    console.log(`[screenshot.prune] 清掉 ${plan.clear.length} 个修订的整屏截图，删了 ${plan.deleteKeys.length} 个对象`);
+    return plan.clear.length;
+  } finally { pruning = false; }
+}
+
+// 存量截图转 WebP（v1.27 ADR-037，§25）：要保留截图的修订（当前版、待采用候选、24 小时内建的）还是 PNG 的，转成无损 WebP，
+// 写好新对象再按键换掉全部引用（回到旧版建的修订可能共用同一个键）、删 PNG。中途重启时没换键的下次启动接着转；其余旧版的 PNG 交给 screenshot.prune
+export async function convertLegacyShots(now = Date.now()): Promise<number> {
+  const rows = await db.select({ id: schema.screenRevisions.id, key: schema.screenRevisions.screenshotKey, candidateIndex: schema.screenRevisions.candidateIndex, candidateSettledAt: schema.screenRevisions.candidateSettledAt, createdAt: schema.screenRevisions.createdAt, current: schema.screens.currentRevisionId })
+    .from(schema.screenRevisions)
+    .innerJoin(schema.screens, eq(schema.screens.id, schema.screenRevisions.screenId))
+    .where(like(schema.screenRevisions.screenshotKey, '%.png'));
+  const keys = [...new Set(rows.filter((r) => keepsScreenshot({ isCurrent: r.current === r.id, candidateIndex: r.candidateIndex, candidateSettledAt: r.candidateSettledAt, createdAt: r.createdAt }, now)).map((r) => r.key!))];
+  let n = 0;
+  for (const key of keys) {
+    try {
+      const webpKey = key.replace(/\.png$/, '.webp');
+      await storage.put(webpKey, await losslessWebp(await storage.get(key)), 'image/webp');
+      await db.update(schema.screenRevisions).set({ screenshotKey: webpKey }).where(eq(schema.screenRevisions.screenshotKey, key));
+      await deleteUnreferenced([key]);
+      n++;
+    } catch (e) { console.warn(`[screenshot.convert] ${key}: ${(e as Error).message}`); }
+  }
+  if (keys.length) console.log(`[screenshot.convert] 存量 PNG 转成 WebP ${n}/${keys.length}`);
+  return n;
 }
 
 // 进程重启的收口（ADR-010 v0.32）：queued 的作业补上——model 的入队、agent 的投递（deliverAgentJob 自己校验会话，不在就收成 failed）；
@@ -114,7 +185,8 @@ async function sweepUploads() {
 }
 
 // storage.gc（§17 v1.03）：删超过 24 小时的导出产物（画布导出成功即下载，get_export 的地址 5 分钟过期）；
-// 删上传超过 24 小时、没被任何消息或作业输入引用的参考图附件。删失败的下一轮再扫
+// 删上传超过 24 小时、没被任何消息或作业输入引用的参考图附件（使用记录开着时先拷进 records/archive/<日期>/attachments/，v1.22）。
+// 只扫 projects/ 下这两类，不扫 records/。删失败的下一轮再扫
 const DAY = 24 * 3600_000;
 export async function sweepStorage(now = Date.now()) {
   const projects = await db.select({ id: schema.projects.id }).from(schema.projects);
@@ -126,7 +198,7 @@ export async function sweepStorage(now = Date.now()) {
     const msgs = await db.select({ a: schema.messages.attachments }).from(schema.messages).where(eq(schema.messages.projectId, p.id));
     const jobs = await db.select({ input: schema.generationJobs.input }).from(schema.generationJobs).where(eq(schema.generationJobs.projectId, p.id));
     const used = new Set([...msgs.flatMap((m) => ((m.a ?? []) as { key: string }[]).map((x) => x.key)), ...jobs.flatMap((j) => ((j.input as { imageKeys?: string[] }).imageKeys ?? []))]);
-    for (const o of stale) if (!used.has(o.key)) { await storage.delete(o.key); removed++; }
+    for (const o of stale) if (!used.has(o.key)) { await archiveAttachment(p.id, o.key); await storage.delete(o.key); removed++; }
   }
   if (removed) console.log(`[storage.gc] removed ${removed} object(s)`);
   return removed;
@@ -158,8 +230,14 @@ export async function startWorker() {
   }, 60_000).unref();
   setTimeout(() => retryScreenshots().catch(() => {}), 3_000);
   setInterval(() => retryScreenshots().catch(() => {}), 5 * 60_000).unref();
+  setTimeout(() => convertLegacyShots().catch((e) => console.error('[screenshot.convert]', e)), 5_000).unref();
+  setTimeout(() => pruneScreenshots().catch((e) => console.error('[screenshot.prune]', e)), config.screenshotPruneFirstMs).unref();
+  setInterval(() => pruneScreenshots().catch((e) => console.error('[screenshot.prune]', e)), 3600_000).unref();
   setInterval(() => sweepUploads().catch((e) => console.error('[upload.gc]', e)), 60_000).unref();
   setTimeout(() => sweepStorage().catch((e) => console.error('[storage.gc]', e)), 60_000).unref();
   setInterval(() => sweepStorage().catch((e) => console.error('[storage.gc]', e)), 3600_000).unref();
-  console.log(`[worker] in-process queues ready (concurrency ${config.workerConcurrency}, llm=${config.llmDriver}, screenshot=${config.screenshotChannel || 'auto'})`);
+  // 整屏截图的编码器（§17 sharp 一行）：sharp 加载失败时 loadWebpEncoder 已另记一行退回浏览器编码的原因
+  const sharp = await loadWebpEncoder();
+  const webp = sharp ? `sharp ${sharp.versions.sharp ?? ''} / libvips ${sharp.versions.vips}` : 'browser';
+  console.log(`[worker] in-process queues ready (concurrency ${config.workerConcurrency}, llm=${config.llmDriver}, screenshot=${config.screenshotChannel || 'auto'}, webp=${webp})`);
 }

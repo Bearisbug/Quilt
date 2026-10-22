@@ -1,12 +1,13 @@
 // docs/TEST.md CORE 域 · 后端、截图与测试基础设施（TC-CORE-070 起，v0.82）。由 ../core.ts 按顺序引入，共用的浏览器、页面与脚手架在 ./shared.ts
-import { stat, readdir, utimes } from 'node:fs/promises';
+import { stat, readdir, utimes, readFile, writeFile, rm } from 'node:fs/promises';
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { seedJson, apiJson, ROOT, WEB, API, eventually, localFetch, zhCN } from '../lib.ts';
+import sharp from 'sharp';
+import { seedJson, apiJson, objectsDir, WEB, API, eventually, localFetch, zhCN } from '../lib.ts';
 import { connectMcp, callTool } from '../mcp-client.ts';
-import { expect, softly, waitJob } from '../harness.ts';
+import { expect, softly, waitJob, restartApi } from '../harness.ts';
 import { page, step, shot, blankSpot, STUB_RUNNER, uploadPng, idemKey, sleep079 } from './shared.ts';
 
 // ---------- v0.82 后端、截图与测试基础设施 ----------
@@ -289,7 +290,7 @@ await step('TC-CORE-090', async () => {
   const RESTART = process.env.QUILT_E2E_RESTART;
   expect(RESTART, '环境：未设 QUILT_E2E_RESTART（重启被测 API 的命令，§3）');
   const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'StorageGc', '--device', 'mobile', '--screens', '1', '--no-shot');
-  const objects = path.join(ROOT, '.data/objects/projects', pid);
+  const objects = path.join(await objectsDir(), 'projects', pid);
   try {
     const ex = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ kind: 'export_prototype', input: {} }) });
     expect((await waitJob(ex.body.job.id, 90) as { status: string }).status === 'succeeded', '导出没成功');
@@ -454,4 +455,158 @@ await step('TC-CORE-095', async () => {
     expect(stored.includes('https://cdn.tailwindcss.com/3.4.17') && stored.includes('https://unpkg.com/lucide@1.55.0/dist/umd/lucide.min.js'), '修订里应存钉死版本的外网地址');
     return `预览域引 ${local.join('、')}，长缓存下发；修订里存钉死版本的外网地址；未知文件 404`;
   } finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
+});
+
+// TC-CORE-151 截图存储瘦身（ADR-037、API-CORE-015，v1.27）：整屏截图存无损 WebP；不是当前版、不是待采用候选、超过 24 小时的旧版由 screenshot.prune
+// 清掉整屏截图、只留缩略图，MCP 取旧版时当场重拍；回到旧版共用源修订的对象，截图三条都成立才沿用；共用的键还有修订要用时只置空、不删对象；
+// 存量 PNG 启动后转成 WebP；screenshot.retry 不补被清掉的旧版。要 QUILT_E2E_RESTART（§3）；改 created_at 与截图键走 docker 里的 quilt-pg
+await step('TC-CORE-151', async () => {
+  const db = (await apiJson<{ database?: string }>('/v1/health')).body.database ?? '';
+  const psql = (q: string) => execFileSync('docker', ['exec', 'quilt-pg', 'psql', '-U', 'quilt', '-d', db, '-Atc', q], { encoding: 'utf8' }).trim();
+  const sq = (s: string) => `'${s.replace(/'/g, "''")}'`;
+  const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Shots', '--device', 'mobile', '--screens', '2');
+  const [s1, s2] = screens.map((s) => s.id);
+  const objects = await objectsDir();
+  const exists = (key: string) => stat(path.join(objects, key)).then(() => true, () => false);
+  const screenDir = path.join(objects, 'projects', pid, 'screens', s1);
+  const row = (id: string) => { const [shot = '', thumb = '', html = ''] = psql(`select coalesce(screenshot_key, ''), coalesce(thumb_key, ''), html_key from screen_revisions where id = ${sq(id)}`).split('|'); return { shot, thumb, html }; };
+  const currentOf = async (sid: string) => (await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${pid}`)).body.screens.find((s) => s.id === sid)!.currentRevisionId;
+  const shotOf = async (id: string, label: string) => { await eventually(() => expect(row(id).shot, 'shot'), 40_000, 500).catch(() => { throw new Error(`${label}：40 s 内没有截图`); }); return row(id); };
+  const backdate = (...ids: string[]) => psql(`update screen_revisions set created_at = now() - interval '25 hours' where id in (${ids.map(sq).join(', ')})`);
+  let knob = false;
+  // 用短首轮间隔重启，等 screenshot.prune 跑完一轮（done 成立）
+  const pruneRound = async (done: () => boolean, label: string) => {
+    knob = true;
+    await restartApi({ QUILT_SCREENSHOT_PRUNE_FIRST_MS: '3000' });
+    await eventually(() => expect(done(), label), 90_000, 1000).catch(() => { throw new Error(`${label}：重启 90 s 内 screenshot.prune 没清掉`); });
+  };
+  const restore = async (rev: string) => {
+    const r = await apiJson<{ revision: { id: string } }>(`/v1/screens/${s1}/revisions/${rev}/restore`, { method: 'POST', body: JSON.stringify({ expectedRevisionId: await currentOf(s1) }) });
+    expect(r.status === 201, `回到旧版 ${r.status}`);
+    return r.body.revision.id;
+  };
+  const setPresentation = async (p: 'push' | 'overlay') => {
+    expect((await apiJson(`/v1/screens/${s1}`, { method: 'PATCH', body: JSON.stringify({ presentation: p }) })).status === 200, `改呈现方式 ${p}`);
+    await shotOf(await currentOf(s1), `改成 ${p} 后当前版重拍`);
+  };
+  const notes: string[] = [];
+  try {
+    // 前置：/s1 经接口改两轮（直改标题），共 3 版，等截图都拍完
+    const v1 = await currentOf(s1);
+    const edit = async (title: string) => {
+      const cur = await currentOf(s1);
+      const htmlUrl = (await apiJson<{ revision: { htmlUrl: string } }>(`/v1/screens/${s1}/revisions/${cur}`)).body.revision.htmlUrl;
+      const qid = /<h1[^>]*data-qid="([^"]+)"/.exec(await (await fetch(htmlUrl)).text())?.[1];
+      expect(qid, '找不到 /s1 标题的 qid');
+      const r = await apiJson<{ revision: { id: string } }>(`/v1/screens/${s1}/elements/${qid}`, { method: 'POST', body: JSON.stringify({ ops: [{ type: 'text', value: title }], expectedRevisionId: cur }) });
+      expect(r.status === 201, `直改 ${r.status}`);
+      return r.body.revision.id;
+    };
+    const v2 = await edit('Screen 1 v2');
+    const v3 = await edit('Screen 1 v3');
+    for (const [id, n] of [[v1, 'v1'], [v2, 'v2'], [v3, 'v3']]) await shotOf(id, `前置 ${n}`);
+
+    // 1 v3 的截图是无损 WebP，缩略图照旧是 .thumb.webp
+    const r3 = row(v3);
+    const buf = await readFile(path.join(objects, r3.shot));
+    expect(r3.shot.endsWith(`${v3}.webp`), `① 截图键应以 <修订 id>.webp 结尾：${r3.shot}`);
+    expect(buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP' && buf.indexOf('VP8L') >= 12, `① 文件头不是 RIFF…WEBP + VP8L：${buf.subarray(0, 16).toString('hex')}`);
+    expect(r3.thumb.endsWith(`${v3}.thumb.webp`), `① 缩略图键：${r3.thumb}`);
+    notes.push(`①${Math.round(buf.length / 1024)} KB VP8L`);
+
+    // 2 v1 拨到 25 小时前，短首轮间隔重启：v1 的截图清掉、对象已删，缩略图与 HTML 还在；v2、v3 不动
+    const r1 = row(v1); const r2 = row(v2);
+    backdate(v1);
+    await pruneRound(() => row(v1).shot === '', '② v1 的截图');
+    expect(!(await exists(r1.shot)), `② v1 的截图对象应已删：${r1.shot}`);
+    expect(row(v1).thumb === r1.thumb && (await exists(r1.thumb)) && (await exists(r1.html)), '② v1 的缩略图与 HTML 应还在');
+    expect(row(v2).shot === r2.shot && row(v3).shot === r3.shot && (await exists(r2.shot)) && (await exists(r3.shot)), '② v2（24 小时内）与 v3（当前版）的截图不该动');
+
+    // 3 GET v1：screenshotUrl 为空、thumbUrl 取得到；修订面板里 v1 照常显示缩略图
+    const g1 = (await apiJson<{ revision: { screenshotUrl: string | null; thumbUrl: string | null } }>(`/v1/screens/${s1}/revisions/${v1}`)).body.revision;
+    expect(g1.screenshotUrl === null && g1.thumbUrl, `③ GET v1：screenshotUrl=${g1.screenshotUrl} thumbUrl=${g1.thumbUrl}`);
+    const t1 = await fetch(g1.thumbUrl!);
+    expect(t1.status === 200 && t1.headers.get('content-type') === 'image/webp', `③ 缩略图 ${t1.status} ${t1.headers.get('content-type')}`);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(`${WEB}/p/${pid}`);
+    await page.locator('[data-testid="screen-card"][data-route="/s1"] .gesture').click();
+    await page.keyboard.press('Alt+r');
+    const img = page.locator('[data-testid="revision"][data-seq="1"] img');
+    await img.waitFor({ timeout: 10_000 });
+    await eventually(async () => expect(await img.evaluate((i) => (i as HTMLImageElement).complete && (i as HTMLImageElement).naturalWidth > 0), 'thumb'), 10_000)
+      .catch(() => { throw new Error('③ 修订面板里 v1 的缩略图没显示出来'); });
+    expect((await img.getAttribute('src'))?.includes('.thumb.webp'), `③ 面板里 v1 用的不是缩略图：${await img.getAttribute('src')}`);
+    await shot(page, 'CORE-151');
+    await page.goto('about:blank');
+
+    // 4 MCP get_revision 取 v1：当场从 HTML 重拍，返回的地址取得到图，v1 的 screenshot_key 又有值
+    const mcp = await connectMcp();
+    try {
+      const got = (await callTool(mcp, 'quilt.get_revision', { screenId: s1, revisionId: v1 })).json as { revision: { screenshotUrl: string | null } };
+      expect(got.revision.screenshotUrl, '④ get_revision 返回的截图地址为空');
+      const res = await fetch(got.revision.screenshotUrl!);
+      const body = Buffer.from(await res.arrayBuffer());
+      expect(res.status === 200 && res.headers.get('content-type') === 'image/webp' && body.toString('ascii', 8, 12) === 'WEBP', `④ 截图地址 ${res.status} ${res.headers.get('content-type')}`);
+      expect(row(v1).shot, '④ v1 的 screenshot_key 应又有值');
+    } finally { await mcp.close(); }
+
+    // 5 回到 v2：v4 与 v2 共用 html / 截图 / 缩略图三个键，屏的目录里不多文件，也不为 v4 重拍
+    const before = (await readdir(screenDir)).sort();
+    const v4 = await restore(v2);
+    await new Promise((r) => setTimeout(r, 5000));
+    const r4 = row(v4);
+    expect(r4.html === r2.html && r4.shot === r2.shot && r4.thumb === r2.thumb, `⑤ v4 应与 v2 共用三个键：${JSON.stringify(r4)} vs ${JSON.stringify(r2)}`);
+    const after = (await readdir(screenDir)).sort();
+    expect(after.join() === before.join(), `⑤ 屏的目录多出文件：${after.filter((f) => !before.includes(f)).join(' ')}`);
+
+    // 6 再把 v1 的截图清掉，回到 v1：v5 共用 v1 的 HTML，截图新拍（新的键），缩略图跟着新拍
+    await pruneRound(() => row(v1).shot === '', '⑥ v1 的截图');
+    const v5 = await restore(v1);
+    const r5 = await shotOf(v5, '⑥ v5');
+    expect(r5.html === r1.html, `⑥ v5 应共用 v1 的 HTML：${r5.html}`);
+    expect(r5.shot.endsWith(`${v5}.webp`) && r5.shot !== r1.shot, `⑥ v5 的截图应是新拍的：${r5.shot}`);
+    await eventually(() => expect(row(v5).thumb.endsWith(`${v5}.thumb.webp`), 'thumb'), 10_000).catch(() => { throw new Error(`⑥ v5 的缩略图应跟着新拍：${row(v5).thumb}`); });
+
+    // 7 /s1 改成叠层，回到 v2：呈现方式不一致，重拍，键是 .overlay.webp
+    await setPresentation('overlay');
+    const v6 = await restore(v2);
+    const r6 = await shotOf(v6, '⑦ v6');
+    expect(r6.shot.endsWith(`${v6}.overlay.webp`), `⑦ 叠层下回到 v2 应重拍成 .overlay.webp：${r6.shot}`);
+
+    // 8 切回整屏；v2（连同共用它截图的 v4）拨到 25 小时前，回到 v2 让 v7 共用它的截图，再跑一轮 prune：v2 置空、对象还在（v7 是当前版）
+    await setPresentation('push');
+    backdate(v2, v4);
+    const v7 = await restore(v2);
+    expect(row(v7).shot === r2.shot, `⑧ v7 应共用 v2 的截图：${row(v7).shot}`);
+    await pruneRound(() => row(v2).shot === '', '⑧ v2 的截图');
+    expect(await exists(r2.shot), `⑧ v7 还在用的截图对象被删了：${r2.shot}`);
+    expect(row(v7).shot === r2.shot, `⑧ v7 的截图键不该动：${row(v7).shot}`);
+
+    // 9 /s2 的当前版换成 PNG 键（对象目录里只放 PNG），重启：后台转回无损 WebP、PNG 删掉、逐像素相同
+    const c2 = await currentOf(s2);
+    const webpKey = row(c2).shot;
+    const pngKey = webpKey.replace(/\.webp$/, '.png');
+    const png = await sharp(await readFile(path.join(objects, webpKey))).png().toBuffer();
+    await writeFile(path.join(objects, pngKey), png);
+    await rm(path.join(objects, webpKey));
+    psql(`update screen_revisions set screenshot_key = ${sq(pngKey)} where id = ${sq(c2)}`);
+    knob = false;
+    await restartApi({});
+    await eventually(() => expect(row(c2).shot === webpKey, 'convert'), 60_000, 1000).catch(() => { throw new Error(`⑨ 重启 60 s 内存量 PNG 没转成 WebP：${row(c2).shot}`); });
+    expect(!(await exists(pngKey)), `⑨ PNG 应已删：${pngKey}`);
+    const raw = (b: Buffer) => sharp(b).ensureAlpha().raw().toBuffer();
+    const converted = await readFile(path.join(objects, webpKey));
+    expect(converted.indexOf('VP8L') >= 12 && (await raw(converted)).equals(await raw(png)), '⑨ 转出来的不是与 PNG 逐像素相同的无损 WebP');
+    notes.push(`⑨PNG ${Math.round(png.length / 1024)} KB → WebP ${Math.round(converted.length / 1024)} KB`);
+
+    // 10 screenshot.retry 再跑一轮（/s2 当前版的截图置空当哨兵：它被补上说明这一轮跑过了），被清掉截图的旧版没补回来
+    psql(`update screen_revisions set screenshot_key = null where id = ${sq(c2)}`);
+    await restartApi({});
+    await shotOf(c2, '⑩ 哨兵（/s2 当前版）');
+    expect(row(v1).shot === '' && row(v2).shot === '' && row(v4).shot === '', `⑩ 被清掉的旧版截图又被补回来了：v1=${row(v1).shot} v2=${row(v2).shot} v4=${row(v4).shot}`);
+    return `10 步通过：${notes.join('；')}；v4/v7 共用 v2 的截图，v5、v6 重拍`;
+  } finally {
+    if (knob) await restartApi({}).catch(() => {});
+    await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});
+  }
 });

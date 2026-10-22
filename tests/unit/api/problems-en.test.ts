@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Hono } from 'hono';
-import { L, createMessageSchema, copyDraftSchema, fontFamilySchema, fontUrlSchema, componentNameSchema, updateComponentSchema, createChannelSchema } from '@quilt/core';
+import { L, createMessageSchema, copyDraftSchema, fontFamilySchema, fontUrlSchema, componentNameSchema, updateComponentSchema, createChannelSchema, jobInputSchemas } from '@quilt/core';
 import { localeMiddleware, requestLocale, requestUiLocale, outsideRequest, tr, listJoin, countEn } from '../../../apps/api/src/lib/locale.ts';
 import { Problem, problems, problemResponse, ISSUE_EN } from '../../../apps/api/src/lib/errors.ts';
 import { setupHint, toolAvailable } from '../../../apps/api/src/lib/agentCli.ts';
@@ -66,10 +66,10 @@ test('出口：英文请求拿到英文 title / detail / errors[].message，不�
   const bad = { kind: 'openai', label: 'x', model: 'm' };
   const en = await (await call('/channels', { 'X-Quilt-Locale': 'en' }, bad)).json() as { title: string; errors: { path: string; message: string }[] };
   assert.equal(en.title, 'Invalid request parameters');
-  assert.deepEqual(en.errors.find((e) => e.path === 'endpoint'), { path: 'endpoint', message: 'OpenAI-compatible channels need an endpoint' });
+  assert.deepEqual(en.errors.find((e) => e.path === 'endpoint'), { path: 'endpoint', message: 'OpenAI-compatible models need an endpoint' });
   assert.ok(en.errors.every((e) => !CJK.test(e.message)), JSON.stringify(en.errors));
   const zh = await (await call('/channels', {}, bad)).json() as { errors: { path: string; message: string }[] };
-  assert.deepEqual(zh.errors.find((e) => e.path === 'endpoint'), { path: 'endpoint', message: 'OpenAI 兼容通道必须填端点' });
+  assert.deepEqual(zh.errors.find((e) => e.path === 'endpoint'), { path: 'endpoint', message: 'OpenAI 兼容的模型必须填端点' });
 });
 
 test('ISSUE_EN：core schema 里每一条中文自定义 message 都登记了英文', () => {
@@ -84,6 +84,7 @@ test('ISSUE_EN：core schema 里每一条中文自定义 message 都登记了英
     updateComponentSchema.safeParse({ name: 'Nav' }),
     createChannelSchema.safeParse({ kind: 'openai', label: 'x', model: 'm' }),
     createChannelSchema.safeParse({ kind: 'openai', label: 'x', model: 'm', endpoint: 'https://example.com/v1' }),
+    jobInputSchemas.regenerate_subtree.safeParse({ screenId: uuid, qid: 'q1', qids: ['q2', 'q2'], prompt: 'x', expectedRevisionId: uuid }),
   ];
   const messages = new Set(results.flatMap((r) => (r.success ? [] : r.error.issues.map((i) => i.message))).filter((m) => CJK.test(m)));
   for (const m of messages) assert.ok(ISSUE_EN[m] && !CJK.test(ISSUE_EN[m]), `没登记英文：${m}`);

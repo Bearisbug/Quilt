@@ -3,6 +3,7 @@ import { Trans } from 'react-i18next';
 import { DEVICE_SIZE, isPreviewMessage, type DeviceType, type ParentToPreview, type ScreenDto } from '@quilt/core/browser';
 import { loadConfig } from '@/lib/api';
 import { markPalette, useResolvedMode } from '@/lib/theme';
+import { recordPreview } from '@/lib/recorder';
 import { useLocale, useT } from '@/i18n';
 import sketchMessages from '@/i18n/locales/sketch';
 
@@ -83,6 +84,7 @@ export function TargetPicker({ screen, deviceType, picked, initialQid, onPick, o
     const on = (e: MessageEvent) => {
       if (e.origin !== origin || e.source !== iframeRef.current?.contentWindow || !isPreviewMessage(e.data)) return;
       const m = e.data;
+      recordPreview(m, { screenId: screen.id });
       const p = latest.current;
       if (m.type === 'quilt:ready') {
         readyRef.current = true; setReady(true); setFailed(false);
@@ -101,7 +103,7 @@ export function TargetPicker({ screen, deviceType, picked, initialQid, onPick, o
     };
     window.addEventListener('message', on);
     return () => window.removeEventListener('message', on);
-  }, [origin, post, t]);
+  }, [origin, post, t, screen.id]);
 
   // 父页清掉或换了选中（写回撞上「元素已不在」）时，常驻框跟着走；就绪之前不发，就绪时由上面的预选接手
   const pickedQid = picked?.qid ?? null;

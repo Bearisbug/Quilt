@@ -2,12 +2,13 @@ import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { MAX_VERSIONS, extractBody } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
-import { Problem, problems } from '../../lib/errors.ts';
+import { Problem } from '../../lib/errors.ts';
 import { storage } from '../../lib/storage.ts';
 import { notifyCanvas } from '../../lib/events.ts';
 import { ownedJob, enqueueScreenshot } from '../../services/jobs.ts';
 import { ownedProject } from '../../services/projects.ts';
-import { ownedScreen, getRevision, listRevisions, hasActiveJob, createRevision, deriveLinks, revisionDto, adoptCandidate, listCandidates } from '../../services/screens.ts';
+import { ownedScreen, getRevision, listRevisions, deriveLinks, revisionDto, adoptCandidate, listCandidates, restoreRevision } from '../../services/screens.ts';
+import { renderRevisionScreenshot } from '../../worker/index.ts';
 import type { ToolCtx } from '../ctx.ts';
 
 // 修订：列 / 取旧版 HTML（直接给文本，agent 拿到就能重推）/ 回溯 / 列候选 / 采用候选——API-CORE-014 / 015 / 025 / 026
@@ -29,7 +30,12 @@ export function registerRevisionTools(c: ToolCtx) {
   }, wrap(async (a) => {
     read();
     const { screen } = await ownedScreen(user.id, a.screenId as string);
-    const rev = await getRevision(screen.id, a.revisionId as string);
+    let rev = await getRevision(screen.id, a.revisionId as string);
+    // 旧版的整屏截图可能已被 screenshot.prune 清掉（v1.27 ADR-037）：agent 要看这一版时当场从 HTML 重拍一张写回；拍不成照常返回，截图地址为空
+    if (!rev.screenshotKey) {
+      await renderRevisionScreenshot(rev.id).catch((e) => console.warn(`[get_revision] ${rev.id} 重拍失败：${(e as Error).message}`));
+      rev = await getRevision(screen.id, rev.id);
+    }
     return { revision: await revisionDto(rev), html: extractBody((await storage.get(rev.htmlKey)).toString('utf8')) };
   }));
 
@@ -40,16 +46,9 @@ export function registerRevisionTools(c: ToolCtx) {
     write();
     const { screen, project } = await ownedScreen(user.id, a.screenId as string);
     const source = await getRevision(screen.id, a.revisionId as string);
-    const html = (await storage.get(source.htmlKey)).toString('utf8');
-    const rev = await db.transaction(async (tx) => {
-      if (await hasActiveJob(tx, project.id, screen.id)) throw problems.screenBusy();
-      const r = await createRevision(tx, { projectId: project.id, screenId: screen.id, html, sourceKind: 'restore', lintReport: source.lintReport, expectedRevisionId: a.expectedRevisionId as string, parentRevisionId: source.id });
-      if (!r) throw problems.revisionConflict();
-      await deriveLinks(tx, project.id);
-      return r;
-    });
-    // 与 REST 一样重拍（API-CORE-015 v0.66）：旧版的截图可能是按另一种呈现方式拍的
-    await enqueueScreenshot(rev.id);
+    const rev = await restoreRevision(project, screen, source, a.expectedRevisionId as string);
+    // 与 REST 一样（API-CORE-015）：共用源修订的对象，截图沿用不了时重拍
+    if (!rev.screenshotKey) await enqueueScreenshot(rev.id);
     await notifyCanvas(project.id, { reason: 'revision', screenId: screen.id, revisionId: rev.id });
     return { revision: await revisionDto(rev) };
   }));
@@ -82,8 +81,12 @@ export function registerRevisionTools(c: ToolCtx) {
       const rev = s.revisions.find((r) => r.index === a.index);
       const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, s.screenId));
       if (!rev || !screen) { skipped.push({ screenId: s.screenId, error: '/errors/not-found' }); continue; }
-      try { await db.transaction((tx) => adoptCandidate(tx, screen, rev.id)); adopted.push(s.screenId); }
-      catch (e) { if (e instanceof Problem) skipped.push({ screenId: s.screenId, error: e.type }); else throw e; }
+      try {
+        await db.transaction((tx) => adoptCandidate(tx, screen, rev.id));
+        adopted.push(s.screenId);
+        // 已结清的旧候选可能已被 screenshot.prune 清掉整屏截图（v1.27 ADR-037），它成了当前版，当场重拍
+        if (!rev.screenshotUrl) await enqueueScreenshot(rev.id);
+      } catch (e) { if (e instanceof Problem) skipped.push({ screenId: s.screenId, error: e.type }); else throw e; }
     }
     if (adopted.length) {
       await db.transaction((tx) => deriveLinks(tx, project.id));

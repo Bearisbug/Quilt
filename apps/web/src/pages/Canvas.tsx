@@ -1,9 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Bot, Component, Crosshair, Download, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MousePointerClick, NotebookPen, Palette, Plus, Search, Settings, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
-import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, failureText, missingPagePrompt, type ComponentDto, type ProjectDetailDto, type JobDto, type JobEventDto, type ScreenDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core/browser';
+import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, MAX_SUBTREE_BLOCKS, failureText, missingPagePrompt, type ComponentDto, type ProjectDetailDto, type JobDto, type JobEventDto, type ScreenDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core/browser';
 import { api, ApiError, loadConfig, subscribeProjectEvents, type LiveState } from '@/lib/api';
 import { useToast } from '@/lib/toast';
+import { recordEvent, recordSelection } from '@/lib/recorder';
 import { rememberLastProject } from '@/lib/lastProject';
 import { Button, Spinner } from '@/ui/ui';
 import { TopNav } from '@/project/TopNav';
@@ -12,7 +13,7 @@ import { CanvasView, type CanvasApi } from '@/canvas/CanvasView';
 import { ScreenFinder, type FinderPick } from '@/canvas/ScreenFinder';
 import { ScreensPanel } from '@/panels/ScreensPanel';
 import { CanvasToolbar, type Tool } from '@/canvas/CanvasToolbar';
-import { isSettingsSection, type SettingsSection } from '@/settings/sections';
+import { useSettingsSection } from '@/settings/sections';
 import { Composer, type ComposerHandle } from '@/composer/Composer';
 import { jobChips, useEndedJobs } from '@/composer/JobChips';
 import { useRunnerPrefs } from '@/composer/useRunnerPrefs';
@@ -24,6 +25,7 @@ import { useUndoStack } from '@/canvas/undo';
 import { coveredScreens, jobLabel, type JobInput } from '@/canvas/jobs';
 import { reconcileJobs, settleJob, progressText } from '@/canvas/jobTracker';
 import { DeleteDialog, MissingDialog, NewComponentDialog, VariantDialog } from '@/canvas/dialogs';
+import { applySelect, type SelectMessage } from '@/canvas/frameMessages';
 import { RevisionPanel } from '@/panels/RevisionPanel';
 import type { ElementSel, DirectEdit, InspectorKeys } from '@/panels/InspectorPanel';
 import { AgentJobsPanel } from '@/panels/AgentJobsPanel';
@@ -133,7 +135,12 @@ function CanvasPage() {
   const [candidates, setCandidates] = useState<{ jobId: string; screenId: string } | null>(null);
   // 设计系统提案（REQ-EDIT-003）：propose_design_system 作业成功后弹预览，确认才写入
   const [proposal, setProposal] = useState<DesignProposalDto | null>(null);
-  const [elementSel, setElementSel] = useState<ElementSel | null>(null);
+  // 选择元素态选中的几块（v1.26 多选 REQ-EDIT-002）：最后一个是最后点中的那一块——逐级选、检查器的路径行与单选时的直改都作用于它。
+  // 运行时的回话可能一拍里连到几条（热更新后逐块重选），所以同步记一份 ref，下一条按它算
+  const [elementSels, setElementSelsState] = useState<ElementSel[]>([]);
+  const elementSelsRef = useRef<ElementSel[]>([]);
+  const setElementSels = useCallback((list: ElementSel[]) => { elementSelsRef.current = list; setElementSelsState(list); }, []);
+  const elementSel = elementSels.length ? elementSels[elementSels.length - 1] : null;
   const canvasApi = useRef<CanvasApi | null>(null);
   const composerRef = useRef<ComposerHandle>(null);
   const safeAreaRef = useRef<HTMLDivElement>(null);
@@ -143,10 +150,8 @@ function CanvasPage() {
   const { runners, runnersFailed, loadRunners, runnerId, applyCatalog, onRunnerChange, agentTool, sessionList, sessionId, loadSessions, lists, loadSessionsFor, onSessionChange, sendRunner, modelRunner } = useRunnerPrefs();
   const panel = (params.get('panel') as Panel) ?? null;
   const setPanel = useCallback((v: Panel) => setParams((q) => { if (v) q.set('panel', v); else q.delete('panel'); return q; }, { replace: true }), [setParams]);
-  // 设置弹层的开关与当前节都在 URL 上（?settings=<节>，INT-020）：刷新保持，旧 /settings 路径重定向到这里；不认识的值回到第一节
-  const settingsParam = params.get('settings');
-  const settingsSection: SettingsSection | null = settingsParam ? (isSettingsSection(settingsParam) ? settingsParam : 'usage') : null;
-  const setSettings = useCallback((v: SettingsSection | null) => setParams((q) => { if (v) q.set('settings', v); else q.delete('settings'); return q; }, { replace: true }), [setParams]);
+  // 设置弹层的开关与当前节都在 URL 上（?settings=<节>，INT-020）：刷新保持，旧 /settings 路径重定向到这里；旧值与不认识的值见 sections.ts
+  const [settingsSection, setSettings] = useSettingsSection();
   const settingsTool = useMemo(() => ({ get current() { return document.querySelector<HTMLElement>('[data-tool="settings"]'); } }), []);
   // 侧面板关掉后焦点归还（A11Y-013，v0.78）：挂载时记下焦点所在（点工具栏按钮打开时就是那个按钮）。卸载时焦点若在面板里、
   // 且是键盘焦点（按面板自己的「关闭」），就还给它；它已不在（快捷键打开时焦点本不在工具栏上）就给工具栏上同名的工具。
@@ -208,6 +213,7 @@ function CanvasPage() {
       }
       if (r.claim.length) {
         for (const j of r.claim) if (!beforeRef.current.has(j.id)) beforeRef.current.set(j.id, new Set(d.screens.map((x) => x.id)));
+        for (const j of r.claim) recordEvent('job', j.kind, { jobId: j.id, status: j.status, claimed: true });
         setActiveJobs((prev) => [...prev, ...r.claim.filter((j) => !prev.some((x) => x.id === j.id))]);
       }
       return d;
@@ -294,6 +300,7 @@ function CanvasPage() {
     if (e.type === 'screen_html_ready') { setP({ type: e.type, data: d }); scheduleRefresh(); }
     if (e.type === 'screen_screenshot_ready') scheduleRefresh();
     if (e.type === 'succeeded' || e.type === 'failed' || e.type === 'cancelled') {
+      recordEvent('job', job.kind, { jobId: job.id, status: e.type, errorClass: d.errorClass });
       const settled = settleJob({ seen: seenRef.current, finished: finishedRef.current, trackedAt: trackedAt.current }, job.id);
       seenRef.current = settled.seen; finishedRef.current = settled.finished; trackedAt.current = settled.trackedAt;
       const before = beforeRef.current.get(job.id) ?? new Set<string>();
@@ -327,6 +334,7 @@ function CanvasPage() {
   // 选中变化 → 写进目标并清掉锚点（选中即改）；清空选中不动目标
   useEffect(() => { if (selectedIds.length) { setTargetIds(selectedIds); setAnchor(null); } }, [selectedIds]);
   useEffect(() => { if (selectedComponentIds.length) { setTargetComponentIds(selectedComponentIds); setAnchor(null); } }, [selectedComponentIds]);
+  useEffect(() => recordSelection(selectedIds, selectedComponentIds), [selectedIds, selectedComponentIds]);
   // 屏数档位的默认值（REQ-CORE-003）：空项目默认「自动」（规划器定 4–6 屏主流程），有屏之后默认 1；只在空 ↔ 非空切换时重置
   const empty = !!detail && screens.length === 0;
   useEffect(() => { if (detail) setCount(empty ? 'auto' : 1); }, [detail?.project.id, empty]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -362,7 +370,8 @@ function CanvasPage() {
   };
   const tokens = detail?.designSystem.tokens as Tokens | undefined;
   // 正在被子树重生成作业改的元素（REQ-EDIT-002）：来自项目的进行中作业，卡片与聚焦屏内都标出来；检查器据此挡住重复发起
-  const workingSubtrees = useMemo(() => (detail?.activeJobs ?? []).filter((j) => j.kind === 'regenerate_subtree').map((j) => { const i = j.input as { screenId: string; qid: string }; return { screenId: i.screenId, qid: i.qid }; }), [detail?.activeJobs]);
+  // 一次改几块的作业（v1.26）每块都算：input.qids 含 qid
+  const workingSubtrees = useMemo(() => (detail?.activeJobs ?? []).filter((j) => j.kind === 'regenerate_subtree').flatMap((j) => { const i = j.input as { screenId: string; qid: string; qids?: string[] }; return (i.qids ?? [i.qid]).map((qid) => ({ screenId: i.screenId, qid })); }), [detail?.activeJobs]);
 
   // 冲突判定读的是全部在跑作业（REQ-CORE-020）：项目详情里那份含 runner=agent（它同样持屏锁）与别处建的，
   // 再并上本页刚建、还没回到详情里的那些——否则连点两次会在同一屏上撞出 409。
@@ -423,6 +432,7 @@ function CanvasPage() {
   };
   // 追加而不是替换：并行作业各自一枚 chip，且 job.input 里带着目标屏，冲突判定不必等下一次 refresh
   const trackJob = (job: JobDto) => {
+    recordEvent('job', job.kind, { jobId: job.id, status: job.status });
     if (!beforeRef.current.has(job.id)) beforeRef.current.set(job.id, new Set(screensRef.current.map((s) => s.id)));
     if (!trackedAt.current.has(job.id)) trackedAt.current = new Map(trackedAt.current).set(job.id, detailSeq.current);
     setActiveJobs((prev) => (prev.some((j) => j.id === job.id) ? prev : [...prev, job]));
@@ -591,10 +601,10 @@ function CanvasPage() {
   };
   const applyDesignSystem = () => startJob({ kind: 'apply_design_system', input: { screenIds: 'all' } }, t('jobs.applyFailed'));
   // REQ-EDIT-002：通道由检查器自己选（记忆独立于输入框），本机 agent 时作业投递到会话、提示词限定只重写该子树。
-  // 发出后不清选中——面板留在这个元素上，回写后由热更新重选刷新
-  const regenerateSubtree = async (qid: string, prompt: string, runner: Runner | undefined): Promise<boolean> => {
-    if (!shownScreen?.currentRevisionId) return false;
-    const job = await startJob({ kind: 'regenerate_subtree', input: { screenId: shownScreen.id, qid, prompt, expectedRevisionId: shownScreen.currentRevisionId, runner } }, t('jobs.regenerateFailed'));
+  // 选中几块时（v1.26）一个作业一次改完：qid 是最后点中的那块，qids 是全部几块。发出后不清选中——面板留在这里，回写后由热更新重选刷新
+  const regenerateSubtree = async (qids: string[], prompt: string, runner: Runner | undefined): Promise<boolean> => {
+    if (!shownScreen?.currentRevisionId || !qids.length) return false;
+    const job = await startJob({ kind: 'regenerate_subtree', input: { screenId: shownScreen.id, qid: qids[qids.length - 1], ...(qids.length > 1 ? { qids } : null), prompt, expectedRevisionId: shownScreen.currentRevisionId, runner } }, t('jobs.regenerateFailed'));
     return !!job;
   };
   // 出变体（REQ-CORE-025）：钉死默认屏路由的 generate；建不成时抛出去让弹层留着报错
@@ -751,10 +761,9 @@ function CanvasPage() {
       if ((e.target as HTMLElement)?.closest('input, textarea, select, [contenteditable]')) return;
       const k = keyRef.current;
       const mod = e.metaKey || e.ctrlKey;
-      // 逐级选（v1.00）：选择元素态下 Shift+Enter 选父级、Enter 回到子级；焦点在按钮、链接、卡片这类控件上时 Enter 留给它自己
-      if (e.key === 'Enter' && k.inspecting && !mod && !e.altKey && !e.isComposing && !k.blocked
-        && !(e.target as HTMLElement).closest('button, a[href], [role="button"], [role="link"], [role="tab"], [role="option"], [role="menuitem"], [tabindex]:not([tabindex="-1"])')) {
-        e.preventDefault(); k.climb(e.shiftKey ? 'up' : 'down'); return;
+      // 逐级选（v1.28）：选择元素态下 Shift+↑ 选父级、Shift+↓ 回到子级，焦点在按钮、链接上也一样；拦掉浏览器扩选文字、滚动的默认动作
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.shiftKey && k.inspecting && !mod && !e.altKey && !k.blocked) {
+        e.preventDefault(); k.climb(e.key === 'ArrowUp' ? 'up' : 'down'); return;
       }
       if (mod && e.code === 'KeyA') { e.preventDefault(); if (!k.blocked) k.selectAll(); return; }
       // ⌘Z 撤销画布位置（拖动 / 对齐 / 等距）与检查器的直改（v0.95）；对话改屏、回溯这些内容历史在修订树里，不进这个栈
@@ -767,9 +776,22 @@ function CanvasPage() {
     };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, []);
-  // 选中元素随聚焦走：退出聚焦、换屏才清空。屏换了修订不清——热更新后由运行时按 qid 重选（quilt:reselect），
-  // 检查器字段刷成新值；元素真没了（被删 / 子树重生成换了 qid）运行时回 deselect 才清
-  useEffect(() => { setElementSel(null); }, [focusedId, focusedComponentId]);
+  // 选中元素随聚焦走：退出聚焦、换屏、退出选择元素态才清空（v1.26 起多选同样）。屏换了修订不清——热更新后由运行时按 qid 逐块重选（quilt:reselect），
+  // 检查器字段刷成新值；元素真没了（被删 / 子树重生成换了 qid）运行时回 deselect 才去掉那一块
+  useEffect(() => { setElementSels([]); }, [focusedId, focusedComponentId, shownScreenId, inspectMode, setElementSels]);
+  // 运行时报上来的点选（规则在 applySelect）：选中里的几块都回给运行时画框；合并到外层、超过上限时说一声
+  const selectElement = (m: SelectMessage) => {
+    const { list, note } = applySelect(elementSelsRef.current, m);
+    if (note === 'merged') toast(tInspect('inspector.multi.merged'));
+    else if (note === 'max') toast(tInspect('inspector.multi.max', { max: MAX_SUBTREE_BLOCKS }));
+    setElementSels(list);
+    canvasApi.current?.highlight(list.map((x) => x.qid));
+  };
+  const deselectElement = (qid: string | null) => {
+    const list = qid ? elementSelsRef.current.filter((x) => x.qid !== qid) : [];
+    setElementSels(list);
+    canvasApi.current?.highlight(list.map((x) => x.qid));
+  };
 
   // 外壳常驻（v0.76）：顶栏、输入框、工具栏在加载与失败时照样画，只有画布区换成加载 / 失败态
   const ready = !!detail && !!tokens && !!previewOrigin && detail.project.kind !== 'sketchbook';
@@ -827,8 +849,8 @@ function CanvasPage() {
     : panel === 'design' ? <DesignPanel ds={detail.designSystem} project={detail.project} screens={screens} assets={detail.assets} busyReason={busyReason} onClose={() => setPanel(null)} onSaved={refresh} onApplyAll={applyDesignSystem} onPropose={(i) => propose(i)} />
     : panel === 'screens' ? <ScreensPanel screens={screens} links={detail.links} busy={busyScreens} onPick={(id) => reveal({ kind: 'screen', id })} onClose={() => setPanel(null)} />
     : panel === 'agent' ? <AgentJobsPanel projectId={projectId} screens={screens} components={components} runners={runners} onClose={() => setPanel(null)} onChanged={refresh} />
-    : panel === 'inspect' && focusedComponent ? <InspectorPanel component={focusedComponent} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyComponents.has(focusedComponent.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} tokens={tokens} onPathPick={(qid) => canvasApi.current?.pick(qid)} onPathPeek={(qid) => canvasApi.current?.peek(qid)} onClose={() => setPanel(null)} onEdited={() => { setElementSel(null); refresh(); }} />
-    : panel === 'inspect' && shownScreen ? <InspectorPanel screen={shownScreen} sel={elementSel} routes={screens.map((s) => s.route)} busy={busyScreens.has(shownScreen.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} onUndo={() => void undoStack.undo()} tokens={tokens} onPathPick={(qid) => canvasApi.current?.pick(qid)} onPathPeek={(qid) => canvasApi.current?.peek(qid)} runners={runners} composerRunnerId={runnerId} sessionLists={lists} onSessionsOpen={(tool) => void loadSessionsFor(tool)} workingQids={workingSubtrees.filter((w) => w.screenId === shownScreen.id).map((w) => w.qid)} onClose={() => setPanel(null)} onEdited={(qid) => { canvasApi.current?.markDone([qid]); refresh(); }} onRegenerate={regenerateSubtree} onEditComponent={onEditComponent} onForkToSketch={(qid) => void forkToSketch(shownScreen.id, qid)} forking={forking} />
+    : panel === 'inspect' && focusedComponent ? <InspectorPanel component={focusedComponent} sel={elementSel} sels={elementSels} onRemoveSel={deselectElement} routes={screens.map((s) => s.route)} busy={busyComponents.has(focusedComponent.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} tokens={tokens} onPathPick={(qid) => canvasApi.current?.pick(qid)} onPathPeek={(qid) => canvasApi.current?.peek(qid)} onClose={() => setPanel(null)} onEdited={() => { setElementSels([]); refresh(); }} />
+    : panel === 'inspect' && shownScreen ? <InspectorPanel screen={shownScreen} sel={elementSel} sels={elementSels} onRemoveSel={deselectElement} routes={screens.map((s) => s.route)} busy={busyScreens.has(shownScreen.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} onUndo={() => void undoStack.undo()} tokens={tokens} onPathPick={(qid) => canvasApi.current?.pick(qid)} onPathPeek={(qid) => canvasApi.current?.peek(qid)} runners={runners} composerRunnerId={runnerId} sessionLists={lists} onSessionsOpen={(tool) => void loadSessionsFor(tool)} workingQids={workingSubtrees.filter((w) => w.screenId === shownScreen.id).map((w) => w.qid)} onClose={() => setPanel(null)} onEdited={(qid) => { canvasApi.current?.markDone([qid]); refresh(); }} onRegenerate={regenerateSubtree} onEditComponent={onEditComponent} onForkToSketch={(qid) => void forkToSketch(shownScreen.id, qid)} forking={forking} />
     : null;
 
   return (
@@ -871,9 +893,9 @@ function CanvasPage() {
             onAnchor={placeAnchor}
             onCandidates={(jobId, screenId) => setCandidates((c) => (c?.screenId === screenId ? null : { jobId, screenId }))}
             candidateStack={candidates && screens.some((s) => s.id === candidates.screenId) ? { screenId: candidates.screenId, node: <CandidateStack jobId={candidates.jobId} screen={screens.find((s) => s.id === candidates.screenId)!} onClose={() => setCandidates(null)} onAdopted={async () => { await refresh(); setCandidates(null); }} /> } : null}
-            onElementSelect={(sel) => { setElementSel(sel); canvasApi.current?.highlight(sel?.qid ?? null); }}
+            onElementSelect={selectElement} onElementDeselect={deselectElement}
             // sel 里带 component（REQ-EDIT-006）：检查器据此挡直改
-            selectedQid={elementSel?.qid ?? null}
+            selectedQids={elementSels.map((x) => x.qid)}
             workingSubtrees={workingSubtrees}
             registerApi={(a) => { canvasApi.current = a; }}
             minimap={minimapOn}

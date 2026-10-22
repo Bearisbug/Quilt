@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { Problem } from '../lib/errors.ts';
 import { storage } from '../lib/storage.ts';
+import { shotMediaType } from '../lib/shots.ts';
 import { locateAttachment } from '../services/attachments.ts';
 import { ownedProject } from '../services/projects.ts';
 import { ownedScreen, getRevision, exemplarBody, currentBody } from '../services/screens.ts';
@@ -45,13 +46,13 @@ export function registerResources(c: ToolCtx) {
     const { screen } = await ownedScreen(user.id, String(vars.screenId));
     return text(uri.href, 'text/html', (await currentBody(screen.id)) ?? '');
   });
-  server.registerResource('screen-screenshot', tpl('quilt://projects/{projectId}/screens/{screenId}/screenshot'), { title: 'Screen screenshot', mimeType: 'image/png' }, async (uri, vars) => {
+  server.registerResource('screen-screenshot', tpl('quilt://projects/{projectId}/screens/{screenId}/screenshot'), { title: 'Screen screenshot', mimeType: 'image/webp' }, async (uri, vars) => {
     read();
     const { screen } = await ownedScreen(user.id, String(vars.screenId));
     if (!screen.currentRevisionId) throw new Problem(404, '/errors/not-found', 'no revision');
     const rev = await getRevision(screen.id, screen.currentRevisionId);
     if (!rev.screenshotKey) throw new Problem(409, '/errors/job-not-finished', 'screenshot not ready');
-    return { contents: [{ uri: uri.href, mimeType: 'image/png', blob: (await storage.get(rev.screenshotKey)).toString('base64') }] };
+    return { contents: [{ uri: uri.href, mimeType: shotMediaType(rev.screenshotKey), blob: (await storage.get(rev.screenshotKey)).toString('base64') }] };
   });
   server.registerResource('attachment', tpl('quilt://projects/{projectId}/attachments/{attachmentId}'), { title: 'Reference image', description: 'A reference image the user attached to a canvas message (REQ-CORE-012)', mimeType: 'image/png' }, async (uri, vars) => {
     read();

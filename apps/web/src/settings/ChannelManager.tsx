@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import { CHANNEL_VENDORS, LOCAL_CHANNEL_KINDS, VENDOR_PRESETS, type ChannelDto, type ChannelKind, type ChannelVendor, type ProbeResultDto, type RunnerOptionDto } from '@quilt/core/browser';
 import { api, ApiError, loadConfig } from '@/lib/api';
 import { useToast } from '@/lib/toast';
-import { Button, Field, Input, cn } from '@/ui/ui';
+import { RefreshCw, Pencil, Trash2 } from 'lucide-react';
+import { Button, Field, IconButton, Input, cn } from '@/ui/ui';
 import { Select } from '@/ui/Select';
 import { VendorIcon } from '@/ui/VendorIcon';
 import { ConfirmDialog, Overlay, useModal } from '@/ui/modal';
@@ -11,11 +12,11 @@ import { tOf, useT } from '@/i18n';
 import settingsMessages from '@/i18n/locales/settings';
 import commonMessages from '@/i18n/locales/common';
 
-// 生成通道管理器（REQ-CORE-013 / PAGE-SETTINGS）。两组：我的通道（可增删改，云端通道只有这一种来源）、本机 agent（固定）。
-// 每行都能「验证」——真的发一次最小请求；只有验证通过的才会出现在画布输入框的下拉里。
+// 设置「模型」一节的管理器（REQ-CORE-013，§13「设置弹层的模型」；代码与接口里仍叫通道 / channel，界面上叫「模型」v1.24）。
+// 两张表：我的模型（可增删改，云端模型只有这一种来源）、本机 agent（固定）。每行都能「验证」——真的发一次最小请求；只有验证通过的才会出现在画布输入框的下拉里。
 // 数据：/v1/runners 给统一目录（含不可用项与原因），/v1/channels 给自建通道的明细（端点、状态、密钥末位）。
 
-// 通道类型的显示名在 settings 命名空间的 drivers.<键>；键的顺序就是「类型」下拉的顺序
+// 模型类型的显示名在 settings 命名空间的 drivers.<键>；键的顺序就是「类型」下拉的顺序
 const KIND_KEY: Record<ChannelKind, 'anthropic' | 'gemini' | 'openai' | 'agentSdk' | 'codex'> = { anthropic: 'anthropic', gemini: 'gemini', openai: 'openai', 'agent-sdk': 'agentSdk', codex: 'codex' };
 const DEFAULT_VENDOR: Record<ChannelKind, ChannelVendor> = { anthropic: 'anthropic', gemini: 'google', openai: 'openai', 'agent-sdk': 'claude-subscription', codex: 'codex-subscription' };
 // 模型名不预填（型号更新太快），只给一个看得出格式的例子
@@ -29,15 +30,14 @@ const OPENAI_VENDORS = CHANNEL_VENDORS.filter((v) => VENDOR_PRESETS[v].kind === 
 const VENDOR_KEY: Partial<Record<ChannelVendor, 'qwen' | 'zhipu' | 'ollama' | 'custom'>> = { qwen: 'qwen', zhipu: 'zhipu', ollama: 'ollama', custom: 'custom' };
 const ts = tOf(settingsMessages);
 
-const hostOf = (endpoint: string | null) => { if (!endpoint) return ''; try { return new URL(endpoint).host; } catch { return endpoint; } };
 const problemText = (e: unknown, fallback: string) => {
   if (!(e instanceof ApiError)) return fallback;
   const errs = (e.problem as { errors?: { message: string }[] }).errors ?? [];
   return [e.problem.title, ...errs.map((x) => x.message)].filter(Boolean).join(ts('channels.problemSep'));
 };
 
-// onCatalog：通道增删改与验证之后，把刚取到的通道清单交给上层——画布那份清单是挂载时取的，
-// 不回传的话新加的通道要刷新页面才出现在输入框下拉里
+// onCatalog：模型增删改与验证之后，把刚取到的清单交给上层——画布那份清单是挂载时取的，
+// 不回传的话新加的模型要刷新页面才出现在输入框下拉里
 export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOptionDto[], defaultId: string) => void }) {
   const toast = useToast();
   const t = useT(settingsMessages);
@@ -95,12 +95,12 @@ export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOption
 
   return (
     <div data-testid="channel-manager" ref={rootRef} tabIndex={-1} className="outline-none">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="type-heading3 font-semibold">{t('sections.runners')}</h2>
-          <p className="mt-1 type-label text-text-secondary"><Trans ns={settingsMessages.ns} i18nKey="channels.intro" components={{ b: <b className="font-medium text-text-primary" /> }} /></p>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="type-heading3 font-semibold">{t('sections.models')}</h3>
+          <p className="mt-1 type-label leading-(--semantic-typography-body-line-height) text-text-secondary"><Trans ns={settingsMessages.ns} i18nKey="channels.intro" components={{ b: <b className="font-medium text-text-primary" /> }} /></p>
         </div>
-        <Button size="sm" variant="primary" data-testid="add-channel" aria-label={t('channels.add')} onClick={(e) => openDialog(e, { mode: 'add' })}>{t('channels.add')}</Button>
+        <Button size="sm" variant="primary" data-testid="add-channel" className="shrink-0" onClick={(e) => openDialog(e, { mode: 'add' })}>{t('channels.add')}</Button>
       </div>
 
       {!secretsOk && (
@@ -116,10 +116,10 @@ export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOption
       )}
 
       {loading ? <RowsSkeleton /> : (
-        <div className="mt-4 space-y-5">
-          <Group title={t('channels.mine')} hint={mine.length === 0 ? t('channels.mineEmpty') : undefined}>{mine.map(row)}</Group>
-          {builtins.length > 0 && <Group title={t('channels.local')} hint={t('channels.localHint')}>{builtins.map(row)}</Group>}
-        </div>
+        <>
+          <Table id="models-mine" title={t('channels.mine')} empty={mine.length === 0 ? t('channels.mineEmpty') : undefined}>{mine.map(row)}</Table>
+          {builtins.length > 0 && <Table id="models-local" title={t('channels.local')} hint={t('channels.localHint')}>{builtins.map(row)}</Table>}
+        </>
       )}
 
       {dialog && <ChannelDialog channel={dialog.mode === 'edit' ? dialog.channel : undefined} secretsOk={secretsOk} onClose={closeDialog} onSaved={() => void load()} returnTo={returnFocus} fallback={rootRef} />}
@@ -138,26 +138,34 @@ export function ChannelManager({ onCatalog }: { onCatalog?: (items: RunnerOption
   );
 }
 
-function Group({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+// 两张表同一套列：名字（logo · 显示名 · 小胶囊 / 等宽模型 ID）、状态（色点 + 文字 / 次行）、行尾的圆形图标按钮。
+// 表头一行灰字（「我的模型 · 状态」），行间发丝线
+const RCOLS = 'grid grid-cols-[minmax(0,1fr)_minmax(7rem,10rem)_6.5rem] items-center gap-x-4';
+
+function Table({ id, title, hint, empty, children }: { id: string; title: string; hint?: string; empty?: string; children: ReactNode }) {
+  const t = useT(settingsMessages);
   return (
-    <section aria-label={title}>
-      <h3 className="type-overline font-semibold text-text-secondary">{title}</h3>
-      {hint && <p className="mt-1 type-caption text-text-secondary">{hint}</p>}
-      {Array.isArray(children) && children.length > 0 && <ul className="mt-1 divide-y divide-border-subtle">{children}</ul>}
+    <section aria-labelledby={id} className="mt-7">
+      <div className={cn(RCOLS, 'pb-2')}>
+        <h4 id={id} className="type-label font-normal text-text-secondary">{title}</h4>
+        <span aria-hidden="true" className="type-label text-text-secondary">{t('channels.colStatus')}</span>
+      </div>
+      {empty ? <p className="border-t border-border-subtle py-4 type-label text-text-secondary">{empty}</p> : <ul>{children}</ul>}
+      {hint && <p className="border-t border-border-subtle pt-2 type-caption leading-(--semantic-typography-body-line-height) text-text-secondary">{hint}</p>}
     </section>
   );
 }
 
-// 加载骨架按真实行结构占位：图标圆、两行文本、状态药丸（IA-006）；reduced-motion 下不闪
+// 加载骨架按真实行结构占位：logo、两行文本、状态、行尾按钮（IA-006）；reduced-motion 下不闪
 function RowsSkeleton() {
   const bar = 'rounded-sm bg-(--semantic-color-surface-sunken) animate-pulse motion-reduce:animate-none';
   return (
-    <ul aria-hidden="true" className="mt-4 divide-y divide-border-subtle">
+    <ul aria-hidden="true" className="mt-10">
       {[0, 1, 2].map((i) => (
-        <li key={i} className="flex items-center gap-3 py-3">
-          <span className={cn('size-5 rounded-full', bar)} />
-          <span className="flex-1 space-y-1.5"><span className={cn('block h-3 w-40', bar)} /><span className={cn('block h-2.5 w-56 max-w-full', bar)} /></span>
-          <span className={cn('h-5 w-12 rounded-pill', bar)} />
+        <li key={i} className={cn(RCOLS, 'border-t border-border-subtle py-3.5')}>
+          <span className="flex items-center gap-3"><span className={cn('size-8 rounded-full', bar)} /><span className="flex-1 space-y-1.5"><span className={cn('block h-3 w-36', bar)} /><span className={cn('block h-2.5 w-28', bar)} /></span></span>
+          <span className="space-y-1.5"><span className={cn('block h-3 w-16', bar)} /><span className={cn('block h-2.5 w-24', bar)} /></span>
+          <span className="flex justify-end gap-1">{[0, 1, 2].map((j) => <span key={j} className={cn('size-7 rounded-full', bar)} />)}</span>
         </li>
       ))}
     </ul>
@@ -165,18 +173,19 @@ function RowsSkeleton() {
 }
 
 type Tone = 'success' | 'muted' | 'danger';
-// 药丸只说「这条通道现在能不能用」。自建通道的可用性就是验证结论，两者同一件事；
-// 预置与本机通道的可用性来自凭据 / 设备是否就位，跟某一次探测成功与否是两个维度——
+// 状态只说「这一行现在能不能用」。自建模型的可用性就是验证结论，两者同一件事；
+// 本机 agent 的可用性来自命令是否在 PATH 上，跟某一次探测成功与否是两个维度——
 // 一次探测超时不代表它不可用（用户实测：本机订阅显示「可用 + 验证失败」自相矛盾）。
-function statusOf(r: RunnerOptionDto, c: ChannelDto | undefined): { tone: Tone; text: string; detail?: string } {
+function statusOf(r: RunnerOptionDto, c: ChannelDto | undefined): { tone: Tone; text: string } {
   if (r.source === 'channel') {
     if (c?.status === 'verified') return { tone: 'success', text: ts('channels.status.verified') };
-    if (c?.status === 'failed') return { tone: 'danger', text: ts('channels.status.failed'), detail: c.lastError ?? undefined };
+    if (c?.status === 'failed') return { tone: 'danger', text: ts('channels.status.failed') };
     return { tone: 'muted', text: ts('channels.status.unverified') };
   }
   if (r.available) return { tone: 'success', text: ts('channels.status.available') };
-  return { tone: 'danger', text: ts('channels.status.notConfigured'), detail: r.unavailableReason };
+  return { tone: 'danger', text: ts('channels.status.notConfigured') };
 }
+const TONE: Record<Tone, string> = { success: 'text-success', muted: 'text-text-secondary', danger: 'text-error' };
 
 function RunnerRow(p: {
   r: RunnerOptionDto; channel?: ChannelDto; probing: boolean; probeResult?: ProbeResultDto; onProbe: () => void;
@@ -186,43 +195,60 @@ function RunnerRow(p: {
   const tc = useT(commonMessages);
   const { r, channel: c } = p;
   const st = statusOf(r, c);
-  const sub = r.source === 'channel' && c ? [t(`drivers.${KIND_KEY[c.kind]}`), c.model, hostOf(c.endpoint)].filter(Boolean).join(' · ') : r.hint ?? '';
-  const pill = st.tone === 'success' ? 'tint-success' : st.tone === 'danger' ? 'tint-error' : 'fill text-text-secondary';
+  const agentTool = r.runner.kind === 'agent' ? r.runner.tool : null;
+  // 本机 agent 的行名只写产品名（接口给的「交给本机 …」是输入框下拉里的说法）
+  const name = agentTool ? (agentTool === 'codex' ? 'Codex' : 'Claude Code') : r.label;
+  const subscription = !!c && LOCAL_CHANNEL_KINDS.includes(c.kind);
+  const mono = c ? c.model : r.hint ?? '';
+  const failed = (c?.status === 'failed') || (!c && !r.available);
+  // 状态次行：密钥末 4 位 / 用哪个 CLI 的登录态 / 失败原因；本机 agent 写「找到 claude 命令」，用不了时给「如何配置」
+  const detail = c
+    ? c.status === 'failed' ? (c.lastError ?? '') : c.apiKeyHint ? t('channels.detail.key', { hint: c.apiKeyHint }) : c.kind === 'agent-sdk' ? t('channels.detail.claudeLogin') : c.kind === 'codex' ? t('channels.detail.codexLogin') : ''
+    : r.available ? t('channels.detail.found', { bin: agentTool === 'codex' ? 'codex' : 'claude' }) : '';
   return (
-    <li data-testid="runner-row" data-runner-id={r.id} className="py-3">
-      <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-        <VendorIcon vendor={r.vendor} size={20} className="mt-0.5 shrink-0" />
-        <div className="min-w-0 flex-1 basis-48">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="min-w-0 max-w-full truncate type-body font-medium">{r.label}</span>
-            <span data-testid="runner-status" className={cn('shrink-0 whitespace-nowrap rounded-pill px-2 py-0.5 type-caption font-medium', pill)}>{st.text}</span>
-            {/* 原因写在药丸旁边而不是 tooltip 里——触屏没有 hover，且这是决定「为什么用不了」的关键信息 */}
-            {st.detail && <span className="type-caption text-error [overflow-wrap:anywhere]">{st.detail}</span>}
-          </div>
-          {sub && <div className="mt-0.5 truncate type-caption text-text-secondary">{sub}</div>}
-          {p.probeResult && (
-            <p role="status" className={cn('mt-1 type-caption [overflow-wrap:anywhere]', p.probeResult.ok ? 'text-success' : 'text-error')}>
-              {p.probeResult.ok
-                ? [t('channels.probe.ok'), p.probeResult.latencyMs != null && `${p.probeResult.latencyMs} ms`, p.probeResult.detail].filter(Boolean).join(' · ')
-                /* 自建通道的失败即结论（状态已落库）；预置 / 本机通道只是「这一次没通」，可用性另有来源 */
-                : t(r.source === 'channel' ? 'channels.probe.failed' : 'channels.probe.failedOnce', { error: p.probeResult.error ?? t('channels.probe.unknown') })}
+    <li data-testid="runner-row" data-runner-id={r.id} className="border-t border-border-subtle py-3.5">
+      <div className={RCOLS}>
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid size-8 shrink-0 place-items-center"><VendorIcon vendor={r.vendor} size={24} /></span>
+          <div className="min-w-0">
+            <p className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate type-body font-medium text-text-primary">{name}</span>
+              {c && <span className="fill inline-flex h-[1.125rem] shrink-0 items-center rounded-pill px-1.5 type-caption font-semibold text-text-primary">{t(subscription ? 'channels.tagSubscription' : 'channels.tagApi')}</span>}
             </p>
-          )}
-          {/* 收起时整块卸载，不留看不见的可聚焦内容（A11Y-011） */}
-          {p.hintOpen && r.setupHint && <div className="fill mt-2 whitespace-pre-wrap rounded-md p-3 type-label leading-(--semantic-typography-body-line-height) text-text-primary">{r.setupHint}</div>}
+            {mono && <p className="truncate font-mono type-caption text-text-secondary">{mono}</p>}
+          </div>
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-1">
-          {r.setupHint && (
-            <Button size="sm" data-testid="setup-hint" aria-expanded={p.hintOpen} aria-label={t(p.hintOpen ? 'channels.row.setupCollapse' : 'channels.row.setupExpand', { name: r.label })} onClick={p.onToggleHint}>{t('channels.row.setup')}</Button>
-          )}
+        <div className={cn('grid min-w-0 grid-cols-[0.5rem_minmax(0,1fr)] items-center gap-x-2 gap-y-0.5', TONE[st.tone])}>
+          <span aria-hidden="true" className="size-2 rounded-full bg-current" />
+          <p data-testid="runner-status" className="type-body font-medium">{st.text}</p>
+          <div className="col-span-2 min-w-0 type-label text-text-secondary">
+            {/* 原因写在状态下面而不是 tooltip 里——触屏没有 hover，且这是决定「为什么用不了」的关键信息 */}
+            {detail && <p className={cn('[overflow-wrap:anywhere]', c?.status === 'failed' ? 'text-error' : 'truncate')}>{detail}</p>}
+            {failed && r.setupHint && (
+              <button type="button" data-testid="setup-hint" aria-expanded={p.hintOpen} aria-label={t(p.hintOpen ? 'channels.row.setupCollapse' : 'channels.row.setupExpand', { name })} onClick={p.onToggleHint}
+                className="focus-ring rounded-sm text-(--semantic-color-action-link)">{t('channels.row.setup')}</button>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-0.5">
           {/* 验证中不禁用按钮：原生 disabled 会立刻把焦点甩到 body（A11Y-013），只用 aria-busy + 转圈 */}
-          <Button size="sm" data-testid="probe-runner" aria-busy={p.probing || undefined} aria-label={t('channels.row.verifyLabel', { name: r.label })} onClick={() => { if (!p.probing) p.onProbe(); }}>
-            {p.probing && <span className="size-3 animate-spin rounded-full border-2 border-current border-r-transparent motion-reduce:animate-none" aria-hidden="true" />}{t('channels.row.verify')}
-          </Button>
-          {c && <Button size="sm" data-testid="edit-channel" aria-label={t('channels.row.editLabel', { name: r.label })} onClick={p.onEdit}>{t('channels.row.edit')}</Button>}
-          {c && <Button size="sm" variant="danger-ghost" data-testid="delete-channel" aria-label={t('channels.row.deleteLabel', { name: r.label })} onClick={p.onDelete}>{tc('delete')}</Button>}
+          <IconButton round size="xs" tip="top" label={t('channels.row.verify')} aria-label={t('channels.row.verifyLabel', { name })} data-testid="probe-runner" aria-busy={p.probing || undefined} onClick={() => { if (!p.probing) p.onProbe(); }}>
+            <RefreshCw size={16} aria-hidden="true" className={cn(p.probing && 'animate-spin motion-reduce:animate-none')} />
+          </IconButton>
+          {c && <IconButton round size="xs" tip="top" label={t('channels.row.edit')} aria-label={t('channels.row.editLabel', { name })} data-testid="edit-channel" onClick={p.onEdit}><Pencil size={16} aria-hidden="true" /></IconButton>}
+          {c && <IconButton round size="xs" tip="top-end" label={tc('delete')} aria-label={t('channels.row.deleteLabel', { name })} data-testid="delete-channel" onClick={p.onDelete}><Trash2 size={16} aria-hidden="true" /></IconButton>}
         </div>
       </div>
+      {p.probeResult && (
+        <p role="status" className={cn('mt-2 pl-11 type-label [overflow-wrap:anywhere]', p.probeResult.ok ? 'text-success' : 'text-error')}>
+          {p.probeResult.ok
+            ? [t('channels.probe.ok'), p.probeResult.latencyMs != null && `${p.probeResult.latencyMs} ms`, p.probeResult.detail].filter(Boolean).join(' · ')
+            /* 自建模型的失败即结论（状态已落库）；本机 agent 只是「这一次没通」，可用性另有来源 */
+            : t(r.source === 'channel' ? 'channels.probe.failed' : 'channels.probe.failedOnce', { error: p.probeResult.error ?? t('channels.probe.unknown') })}
+        </p>
+      )}
+      {/* 收起时整块卸载，不留看不见的可聚焦内容（A11Y-011） */}
+      {p.hintOpen && r.setupHint && <div className="fill ml-11 mt-2 whitespace-pre-wrap rounded-md p-3 type-label leading-(--semantic-typography-body-line-height) text-text-primary">{r.setupHint}</div>}
     </li>
   );
 }
@@ -358,11 +384,14 @@ function ChannelDialog(p: { channel?: ChannelDto; secretsOk: boolean; onClose: (
             <Input id="ch-model" name="model" value={model} onChange={(e) => { setModel(e.target.value); recheck({ model: e.target.value }); }} placeholder={t('channels.dialog.modelPlaceholder', { model: MODEL_HINT[vendor] })} maxLength={80} autoComplete="one-time-code" data-1p-ignore data-lpignore="true" spellCheck={false} className="font-mono" {...err('ch-model')} />
             {errorLine('ch-model')}
           </Field>
+          {/* 密钥框的容器标 data-record="off"：本机使用记录的浏览器采集据此跳过它（INV-CORE-006） */}
           {!local && (
+          <div data-record="off">
           <Field label="API Key" htmlFor="ch-key" hint={t(editing ? 'channels.dialog.keyHintEdit' : 'channels.dialog.keyHintNew')}>
             <Input id="ch-key" name="apiKey" type="password" value={apiKey} onChange={(e) => { setApiKey(e.target.value); recheck({ apiKey: e.target.value }); }} placeholder={editing && saved?.apiKeyHint ? `••••${saved.apiKeyHint}` : 'sk-…'} autoComplete="new-password" data-1p-ignore data-lpignore="true" spellCheck={false} className="font-mono" {...err('ch-key')} />
             {errorLine('ch-key')}
           </Field>
+          </div>
           )}
           {kind === 'agent-sdk' && (
             <p className="fill rounded-md p-3 type-label leading-(--semantic-typography-body-line-height) text-text-secondary">

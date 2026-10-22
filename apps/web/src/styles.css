@@ -495,3 +495,49 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
 @media (prefers-reduced-motion: reduce) {
   .draft-skeleton::before, .draft-frame .sk-dot { animation: none; }
 }
+
+/* 设置弹层（§13 设置弹层，v1.24 用量 / 模型 / 系统）。时长按设计：换节 150 ms、分段滑块 200 ms、柱子 300 ms（逐根错开合计 ≤ 150 ms）、
+   胶囊与分段条 400 ms、悬停提示 120 ms。200 与 120 是 brand 的 base / fast；150、300、400 brand 没有，只在这里定义一次（MOTION-029）。
+   入场按终态编写：初始帧只在允许动效时存在，减弱动态时一律直接到位（MOTION-004）。 */
+.settings-sheet { --settings-swap: 150ms; --usage-rise: 300ms; --usage-grow: 400ms; }
+@keyframes settings-in { from { opacity: 0; transform: translateY(4px); } }
+@keyframes usage-rise { from { transform: scaleY(0); } }
+@keyframes usage-fill { from { clip-path: inset(0 100% 0 0 round var(--semantic-radius-pill)); } to { clip-path: inset(0 0 0 0 round var(--semantic-radius-pill)); } }
+@keyframes usage-fill-on { from { clip-path: inset(0 100% 0 0); } }
+@keyframes usage-fill-rest { from { clip-path: inset(0 0 0 0); } }
+@media (prefers-reduced-motion: no-preference) {
+  .settings-in { animation: settings-in var(--settings-swap) var(--semantic-motion-easing-standard); }
+  .usage-rise { transform-origin: bottom; animation: usage-rise var(--usage-rise) var(--semantic-motion-easing-standard) var(--delay, 0ms) both; }
+  .usage-fill { animation: usage-fill var(--usage-grow) var(--semantic-motion-easing-standard) both; }
+  .usage-fill-on { animation: usage-fill-on var(--usage-grow) var(--semantic-motion-easing-standard) both; }
+  .usage-fill-rest { animation: usage-fill-rest var(--usage-grow) var(--semantic-motion-easing-standard) both; }
+  .seg-thumb { transition: transform var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard); }
+}
+
+/* 统计范围的分段控件：等宽的几格 + 一块浮起的滑块滑到选中项（brand「分段控件」：填充底轨道、raised 滑块、当前项 500 字重）。
+   各格字重两态都是 500，切换时整条宽度不跳；滑块按自身宽度的百分比平移（MOTION-025） */
+.seg-slider { position: relative; display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 2px; border-radius: var(--semantic-radius-md); background: color-mix(in srgb, var(--semantic-color-text-primary) 7%, transparent); }
+.seg-slider > [role="radio"] { position: relative; z-index: 1; border-radius: calc(var(--semantic-radius-md) - 2px); color: var(--semantic-color-text-secondary); }
+.seg-slider > [aria-checked="true"] { color: var(--semantic-color-text-primary); }
+.seg-thumb { position: absolute; top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px - (var(--n) - 1) * 2px) / var(--n)); border-radius: calc(var(--semantic-radius-md) - 2px); background: var(--semantic-color-surface-raised); box-shadow: var(--semantic-elevation-raised); transform: translateX(calc(var(--i) * (100% + 2px))); pointer-events: none; }
+:where([data-theme="dark"]) .seg-thumb { background: color-mix(in srgb, var(--semantic-color-text-primary) 16%, var(--semantic-color-surface-raised)); }
+@media (prefers-color-scheme: dark) { :where(:root:not([data-theme="light"])) .seg-thumb { background: color-mix(in srgb, var(--semantic-color-text-primary) 16%, var(--semantic-color-surface-raised)); } }
+
+/* 用量的悬停提示：反色实底气泡，120 ms 淡入；只给精确指针（INT-006），读屏走图表旁的表格。
+   藏起来时 visibility:hidden，淡出结束才藏，免得半透明的气泡挡住旁边的悬停 */
+.usage-tip { position: absolute; bottom: calc(100% + 8px); z-index: 20; width: max-content; min-width: 10rem; max-width: 18rem; padding: 8px 12px; border-radius: var(--semantic-radius-md); background: var(--semantic-color-surface-inverse); color: var(--semantic-color-text-on-inverse); box-shadow: var(--semantic-elevation-overlay); pointer-events: none; opacity: 0; visibility: hidden; transition: opacity var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard), visibility 0s linear var(--semantic-motion-duration-fast); }
+@media (hover: hover) and (pointer: fine) {
+  .usage-hover:hover > .usage-tip { opacity: 1; visibility: visible; transition-delay: 0s; }
+}
+
+/* 活动日历的 5 档：0 次是正文色 7% 的填充（与 .fill 同值，叠在活动卡的填充上看得出格子），1～4 档是成功色由浅到深（深色模式由暗到亮）。
+   brand 的顺序色是蓝色，设计写的是绿色日历：这里只从 brand 的 feedback.success 推出几档（oklch 改亮度与彩度、色相不变），不另写颜色值 */
+/* 深色下越暗越淡：亮度每档降 0.13、彩度每档收 15%，否则低档是一片高饱和的墨绿 */
+.settings-sheet { --heat-step: 0.12; --heat-c: 0; }
+:where([data-theme="dark"]) .settings-sheet { --heat-step: -0.13; --heat-c: -0.15; }
+@media (prefers-color-scheme: dark) { :where(:root:not([data-theme="light"])) .settings-sheet { --heat-step: -0.13; --heat-c: -0.15; } }
+.heat-0 { background: color-mix(in srgb, var(--semantic-color-text-primary) 7%, transparent); }
+.heat-1 { background: oklch(from var(--semantic-color-feedback-success) calc(l + 3 * var(--heat-step)) calc(c * (1 + 3 * var(--heat-c))) h); }
+.heat-2 { background: oklch(from var(--semantic-color-feedback-success) calc(l + 2 * var(--heat-step)) calc(c * (1 + 2 * var(--heat-c))) h); }
+.heat-3 { background: oklch(from var(--semantic-color-feedback-success) calc(l + var(--heat-step)) calc(c * (1 + var(--heat-c))) h); }
+.heat-4 { background: var(--semantic-color-feedback-success); }

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'react-router';
-import { draftNameFromPrompt, failureText, type DraftFrame, type DraftFrameChoice, type JobDto, type ScreenDto } from '@quilt/core/browser';
+import { MAX_SUBTREE_BLOCKS, draftNameFromPrompt, failureText, type DraftFrame, type DraftFrameChoice, type JobDto, type ScreenDto } from '@quilt/core/browser';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button } from '@/ui/ui';
@@ -12,14 +12,14 @@ import { useRunnerPrefs } from '@/composer/useRunnerPrefs';
 import { useComposerDock } from '@/composer/useComposerDock';
 import { jobChips, useEndedJobs } from '@/composer/JobChips';
 import { coveredScreens, jobLabel } from '@/canvas/jobs';
-import type { ElementSelection } from '@/canvas/frameMessages';
+import { applySelect, type ElementSelection, type SelectMessage } from '@/canvas/frameMessages';
 import { useSketchbook, type SketchEvent } from '@/sketch/useSketchbook';
 import { DraftStage, type StageState } from '@/sketch/DraftStage';
 import { DraftRail } from '@/sketch/DraftRail';
-import { SketchComposer, type DraftPick } from '@/sketch/SketchComposer';
+import { SketchComposer } from '@/sketch/SketchComposer';
 import { useRefProjects } from '@/sketch/RefSelect';
 import { CopyDialog } from '@/sketch/CopyDialog';
-import { isSettingsSection, type SettingsSection } from '@/settings/sections';
+import { useSettingsSection } from '@/settings/sections';
 import { getLocale, tOf, useLocale, useT, type Locale } from '@/i18n';
 import sketchMessages from '@/i18n/locales/sketch';
 import commonMessages from '@/i18n/locales/common';
@@ -34,12 +34,15 @@ const EDITABLE = 'input, textarea, select, [contenteditable]';
 // 服务端点名的原因（problem 的 errors[0]，没有就 title）；不是服务端的错（连不上）用 fallback
 const problemText = (e: unknown, fallback: string) => (e instanceof ApiError ? (e.problem as { errors?: { message: string }[] }).errors?.[0]?.message ?? e.problem.title : fallback);
 
-// 作业 chip 的文案：草稿本里只有这几种——出一张新草稿、改某一张、改某一张里的一块
+// 作业 chip 的文案：草稿本里只有这几种——出一张新草稿、改某一张、改某一张里的一块或几块（v1.26 qids）
 function draftJobLabel(j: JobDto, screens: ScreenDto[]): string {
-  const i = j.input as { prompt?: string; screenIds?: string[] } | null;
+  const i = j.input as { prompt?: string; screenIds?: string[]; qids?: string[] } | null;
   if (j.kind === 'generate') return tm('page.job.newDraft', { name: draftNameFromPrompt(i?.prompt ?? '') });
   if (j.kind === 'edit_screens') return tm('page.job.edit', { name: screens.find((s) => s.id === i?.screenIds?.[0])?.name ?? tm('page.job.deletedDraft') });
-  if (j.kind === 'regenerate_subtree') return tm('page.job.editBlock', { name: screens.find((s) => s.id === (j.input as { screenId?: string } | null)?.screenId)?.name ?? tm('page.job.deletedDraft') });
+  if (j.kind === 'regenerate_subtree') {
+    const name = screens.find((s) => s.id === (j.input as { screenId?: string } | null)?.screenId)?.name ?? tm('page.job.deletedDraft');
+    return i?.qids && i.qids.length > 1 ? tm('page.job.editBlocks', { name, n: i.qids.length }) : tm('page.job.editBlock', { name });
+  }
   return jobLabel(j, screens, []);
 }
 
@@ -75,20 +78,18 @@ export function SketchRoute() {
   };
   const toggleComposer = () => { if (composerDock.prefs.collapsed) showComposer(); else composerDock.setCollapsed(true); };
   // 看板上开哪一张进 URL（INT-020）：点记录栏、收起是用户的导航（push），自动摆上新草稿、清掉已删的是校正（replace）
-  // 设置弹层（?settings=<节>，与画布同一个）：输入框通道下拉的「管理通道…」打开它，看板上开着的草稿不动
-  const settingsParam = params.get('settings');
-  const settingsSection: SettingsSection | null = settingsParam ? (isSettingsSection(settingsParam) ? settingsParam : 'usage') : null;
-  const setSettings = useCallback((v: SettingsSection | null) => setParams((q) => { if (v) q.set('settings', v); else q.delete('settings'); return q; }, { replace: true }), [setParams]);
+  // 设置弹层（?settings=<节>，与画布同一个）：输入框模型下拉的「管理模型…」打开它，看板上开着的草稿不动
+  const [settingsSection, setSettings] = useSettingsSection();
   const openDraft = useCallback((id: string | null, mode: 'push' | 'replace' = 'push') => setParams((q) => { if (id) q.set('d', id); else q.delete('d'); return q; }, { replace: mode === 'replace' }), [setParams]);
 
   // 本页发出、还在等它落成屏的新草稿：作业 id 与发出时的画框。看板空着就自动摆上去；这期间用户已打开别的草稿就不抢（S5）
   const [pendingNew, setPendingNew] = useState<{ jobId: string; frame: DraftFrameChoice; screenId?: string } | null>(null);
   const pendingRef = useRef(pendingNew);
   pendingRef.current = pendingNew;
-  // 「选元素」开关与点中的那一块（REQ-CORE-045）：都记着是哪张草稿的，换了草稿就不算数；
-  // 胶囊还记着点选时的那一版，草稿出了新一版（FLOW-SKETCH-REFINE S6）它就作废
+  // 「选元素」开关与点中的那几块（REQ-CORE-045，v1.26 按住 Shift 选几块，最后点中的排最后）：都记着是哪张草稿的，换了草稿就不算数；
+  // 胶囊还记着点选时的那一版，草稿出了新一版（FLOW-SKETCH-REFINE S6）它们就一起作废
   const [pickingFor, setPickingFor] = useState<string | null>(null);
-  const [pick, setPick] = useState<DraftPick | null>(null);
+  const [pick, setPick] = useState<{ draftId: string; revisionId: string; sels: ElementSelection[] } | null>(null);
   // 新草稿作业建出的是哪张屏（screen_planned 带 screenId）：失败时没内容的那张由服务端删掉，看板上开着它就一起撤
   const planned = useRef(new Map<string, string>());
   const screensRef = useRef<ScreenDto[]>([]);
@@ -191,16 +192,29 @@ export function SketchRoute() {
   // 开关与胶囊只对看板上这张草稿的这一版有效（见上）；换了草稿时连同记下的一起清掉，回到这张时不再自己开着
   const picking = !!open && pickingFor === open.id;
   const activePick = picking && open && pick?.draftId === open.id && pick.revisionId === open.currentRevisionId ? pick : null;
+  const picks = useMemo(() => activePick?.sels ?? [], [activePick]);
   const openId = open?.id ?? null;
   useEffect(() => { setPickingFor(null); setPick(null); }, [openId]);
   // 胶囊只在「选元素」开着时有：开关一换就去掉
   const changePicking = (on: boolean) => { if (!open) return; setPickingFor(on ? open.id : null); setPick(null); };
-  // 选元素点中一块（FLOW-SKETCH-REFINE S2）：输入框目标区出胶囊、焦点交给输入框写这一句。点在草稿根上等同改整张（S4）：不出胶囊，框随之撤掉
-  const onPick = (sel: ElementSelection) => {
+  // 选元素点中一块（FLOW-SKETCH-REFINE S2）：输入框目标区出胶囊、焦点交给输入框写这一句。点在草稿根上等同改整张（S4）：不出胶囊，框随之撤掉。
+  // 按住 Shift 点是加选或减选（v1.26），规则同画布的多选（applySelect）：互相包含只留外层、最多 MAX_SUBTREE_BLOCKS 块，碰上时说一声
+  const climbRef = useRef<((dir: 'up' | 'down') => void) | null>(null);
+  const onPick = (m: SelectMessage) => {
     if (!open?.currentRevisionId) return;
-    const root = !!sel.path?.length && sel.path[0].qid === sel.qid;
-    setPick(root ? null : { draftId: open.id, revisionId: open.currentRevisionId, qid: sel.qid, tag: sel.tag, text: sel.text });
+    const root = !!m.path?.length && m.path[0].qid === m.qid;
+    if (root) { setPick(null); showComposer(); return; }
+    const { list, note } = applySelect(picks, m);
+    if (note === 'merged') toast(t('page.pick.merged'));
+    else if (note === 'max') toast(t('page.pick.max', { max: MAX_SUBTREE_BLOCKS }));
+    setPick(list.length ? { draftId: open.id, revisionId: open.currentRevisionId, sels: list } : null);
     showComposer();
+  };
+  // 胶囊上的 ×：只去掉这一块，去光了回到改整张
+  const removePick = (qid: string) => {
+    const rest = picks.filter((x) => x.qid !== qid);
+    setPick(activePick && rest.length ? { ...activePick, sels: rest } : null);
+    composerRef.current?.focus();
   };
 
   // 发送没发出去：原因按 problem 的类型说（REQ-CORE-020 的挡法之外真撞上的），输入框留着字与参考图
@@ -216,15 +230,16 @@ export function SketchRoute() {
     else toast(problemText(e, t('page.send.offline')), 'error');
   };
   // 发送（API-CORE-010 草稿本）：看板空着 = 新草稿（带画框与参照），有草稿 = 改它；选元素点中了一块 = 只改这一块（API-CORE-006 regenerate_subtree，
-  // 目标是这张草稿与点中的元素，expectedRevisionId 取点选时的那一版，参考图同样带上）。没发出去时输入框留着字与参考图（REQ-CORE-020）
+  // 目标是这张草稿与点中的元素，expectedRevisionId 取点选时的那一版，参考图同样带上）；点中了几块（v1.26）是同一种作业带 qids，qid 是最后点中的那块。
+  // 没发出去时输入框留着字与参考图（REQ-CORE-020）
   const onSend = async (content: string, attachmentIds: string[], frame: DraftFrameChoice, refProjectId: string | null): Promise<boolean> => {
     if (!projectId) return false;
     const target = open;
-    const block = target ? activePick : null;
+    const block = target && activePick ? { ...activePick, qids: activePick.sels.map((x) => x.qid) } : null;
     const agentNote = prefs.agentTool === 'codex' ? t('page.send.toCodex') : t('page.send.toClaude');
     try {
       if (target && block) {
-        const { job } = await api.projects.createJob(projectId, { kind: 'regenerate_subtree', input: { screenId: target.id, qid: block.qid, prompt: content, expectedRevisionId: block.revisionId, runner: prefs.sendRunner }, attachmentIds: attachmentIds.length ? attachmentIds : undefined });
+        const { job } = await api.projects.createJob(projectId, { kind: 'regenerate_subtree', input: { screenId: target.id, qid: block.qids[block.qids.length - 1], ...(block.qids.length > 1 ? { qids: block.qids } : null), prompt: content, expectedRevisionId: block.revisionId, runner: prefs.sendRunner }, attachmentIds: attachmentIds.length ? attachmentIds : undefined });
         book.track(job);
         if (job.runner === 'agent') toast(agentNote);
         return true;
@@ -281,7 +296,7 @@ export function SketchRoute() {
     if (dRef.current) openDraft(null);
     composerRef.current?.focus();
   }, [openDraft]);
-  // Esc 的先后（PAGE-SKETCH）：下拉与弹层自己先拦下；然后去掉胶囊回到改整张；最后才按 Q-SKETCH-3 收起看板
+  // Esc 的先后（PAGE-SKETCH）：下拉与弹层自己先拦下；然后一次去掉全部胶囊回到改整张；最后才按 Q-SKETCH-3 收起看板
   const escape = () => { if (activePick) setPick(null); else collapse(); };
 
   const [copyFor, setCopyFor] = useState<ScreenDto | null>(null);
@@ -310,17 +325,46 @@ export function SketchRoute() {
   // Esc 收起（Q-SKETCH-3）：焦点在输入框里时由输入框处理（有字先清字），弹层与下拉开着时归它们（它们会拦下或 preventDefault）。
   // ⌘/ 收起 / 展开输入框（同画布）：焦点在输入框里也要能按，所以不过「可编辑区」那道门
   // 快捷键同画布（v1.16）：⌘E 选元素、⌘/ 输入框；焦点在草稿 iframe 里时父页收不到键盘，由运行时转发上来（DraftStage 的 onShortcut）
+  // ⌘Z 回到上一版（v1.25）：取当前版的父修订，走「版本」里「回到这一版」同一个接口（以它的内容建新一版，新一版的父修订就是被回到的那一版）。
+  // 当前版本身是回到旧版建出来的（restore）时，它的内容就是父修订那一版，要先退到那一版再取父修订——连按才会沿着来路一版版往回走
+  const undoing = useRef(false);
+  const undoVersion = async () => {
+    if (!open?.currentRevisionId || undoing.current) return;
+    if (openBusy) { toast(openBusy); return; }
+    undoing.current = true;
+    try {
+      const { items } = await api.screens.revisions(open.id);
+      const byId = new Map(items.map((r) => [r.id, r]));
+      let base = byId.get(open.currentRevisionId);
+      while (base?.sourceKind === 'restore' && base.parentRevisionId && byId.has(base.parentRevisionId)) base = byId.get(base.parentRevisionId);
+      const parent = base?.parentRevisionId ? byId.get(base.parentRevisionId) : undefined;
+      if (!parent) { toast(t('versions.atFirst')); return; }
+      await api.screens.restore(open.id, parent.id, open.currentRevisionId);
+      toast(t('versions.restored', { seq: parent.seq }));
+      await refresh();
+    } catch (e) {
+      if (e instanceof ApiError && e.type === '/errors/revision-conflict') { toast(t('versions.conflict'), 'error'); void refresh(); }
+      else if (e instanceof ApiError && e.type === '/errors/screen-busy') toast(t('versions.busy', { name: open.name }), 'error');
+      else toast(e instanceof ApiError ? e.problem.title : t('versions.failed'), 'error');
+    } finally { undoing.current = false; }
+  };
   const shortcut = (code: string) => {
     if (keyRef.current.blocked) return;
     if (code === 'Slash') { toggleComposer(); return; }
     if (!open?.currentRevisionId) return;
     if (code === 'KeyE') changePicking(!picking);
+    if (code === 'KeyZ') void undoVersion();
   };
   const keyRef = useRef({ escape, toggleComposer, shortcut, blocked: false });
   keyRef.current = { escape, toggleComposer, shortcut, blocked: !!copyFor || !!deleting || !!settingsSection };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.code === 'Slash' || e.code === 'KeyE')) { e.preventDefault(); keyRef.current.shortcut(e.code); return; }
+      // ⌘Z：焦点在文本框里时留给文本框自己撤销
+      if ((e.metaKey || e.ctrlKey) && e.code === 'KeyZ' && !e.shiftKey && !e.altKey) {
+        if ((e.target as HTMLElement | null)?.closest(EDITABLE)) return;
+        e.preventDefault(); keyRef.current.shortcut(e.code); return;
+      }
       if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing || keyRef.current.blocked) return;
       if ((e.target as HTMLElement | null)?.closest(EDITABLE)) return;
       keyRef.current.escape();
@@ -374,13 +418,13 @@ export function SketchRoute() {
           onEscape={escape} onShortcut={(code) => keyRef.current.shortcut(code)}
           onStale={() => refresh({ quiet: true })}
           refs={refs} onRef={(id) => void changeRef(id)}
-          picking={picking} onPicking={changePicking} pickQid={activePick?.qid ?? null} onPick={onPick}
+          picking={picking} onPicking={changePicking} pickQids={picks.map((x) => x.qid)} onPick={onPick} climbRef={climbRef}
         />
       ) : <StagePending failure={book.failure} onRetry={book.retry} />}
       <DraftRail open={railOpen} onToggle={toggleRail} drafts={drafts} openId={open?.id ?? null} generating={generating} onPick={(id) => { if (id !== dRef.current) openDraft(id); if (narrow()) setRailOpen(false); }} onShotError={onShotError} />
       <SketchComposer
         handle={composerRef} laneRef={laneRef} draft={open} jobs={chips} blockedReason={blockedReason} prefs={prefs}
-        refs={refs} picking={picking} pick={activePick} onClearPick={() => { setPick(null); composerRef.current?.focus(); }}
+        refs={refs} picking={picking} picks={picks} onRemovePick={removePick} onClimb={(dir) => climbRef.current?.(dir)}
         onSend={onSend} onCancelJob={(id) => void book.cancel(id)} onRetryJob={retryJob} onDismissJob={dismissJob}
         onUploadImage={(file) => (projectId ? api.projects.uploadImage(projectId, file) : Promise.reject(new Error(t('page.blocked.loading'))))}
         onError={(m) => toast(m, 'error')} onEscape={escape}

@@ -41,7 +41,8 @@ export function jobLabel(job: JobDto, screens: Pick<ScreenDto, 'id' | 'name'>[],
       if (preset === 'conventions') return t('jobs.conventions', { count: ids.length }) + ver;
       return (ids.length === 1 ? t('jobs.editOne', { name: name(ids[0]) }) : screens.length > 0 && ids.length >= screens.length ? t('jobs.editAll', { n: ids.length }) : t('jobs.editSome', { n: ids.length })) + ver;
     }
-    case 'regenerate_subtree': return t('jobs.regenerateBlock', { name: name(i.screenId) });
+    // 一次改几块（v1.26 qids）说块数
+    case 'regenerate_subtree': return i.qids && i.qids.length > 1 ? t('jobs.regenerateBlocks', { name: name(i.screenId), n: i.qids.length }) : t('jobs.regenerateBlock', { name: name(i.screenId) });
     case 'apply_design_system': return i.screenIds === 'all' ? t('jobs.applyAll') : t('jobs.applyN', { count: (i.screenIds ?? []).length });
     case 'propose_design_system': return t('jobs.propose');
     case 'export_prototype': return t('jobs.export');

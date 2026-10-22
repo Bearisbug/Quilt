@@ -150,7 +150,7 @@ await step('TC-CORE-048', async () => {
   });
   const dlg = page.getByTestId('channel-dialog');
   const openManager = async () => {
-    await page.goto(`${WEB}/p/${projectId}?settings=runners`);
+    await page.goto(`${WEB}/p/${projectId}?settings=models`);
     await page.getByTestId('channel-manager').waitFor({ timeout: 15000 });
     await page.getByTestId('add-channel').waitFor();
   };

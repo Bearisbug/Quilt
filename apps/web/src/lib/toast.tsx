@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { TriangleAlert, X } from 'lucide-react';
 import { useT } from '@/i18n';
 import libMessages from '@/i18n/locales/shellLib';
+import { recordEvent } from '@/lib/recorder';
 
 // 提示条（PAGE-CANVAS「提示条」，v1.04）：信息 3.2 s、错误 8 s 后消失；悬停时不计时，移开重新计时；
 // 错误与带动作的可手动关。动作只有一个（例如「撤销（⌘Z）」），点了就收起
@@ -17,6 +18,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const dismiss = useCallback((id: number) => setItems((xs) => xs.filter((t) => t.id !== id)), []);
   const push = useCallback<Push>((text, kind = 'info', opts) => {
     const id = ++seq.current;
+    recordEvent('toast', undefined, { text, kind, ...(opts?.action ? { action: opts.action.label } : null) });
     setItems((xs) => [...xs, { id, text, kind, action: opts?.action }]);
   }, []);
   return (

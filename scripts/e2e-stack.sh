@@ -2,7 +2,7 @@
 # e2e 隔离测试栈（TEST.md §3）。用法：scripts/e2e-stack.sh <lane> <start|stop|restart|status|env>
 #   lane = main：测试库 quilt_test、端口 3410 / 3411；lane = l1…l9：测试库 quilt_l<N>_test、端口 3410+10N / 3411+10N，库不存在就建。
 #   绝不碰开发实例（3100 / 3101 / 6688）与开发库 quilt：库名一律以 _test 结尾，tests/e2e/lib.ts 的 assertTestApi 只认这种库名。
-#   跑的是本脚本所在仓库（或 worktree）的代码；状态（API 日志、假会话与假 Codex 目录）在 <仓库>/.e2e/<lane>/，已 gitignore。
+#   跑的是本脚本所在仓库（或 worktree）的代码；状态（API 日志、假会话与假 Codex 目录、对象存储 data/）在 <仓库>/.e2e/<lane>/，已 gitignore。
 #   QUILT_RATE_LIMIT_PER_MIN 缺省 1000（stub 下的限流旋钮）；调用方的环境里给了就用给的（restartApi 按 10 重启验限流）。
 lane=$1; cmd=$2
 case $lane in
@@ -38,7 +38,7 @@ ensure_db() {
 start() {
   if lsof -nP -iTCP:$API -sTCP:LISTEN >/dev/null; then echo "已在运行 :$API"; return; fi
   ensure_db || return 1
-  (cd $WT && env DATABASE_URL=$DBURL API_PORT=$API PREVIEW_PORT=$PRV \
+  (cd $WT && env DATABASE_URL=$DBURL QUILT_DATA_DIR=$DIR/data API_PORT=$API PREVIEW_PORT=$PRV \
     API_ORIGIN=http://localhost:$API WEB_ORIGIN=http://localhost:$API PREVIEW_ORIGIN=http://preview.localhost:$PRV \
     WEB_DIST=$WT/apps/web/dist LLM_DRIVER=stub LLM_STUB= QUILT_RATE_LIMIT_PER_MIN=${QUILT_RATE_LIMIT_PER_MIN:-1000} \
     QUILT_CLAUDE_SESSIONS_DIR=$DIR/sessions QUILT_CODEX_HOME=$DIR/codex \
@@ -53,6 +53,6 @@ case $cmd in
   restart) stop; start ;;
   status) curl -s --noproxy '*' http://localhost:$API/v1/health; echo ;;
   env) # 给 e2e / 脚本用：eval "$(scripts/e2e-stack.sh main env)"
-    echo "export DATABASE_URL=$DBURL QUILT_E2E_API=http://localhost:$API QUILT_E2E_WEB=http://localhost:$API LIVE_LLM=0 GEMINI_API_KEY= QUILT_CLAUDE_SESSIONS_DIR=$DIR/sessions QUILT_CODEX_HOME=$DIR/codex QUILT_E2E_RESTART='$WT/scripts/e2e-stack.sh $lane restart'" ;;
+    echo "export DATABASE_URL=$DBURL QUILT_DATA_DIR=$DIR/data QUILT_E2E_API=http://localhost:$API QUILT_E2E_WEB=http://localhost:$API LIVE_LLM=0 GEMINI_API_KEY= QUILT_CLAUDE_SESSIONS_DIR=$DIR/sessions QUILT_CODEX_HOME=$DIR/codex QUILT_E2E_RESTART='$WT/scripts/e2e-stack.sh $lane restart'" ;;
   *) echo "cmd: start|stop|restart|status|env"; exit 2 ;;
 esac

@@ -7,6 +7,7 @@ export * from './protocol.ts';
 export * from './lint.ts';
 export * from './inject.ts';
 export * from './edits.ts';
+export * from './blocks.ts';
 export * from './outline.ts';
 export * from './component-meta.ts';
 export * from './components.ts';

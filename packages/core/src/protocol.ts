@@ -17,9 +17,11 @@ export const previewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('quilt:wheel'), deltaY: z.number(), x: z.number(), y: z.number(), deltaX: z.number().optional(), pan: z.boolean().optional() }),
   // component：元素所在的共享组件名（自身或祖先带 data-component，REQ-EDIT-006），检查器据此挡住直改、给「改组件 / 脱离共享」
   // path（v1.00 逐级选）：从屏根到锚点（最近一次悬停 / 点中的最里层元素）的祖先链，当前选中是其中一级
+  // additive（v1.26 多选）：按着 Shift 点的，父页加选或减选；replace：这一份换掉选中里的哪一块——逐级选、路径点选换的是最后点中的那块，
+  // 热更新重选是原地刷新同一块；两样都不带 = 不按 Shift 点，只选这一个
   z.object({
     type: z.literal('quilt:select'), qid: z.string(), tag: z.string(), text: z.string(), classes: z.string(), href: z.string().nullable(), component: z.string().nullable(),
-    path: z.array(elementPathItemSchema).optional(),
+    path: z.array(elementPathItemSchema).optional(), additive: z.boolean().optional(), replace: z.string().optional(),
   }),
   // 父页在热更新后要求按 qid 重选（quilt:reselect），元素已不在时回这个：检查器清空
   z.object({ type: z.literal('quilt:deselect'), qid: z.string() }),
@@ -41,7 +43,8 @@ export type ParentToPreview =
     // 叠层屏（v0.63）：把 html 的根元素压在当前文档上（45% 暗遮罩 + 根元素），不换 DOM；swap 会先清掉全部叠层
   | { type: 'quilt:overlay'; html: string; route: string }
   | { type: 'quilt:overlay-close' }
-  | { type: 'quilt:highlight'; qid: string | null }
+    // qids（v1.26 多选）：选中的全部几块，各画一个选中框；qid 是其中最后点中的那一块（逐级选移动它）。只选一块时可不带 qids
+  | { type: 'quilt:highlight'; qid: string | null; qids?: string[] }
     // 热更新换了修订后按 qid 重新选中同一元素（回 quilt:select 带新值；元素没了回 quilt:deselect）
   | { type: 'quilt:reselect'; qid: string }
     // 屏内标记（REQ-EDIT-002）：working = 正在被作业改的元素（描边 + 「修改中…」角标），done = 刚回写完的（绿描边 + 「已更新」，运行时 4 s 后自撤）

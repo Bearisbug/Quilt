@@ -6,7 +6,7 @@ import { config } from '../config.ts';
 import { sha256 } from './signing.ts';
 import { codexBin } from './agentCli.ts';
 import { tr } from './locale.ts';
-import { EDIT_BLOCK, SKETCH_GENERATOR_MARK, type DraftFrame } from '@quilt/core';
+import { EDIT_BLOCK, SKETCH_GENERATOR_MARK, SUBTREE_BLOCKS_HEADER, quiltBlock, quiltBlocks, type DraftFrame } from '@quilt/core';
 
 // LLM 适配层（§17 Claude API）。驱动：anthropic（生产，API key）| agent-sdk（本机 Claude 订阅，仅开发）| codex（本机 Codex 订阅，v0.68）
 // | gemini | openai（兼容端点）| stub（测试故障注入/回放）。
@@ -307,6 +307,13 @@ class StubLlm implements Llm {
     if (current && (prompt.includes('[stub-patch-miss]') || (prompt.includes('[stub-patch]') && h1))) {
       const [find, replace] = prompt.includes('[stub-patch-miss]') ? ['<h1 data-qid="q0">not in this screen</h1>', '<h1>x</h1>'] : [h1!, h1!.replace(/>[^<]*</, '>Patched title<')];
       return { text: `${EDIT_BLOCK.find}\n${find}\n${EDIT_BLOCK.sep}\n${replace}\n${EDIT_BLOCK.replace}`, tokensIn: 1000, tokensOut: 100, model, ms: 5 };
+    }
+    // 一次改几块（v1.26，subtreeBlocksUserPrompt）：屏与草稿都认。每块原样回，根元素加 data-stub="multi"、开标签后接「已改 · 」，用例据此核对换了哪几块；
+    // [stub-blocks-miss] 每次都少回最后一块（补问那一轮同样少），流水线补问一轮后判失败
+    const asked = prompt.split(`\n${SUBTREE_BLOCKS_HEADER}\n`)[1];
+    if (asked !== undefined) {
+      const blocks = quiltBlocks(asked).map((b) => quiltBlock(b.qid, b.html.replace(/^(<[a-zA-Z][\w-]*)([^>]*>)/, '$1 data-stub="multi"$2已改 · ')));
+      return { text: (prompt.includes('[stub-blocks-miss]') ? blocks.slice(0, -1) : blocks).join('\n'), tokensIn: 1000, tokensOut: 100, model, ms: 5 };
     }
     // 草稿（REQ-CORE-040）：画框先取提示里的 [stub-frame:<画框>]（模拟模型在 auto 时自选），其次取系统提示给定的，再次 component。
     // 草稿里只改一块（REQ-CORE-045，subtreeUserPrompt）回一个认得出的单元素，用例据此核对只换了那一块

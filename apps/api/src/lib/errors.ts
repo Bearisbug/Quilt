@@ -32,6 +32,8 @@ export function localizeDeep(v: unknown, locale: Locale, key?: string): unknown 
 // @quilt/core schemas 里 zod 自定义 message 的英文（中文原文 → 英文）。schema 里新加中文 message 时在这里补一行
 export const ISSUE_EN: Record<string, string> = {
   'variantOf 与 variantName 要一起给': 'variantOf and variantName must be given together',
+  'qids 里有重复的块': 'qids has the same block more than once',
+  'qids 要含 qid': 'qids must include qid',
   '先写点什么': 'Write something first',
   '覆盖要给目标屏': 'Choose the screen to replace',
   '覆盖要给目标屏确认时的当前修订': 'Replace whole screen needs the revision the target screen was at when you confirmed',
@@ -40,8 +42,8 @@ export const ISSUE_EN: Record<string, string> = {
   '字体样式表必须是 https 链接': 'The font stylesheet must be an https URL',
   '组件名只能是字母、数字、空格、下划线与连字符，最长 40 字': 'Component names can only contain letters, digits, spaces, underscores and hyphens, up to 40 characters',
   '改内容或改名要带 expectedVersion': 'Changing the content or name requires expectedVersion',
-  'OpenAI 兼容通道必须填端点': 'OpenAI-compatible channels need an endpoint',
-  '这类通道必须填 API Key': 'This kind of channel needs an API key',
+  'OpenAI 兼容的模型必须填端点': 'OpenAI-compatible models need an endpoint',
+  '这类模型必须填 API Key': 'This kind of model needs an API key',
 };
 
 export const problems = {

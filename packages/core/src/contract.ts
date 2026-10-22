@@ -417,6 +417,23 @@ export function subtreeUserPrompt(screenName: string, route: string, fragment: s
   const prior = priorInstructions.length ? `\n${priorInstructionsBlock('THIS SCREEN', priorInstructions)}` : '';
   return `Within the screen "${screenName}" at route ${route}, regenerate ONLY the following element according to this instruction:\n${instruction}\n${prior}\nReturn the complete replacement HTML for this single element (one root element, same role in the layout), nothing else. Keep the design system, recipes and any links intact unless the instruction says otherwise.\n\nCURRENT ELEMENT:\n${fragment}`;
 }
+// 一次改几块（REQ-EDIT-002 v1.26）：一次调用拿到这几块的原 HTML（片段里不带 data-qid，qid 写在块头），每块回一段 <quilt-block>，
+// 按给的顺序、别的不回；回包由 parseQuiltBlocks（blocks.ts）收，对不上时补问一轮，补问的提示词末尾接 subtreeBlocksRetryNote 说上次哪里不对。
+// 提示词里列原 HTML 与模型回包是同一种块：
+//   <quilt-block qid="q3">
+//   …这一块的 HTML…
+//   </quilt-block>
+export type QuiltBlock = { qid: string; html: string };
+export const quiltBlock = (qid: string, html: string): string => `<quilt-block qid="${qid}">\n${html.trim()}\n</quilt-block>`;
+export const SUBTREE_BLOCKS_HEADER = 'CURRENT ELEMENTS:';
+export function subtreeBlocksUserPrompt(screenName: string, route: string, blocks: QuiltBlock[], instruction: string, priorInstructions: string[] = []): string {
+  const prior = priorInstructions.length ? `\n${priorInstructionsBlock('THIS SCREEN', priorInstructions)}` : '';
+  const n = blocks.length;
+  return `Within the screen "${screenName}" at route ${route}, regenerate ONLY the following ${n} elements according to this instruction (it applies to each of them):\n${instruction}\n${prior}\nReturn exactly ${n} blocks, one per element, in the order given below (${blocks.map((b) => b.qid).join(', ')}), and nothing else — no other element, not the rest of the screen, no explanation:\n<quilt-block qid="…">\nthe complete replacement HTML for that element (one root element, same role in the layout)\n</quilt-block>\nCopy each qid exactly as given. Keep the design system, recipes and any links intact unless the instruction says otherwise.\n\n${SUBTREE_BLOCKS_HEADER}\n${blocks.map((b) => quiltBlock(b.qid, b.html)).join('\n\n')}`;
+}
+export function subtreeBlocksRetryNote(qids: readonly string[], error: string): string {
+  return `\n\nYour previous reply was rejected: ${error}. Return exactly ${qids.length} <quilt-block> blocks with qid ${qids.join(', ')}, in that order, and nothing else.`;
+}
 
 // ---- 约定节（REQ-EDIT-003 / REQ-CORE-016）：DESIGN.md 里唯一由系统维护的一节 ----
 export const CONVENTIONS_HEADING = '## 约定';

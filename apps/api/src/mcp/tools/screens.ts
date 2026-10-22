@@ -5,6 +5,7 @@ import { db, schema } from '../../db/client.ts';
 import { config } from '../../config.ts';
 import { Problem, problems, isUniqueViolation } from '../../lib/errors.ts';
 import { storage } from '../../lib/storage.ts';
+import { shotMediaType } from '../../lib/shots.ts';
 import { notifyCanvas } from '../../lib/events.ts';
 import { randomToken, signObject } from '../../lib/signing.ts';
 import { createUpload } from '../../services/attachments.ts';
@@ -50,7 +51,7 @@ export function registerScreenTools(c: ToolCtx) {
   }));
 
   server.registerTool('quilt.get_screenshot', {
-    description: 'Screenshot (PNG) of a screen\'s current revision, returned as an image.',
+    description: 'Screenshot (lossless WebP) of a screen\'s current revision, returned as an image.',
     inputSchema: { screenId: z.string().uuid() },
   }, wrap(async (a) => {
     read();
@@ -58,8 +59,8 @@ export function registerScreenTools(c: ToolCtx) {
     if (!screen.currentRevisionId) throw new Problem(404, '/errors/not-found', 'no revision');
     const rev = await getRevision(screen.id, screen.currentRevisionId);
     if (!rev.screenshotKey) throw new Problem(409, '/errors/job-not-finished', 'screenshot not ready yet');
-    const png = await storage.get(rev.screenshotKey);
-    return { content: [{ type: 'image' as const, data: png.toString('base64'), mimeType: 'image/png' }] };
+    const image = await storage.get(rev.screenshotKey);
+    return { content: [{ type: 'image' as const, data: image.toString('base64'), mimeType: shotMediaType(rev.screenshotKey) }] };
   }));
 
   server.registerTool('quilt.validate_screen', {

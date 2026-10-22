@@ -10,6 +10,8 @@ export const API = process.env.QUILT_E2E_API ?? 'http://localhost:3100';
 export const EVIDENCE = path.join(ROOT, 'docs/test-runs');
 // 预览域的 host（含端口）：从被测 API 的 /v1/config 取，隔离栈（3200 / 3201）上跑也对得上；取不到时回落到开发默认 3101
 export const previewHost = async (): Promise<string> => { try { const c = (await (await fetch(`${API}/v1/config`)).json()) as { previewOrigin?: string }; return c.previewOrigin ? new URL(c.previewOrigin).host : 'preview.localhost:3101'; } catch { return 'preview.localhost:3101'; } };
+// 被测栈的对象目录（TEST.md §3「对象目录」）：/v1/config 的 home 下的 objects/。隔离栈各有一份（.e2e/<lane>/data），不是仓库的 .data
+export const objectsDir = async (): Promise<string> => path.join(((await (await fetch(`${API}/v1/config`)).json()) as { home: string }).home, 'objects');
 
 // 取本机 *.localhost（预览域）上的地址：改连 127.0.0.1、Host 头保留原名。系统解析器在开着 fake-ip 代理的机器上
 // 会把 preview.localhost 解析到 198.18.x，直接 fetch 连不上（RUN-239，TC-CORE-035）

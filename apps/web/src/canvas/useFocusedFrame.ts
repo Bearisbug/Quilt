@@ -135,7 +135,6 @@ export function useFocusedFrame(p: CanvasProps, propsRef: { current: CanvasProps
     void rebuild(stack);
   }, [focused, p, baseByRoute, rebuild]);
 
-  const highlight = useCallback((qid: string | null) => postToPreview({ type: 'quilt:highlight', qid }), [postToPreview]);
   // 回到这张卡片自己的屏：重挂 iframe（src 不变时 React 不会重新加载，只能靠换 key）并清空导航栈
   // 清空后由上面的 effect 用「当前这一轮的 props」重新钉住——这里直接读 propsRef 会拿到上一轮的
   // previewUrl（调用方常常是 await refresh() 之后紧接着调，state 还没落到下一次渲染），于是重载出旧修订
@@ -194,8 +193,8 @@ export function useFocusedFrame(p: CanvasProps, propsRef: { current: CanvasProps
   const baseline = useRef<{ id: string; rev: string | null } | null>(null);
   // 每屏最近一次显示在 iframe 里的修订：叠层关掉时拿它判断底下那一屏在被盖住期间有没有更新
   const shownRevs = useRef(new Map<string, string | null>());
-  // 热更新换完 DOM（quilt:swapped，或整份重写后的 quilt:ready）再按这个 qid 重选；跳转的 swap 不重选——同一 qid 在别的屏上是另一个元素
-  const pendingReselect = useRef<string | null>(null);
+  // 热更新换完 DOM（quilt:swapped，或整份重写后的 quilt:ready）再按这几个 qid 逐块重选（最后点中的排最后）；跳转的 swap 不重选——同一 qid 在别的屏上是另一个元素
+  const pendingReselect = useRef<string[]>([]);
   useEffect(() => {
     if (!p.focusedId || !iframeReady || !shownId) { baseline.current = null; setFrameShows(null); return; }
     const base = baseline.current ?? pinned.current;
@@ -211,7 +210,7 @@ export function useFocusedFrame(p: CanvasProps, propsRef: { current: CanvasProps
     const asLayer = cur.presentation === 'overlay' && propsRef.current.navStack.length > 0;
     htmlOf(cur).then((html) => {
       if (stale || html === null) return;
-      pendingReselect.current = propsRef.current.selectedQid;
+      pendingReselect.current = propsRef.current.selectedQids;
       if (asLayer) { postToPreview({ type: 'quilt:overlay-close' }); postToPreview({ type: 'quilt:overlay', html, route: cur.route }); }
       else { postToPreview({ type: 'quilt:swap', html, route: cur.route, keepScroll: true }); setFrameShows({ id: shownId, rev: shownRev }); }
     }).catch(() => { if (!stale) propsRef.current.onPreviewError?.(cur); });
@@ -258,9 +257,9 @@ export function useFocusedFrame(p: CanvasProps, propsRef: { current: CanvasProps
     setTimeout(() => { pendingDone.current = pendingDone.current.filter((q) => !qids.includes(q)); }, 3000);
   }, [postToPreview]);
   const reselectAfterSwap = useCallback(() => {
-    const qid = pendingReselect.current;
-    pendingReselect.current = null;
-    if (qid) postToPreview({ type: 'quilt:reselect', qid });
+    const qids = pendingReselect.current;
+    pendingReselect.current = [];
+    for (const qid of qids) postToPreview({ type: 'quilt:reselect', qid });
     const done = pendingDone.current;
     pendingDone.current = [];
     postToPreview({ type: 'quilt:mark', working: workingRef.current, done });
@@ -273,8 +272,8 @@ export function useFocusedFrame(p: CanvasProps, propsRef: { current: CanvasProps
     let html: string | null;
     try { html = await htmlOf(target); } catch { propsRef.current.onPreviewError?.(target); return; }
     if (html === null) return;
-    pendingReselect.current = null;
-    propsRef.current.onElementSelect(null);
+    pendingReselect.current = [];
+    propsRef.current.onElementDeselect(null);
     if (target.presentation === 'overlay' && propsRef.current.navStack.length > 0) { postToPreview({ type: 'quilt:overlay-close' }); postToPreview({ type: 'quilt:overlay', html, route: target.route }); }
     else postToPreview({ type: 'quilt:swap', html, route: target.route, keepScroll: true });
     setShownId(target.id);
@@ -302,6 +301,6 @@ export function useFocusedFrame(p: CanvasProps, propsRef: { current: CanvasProps
   return {
     iframeRef, iframeReady, reloadKey, focusedSrc, frameFailed, lingerOn, shownId, family, focused,
     beginFocus, onFrameLoad, retryFrame, markReady, markSwapped, navigate, goBack, resetToOwn,
-    highlight, markDone, swapVariant, onShotShown,
+    markDone, swapVariant, onShotShown,
   };
 }

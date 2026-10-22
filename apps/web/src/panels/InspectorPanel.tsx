@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { X } from 'lucide-react';
 import type { ScreenDto, ComponentDto, RunnerOptionDto, AgentTool, Runner, Tokens, ElementPathItem } from '@quilt/core/browser';
 import type { SessionList } from '@/composer/useRunnerPrefs';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
-import { Button, EmptyState, Input, Panel, Textarea } from '@/ui/ui';
+import { Button, EmptyState, IconButton, Input, Panel, Textarea } from '@/ui/ui';
 import { ConfirmDialog } from '@/ui/modal';
 import { Select } from '@/ui/Select';
 import { RunnerSelect, SessionSelect } from '@/composer/Composer';
@@ -35,9 +36,12 @@ const SUBTREE_SESSION_KEY: Record<AgentTool, string> = { 'claude-code': 'quilt:a
 const readKey = (k: string) => { try { return localStorage.getItem(k) ?? ''; } catch { return ''; } };
 // 「记为共享组件」的默认名：按元素标签给个常见叫法，用户可改
 const COMPONENT_NAME_BY_TAG: Record<string, string> = { nav: 'TabBar', header: 'AppBar', aside: 'Sidebar', footer: 'Footer' };
+// 多选列表里每块的文字摘要：按码点截，不把 emoji 截成半个
+const SUMMARY_MAX = 40;
+const summary = (s: string) => { const cs = Array.from(s.trim()); return cs.length > SUMMARY_MAX ? `${cs.slice(0, SUMMARY_MAX).join('')}…` : cs.join(''); };
 // 逐级选（v1.00 REQ-EDIT-001）：从屏根到锚点（最近一次点中的最里层元素）的祖先路径。当前层加粗、带 aria-current；
 // 当前层以下（回锚点的那几级）淡色仍可点。点一级选中它，悬停一级在屏上画悬停框。
-// 按钮不进 Tab 序：键盘走层级用 Shift+Enter / Enter，Tab 要从检查器直接进文案框
+// 按钮不进 Tab 序：键盘走层级用 Shift+↑ / Shift+↓，Tab 要从检查器直接进文案框
 function ElementPath({ sel, onPick, onPeek }: { sel: ElementSel; onPick?: (qid: string) => void; onPeek?: (qid: string | null) => void }) {
   const t = useT(inspectMessages);
   const path = sel.path?.length ? sel.path : [{ qid: sel.qid, tag: sel.tag }];
@@ -66,14 +70,19 @@ function ElementPath({ sel, onPick, onPeek }: { sel: ElementSel; onPick?: (qid: 
 // 目标是一张屏，或一个共享组件（v0.57 `REQ-EDIT-006`）——组件也能选元素直改，op 与屏同一套，
 // 只是落在组件自己的 HTML 上、乐观并发用版本号，改完由服务端回刷所有用它的屏。
 // 组件没有 AI 子树重生成（整块重写走输入框的「改组件」），也不能再「记为共享组件」。
-export function InspectorPanel({ screen, component, sel, routes, busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent, onForkToSketch, forking = false, keysRef, onDirectEdit, onUndo, tokens, onPathPick, onPathPeek }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; routes: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qid: string, prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void; onForkToSketch?: (qid: string) => void; forking?: boolean; keysRef?: { current: InspectorKeys | null }; onDirectEdit?: (e: DirectEdit) => void; onUndo?: () => void; tokens?: Tokens; onPathPick?: (qid: string) => void; onPathPeek?: (qid: string | null) => void }) {
+// 多选（v1.26 REQ-EDIT-002）：sels 是选中的几块，sel 是其中最后点中的那一块（路径行作用于它）。选中 2 块以上时只列出这几块、
+// 给「用 AI 重生成这几块」；直改、删除元素、记为共享组件、到草稿本里改只在单选时有
+export function InspectorPanel({ screen, component, sel, sels = [], onRemoveSel, routes, busy, runners = [], composerRunnerId = '', sessionLists, onSessionsOpen, workingQids = [], onClose, onEdited, onRegenerate, onEditComponent, onForkToSketch, forking = false, keysRef, onDirectEdit, onUndo, tokens, onPathPick, onPathPeek }: { screen?: ScreenDto; component?: ComponentDto; sel: ElementSel | null; sels?: ElementSel[]; onRemoveSel?: (qid: string) => void; routes: string[]; busy: boolean; runners?: RunnerOptionDto[]; composerRunnerId?: string; sessionLists?: Record<AgentTool, SessionList>; onSessionsOpen?: (tool: AgentTool) => void; workingQids?: string[]; onClose: () => void; onEdited: (qid: string) => void; onRegenerate?: (qids: string[], prompt: string, runner: Runner | undefined) => Promise<boolean>; onEditComponent?: (name: string) => void; onForkToSketch?: (qid: string) => void; forking?: boolean; keysRef?: { current: InspectorKeys | null }; onDirectEdit?: (e: DirectEdit) => void; onUndo?: () => void; tokens?: Tokens; onPathPick?: (qid: string) => void; onPathPeek?: (qid: string | null) => void }) {
   const toast = useToast();
   const t = useT(inspectMessages);
   const tc = useT(commonMessages);
   // 改了没存的文案 / 类名 / 跳转与重生成说明按元素暂存（v0.78）：点别的元素再点回来还在。
   // 直改三格记着起草时元素的原值：元素本身变了（保存后热更新重选、别处改了它）就作废、回到新值；说明不随元素内容作废
   const [drafts, setDrafts] = useState<Record<string, ElementDraft>>({});
-  const draftKey = sel ? `${component?.id ?? screen?.id}:${sel.qid}` : '';
+  const multi = sels.length > 1;
+  // 这一次重生成要改的几块：多选时是全部，单选时是这一块
+  const blocks = multi ? sels : sel ? [sel] : [];
+  const draftKey = blocks.length ? `${component?.id ?? screen?.id}:${blocks.map((b) => b.qid).join('+')}` : '';
   const base = sel ? JSON.stringify([sel.text, sel.classes, sel.href ?? '']) : '';
   const draft = drafts[draftKey];
   const fresh = draft?.base === base ? draft : undefined;
@@ -113,14 +122,16 @@ export function InspectorPanel({ screen, component, sel, routes, busy, runners =
   // 重生成：按钮或文本框里 Shift+Enter（这里是多行说明，Enter 留给换行，与输入框的 Enter 发送不同）。
   // 发出成功只清说明框，选中不动——面板留在这个元素上；建作业被拒（屏忙等）时说明保留
   // 这块已有作业在改（本机会话投递的作业不占 busy，靠这个挡重复发起；屏锁在服务端还有一道 409）
-  const working = !!sel && workingQids.includes(sel.qid);
-  const canRegenerate = !!sel && !!onRegenerate && !!prompt.trim() && !busy && sessionOk && !working;
+  const working = blocks.some((b) => workingQids.includes(b.qid));
+  // 多选里有共享组件实例里的元素：单选时它不给重生成（只给改组件 / 脱离共享），多选同样挡住，点名是哪一块
+  const locked = multi && !component ? sels.find((s) => s.component) : undefined;
+  const canRegenerate = blocks.length > 0 && !!onRegenerate && !!prompt.trim() && !busy && sessionOk && !working && !locked;
   // 转圈只给这一下自己发出的请求；屏被别的作业占着时靠面板里那行原因说明
   const [regenerating, setRegenerating] = useState(false);
   const regenerate = async () => {
     if (!sel || !canRegenerate || !onRegenerate || regenerating) return;
     setRegenerating(true);
-    try { if (await onRegenerate(sel.qid, prompt.trim(), runner)) edit({ prompt: '' }); } finally { setRegenerating(false); }
+    try { if (await onRegenerate(blocks.map((b) => b.qid), prompt.trim(), runner)) edit({ prompt: '' }); } finally { setRegenerating(false); }
   };
   useEffect(() => { setMaking(false); setCompError(null); }, [sel?.qid, sel?.text, sel?.classes, sel?.href]);
   // 当前指向的路由若不在项目里（断链）也要能显示出来
@@ -182,7 +193,7 @@ export function InspectorPanel({ screen, component, sel, routes, busy, runners =
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (sel && document.activeElement instanceof HTMLIFrameElement) bodyRef.current?.focus({ preventScroll: true }); }, [sel]);
   // 键盘等价物（v0.95）：与按钮同样的可用条件——共享组件实例里的元素没有这两个操作，保存中不响应；屏忙时提示原因（v1.04）
-  const keyable = !!sel && !(sel.component && !component);
+  const keyable = !!sel && !multi && !(sel.component && !component);
   const busyText = component ? t('inspector.busyComponent') : t('inspector.busyScreen');
   useEffect(() => {
     if (!keysRef) return;
@@ -190,6 +201,37 @@ export function InspectorPanel({ screen, component, sel, routes, busy, runners =
     keysRef.current = keyable ? { save: guard(save), remove: guard(remove) } : null;
     return () => { keysRef.current = null; };
   });
+  // 「用 AI 重生成这块 / 这几块」（REQ-EDIT-002）：单选与多选同一节，只是文案按块数换。组件没有子树重生成：整块重写是「改组件」那条路
+  //（输入框里以这个组件为目标发一句话），它会重写整个组件并回刷所有用它的屏，这里只给指路，不另起一个入口
+  const regenSection = component ? (
+    <p className="border-t border-border-subtle pt-3 type-label leading-(--semantic-typography-body-line-height) text-text-secondary" data-testid="el-component-hint">
+      {t('inspector.componentHint')}
+    </p>
+  ) : (
+    <div className="space-y-1.5 border-t border-border-subtle pt-3">
+      <label htmlFor="el-prompt" className="block type-label font-semibold text-text-secondary">{multi ? t('inspector.multi.regenTitle') : t('inspector.regen.title')}</label>
+      <Textarea id="el-prompt" value={prompt} onChange={(e) => edit({ prompt: e.target.value })} rows={3} placeholder={multi ? t('inspector.multi.regenPlaceholder') : t('inspector.regen.placeholder')} disabled={busy}
+        onKeyDown={(e) => { if (e.key === 'Enter' && e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void regenerate(); } }} />
+      {/* 通道单独选：与输入框同一套控件；本机 agent 时还要选投给哪个会话。面板 20rem 宽，两个下拉放不下时折行 */}
+      <div className="flex flex-wrap items-center gap-1.5" data-testid="el-runner">
+        {runners.length > 0 && <RunnerSelect runners={runners} value={runnerId} onChange={pickRunner} disabled={busy} testId="el-runner-select" />}
+        {tool && <SessionSelect tool={tool} sessions={sessions} reason={list?.reason} value={sessionId} onChange={pickSession} onOpen={() => onSessionsOpen?.(tool)} disabled={busy} testId="el-session-select" />}
+      </div>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="primary" disabled={!canRegenerate} pending={regenerating} onClick={() => void regenerate()}>{multi ? t('inspector.multi.regenSubmit') : t('inspector.regen.submit')}</Button>
+        <kbd className="kbd px-1 type-caption">Shift+Enter</kbd>
+      </div>
+      {working && <p className="type-caption text-primary" data-testid="el-working">{multi ? t('inspector.multi.regenWorking') : t('inspector.regen.working')}</p>}
+      {locked?.component && <p className="type-caption text-warning" data-testid="el-multi-locked">{t('inspector.multi.locked', { tag: locked.tag, qid: locked.qid, name: locked.component })}</p>}
+      {agent && !sessionOk && !working && <p className="type-caption text-warning">{t('inspector.regen.pickSession')}</p>}
+    </div>
+  );
+  // 多选列表里 × 掉一块：按钮随之卸掉，焦点交给检查器的内容区，接着按 Shift+↑ / Shift+↓ 照样换层（A11Y-013）
+  const removeSel = (qid: string) => {
+    onRemoveSel?.(qid);
+    requestAnimationFrame(() => { if (!document.activeElement || document.activeElement === document.body) bodyRef.current?.focus({ preventScroll: true }); });
+  };
+
   const makeComponent = async () => {
     if (!sel) return;
     const name = compName.trim();
@@ -210,7 +252,29 @@ export function InspectorPanel({ screen, component, sel, routes, busy, runners =
 
   return (
     <Panel title={t('inspector.title', { name: component ? component.name : screen?.name ?? '' })} className="h-full" actions={<Button size="sm" onClick={onClose}>{tc('close')}</Button>}>
-      {!sel ? <EmptyState title={component ? t('inspector.emptyComponent') : t('inspector.emptyScreen')} hint={t('inspector.emptyHint')} /> : sel.component && !component ? (
+      {!sel ? <EmptyState title={component ? t('inspector.emptyComponent') : t('inspector.emptyScreen')} hint={t('inspector.emptyHint')} /> : multi ? (
+        // 选中 2 块以上（v1.26）：逐行列出，悬停一行在屏上框出那一块、× 去掉它；最后点中的那一块（路径行作用于它）加粗
+        <div ref={bodyRef} tabIndex={-1} className="scroll flex-1 space-y-4 p-3 focus:outline-none" data-testid="inspector-body">
+          <ElementPath sel={sel} onPick={onPathPick} onPeek={onPathPeek} />
+          <div className="space-y-1.5" data-testid="el-multi">
+            <div className="type-label font-semibold text-text-primary" data-testid="el-multi-title">{t('inspector.multi.title', { n: sels.length })}</div>
+            <ul aria-label={t('inspector.multi.listLabel')} className="space-y-0.5">
+              {sels.map((s) => (
+                <li key={s.qid} data-qid={s.qid} data-testid="el-multi-row" aria-current={s === sel ? 'true' : undefined} className="flex min-w-0 items-center gap-2 py-1"
+                  onMouseEnter={() => onPathPeek?.(s.qid)} onMouseLeave={() => onPathPeek?.(null)}>
+                  <div className="min-w-0 flex-1 type-label">
+                    <div className={`font-mono ${s === sel ? 'font-semibold text-text-primary' : 'text-text-secondary'}`}>{s.tag} · {s.qid}</div>
+                    <div className={`[overflow-wrap:anywhere] ${s.text.trim() ? 'text-text-primary' : 'text-text-secondary'}`}>{summary(s.text) || t('inspector.textPlaceholder')}</div>
+                  </div>
+                  <IconButton size="2xs" tip="none" label={t('inspector.multi.remove', { tag: s.tag, qid: s.qid })} onClick={() => removeSel(s.qid)} data-testid="el-multi-remove"><X size={14} aria-hidden="true" /></IconButton>
+                </li>
+              ))}
+            </ul>
+          </div>
+          {busy && <p className="type-caption text-warning" data-testid="el-busy">{busyText}</p>}
+          {regenSection}
+        </div>
+      ) : sel.component && !component ? (
         // 共享组件实例里的元素（REQ-EDIT-006）：直改会在下一次写入时被组件展开顶掉，所以不给字段，只给两个出口
         <div ref={bodyRef} tabIndex={-1} className="scroll flex-1 space-y-4 p-3 focus:outline-none">
           <ElementPath sel={sel} onPick={onPathPick} onPeek={onPathPeek} />
@@ -273,30 +337,7 @@ export function InspectorPanel({ screen, component, sel, routes, busy, runners =
               </form>
             )}
           </div>
-          {component ? (
-            /* 组件没有子树重生成：整块重写是「改组件」那条路（输入框里以这个组件为目标发一句话），
-               它会重写整个组件并回刷所有用它的屏。这里只给指路，不另起一个入口。 */
-            <p className="border-t border-border-subtle pt-3 type-label leading-(--semantic-typography-body-line-height) text-text-secondary" data-testid="el-component-hint">
-              {t('inspector.componentHint')}
-            </p>
-          ) : (
-          <div className="space-y-1.5 border-t border-border-subtle pt-3">
-            <label htmlFor="el-prompt" className="block type-label font-semibold text-text-secondary">{t('inspector.regen.title')}</label>
-            <Textarea id="el-prompt" value={prompt} onChange={(e) => edit({ prompt: e.target.value })} rows={3} placeholder={t('inspector.regen.placeholder')} disabled={busy}
-              onKeyDown={(e) => { if (e.key === 'Enter' && e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void regenerate(); } }} />
-            {/* 通道单独选：与输入框同一套控件；本机 agent 时还要选投给哪个会话。面板 20rem 宽，两个下拉放不下时折行 */}
-            <div className="flex flex-wrap items-center gap-1.5" data-testid="el-runner">
-              {runners.length > 0 && <RunnerSelect runners={runners} value={runnerId} onChange={pickRunner} disabled={busy} testId="el-runner-select" />}
-              {tool && <SessionSelect tool={tool} sessions={sessions} reason={list?.reason} value={sessionId} onChange={pickSession} onOpen={() => onSessionsOpen?.(tool)} disabled={busy} testId="el-session-select" />}
-            </div>
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="primary" disabled={!canRegenerate} pending={regenerating} onClick={() => void regenerate()}>{t('inspector.regen.submit')}</Button>
-              <kbd className="kbd px-1 type-caption">Shift+Enter</kbd>
-            </div>
-            {working && <p className="type-caption text-primary" data-testid="el-working">{t('inspector.regen.working')}</p>}
-            {agent && !sessionOk && !working && <p className="type-caption text-warning">{t('inspector.regen.pickSession')}</p>}
-          </div>
-          )}
+          {regenSection}
           {/* 到草稿本里改（REQ-CORE-043）：只有屏的检查器给这一项（组件不是屏，建不了草稿）。
               共享组件实例里的元素不给：草稿写回原处会被 component-locked 挡掉，是一条走不通的路 */}
           {onForkToSketch && (

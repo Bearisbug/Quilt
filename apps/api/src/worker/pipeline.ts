@@ -12,6 +12,7 @@ import { countEn, listJoin, outsideRequest, tr } from '../lib/locale.ts';
 import { storage, objectKeys } from '../lib/storage.ts';
 import { screenshotHtml, extractTailwindCss } from '../lib/screenshot.ts';
 import { recordUsage } from '../services/usage.ts';
+import { recordModelCall, archiveDrafts, type ModelCallAttempt } from '../services/record.ts';
 import { createRevision, deriveLinks, pointCurrentToFirstCandidate, priorInstructions, exemplarBody, currentBody, storeRevisionShot } from '../services/screens.ts';
 import { screenDtos } from '../services/projects.ts';
 import { timeoutFor, modelAborts, enqueueScreenshot } from '../services/jobs.ts';
@@ -23,10 +24,10 @@ import {
   buildPrelude, lintScreenBody, injectQids, reconcileQids, applyEdits, parseEditBlocks, assembleDocument, extractBody, stripFences, buildPrototypeDocument, replaceSubtree, extractLinks,
   expandComponents, validateComponentHtml, classifyComponentHtml, componentSummary, componentSystemPrompt, componentUserPrompt,
   type ProjectAsset, type SketchReference,
-  OVERLAY_SCREEN_NOTE, screenSystemPrompt, planSystemPrompt, planUserPrompt, planOneScreenSystemPrompt, planOneScreenUserPrompt, screenUserPrompt, editUserPrompt, editPatchUserPrompt, subtreeUserPrompt, linkRepairPrompt,
+  OVERLAY_SCREEN_NOTE, screenSystemPrompt, planSystemPrompt, planUserPrompt, planOneScreenSystemPrompt, planOneScreenUserPrompt, screenUserPrompt, editUserPrompt, editPatchUserPrompt, subtreeUserPrompt, subtreeBlocksUserPrompt, subtreeBlocksRetryNote, parseQuiltBlocks, type QuiltBlock, linkRepairPrompt,
   proposeDesignSystemSystemPrompt, proposeDesignSystemUserPrompt, parseConventions, REFERENCE_IMAGE_NOTE, FONT_FAMILIES, RADIUS_SCALES, MAX_CONVENTIONS,
   sketchSystemPrompt, SKETCH_REFERENCE_IMAGE_NOTE, draftNameFromPrompt, frameFromBody, shotSpecFor,
-  VENDOR, inputOf, jobInputSchemas, withUiLanguage, jobLocale, DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput, type JobKind, type JobInputOf, type Presentation, type DraftFrame, failureText,
+  VENDOR, inputOf, jobInputSchemas, type ModelCallPurpose, withUiLanguage, jobLocale, DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput, type JobKind, type JobInputOf, type Presentation, type DraftFrame, failureText,
 } from '@quilt/core';
 
 // 导出件内联的 lucide 取仓库里与屏同版本的副本（§17 v1.06），不走外网
@@ -74,6 +75,8 @@ type Ctx = {
   entryRepair: { name: string; added: string[] } | null;
   // 草稿这一轮按参照项目写（REQ-CORE-042 / ADR-033）：参考图说明换回守设计系统的那一句
   draftReferenced?: boolean;
+  // 本作业已发出几次模型调用：使用记录的 model_calls.seq（REQ-CORE-047）
+  calls: number;
 };
 
 class JobFailure extends Error { constructor(public errorClass: ErrorClass, msg: string) { super(msg); } }
@@ -95,12 +98,34 @@ async function expandLatest(ctx: Ctx, body: string, route: string): Promise<stri
 // effort：按调用类型定思考深度（ADR-012 v1.05）——规划与提炼 low、改屏补丁 medium，其余不传（驱动缺省）
 // 草稿本（REQ-CORE-040）换一句参考图说明：没有设计系统要守，参考图可以照着取色；草稿按参照项目写时仍守它的设计系统
 // 网页端建的写屏作业带界面语言（REQ-CORE-046）：系统提示末尾补一句「请求没说语言时屏上文字用 <语言>」，预热与正式调用同一份前缀
-async function llmCall(ctx: Ctx, systemPrompt: string, prompt: string, model?: string, withImages = false, opts: { effort?: LlmEffort; maxTokens?: number } = {}) {
+// 使用记录（REQ-CORE-047 / ADR-035）：这里是所有模型调用的唯一出口，每次调用按 purpose 记一条 model_calls（成败、错误原文、试了几次、token、参考图键），
+// 正文是拼好的提示词与原始回复；开关关着不记，记不上不影响作业
+async function llmCall(ctx: Ctx, purpose: ModelCallPurpose, systemPrompt: string, prompt: string, model?: string, withImages = false, opts: { effort?: LlmEffort; maxTokens?: number } = {}) {
   const system = withUiLanguage(systemPrompt, ctx.job);
   const images = withImages ? ctx.images : undefined;
   const spec = ctx.runner.driver ? { driver: ctx.runner.driver, apiKey: ctx.runner.apiKey, baseUrl: ctx.runner.baseUrl } : undefined;
   const imageNote = ctx.project.kind === 'sketchbook' && !ctx.draftReferenced ? SKETCH_REFERENCE_IMAGE_NOTE : REFERENCE_IMAGE_NOTE;
-  const r = await completeWithRetry({ system, prompt: withImages && images?.length ? `${imageNote}\n\n${prompt}` : prompt, images, model: ctx.runner.model ?? model, spec, signal: ctx.signal, ...opts }, (n, err) => { void emitJobEvent(ctx.job.id, 'progress', { stage: 'retry', attempt: n, error: err.message }).catch(() => {}); });
+  const fullPrompt = withImages && images?.length ? `${imageNote}\n\n${prompt}` : prompt;
+  const seq = ++ctx.calls; const startedAt = new Date();
+  const attempts: ModelCallAttempt[] = [];
+  const record = (ok: boolean, r: { text: string; tokensIn: number; tokensOut: number; model: string } | null, error: string | null) => recordModelCall({
+    userId: ctx.job.createdBy, jobId: ctx.job.id, projectId: ctx.project.id, seq, purpose, runner: ctx.job.runner, driver: ctx.runner.driver ?? config.llmDriver, model: r?.model ?? ctx.runner.model ?? model ?? config.model,
+    ok, error, attempts, tokensIn: r?.tokensIn ?? 0, tokensOut: r?.tokensOut ?? 0, imageKeys: images?.length ? ((ctx.job.input as { imageKeys?: string[] }).imageKeys ?? []) : [],
+    system, prompt: fullPrompt, response: r?.text ?? null, startedAt, finishedAt: new Date(),
+  });
+  let r: Awaited<ReturnType<typeof completeWithRetry>>;
+  try {
+    r = await completeWithRetry({ system, prompt: fullPrompt, images, model: ctx.runner.model ?? model, spec, signal: ctx.signal, ...opts }, (n, err) => {
+      attempts.push({ attempt: n, ok: false, error: err.message, at: new Date().toISOString() });
+      void emitJobEvent(ctx.job.id, 'progress', { stage: 'retry', attempt: n, error: err.message }).catch(() => {});
+    });
+  } catch (e) {
+    attempts.push({ attempt: attempts.length + 1, ok: false, error: (e as Error).message, at: new Date().toISOString() });
+    await record(false, null, (e as Error).message);
+    throw e;
+  }
+  attempts.push({ attempt: attempts.length + 1, ok: true, at: new Date().toISOString() });
+  await record(true, r, null);
   ctx.usage.tokensIn += r.tokensIn; ctx.usage.tokensOut += r.tokensOut;
   ctx.usage.cacheRead += r.cacheRead ?? 0; ctx.usage.cacheWrite += r.cacheWrite ?? 0;
   return r.text;
@@ -111,20 +136,20 @@ async function llmCall(ctx: Ctx, systemPrompt: string, prompt: string, model?: s
 const fanOut = (calls: number) => Math.min(6, Math.max(config.screenConcurrency, calls));
 async function warmPrefix(ctx: Ctx, system: string, calls: number, model?: string) {
   if (calls < 2 || (ctx.runner.driver ?? config.llmDriver) !== 'anthropic') return;
-  try { await llmCall(ctx, system, 'Warm-up: reply with nothing.', model, false, { maxTokens: 0 }); }
+  try { await llmCall(ctx, 'warmup', system, 'Warm-up: reply with nothing.', model, false, { maxTokens: 0 }); }
   catch (e) { console.warn(`[job ${ctx.job.id}] cache warm-up skipped: ${(e as Error).message}`); }
 }
 
 // 改一屏（ADR-007 v1.05）：先要补丁块，按序套在当前 body 上；任一块对不上就整批作废，同一轮改用整屏提示词再要一次。
 // 产出里没有补丁块（模型判断改动占了大半屏、直接回整屏）时按整屏处理。返回的 body 还没对齐 qid，由 produceScreen 做
 async function editBody(ctx: Ctx, args: { system: string; name: string; route: string; body: string; instruction: string; prior: string[] }): Promise<string> {
-  const raw = await llmCall(ctx, args.system, editPatchUserPrompt(args.name, args.route, args.body, args.instruction, args.prior), undefined, true, { effort: 'medium' });
+  const raw = await llmCall(ctx, 'edit', args.system, editPatchUserPrompt(args.name, args.route, args.body, args.instruction, args.prior), undefined, true, { effort: 'medium' });
   const edits = parseEditBlocks(raw);
   if (!edits) return stripFences(raw);
   const applied = applyEdits(args.body, edits);
   if (!applied.errors.length) return applied.body;
   console.warn(`[job ${ctx.job.id}] patch for ${args.route} did not apply (${applied.errors.map((e) => `#${e.index}:${e.matches}`).join(' ')}), rewriting the whole screen`);
-  return stripFences(await llmCall(ctx, args.system, editUserPrompt(args.name, args.route, args.body, args.instruction, args.prior), undefined, true));
+  return stripFences(await llmCall(ctx, 'edit', args.system, editUserPrompt(args.name, args.route, args.body, args.instruction, args.prior), undefined, true));
 }
 
 function parseJsonObject<T>(text: string): T {
@@ -185,7 +210,7 @@ async function draftSystem(ctx: Ctx, draft: { frame: string | null; refProjectId
 // 单屏单版：生成/编辑 → 展开共享组件 → lint（只报告）→ 注入 qid → 落修订 → 截图
 // 出屏给 prompt（调一次模型）；改屏给已经套好补丁的 body（editBody），qid 用 reconcileQids 对齐——没改的元素保住原来的 qid（ADR-007 v1.05）
 async function produceScreen(ctx: Ctx, args: { screenId: string; system: string; prompt?: string; body?: string; sourceKind: 'generate' | 'edit'; expectedRevisionId?: string | null; parentRevisionId?: string | null; candidateIndex?: number | null; advanceCurrent?: boolean; model?: string }) {
-  const raw = args.body ?? await llmCall(ctx, args.system, args.prompt!, args.model, true);
+  const raw = args.body ?? await llmCall(ctx, 'screen', args.system, args.prompt!, args.model, true);
   const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, args.screenId));
   // 共享组件占位在这里展开成正式 HTML，再 lint、再打 qid——模型手写的副本也会被盖成正式版
   const body = await expandLatest(ctx, stripFences(raw), screen.route);
@@ -283,16 +308,16 @@ async function runGenerate(ctx: Ctx) {
   } else if (input.count === 1) {
     const planPrompt = planOneScreenUserPrompt(a, input.prompt, existing);
     let one: ReturnType<typeof parseOne>;
-    try { one = parseOne(await llmCall(ctx, planOneScreenSystemPrompt(), planPrompt, undefined, false, { effort: 'low' })); }
-    catch { one = parseOne(await llmCall(ctx, planOneScreenSystemPrompt(), planPrompt + '\nReturn strictly valid JSON.', undefined, false, { effort: 'low' })); }
+    try { one = parseOne(await llmCall(ctx, 'plan', planOneScreenSystemPrompt(), planPrompt, undefined, false, { effort: 'low' })); }
+    catch { one = parseOne(await llmCall(ctx, 'plan', planOneScreenSystemPrompt(), planPrompt + '\nReturn strictly valid JSON.', undefined, false, { effort: 'low' })); }
     planned = [one];
     entryFrom = one.entryFrom ?? null;
   } else {
     const system = planSystemPrompt({ count: input.count, empty });
     const planPrompt = planUserPrompt(a, input.prompt, existing);
     let plan: Plan;
-    try { plan = parsePlan(await llmCall(ctx, system, planPrompt, undefined, false, { effort: 'low' })); }
-    catch { plan = parsePlan(await llmCall(ctx, system, planPrompt + '\nReturn strictly valid JSON.', undefined, false, { effort: 'low' })); }
+    try { plan = parsePlan(await llmCall(ctx, 'plan', system, planPrompt, undefined, false, { effort: 'low' })); }
+    catch { plan = parsePlan(await llmCall(ctx, 'plan', system, planPrompt + '\nReturn strictly valid JSON.', undefined, false, { effort: 'low' })); }
     planned = plan.screens.slice(0, input.count === 'auto' ? 6 : input.count);
     entryFrom = empty ? null : (plan.entryFrom ?? null);
     // 应用简介（REQ-CORE-016）：只在空项目首轮、且用户没写过时落库
@@ -383,8 +408,10 @@ async function runGenerateDraft(ctx: Ctx, input: JobInputOf<'generate'>) {
   try {
     if (!ctx.signal.aborted) await produceScreen(ctx, { screenId: screen.id, system, prompt: input.prompt, sourceKind: 'generate', expectedRevisionId: null, parentRevisionId: null, candidateIndex: null, advanceCurrent: true });
   } finally {
-    // 同 runGenerate：失败或取消时没出内容的新草稿删掉（进程中途退出的由 failJob.ts 的 settleInterrupted 按 screen_planned 补删）
-    await db.delete(schema.screens).where(and(eq(schema.screens.id, screen.id), isNull(schema.screens.currentRevisionId)));
+    // 同 runGenerate：失败或取消时没出内容的新草稿删掉（进程中途退出的由 failJob.ts 的 settleInterrupted 按 screen_planned 补删）；
+    // 使用记录开着时它也留一份归档（API-CORE-018）
+    const gone = await db.delete(schema.screens).where(and(eq(schema.screens.id, screen.id), isNull(schema.screens.currentRevisionId))).returning();
+    await archiveDrafts(ctx.project.id, gone);
   }
 }
 
@@ -441,8 +468,8 @@ async function runProposeDesignSystem(ctx: Ctx): Promise<DesignProposalDto> {
   const system = proposeDesignSystemSystemPrompt(FONT_FAMILIES);
   const user = proposeDesignSystemUserPrompt({ instruction: input.instruction, designMd: ctx.ds.designMd, tokens: ctx.tokens, existing, sampleBody: sampleBody ?? undefined });
   let raw: Partial<DesignProposalDto> & { tokens?: Record<string, unknown> };
-  try { raw = parseJsonObject(await llmCall(ctx, system, user, undefined, false, { effort: 'low' })); }
-  catch { raw = parseJsonObject(await llmCall(ctx, system, user + '\nReturn strictly valid JSON.', undefined, false, { effort: 'low' })); }
+  try { raw = parseJsonObject(await llmCall(ctx, 'propose', system, user, undefined, false, { effort: 'low' })); }
+  catch { raw = parseJsonObject(await llmCall(ctx, 'propose', system, user + '\nReturn strictly valid JSON.', undefined, false, { effort: 'low' })); }
   const conventions = (Array.isArray(raw.conventions) ? raw.conventions : existing).map((c) => String(c).trim()).filter(Boolean).slice(0, MAX_CONVENTIONS);
   const tokens: DesignProposalDto['tokens'] = {};
   const t = raw.tokens ?? {};
@@ -475,12 +502,31 @@ async function runRegenerateSubtree(ctx: Ctx) {
     : screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], reg, [], ctx.assets, await componentCards(ctx.project.id, { screenIds: [screen.id] }));
   const { parseHTML } = await import('linkedom');
   const { document } = parseHTML(`<!doctype html><html><body>${body}</body></html>`);
-  const el = document.querySelector(`[data-qid="${input.qid}"]`);
-  if (!el) throw new JobFailure('validation', 'element not found');
-  const exact = el.outerHTML.replace(/ data-qid="q\d+"/g, '');
-  const newFrag = stripFences(await llmCall(ctx, system, subtreeUserPrompt(screen.name, screen.route, exact, input.prompt, await priorInstructions(screen.id, screen.currentRevisionId)), undefined, true));
-  const replaced = replaceSubtree(body, input.qid, newFrag);
-  if (!replaced) throw new JobFailure('validation', 'replacement produced no element');
+  const qids = input.qids ?? [input.qid];
+  const current: QuiltBlock[] = [];
+  for (const qid of qids) {
+    const el = document.querySelector(`[data-qid="${qid}"]`);
+    if (!el) throw new JobFailure('validation', 'element not found');
+    current.push({ qid, html: el.outerHTML.replace(/ data-qid="q\d+"/g, '') });
+  }
+  const prior = await priorInstructions(screen.id, screen.currentRevisionId);
+  let fresh: QuiltBlock[];
+  if (!input.qids) fresh = [{ qid: input.qid, html: stripFences(await llmCall(ctx, 'subtree', system, subtreeUserPrompt(screen.name, screen.route, current[0].html, input.prompt, prior), undefined, true)) }];
+  else {
+    // 几块一次改完（v1.26）：一次调用、每块回一段；块数或 qid 对不上补问一轮并说明上次哪里不对，仍不对作业失败、这一屏不变
+    const prompt = subtreeBlocksUserPrompt(screen.name, screen.route, current, input.prompt, prior);
+    let parsed = parseQuiltBlocks(await llmCall(ctx, 'subtree', system, prompt, undefined, true), qids);
+    if ('error' in parsed) parsed = parseQuiltBlocks(await llmCall(ctx, 'subtree', system, prompt + subtreeBlocksRetryNote(qids, parsed.error), undefined, true), qids);
+    if ('error' in parsed) throw new JobFailure('validation', `blocks did not match the selected elements: ${parsed.error}`);
+    fresh = parsed.blocks;
+  }
+  // 逐块换：选中的几块互不包含（建作业时查过），换掉一块不影响其余几块的定位；每块换进去的根沿用原 qid
+  let replaced = { body, newQids: [] as string[] };
+  for (const b of fresh) {
+    const r = replaceSubtree(replaced.body, b.qid, b.html);
+    if (!r) throw new JobFailure('validation', 'replacement produced no element');
+    replaced = { body: r.body, newQids: [...replaced.newQids, ...r.newQids] };
+  }
   // 共享组件（REQ-EDIT-006）：新片段里放的占位在这里展开；实例根沿用 qid、新子树接着编号
   const expanded = await expandLatest(ctx, replaced.body, screen.route);
   // v0.43：同 produceScreen——偏离只记录，不为它再烧一次调用；草稿没有设计契约可偏离，记空报告
@@ -521,10 +567,10 @@ async function runEditComponent(ctx: Ctx): Promise<{ component: string; applied:
     .where(and(eq(schema.componentUses.projectId, ctx.project.id), eq(schema.componentUses.name, comp.name)));
   const system = componentSystemPrompt({ app: app(ctx, 'existing app being revised'), device: ctx.device, tokens: ctx.tokens, designMd: ctx.ds.designMd, registry: await registry(ctx) });
   const prompt = componentUserPrompt({ name: comp.name, instruction: input.prompt, currentHtml: comp.html, usedBy: uses.map((u) => u.name), prior: await componentInstructions(ctx.project.id, comp.id) });
-  let out = stripFences(await llmCall(ctx, system, prompt, undefined, true));
+  let out = stripFences(await llmCall(ctx, 'component', system, prompt, undefined, true));
   let v = validateComponentHtml(out);
   // 结构不对（多根 / 带 script）修一回合：这是硬要求，不是设计偏离
-  if (!v.ok) { out = stripFences(await llmCall(ctx, system, `${prompt}\n\nYour previous output was rejected: ${v.error}. Return exactly ONE root element, no <script>/<style>.`, undefined, true)); v = validateComponentHtml(out); }
+  if (!v.ok) { out = stripFences(await llmCall(ctx, 'component', system, `${prompt}\n\nYour previous output was rejected: ${v.error}. Return exactly ONE root element, no <script>/<style>.`, undefined, true)); v = validateComponentHtml(out); }
   if (!v.ok) throw new JobFailure('validation', v.error);
   const c = classifyComponentHtml(out);
   // 取消只在组件行升版之前生效：升版之后回刷必须做完，屏里的实例要与组件一致
@@ -546,17 +592,26 @@ async function runEditComponent(ctx: Ctx): Promise<{ component: string; applied:
 // 聊天回合（REQ-CORE-023 / ADR-018）：借 Agent SDK 的回路，只对「本机 Claude 订阅」通道开放（SDK 只认 Claude）。
 // 助手回写的修订经 MCP 落库时已带本作业 jobId，这里只认领回 produced；回执 = 它最后一段文字
 async function runChat(ctx: Ctx): Promise<{ reply: string }> {
-  if ((ctx.runner.driver ?? config.llmDriver) !== 'agent-sdk') throw new JobFailure('validation', '聊天只能用「本机 Claude 订阅」通道');
+  if ((ctx.runner.driver ?? config.llmDriver) !== 'agent-sdk') throw new JobFailure('validation', '聊天只能用「本机 Claude 订阅」的模型');
   let r: Awaited<ReturnType<typeof runChatTurn>>;
+  // 使用记录（REQ-CORE-047）：聊天不经 llmCall，整个回合记一条 purpose=chat；系统提示在 chat.ts 里拼，这里只有用户这句话与回执
+  const startedAt = new Date();
+  const record = (ok: boolean, response: string | null, error: string | null, tokens = { tokensIn: 0, tokensOut: 0 }) => recordModelCall({
+    userId: ctx.job.createdBy, jobId: ctx.job.id, projectId: ctx.project.id, seq: ++ctx.calls, purpose: 'chat', runner: ctx.job.runner, driver: 'agent-sdk', model: ctx.runner.model ?? null,
+    ok, error, attempts: [{ attempt: 1, ok, ...(error ? { error } : {}), at: new Date().toISOString() }], ...tokens, imageKeys: ctx.images.length ? ((ctx.job.input as { imageKeys?: string[] }).imageKeys ?? []) : [],
+    system: null, prompt: String((ctx.job.input as { prompt?: string }).prompt ?? ''), response, startedAt, finishedAt: new Date(),
+  });
   try {
     r = await runChatTurn({
       job: ctx.job, project: ctx.project, designMd: ctx.ds.designMd, designVersion: ctx.ds.version, model: ctx.runner.model, images: ctx.images, signal: ctx.signal,
       onStep: (step) => { void emitJobEvent(ctx.job.id, 'progress', { stage: 'chat', step }).catch(() => {}); },
     });
   } catch (e) {
+    await record(false, null, (e as Error).message);
     if (e instanceof ChatFailure) throw new JobFailure(e.errorClass, e.message);
     throw e;
   }
+  await record(true, r.reply, null, { tokensIn: r.tokensIn, tokensOut: r.tokensOut });
   ctx.usage.tokensIn += r.tokensIn; ctx.usage.tokensOut += r.tokensOut;
   for (const p of r.produced) ctx.produced.push({ screenId: p.screenId, revisionId: p.revisionId, lintPassed: true });
   return { reply: r.reply };
@@ -656,11 +711,11 @@ async function runClaimed(claimed: JobRow): Promise<void> {
   else if (jobRunner?.kind === 'channel' && jobRunner.channelId) {
     // 账号自建通道：此刻才解密凭据（REQ-CORE-013）；通道被删或主密钥换了就让作业明确失败，而不是悄悄回落到 .env 的驱动
     try { const spec = await resolveChannelSpec(claimed.createdBy, jobRunner.channelId); runner = { driver: spec.driver, model: spec.model, apiKey: spec.apiKey, baseUrl: spec.baseUrl }; }
-    catch (e) { runnerError = `通道不可用：${(e as Error).message}`; }
+    catch (e) { runnerError = `模型不可用：${(e as Error).message}`; }
   }
   const images = await loadForModel((claimed.input as { imageKeys?: string[] }).imageKeys);
   const assets = await assetsForPrompt(project.id);
-  const ctx: Ctx = { job: claimed, project, ds, device, tokens, prelude: buildPrelude(tokens), signal: abort.signal, usage: { tokensIn: 0, tokensOut: 0, screens: 0, cacheRead: 0, cacheWrite: 0 }, runner, images, assets, produced: [], entryRepair: null };
+  const ctx: Ctx = { job: claimed, project, ds, device, tokens, prelude: buildPrelude(tokens), signal: abort.signal, usage: { tokensIn: 0, tokensOut: 0, screens: 0, cacheRead: 0, cacheWrite: 0 }, runner, images, assets, produced: [], entryRepair: null, calls: 0 };
   await emitJobEvent(jobId, 'progress', { stage: 'running' });
   const timer = setTimeout(() => abort.abort(new Error('timeout')), timeoutMs);
   modelAborts.set(jobId, abort);
@@ -694,7 +749,9 @@ async function runClaimed(claimed: JobRow): Promise<void> {
 
   // 落库前复核取消（§16 竞态：worker vs cancel）
   const [fresh] = await db.select({ status: schema.generationJobs.status }).from(schema.generationJobs).where(eq(schema.generationJobs.id, jobId));
-  await recordUsage(job.createdBy, jobId, ctx.usage.tokensIn, ctx.usage.tokensOut, ctx.usage.screens, ctx.runner.driver ?? config.llmDriver, ctx.runner.model ?? config.model, { read: ctx.usage.cacheRead, write: ctx.usage.cacheWrite });
+  // 没调过模型的作业（导出、套用设计系统、第一次调用前就取消或失败的）不记驱动与模型：用量看板不把它们算给任何模型（API-CORE-052，v1.28）
+  const called = ctx.calls > 0;
+  await recordUsage(job.createdBy, jobId, ctx.usage.tokensIn, ctx.usage.tokensOut, ctx.usage.screens, called ? ctx.runner.driver ?? config.llmDriver : undefined, called ? ctx.runner.model ?? config.model : undefined, { read: ctx.usage.cacheRead, write: ctx.usage.cacheWrite });
   if (fresh.status === 'cancelled') { await deriveIfProduced(ctx); return; }
   // 测试钩子，只在 stub 驱动时认：复核取消之后、落库之前停一会，造「取消与落库同时到达」（TEST.md §3）
   const finalizeHold = config.llmDriver === 'stub' ? Number(/\[stub-finalize-hold:(\d+)\]/.exec(String((job.input as { prompt?: string }).prompt ?? ''))?.[1] ?? 0) : 0;
@@ -732,7 +789,7 @@ async function runClaimed(claimed: JobRow): Promise<void> {
         `Updated component “${extraOutput.component}” and synced ${countEn(screens.length, 'screen')}${names ? `: ${names}` : ''}${skipped.length ? `; ${listJoin(skipped, locale)} ${skipped.length === 1 ? 'is' : 'are'} being edited and will use the new version when done` : ''}`, locale)
       : job.kind === 'apply_design_system' ? tr(`设计系统已回刷 ${screens.length} 屏`, `Re-applied the design system to ${countEn(screens.length, 'screen')}`, locale)
       : job.kind === 'propose_design_system' ? tr(`设计系统提案已生成${proposal?.summary ? `：${proposal.summary}` : ''}，在设计系统面板预览后确认写入`, `Design system proposal ready${proposal?.summary ? `: ${proposal.summary}` : ''}; preview it in the design system panel, then confirm to write it`, locale)
-      : job.kind === 'regenerate_subtree' ? tr(`已重生成「${names}」的一块`, `Regenerated one block of “${names}”`, locale)
+      : job.kind === 'regenerate_subtree' ? ((n) => n > 1 ? tr(`已重生成「${names}」的 ${n} 块`, `Regenerated ${n} blocks of “${names}”`, locale) : tr(`已重生成「${names}」的一块`, `Regenerated one block of “${names}”`, locale))((job.input as { qids?: string[] }).qids?.length ?? 1)
       : job.kind === 'edit_screens' ? tr(`已更新 ${screens.length} 屏：${names}${candidateNote}`, `Updated ${countEn(screens.length, 'screen')}: ${names}${candidateNote}`, locale)
       : tr(`已生成 ${fresh.length} 屏：${names}${candidateNote}${entryNote}`, `Generated ${countEn(fresh.length, 'screen')}: ${names}${candidateNote}${entryNote}`, locale);
     await tx.update(schema.messages).set({ content, affectedScreenIds: screenIds }).where(and(eq(schema.messages.jobId, jobId), eq(schema.messages.role, 'assistant')));

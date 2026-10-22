@@ -67,7 +67,7 @@ test('选择元素态：点选、逐级选、重选、取消，select 带祖先�
   const p = preview(SCREEN);
   p.post({ type: 'quilt:mode', mode: 'inspect', marks: LIGHT });
   p.$('[data-qid="q3"]').click();
-  p.key({ key: 'Enter', code: 'Enter', shiftKey: true });   // 上一级
+  p.key({ key: 'ArrowUp', code: 'ArrowUp', shiftKey: true });   // 上一级
   p.post({ type: 'quilt:reselect', qid: 'q2' });
   p.post({ type: 'quilt:reselect', qid: 'q99' });
   for (const m of p.sent) assert.ok(previewMessageSchema.safeParse(m).success, JSON.stringify(m));
@@ -78,6 +78,65 @@ test('选择元素态：点选、逐级选、重选、取消，select 带祖先�
   assert.equal(climbed.qid, 'q2');
   assert.equal(again.qid, 'q2');
   assert.deepEqual(gone, { type: 'quilt:deselect', qid: 'q99' });
+  await p.close();
+});
+
+// 多选（v1.26）：两个列表项各自到底的链，互不包含
+const LIST = '<main data-qid="q1"><ul data-qid="q2"><li data-qid="q3"><span data-qid="q4">一</span></li><li data-qid="q5"><span data-qid="q6">二</span></li></ul></main>';
+const boxes = (p: ReturnType<typeof preview>) => Array.from(p.win.document.querySelectorAll('[data-quilt-selection]')).map((b) => `${b.getAttribute('data-qid')}=${b.textContent}`);
+
+test('多选：Shift 点带 additive，父页的 quilt:highlight{ qids } 画全部选中框，逐级选只移动最后点中的那一块', async () => {
+  const p = preview(LIST);
+  p.post({ type: 'quilt:mode', mode: 'inspect', marks: LIGHT });
+  p.$('[data-qid="q4"]').click();
+  p.$('[data-qid="q6"]').dispatchEvent(new p.win.MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true }));
+  // 按着 Shift 点的那一块由父页定去留：父页回话之前运行时不动框
+  assert.deepEqual(boxes(p), ['q4=span · q4']);
+  p.post({ type: 'quilt:highlight', qid: 'q6', qids: ['q4', 'q6'] });
+  assert.deepEqual(boxes(p), ['q4=span · q4', 'q6=span · q6']);
+  p.key({ key: 'ArrowUp', code: 'ArrowUp', shiftKey: true });   // 最后点中的 q6 上移到 q5，q4 不动
+  assert.deepEqual(boxes(p), ['q4=span · q4', 'q5=li · q5']);
+  p.post({ type: 'quilt:climb', dir: 'down' });              // 沿 q6 那条链回到 q6
+  p.post({ type: 'quilt:pick', qid: 'q2' });                 // 路径点选同样只换最后那一块
+  assert.deepEqual(boxes(p), ['q4=span · q4', 'q2=ul · q2']);
+  p.post({ type: 'quilt:highlight', qid: 'q4' });            // 只选一块：不带 qids
+  assert.deepEqual(boxes(p), ['q4=span · q4']);
+  p.post({ type: 'quilt:highlight', qid: null });
+  assert.deepEqual(boxes(p), []);
+  for (const m of p.sent) assert.ok(previewMessageSchema.safeParse(m).success, JSON.stringify(m));
+  const sel = (p.sent.slice(1) as Record<string, unknown>[]).map(({ qid, additive, replace }) => ({ qid, additive, replace }));
+  assert.deepEqual(sel, [
+    { qid: 'q4', additive: undefined, replace: undefined },
+    { qid: 'q6', additive: true, replace: undefined },
+    { qid: 'q5', additive: undefined, replace: 'q6' },
+    { qid: 'q6', additive: undefined, replace: 'q5' },
+    { qid: 'q2', additive: undefined, replace: 'q6' },
+  ]);
+  // 逐级选的路径仍到最后点中那一块的锚点
+  assert.deepEqual((p.sent[3] as { path: unknown }).path, [{ qid: 'q1', tag: 'main' }, { qid: 'q2', tag: 'ul' }, { qid: 'q5', tag: 'li' }, { qid: 'q6', tag: 'span' }]);
+  await p.close();
+});
+
+test('多选：热更新后逐块重选（replace 是它自己）、框一块块接回；Shift 按下时不划选文字；检查器悬停已选中的一块照样框出', async () => {
+  const p = preview(LIST);
+  p.post({ type: 'quilt:mode', mode: 'inspect', marks: LIGHT });
+  p.post({ type: 'quilt:swap', html: `<html><head>${HEAD}</head><body>${LIST}</body></html>`, route: '/s1', keepScroll: true });
+  p.post({ type: 'quilt:reselect', qid: 'q4' });
+  p.post({ type: 'quilt:reselect', qid: 'q6' });
+  p.post({ type: 'quilt:reselect', qid: 'q9' });
+  assert.deepEqual(boxes(p), ['q4=span · q4', 'q6=span · q6']);
+  const replies = p.sent.filter((m) => (m as { type: string }).type !== 'quilt:swapped' && (m as { type: string }).type !== 'quilt:ready') as Record<string, unknown>[];
+  assert.deepEqual(replies.map((m) => [m.type, m.qid, m.replace]), [['quilt:select', 'q4', 'q4'], ['quilt:select', 'q6', 'q6'], ['quilt:deselect', 'q9', undefined]]);
+  const down = new p.win.MouseEvent('mousedown', { bubbles: true, cancelable: true, shiftKey: true });
+  p.$('[data-qid="q4"]').dispatchEvent(down);
+  assert.equal(down.defaultPrevented, true);
+  const hover = () => Array.from(p.win.document.querySelectorAll<HappyElement>('div[data-quilt-ui]')).find((d) => d.style.borderStyle === 'dashed');
+  p.post({ type: 'quilt:highlight', qid: 'q6', qids: ['q4', 'q6'] });
+  p.post({ type: 'quilt:peek', qid: 'q4' });
+  assert.equal(hover()?.style.display, 'block');
+  p.post({ type: 'quilt:highlight', qid: 'q4' });
+  p.post({ type: 'quilt:peek', qid: 'q4' });   // 只选一块时悬停它不再叠一层（与 v1.00 一致）
+  assert.equal(hover()?.style.display, 'none');
   await p.close();
 });
 

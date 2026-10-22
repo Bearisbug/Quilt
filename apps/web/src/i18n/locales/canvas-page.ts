@@ -121,13 +121,13 @@ export default defineMessages('canvas-page', {
       descAll: '屏里那些点了没反应的按钮和表单，让 AI 判断它们各自该去哪一屏并接上，原型就能连着点下去。先选中几屏可只修这几屏。会改屏、按屏计费',
     },
     design: { label: '设计系统', desc: '看/改这个项目的色板、字体、圆角、应用简介、约定与 DESIGN.md，可一键回刷所有屏' },
-    newScreen: { label: '新建屏幕', desc: '在可见区中心放一个新屏落点，然后在下方输入框描述它；双击画布空白处也能放。屏数、版数、通道都在输入框里选' },
+    newScreen: { label: '新建屏幕', desc: '在可见区中心放一个新屏落点，然后在下方输入框描述它；双击画布空白处也能放。屏数、版数、模型都在输入框里选' },
     newComponent: {
       label: '新建组件',
       desc: '起个名字建一个共享组件（导航栏、页头这类每屏都一样的块），然后在输入框里描述它；改组件一次，用它的屏全部同步。从屏里现有元素做组件走检查器的「记为共享组件」',
     },
     export: { label: '导出原型', desc: '把全部屏打包成一个可离线打开的单文件 HTML 原型' },
-    agent: { label: '本机 agent', desc: '交给本机 Claude Code / Codex 的作业列表：投递到哪个会话、状态、取消。派活入口在输入框的通道下拉与会话下拉' },
+    agent: { label: '本机 agent', desc: '交给本机 Claude Code / Codex 的作业列表：投递到哪个会话、状态、取消。派活入口在输入框的模型下拉与会话下拉' },
     interact: {
       enter: '进入交互',
       exit: '退出交互',
@@ -169,7 +169,7 @@ export default defineMessages('canvas-page', {
       desc: '删掉组件；屏里已经展开的那份留着，只是不再跟着改',
     },
     back: { label: '后退', desc: '退回屏内上一次跳转之前', none: '还没有在这一屏里跳转过' },
-    settings: { label: '设置', desc: '本月用量、生成通道与外观：添加 / 验证 Key 与本机订阅，复制 MCP 接入命令，切换浅色 / 深色' },
+    settings: { label: '设置', desc: '用量、模型与系统：看用量看板，添加 / 验证 Key 与本机订阅，复制 MCP 接入命令，切换外观与语言，开关使用记录' },
   },
 }, {
   generateBusy: 'The previous batch of screens is still generating; wait for it to finish before generating another',
@@ -291,13 +291,13 @@ export default defineMessages('canvas-page', {
       descAll: 'Have AI work out where each unresponsive button and form should go and connect it, so the prototype can be clicked through. Select screens first to fix only those. Edits screens; billed per screen',
     },
     design: { label: 'Design system', desc: 'View and edit this project’s palette, fonts, corner radius, app brief, conventions and DESIGN.md, and re-apply to all screens in one click' },
-    newScreen: { label: 'New screen', desc: 'Place a spot for a new screen in the center of the view, then describe it in the composer below; double-clicking empty canvas works too. Choose the screen count, versions and channel in the composer' },
+    newScreen: { label: 'New screen', desc: 'Place a spot for a new screen in the center of the view, then describe it in the composer below; double-clicking empty canvas works too. Choose the screen count, versions and model in the composer' },
     newComponent: {
       label: 'New component',
       desc: 'Name a new shared component (a block that’s the same on every screen, like a nav bar or header), then describe it in the composer; edit the component once and every screen using it syncs. To make one from an existing element, use “Save as shared component” in the Inspector',
     },
     export: { label: 'Export prototype', desc: 'Package every screen into a single-file HTML prototype that works offline' },
-    agent: { label: 'Local agents', desc: 'Jobs handed to local Claude Code / Codex: which session each was delivered to, its status, and cancel. To hand off work, use the channel and session menus in the composer' },
+    agent: { label: 'Local agents', desc: 'Jobs handed to local Claude Code / Codex: which session each was delivered to, its status, and cancel. To hand off work, use the model and session menus in the composer' },
     interact: {
       enter: 'Interact',
       exit: 'Stop interacting',
@@ -339,6 +339,6 @@ export default defineMessages('canvas-page', {
       desc: 'Delete the component; copies already in screens stay but stop syncing',
     },
     back: { label: 'Back', desc: 'Go back to before the last navigation within this screen', none: 'No navigation within this screen yet' },
-    settings: { label: 'Settings', desc: 'Usage this month, channels and appearance: add / verify keys and local subscriptions, copy the MCP setup command, switch between light and dark' },
+    settings: { label: 'Settings', desc: 'Usage, models and system: see the usage dashboard, add / verify keys and local subscriptions, copy the MCP setup command, change appearance and language, turn usage recording on or off' },
   },
 });

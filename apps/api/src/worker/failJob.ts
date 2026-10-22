@@ -2,6 +2,7 @@ import { and, eq, isNull, isNotNull, inArray, sql } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { emitJobEvent } from '../lib/events.ts';
 import { pointCurrentToFirstCandidate, deriveLinks } from '../services/screens.ts';
+import { archiveDrafts } from '../services/record.ts';
 import { failureText, jobLocale, type ErrorClass, type JobKind } from '@quilt/core';
 
 // input：失败文案按作业的语言写（REQ-CORE-046，input.locale）
@@ -9,7 +10,7 @@ type FailedJob = { id: string; kind: string; projectId: string; input: unknown }
 
 // 进程在造屏 / 改屏中途退出时，runGenerate / runEditScreens 在 finally 里的收尾没跑（进程被杀时 finally 不执行）：按作业自己的
 // screen_planned 事件与修订补做——候选批让 current 指向第 1 版（改屏候选只在 current 仍是它的基线时），一版都没落的新屏删掉
-// （空屏占着路由，指向它的链接也不再显示为断链），再重派生应用地图
+// （空屏占着路由，指向它的链接也不再显示为断链），再重派生应用地图。删掉的是草稿本里的空草稿时，使用记录开着就留一份归档（API-CORE-018）
 export async function settleInterrupted(job: { id: string; projectId: string }) {
   const planned = (await db.select({ data: schema.jobEvents.data }).from(schema.jobEvents).where(and(eq(schema.jobEvents.jobId, job.id), eq(schema.jobEvents.type, 'screen_planned'))))
     .map((e) => (e.data as { screenId?: string }).screenId).filter((id): id is string => !!id);
@@ -17,11 +18,13 @@ export async function settleInterrupted(job: { id: string; projectId: string }) 
     .where(and(eq(schema.screenRevisions.jobId, job.id), isNotNull(schema.screenRevisions.candidateIndex)));
   const produced = await db.select({ id: schema.screenRevisions.id }).from(schema.screenRevisions).where(eq(schema.screenRevisions.jobId, job.id)).limit(1);
   if (!planned.length && !produced.length) return;
-  await db.transaction(async (tx) => {
+  const gone = await db.transaction(async (tx) => {
     for (const b of batches) await pointCurrentToFirstCandidate(tx, b.screenId, job.id, b.base ?? undefined);
-    if (planned.length) await tx.delete(schema.screens).where(and(inArray(schema.screens.id, planned), isNull(schema.screens.currentRevisionId)));
+    const rows = planned.length ? await tx.delete(schema.screens).where(and(inArray(schema.screens.id, planned), isNull(schema.screens.currentRevisionId))).returning() : [];
     await deriveLinks(tx, job.projectId);
+    return rows;
   });
+  await archiveDrafts(job.projectId, gone);
 }
 
 // 失败收尾（§16 v1.03）：领取后的异常、启动时上次没跑完的作业、job.timeout 扫到的超时作业都走这里——

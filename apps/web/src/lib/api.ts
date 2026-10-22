@@ -1,4 +1,4 @@
-import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, UsageDto, DesignSystemDto, ElementOp, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, Runner, ChannelDto, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, DraftFrame, DraftFrameChoice, SketchbookDto, CopyDraftInput, CreateDraftInput, CopyDraftResultDto } from '@quilt/core/browser';
+import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, DesignSystemDto, ElementOp, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, Runner, ChannelDto, UsageStatsDto, UsageRange, RecordingDto, RecordEventInput, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, DraftFrame, DraftFrameChoice, SketchbookDto, CopyDraftInput, CreateDraftInput, CopyDraftResultDto } from '@quilt/core/browser';
 
 import { getLocale } from '@/i18n';
 
@@ -136,7 +136,13 @@ export const api = {
     remove: (id: string) => call<void>(`/v1/channels/${id}`, { method: 'DELETE' }),
   },
   exportUrl: (jobId: string) => `/v1/jobs/${jobId}/export`,
-  usage: () => call<UsageDto>('/v1/me/usage'),
+  // 用量看板（API-CORE-052）：自然日按浏览器的时区切
+  usageStats: (range: UsageRange) => call<UsageStatsDto>(`/v1/me/usage/stats?range=${range}&utcOffset=${-new Date().getTimezoneOffset()}`),
+  // 本机使用记录（API-CORE-049～051）；事件批在页面隐藏或关闭时用 keepalive 发出
+  recording: () => call<RecordingDto>('/v1/record'),
+  recordingSwitch: () => call<Pick<RecordingDto, 'enabled' | 'since'>>('/v1/record?brief=1'),
+  setRecording: (enabled: boolean) => call<RecordingDto>('/v1/record', { method: 'PATCH', body: JSON.stringify({ enabled }) }),
+  recordEvents: (sessionId: string, events: RecordEventInput[], keepalive = false) => call<void>('/v1/record/events', { method: 'POST', body: JSON.stringify({ sessionId, events }), keepalive }),
 };
 
 // SSE：作业事件流（API-CORE-008），断线自动重连并按 Last-Event-ID 续传（EventSource 内建）。

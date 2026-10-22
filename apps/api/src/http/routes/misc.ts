@@ -1,14 +1,14 @@
 import { Hono } from 'hono';
 import path from 'node:path';
-import { requireUser, type Env } from '../app.ts';
-import { monthlyUsage } from '../../services/usage.ts';
+import { parseQuery, requireUser, type Env } from '../app.ts';
+import { monthlyUsage, usageStats } from '../../services/usage.ts';
 import { problems } from '../../lib/errors.ts';
 import { storage } from '../../lib/storage.ts';
 import { verifyObject } from '../../lib/signing.ts';
 import { attachmentKey, storeUpload } from '../../services/attachments.ts';
 import { config } from '../../config.ts';
 import { secretsConfigured } from '../../lib/secrets.ts';
-import type { ConfigDto } from '@quilt/core';
+import { usageStatsQuerySchema, type ConfigDto } from '@quilt/core';
 
 export const miscRoutes = new Hono<Env>();
 
@@ -27,6 +27,13 @@ miscRoutes.get('/v1/config', (c) => c.json({ previewOrigin: config.previewOrigin
 miscRoutes.get('/v1/me/usage', async (c) => {
   c.header('Cache-Control', 'no-store');
   return c.json(await monthlyUsage(requireUser(c)));
+});
+
+// API-CORE-052：设置「用量」的看板；自然日按浏览器给的 utcOffset 切
+miscRoutes.get('/v1/me/usage/stats', async (c) => {
+  const q = parseQuery(c, usageStatsQuerySchema);
+  c.header('Cache-Control', 'no-store');
+  return c.json(await usageStats(requireUser(c), q.range, q.utcOffset));
 });
 
 // API-CORE-019 直传接收：签名校验 + 类型大小复核（签发时报的 bytes 只是声明，到货的才算数）

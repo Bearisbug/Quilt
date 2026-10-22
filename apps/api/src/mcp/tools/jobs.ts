@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
-import { JOB_RUNNERS, L, type JobRunner, type Runner } from '@quilt/core';
+import { JOB_RUNNERS, L, MAX_SUBTREE_BLOCKS, type JobRunner, type Runner } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
 import { Problem, problems } from '../../lib/errors.ts';
 import { storage } from '../../lib/storage.ts';
@@ -72,14 +72,14 @@ export function registerJobTools(c: ToolCtx) {
 
   // 其余四种作业（API-CORE-006）：子树重生成、AI 改组件、提炼约定（产出给 agent 自己确认）、导出原型
   server.registerTool('quilt.regenerate_subtree', {
-    description: 'AI-rewrite one element subtree (by data-qid) with an instruction; siblings keep their qids. expectedRevisionId must be current. attachmentIds as in quilt.generate_screens. Returns a job.',
-    inputSchema: { screenId: z.string().uuid(), qid: z.string().regex(/^q\d+$/), prompt: z.string().min(1).max(4000), expectedRevisionId: z.string().uuid(), runner: runnerInput, attachmentIds: attachmentsInput },
+    description: 'AI-rewrite one element subtree (by data-qid) with an instruction; siblings keep their qids. To change several elements with one instruction in one model call and one new revision, also pass qids (2–8 data-qids, including qid, none inside another). expectedRevisionId must be current. attachmentIds as in quilt.generate_screens. Returns a job.',
+    inputSchema: { screenId: z.string().uuid(), qid: z.string().regex(/^q\d+$/), qids: z.array(z.string().regex(/^q\d+$/)).min(2).max(MAX_SUBTREE_BLOCKS).optional(), prompt: z.string().min(1).max(4000), expectedRevisionId: z.string().uuid(), runner: runnerInput, attachmentIds: attachmentsInput },
   }, wrap(async (a) => {
     write();
     const { screen, project } = await ownedScreen(user.id, a.screenId as string);
     const runner = a.runner as Runner | undefined;
     const { imageKeys } = await prep(project.id, a.attachmentIds);
-    return runJob(project.id, { kind: 'regenerate_subtree', input: { screenId: screen.id, qid: a.qid as string, prompt: a.prompt as string, expectedRevisionId: a.expectedRevisionId as string, runner, imageKeys } });
+    return runJob(project.id, { kind: 'regenerate_subtree', input: { screenId: screen.id, qid: a.qid as string, qids: a.qids as string[] | undefined, prompt: a.prompt as string, expectedRevisionId: a.expectedRevisionId as string, runner, imageKeys } });
   }));
 
   server.registerTool('quilt.edit_component', {
@@ -89,7 +89,7 @@ export function registerJobTools(c: ToolCtx) {
     write();
     const { component, project } = await ownedComponent(user.id, a.componentId as string);
     const runner = a.runner as Runner | undefined;
-    if (runner?.kind === 'agent') throw problems.validation([{ path: 'runner', message: L('改组件请换一个模型通道，本机会话不接这类作业', 'Local sessions do not take component edits; switch to a model channel') }]);
+    if (runner?.kind === 'agent') throw problems.validation([{ path: 'runner', message: L('改组件请换一个模型，本机会话不接这类作业', 'Local sessions do not take component edits; switch to a model') }]);
     const { imageKeys } = await prep(project.id, a.attachmentIds);
     return runJob(project.id, { kind: 'edit_component', input: { componentId: component.id, prompt: a.prompt as string, runner, imageKeys } });
   }));

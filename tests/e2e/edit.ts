@@ -1203,7 +1203,7 @@ await step('TC-EDIT-030', async () => {
   return '一行一个、说明按项目取值；‹ › 换档且到头不可点；颜色下拉换 token；删行 / 加行 / 失焦拆行；未收录与非 token 色有标注；打字不横跳；⌘S 按行序存回';
 });
 
-// TC-EDIT-031 逐级选（REQ-EDIT-001 v1.00）：Shift+Enter 选父级、Enter 回到子级；悬停时扩大高亮、选中后移动选中；检查器祖先路径点选与悬停预览
+// TC-EDIT-031 逐级选（REQ-EDIT-001 v1.00）：Shift+↑ 选父级、Shift+↓ 回到子级；悬停时扩大高亮、选中后移动选中；检查器祖先路径点选与悬停预览
 await step('TC-EDIT-031', async () => {
   const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Climb', '--device', 'mobile', '--screens', '1', '--no-shot');
   const pid = r.projectId;
@@ -1251,62 +1251,65 @@ await step('TC-EDIT-031', async () => {
     const SPAN = 'ul li a span.flex-1';
     await fl.locator(SPAN).first().waitFor({ timeout: 15000 });
     await page.waitForTimeout(400);
-    // 1 悬停在最里层的 span 上，焦点在画布：Shift+Enter 两次，悬停框扩到 a、li；还没选中
+    // 1 悬停在最里层的 span 上，焦点在画布：Shift+↑ 两次，悬停框扩到 a、li；还没选中
     const p1 = await pointAt('.card.focused iframe', SPAN);
     await page.mouse.move(p1.x, p1.y, { steps: 4 });
     await S.check(() => eventually(async () => expect(near(await P1.hover(), await P1.rect(SPAN)), '① 悬停框应先在 span 上'), 3000));
-    await page.keyboard.press('Shift+Enter');
-    await S.check(() => eventually(async () => expect(near(await P1.hover(), await P1.rect('ul li a')), '① 第一次 Shift+Enter 悬停框应框住 a'), 3000));
-    await page.keyboard.press('Shift+Enter');
-    await S.check(() => eventually(async () => expect(near(await P1.hover(), await P1.rect('ul li')), '① 第二次 Shift+Enter 悬停框应框住 li'), 3000));
+    await page.keyboard.press('Shift+ArrowUp');
+    await S.check(() => eventually(async () => expect(near(await P1.hover(), await P1.rect('ul li a')), '① 第一次 Shift+↑ 悬停框应框住 a'), 3000));
+    await page.keyboard.press('Shift+ArrowUp');
+    await S.check(() => eventually(async () => expect(near(await P1.hover(), await P1.rect('ul li')), '① 第二次 Shift+↑ 悬停框应框住 li'), 3000));
     await S.check(async () => expect((await page.getByTestId('el-path').count()) === 0, '① 还没点，检查器不该有选中'));
     // 2 不动指针点一下：选中 li，路径到 span，li 当前、a / span 在它之下
     await page.mouse.down(); await page.mouse.up();
     await at('li', '② 点一下应选中悬停框所在的 li');
     await S.check(async () => expect((await crumbs()) === 'div › main › ul › li › a › span', `② 祖先路径不对：${await crumbs()}`));
     await S.check(async () => expect((await P1.label()).startsWith('li · '), `② 选中框标签不对：${await P1.label()}`));
-    // 3 焦点在检查器上按 Shift+Enter：选中上移到 ul
+    // 3 焦点在检查器上按 Shift+↑：选中上移到 ul
     await S.check(() => eventually(async () => expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.testid) === 'inspector-body', '③ 点选后焦点应在检查器上'), 3000));
-    await page.keyboard.press('Shift+Enter');
-    await at('ul', '③ Shift+Enter 应选中 ul');
-    await S.check(() => eventually(async () => expect((await P1.label()).startsWith('ul · '), `③ 选中框标签应跟到 ul：${await P1.label()}`), 3000));
-    // 4 Enter 沿锚点链往下走，到 span 为止
-    for (const tag of ['li', 'a', 'span']) { await page.keyboard.press('Enter'); await at(tag, `④ Enter 应回到 ${tag}`); }
+    await page.keyboard.press('Shift+ArrowUp');
+    await at('ul', '③ Shift+↑ 应选中 ul');
     await page.keyboard.press('Enter');
+    await page.waitForTimeout(300);
+    await S.check(async () => expect((await current()) === 'ul', `③ Enter 不该换层：${await current()}`));
+    await S.check(() => eventually(async () => expect((await P1.label()).startsWith('ul · '), `③ 选中框标签应跟到 ul：${await P1.label()}`), 3000));
+    // 4 Shift+↓ 沿锚点链往下走，到 span 为止
+    for (const tag of ['li', 'a', 'span']) { await page.keyboard.press('Shift+ArrowDown'); await at(tag, `④ Shift+↓ 应回到 ${tag}`); }
+    await page.keyboard.press('Shift+ArrowDown');
     await page.waitForTimeout(400);
-    await S.check(async () => expect((await current()) === 'span', `④ 到锚点后再按 Enter 应停在 span：${await current()}`));
-    // 5 点路径上的 main：选中 main、路径不变；Enter 回到 ul
+    await S.check(async () => expect((await current()) === 'span', `④ 到锚点后再按 Shift+↓ 应停在 span：${await current()}`));
+    // 5 点路径上的 main：选中 main、路径不变；Shift+↓ 回到 ul
     await page.locator('[data-testid="el-path"] button', { hasText: /^main$/ }).click();
     await at('main', '⑤ 点路径上的 main 应选中它');
     await S.check(async () => expect((await crumbs()) === 'div › main › ul › li › a › span', `⑤ 路径应不变：${await crumbs()}`));
-    await page.locator('[data-testid="inspector-body"]').focus();
-    await page.keyboard.press('Enter');
-    await at('ul', '⑤ 从 main 按 Enter 应回到 ul');
+    await page.keyboard.press('Shift+ArrowDown');
+    await at('ul', '⑤ 从 main 按 Shift+↓ 应回到 ul');
     // 6 悬停路径上的 div：屏上悬停框框住屏根，移开撤掉
     const rootCrumb = page.locator('[data-testid="el-path"] button').first();
     await rootCrumb.hover();
     await S.check(() => eventually(async () => expect(near(await P1.hover(), await P1.rect('body > div[data-qid]')), '⑥ 悬停路径上的 div 应在屏上框住屏根'), 3000));
     await page.getByTestId('inspector-body').hover({ position: { x: 10, y: 200 } });
     await S.check(() => eventually(async () => expect((await P1.hover()) === null, '⑥ 移开后悬停框应撤掉'), 3000));
-    // 7 Tab 从检查器直接进文案框（路径按钮不进 Tab 序）；文案框里 Shift+Enter 不换选中
+    // 7 Tab 从检查器直接进文案框（路径按钮不进 Tab 序）；文案框里 Shift+↑ 不换选中
     await page.locator('[data-testid="inspector-body"]').focus();
     await page.keyboard.press('Tab');
     await S.check(async () => expect(await page.evaluate(() => document.activeElement?.id) === 'el-text', `⑦ 从检查器按 Tab 应进文案框：${await page.evaluate(() => document.activeElement?.tagName + ' ' + (document.activeElement?.getAttribute('data-qid') ?? ''))}`));
     await page.locator('#el-text').focus();
-    await page.keyboard.press('Shift+Enter');
+    await page.keyboard.press('Shift+ArrowUp');
     await page.waitForTimeout(400);
-    await S.check(async () => expect((await current()) === 'ul', `⑦ 文案框里按 Shift+Enter 不该换选中：${await current()}`));
+    await S.check(async () => expect((await current()) === 'ul', `⑦ 文案框里按 Shift+↑ 不该换选中：${await current()}`));
     // 8 焦点在预览 iframe 里：运行时就地处理
     await page.locator('.card.focused iframe').focus();
-    await page.keyboard.press('Shift+Enter');
-    await S.check(() => at('main', '⑧ 焦点在 iframe 里按 Shift+Enter 应上移到 main'));
-    // 9 组件卡：Esc 退出这一屏后选择元素态仍开着，双击组件卡聚焦它就在它上面选元素；点 span，Shift+Enter 两次
+    await page.keyboard.press('Shift+ArrowUp');
+    await S.check(() => at('main', '⑧ 焦点在 iframe 里按 Shift+↑ 应上移到 main'));
+    // 9 组件卡：Esc 退出这一屏后选择元素态仍开着，双击组件卡聚焦它就在它上面选元素；点 span，Shift+↑ 两次
     await page.keyboard.press('Escape');
     await page.locator('.card.focused').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
     const compCard = page.locator('[data-testid="component-card"][data-name="Box"]');
-    await page.locator('[data-testid="component-card"][data-name="Box"][data-ready]').waitFor({ timeout: 20000 });
+    // 组件卡摆在视口外时不量尺寸、不出 data-ready：先适配视图让它进画面再等
     await page.keyboard.press('f');
     await page.waitForTimeout(600);
+    await page.locator('[data-testid="component-card"][data-name="Box"][data-ready]').waitFor({ timeout: 20000 });
     await compCard.locator('.gesture').dblclick();
     await eventually(async () => expect((await page.locator('.comp.focused').count()) === 1, '⑨ 选择元素态下双击组件卡没聚焦它'));
     const cf = page.frameLocator('.comp.focused iframe');
@@ -1317,14 +1320,14 @@ await step('TC-EDIT-031', async () => {
     await at('span', '⑨ 组件里点 span 应选中它');
     await S.check(async () => expect((await crumbs()) === 'section › div › p › span', `⑨ 组件的祖先路径不对：${await crumbs()}`));
     await page.locator('[data-testid="inspector-body"]').focus();
-    await page.keyboard.press('Shift+Enter');
-    await S.check(() => at('p', '⑨ 组件里 Shift+Enter 应选中 p'));
-    await page.keyboard.press('Shift+Enter');
+    await page.keyboard.press('Shift+ArrowUp');
+    await S.check(() => at('p', '⑨ 组件里 Shift+↑ 应选中 p'));
+    await page.keyboard.press('Shift+ArrowUp');
     await S.check(() => at('div', '⑨ 再按应选中 div'));
   } catch (e) { S.fail(e); }
   finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
   S.done();
-  return '悬停 Shift+Enter 扩到 a、li，点中 li；选中后 Shift+Enter / Enter 上下走、到锚点为止；路径点选不改路径、悬停预览；文案框里不触发；iframe 里就地处理；组件卡同样可用';
+  return '悬停 Shift+↑ 扩到 a、li，点中 li；选中后 Shift+↑ / Shift+↓ 上下走、到锚点为止；路径点选不改路径、悬停预览；文案框里不触发；iframe 里就地处理；组件卡同样可用';
 });
 
 // TC-EDIT-032 撤销不了的删除先确认（v1.03 UX-1）：组件里的元素（Delete 键与「删除元素」按钮都先弹确认，写明同步屏数；取消不删、确认才删）；
@@ -1711,6 +1714,191 @@ await step('TC-EDIT-039', async () => {
   } catch (e) { S.fail(e); }
   S.done();
   return '画布工具栏与草稿工具条都没有「批注」，⌥N 不开任何东西，panel=annotate 不开面板；四个批注接口 404；MCP 没有批注工具、项目详情没有 annotations';
+});
+
+// TC-EDIT-040 逐级选不被焦点控件的默认动作吃掉（源自缺陷 2026-10-22；v1.28 改用 Shift+↑ / Shift+↓）：点过路径按钮、用鼠标按过「保存」之后照样换层；
+// 键盘 Tab 到的按钮上 Enter 照旧按下它；屏里点过链接后 Shift+↑ 不开新窗口
+await step('TC-EDIT-040', async () => {
+  const r = seedJson<{ projectId: string }>('seed:project', '--name', 'Climb2', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const S = softly();
+  const current = async () => (await page.locator('[data-testid="el-path"] [aria-current="location"]').innerText().catch(() => '')).trim();
+  const at = (tag: string, msg: string) => eventually(async () => expect((await current()) === tag, `${msg}：当前层是 ${await current()}`), 4000);
+  const noChanges = () => page.getByText('没有改动', { exact: true }).count();
+  const pages0 = page.context().pages().length;
+  try {
+    await page.goto(`${WEB}/p/${r.projectId}`);
+    const card = page.locator('[data-testid="screen-card"][data-route="/s1"]');
+    await card.waitFor({ timeout: 15000 });
+    await page.keyboard.press('ControlOrMeta+e');
+    await page.getByTestId('armed-hint').waitFor({ timeout: 5000 });
+    await card.locator('.gesture').click();
+    await page.locator('.card.focused .badge', { hasText: '选择元素中' }).waitFor({ timeout: 20000 });
+    const fl = page.frameLocator('.card.focused iframe');
+    const SPAN = 'ul li a span.flex-1';
+    await fl.locator(SPAN).first().waitFor({ timeout: 15000 });
+    await page.waitForTimeout(400);
+    // 1 点 span 选中，再点路径上的 li：选中 li（焦点停在路径按钮上也不影响下一步）
+    await fl.locator(SPAN).first().click();
+    await at('span', '① 点文字应选中 span');
+    await page.locator('[data-testid="el-path"] button', { hasText: /^li$/ }).click();
+    await at('li', '① 点路径上的 li 应选中它');
+    // 2 紧接着按 Shift+↓、两次 Shift+↑
+    await page.keyboard.press('Shift+ArrowDown');
+    await S.check(() => at('a', '② 点过路径后 Shift+↓ 应回到 a'));
+    await page.keyboard.press('Shift+ArrowUp');
+    await S.check(() => at('li', '② Shift+↑ 应选中 li'));
+    await page.keyboard.press('Shift+ArrowUp');
+    await S.check(() => at('ul', '② 再按 Shift+↑ 应选中 ul'));
+    // 3 鼠标按「保存」（没有改动），再按 Shift+↓：换层，不再按一次保存
+    const save = page.getByRole('button', { name: /^保存/ });
+    await save.click();
+    await eventually(async () => expect((await noChanges()) >= 1, '③ 点保存应提示没有改动'), 3000);
+    await page.waitForTimeout(3500);
+    const before3 = await noChanges();
+    await page.keyboard.press('Shift+ArrowDown');
+    await S.check(() => at('li', '③ 鼠标按过保存后 Shift+↓ 应回到 li'));
+    await page.waitForTimeout(400);
+    await S.check(async () => expect((await noChanges()) <= before3, '③ Enter 又按了一次保存'));
+    // 4 键盘 Tab 到「保存」上按 Enter：照旧按下它，选中不变
+    await page.waitForTimeout(3500);
+    await page.locator('#el-text').focus();
+    let onSave = false;
+    for (let i = 0; i < 25 && !onSave; i++) { await page.keyboard.press('Tab'); onSave = await page.evaluate(() => !!(document.activeElement as HTMLElement | null)?.innerText?.trim().startsWith('保存')); }
+    await S.check(async () => expect(onSave, '④ Tab 走不到「保存」'));
+    if (onSave) {
+      const before4 = await noChanges();
+      await page.keyboard.press('Enter');
+      await S.check(() => eventually(async () => expect((await noChanges()) > before4 || before4 > 0 && (await noChanges()) >= 1, '④ 键盘走到保存按 Enter 应提示没有改动'), 3000));
+      await S.check(async () => expect((await current()) === 'li', `④ 键盘按保存不该换层：${await current()}`));
+    }
+    // 5 屏里点链接 a 本身（左缘），再按 Shift+↑：选中上移一级，不开新窗口、屏不跳走
+    const box = await fl.locator('ul li a').first().boundingBox();
+    if (box) await page.mouse.click(box.x + 3, box.y + box.height / 2);
+    await page.waitForTimeout(400);
+    const picked = await current();
+    await page.keyboard.press('Shift+ArrowUp');
+    await page.waitForTimeout(600);
+    const after5 = await current();
+    await S.check(async () => expect(!!picked && after5 !== picked, `⑤ 点过链接后 Shift+↑ 应换层：${picked} → ${after5}`));
+    await S.check(async () => expect(page.context().pages().length === pages0, `⑤ 开了新窗口：${page.context().pages().length - pages0}`));
+    await S.check(async () => expect((await page.locator('.card.focused').getAttribute('data-route')) === '/s1', '⑤ 屏跳走了'));
+  } catch (e) { S.fail(e); }
+  S.done();
+  return '点过路径按钮、鼠标按过保存后 Shift+↓ / Shift+↑ 照样换层；Tab 到的保存按 Enter 照旧按下；点过链接 Shift+↑ 不开新窗口';
+});
+
+// TC-EDIT-042 画布选择元素按住 Shift 多选，检查器一起改（v1.26）：多选列表、× 回到单选、Shift+↑ 只移最后点中的那块、
+// 一句话一次重生成这几块、退出聚焦清空；MCP 带 qids
+await step('TC-EDIT-042', async () => {
+  const { startOpenAiStub } = await import('./openai-stub.ts');
+  const { connectMcp, callTool } = await import('./mcp-client.ts');
+  const r = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'Multi', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const pid = r.projectId; const sid = r.screens[0].id;
+  const S = softly();
+  // 测试库里只有本机 agent 通道，检查器选它要先选会话才能发：建一条桩通道给检查器选上，建作业的请求在网络层换成 stub 驱动
+  // （它按多块提示词逐块回、根元素加 data-stub="multi"），界面拼的请求体原样记下来核对
+  const LABEL = 'Stub 多选';
+  const stub = startOpenAiStub({ port: 3977, apiKey: 'good-key-0042', reply: 'OK' });
+  const JOBS_RE = /\/v1\/projects\/[^/]+\/jobs$/;
+  const sent: { kind: string; input: { qid?: string; qids?: string[] } }[] = [];
+  let cid = '';
+  const SPAN = 'ul li a span.flex-1';
+  const set = (...xs: string[]) => [...xs].sort().join(',');
+  const frame = async () => (await page.locator('.card.focused iframe').elementHandle())!.contentFrame();
+  const boxes = async () => set(...((await (await frame())?.evaluate(() => Array.from(document.querySelectorAll('[data-quilt-selection]')).map((b) => (b as HTMLElement).innerText.trim()))) ?? []));
+  const qidAt = async (sel: string, i: number) => (await frame())!.evaluate(({ s, k }) => document.querySelectorAll(s)[k]?.getAttribute('data-qid') ?? '', { s: sel, k: i });
+  const rows = async () => set(...(await page.getByTestId('el-multi-row').evaluateAll((els) => els.map((e) => e.getAttribute('data-qid') ?? ''))));
+  // 卡片带缩放：按 iframe 的实际缩放换算指针位置（同 TC-EDIT-031 的 pointAt）；按住 Shift 点是加选 / 减选
+  const clickIn = async (sel: string, i: number, shift = false) => {
+    const box = (await page.locator('.card.focused iframe').boundingBox())!;
+    const p = await (await frame())!.evaluate(({ s, k }) => { const b = document.querySelectorAll(s)[k].getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2, vw: innerWidth }; }, { s: sel, k: i });
+    const z = box.width / p.vw;
+    if (shift) await page.keyboard.down('Shift');
+    await page.mouse.click(box.x + p.x * z, box.y + p.y * z);
+    if (shift) await page.keyboard.up('Shift');
+  };
+  const stubbed = (html: string, qid: string) => (new RegExp(`<[a-z][a-z0-9]*\\b[^>]*data-qid="${qid}"[^>]*>`).exec(html)?.[0] ?? '').includes('data-stub="multi"');
+  const currentRev = async () => (await detail(pid)).screens[0].currentRevisionId;
+  try {
+    cid = (await apiJson<{ channel: { id: string } }>('/v1/channels', { method: 'POST', body: JSON.stringify({ kind: 'openai', vendor: 'custom', label: LABEL, endpoint: stub.url, model: 'stub-42', apiKey: 'good-key-0042' }) })).body.channel.id;
+    expect((await apiJson<{ ok: boolean }>(`/v1/runners/channel:${cid}/probe`, { method: 'POST' })).body.ok, '桩通道探测未通过');
+    await page.route(JOBS_RE, async (route) => {
+      const req = route.request();
+      if (req.method() !== 'POST') return route.fallback();
+      const body = JSON.parse(req.postData() || '{}') as { kind: string; input: Record<string, unknown> };
+      sent.push(JSON.parse(JSON.stringify(body)));
+      await route.continue({ postData: JSON.stringify({ ...body, input: { ...body.input, runner: STUB_RUNNER } }) });
+    });
+    await page.goto(`${WEB}/p/${pid}`);
+    const card = page.locator('[data-testid="screen-card"][data-route="/s1"]');
+    await card.waitFor({ timeout: 15000 });
+    await page.keyboard.press('ControlOrMeta+e');
+    await page.getByTestId('armed-hint').waitFor({ timeout: 5000 });
+    await card.locator('.gesture').click();
+    await page.locator('.card.focused .badge', { hasText: '选择元素中' }).waitFor({ timeout: 20000 });
+    const fl = page.frameLocator('.card.focused iframe');
+    await fl.locator(SPAN).first().waitFor({ timeout: 15000 });
+    await page.waitForTimeout(400);
+    const q1 = await qidAt(SPAN, 0); const q2 = await qidAt(SPAN, 1);
+    // 1 点 Item 1，按住 Shift 点 Item 2：「已选 2 个元素」、两行、两处选中框；没有文案框、类名框与「删除元素」
+    await clickIn(SPAN, 0);
+    await page.locator('#el-text').waitFor({ timeout: 5000 });
+    await clickIn(SPAN, 1, true);
+    await page.getByTestId('el-multi-title').waitFor({ timeout: 5000 });
+    await S.check(async () => expect((await page.getByTestId('el-multi-title').innerText()).trim() === '已选 2 个元素' && (await rows()) === set(q1, q2), `① 检查器应是「已选 2 个元素」与这两行：「${await page.getByTestId('el-multi-title').innerText()}」 ${await rows()}`));
+    await S.check(() => eventually(async () => expect((await boxes()) === set(`span · ${q1}`, `span · ${q2}`), `① 屏里应框住这两块：${await boxes()}`), 3000));
+    await S.check(async () => expect((await page.locator('#el-text').count()) === 0 && (await page.getByTestId('class-list').count()) === 0 && (await page.getByRole('button', { name: '删除元素' }).count()) === 0, '① 多选时不该有文案框、类名框与「删除元素」'));
+    // 2 点 Item 2 那一行的 ×：回到单选，检查器是 Item 1 的直改表单
+    await page.locator(`[data-testid="el-multi-row"][data-qid="${q2}"] [data-testid="el-multi-remove"]`).click();
+    await S.check(() => eventually(async () => expect((await page.getByTestId('el-multi').count()) === 0 && (await page.locator('#el-text').count()) === 1 && (await page.locator('#el-text').inputValue()) === 'Item 1 of screen 1', `② × 之后应回到 Item 1 的直改表单：多选 ${await page.getByTestId('el-multi').count()}，文案框 ${await page.locator('#el-text').count()}`), 5000));
+    // 3 按住 Shift 再点 Item 2，按 Shift+↑：最后点中的 Item 2 上移到 a，Item 1 仍是 span
+    await clickIn(SPAN, 1, true);
+    await page.getByTestId('el-multi-title').waitFor({ timeout: 5000 });
+    await page.keyboard.press('Shift+ArrowUp');
+    const a2 = await qidAt('ul li a', 1);
+    await S.check(() => eventually(async () => expect((await boxes()) === set(`span · ${q1}`, `a · ${a2}`) && (await rows()) === set(q1, a2), `③ 应是 Item 1 的 span 与 Item 2 的 a：框 ${await boxes()}，行 ${await rows()}`), 5000));
+    // 4 「用 AI 重生成这几块」写一句发送：一个带两个 qids 的 regenerate_subtree，屏多一版，这两块换了、第 3 项原样
+    const rev4 = await currentRev();
+    if ((await selectedValue(page, '[data-testid="el-runner-select"]')) !== `channel:${cid}`) await pickOption(page, '[data-testid="el-runner-select"]', LABEL);
+    await page.locator('#el-prompt').fill('都改成红色');
+    await page.getByRole('button', { name: '重生成这几块' }).click();
+    await S.check(async () => {
+      const job = await waitLatestJob(pid, 'regenerate_subtree', 60);
+      const ui = sent.filter((b) => b.kind === 'regenerate_subtree');
+      expect(ui.length === 1 && set(...(ui[0].input.qids ?? [])) === set(q1, a2) && set(...((job.input.qids as string[] | undefined) ?? [])) === set(q1, a2), `④ 应建一个 qids 为这两块的作业：请求 ${JSON.stringify(ui.map((b) => b.input.qids))}，作业 ${JSON.stringify(job.input.qids)}`);
+      const rev = await currentRev();
+      const html = (await revisionHtml(sid, rev)).html;
+      const item3 = /<span[^>]*data-qid="(q\d+)"[^>]*>Item 3 of screen 1<\/span>/.exec(html)?.[1] ?? '';
+      expect(rev !== rev4 && stubbed(html, q1) && stubbed(html, a2) && (html.match(/data-stub="multi"/g) ?? []).length === 2 && !!item3 && !stubbed(html, item3), `④ 屏应多一版、这两块换了、第 3 项原样：换版 ${rev !== rev4}，标记 ${(html.match(/data-stub="multi"/g) ?? []).length}，第 3 项 ${item3 || '没找到'}`);
+    });
+    // 5 按 Esc 退出聚焦，再进 /s1：多选已清空，检查器是空态
+    await S.check(() => eventually(async () => expect((await rows()) === set(q1, a2), `⑤ 退出前多选应还在（热更新后逐块接回）：${await rows()}`), 10000));
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press('Escape');
+    await page.locator('.card.focused').waitFor({ state: 'detached', timeout: 10000 });
+    await card.locator('.gesture').click();
+    await page.locator('.card.focused .badge', { hasText: '选择元素中' }).waitFor({ timeout: 20000 });
+    await fl.locator(SPAN).first().waitFor({ timeout: 15000 });
+    await page.waitForTimeout(600);
+    await S.check(async () => expect((await page.getByTestId('el-multi').count()) === 0 && (await page.locator('#el-text').count()) === 0 && (await boxes()) === '' && (await page.getByText('在屏幕里点选一个元素').count()) === 1, `⑤ 再进 /s1 应清空多选、检查器空态：多选 ${await page.getByTestId('el-multi').count()}，文案框 ${await page.locator('#el-text').count()}，框 ${await boxes()}`));
+    // 6 MCP 调 quilt.regenerate_subtree 带 3 个 qids（标题、Follow、第 3 项）：作业成功，屏多一版
+    const rev6 = await currentRev();
+    const html6 = (await revisionHtml(sid, rev6)).html;
+    const three = [qidOf(html6, 'class="text-lg font-semibold"'), qidOf(html6, 'id="toggle"'), /<span[^>]*data-qid="(q\d+)"[^>]*>Item 3 of screen 1<\/span>/.exec(html6)?.[1] ?? null];
+    expect(three.every(Boolean), `⑥ 取不到三块的 qid：${JSON.stringify(three)}`);
+    const mcp = await connectMcp();
+    try {
+      const m = await callTool(mcp, 'quilt.regenerate_subtree', { screenId: sid, qid: three[0], qids: three, prompt: '都改成蓝色', expectedRevisionId: rev6, runner: STUB_RUNNER });
+      expect(!m.isError, `⑥ MCP regenerate_subtree 报错：${m.text.slice(0, 200)}`);
+      const mj = await waitJob((m.json as { id: string }).id, 60);
+      const rev = await currentRev();
+      const html = (await revisionHtml(sid, rev)).html;
+      await S.check(() => expect(mj.status === 'succeeded' && (mj.input.qids as string[]).length === 3 && rev !== rev6 && three.every((qq) => stubbed(html, qq!)), `⑥ MCP 作业应成功、屏多一版、三块都换了：${mj.status}，换版 ${rev !== rev6}，qids ${JSON.stringify(mj.input.qids)}，换了的 ${three.filter((qq) => stubbed(html, qq!)).join(',')}`));
+    } finally { await mcp.close(); }
+  } catch (e) { S.fail(e); }
+  finally { await page.unroute(JOBS_RE).catch(() => {}); await stub.close(); if (cid) await apiJson(`/v1/channels/${cid}`, { method: 'DELETE' }).catch(() => {}); }
+  S.done();
+  return '多选两块出列表、两处选中框、没有直改；× 回单选；Shift+↑ 只移最后点中的那块；一次重生成两块、第 3 项原样；退出聚焦清空；MCP 带 3 个 qids 成功';
 });
 
 await browser.close();

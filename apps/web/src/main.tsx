@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider, redirect } from 'react-router';
 import { api } from '@/lib/api';
 import { ToastProvider } from '@/lib/toast';
+import { noteLocation, startRecorder } from '@/lib/recorder';
 import { FirstProjectPage, NotFoundPage, RouteError } from '@/pages/Projects';
 import { CanvasRoute } from '@/pages/Canvas';
 import { SketchRoute } from '@/pages/Sketch';
@@ -33,6 +34,10 @@ const router = createBrowserRouter([{ errorElement: <RouteError />, children: [
   } },
   { path: '*', element: <NotFoundPage /> },
 ] }]);
+
+// 本机使用记录（REQ-CORE-047）：启动时读一次开关，开着才采集；换路由与查询参数记一条 view
+startRecorder();
+router.subscribe(noteLocation);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

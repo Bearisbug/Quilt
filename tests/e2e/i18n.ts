@@ -87,11 +87,11 @@ const chineseLeft = (pg: Page) => pg.evaluate((src) => {
   return [...out];
 }, HAN.source);
 const tabTexts = async (pg: Page) => (await pg.locator('[data-testid^="settings-tab-"]').allInnerTexts()).map((s) => s.trim());
-// 从工具栏「设置」进「语言」节点一种语言，再按 Esc 关掉弹层
+// 从工具栏「设置」进「系统」节、在「语言」组点一种语言，再按 Esc 关掉弹层
 async function switchLocale(pg: Page, to: 'zh' | 'en') {
   await pg.getByTestId('open-settings').click();
   await pg.getByTestId('settings-modal').waitFor({ timeout: 5000 });
-  await pg.getByTestId('settings-tab-language').click();
+  await pg.getByTestId('settings-tab-system').click();
   await pg.getByTestId(`locale-${to}`).click();
   await pg.keyboard.press('Escape');
   await pg.getByTestId('settings-modal').waitFor({ state: 'detached', timeout: 5000 });
@@ -185,12 +185,12 @@ await step('TC-CORE-131', async () => {
   const { projectId } = seedJson<Seeded>('seed:project', '--name', 'Switch', '--device', 'mobile', '--screens', '2', '--no-shot');
   const S = softly();
   const { ctx, pg, sent } = await openPage('en-US');
-  // 1 ?settings=language：左栏四节英文、「Language」选中；两个选项各用自己的文字写、标 lang；English 选中；四节逐节看都没有中文（语言名「中文」除外）
-  await openCanvas(pg, projectId, '?settings=language');
+  // 1 ?settings=system：左栏三节英文、「System」选中；语言组两个选项各用自己的文字写、标 lang；English 选中；三节逐节看都没有中文（语言名「中文」除外）
+  await openCanvas(pg, projectId, '?settings=system');
   const modal = pg.getByTestId('settings-modal');
   await modal.waitFor({ timeout: 5000 });
-  await S.check(async () => expect(JSON.stringify(await tabTexts(pg)) === JSON.stringify(['Usage this month', 'Channels', 'Appearance', 'Language']), `① 左栏应是四节英文：${JSON.stringify(await tabTexts(pg))}`));
-  await S.check(async () => expect((await pg.getByTestId('settings-tab-language').getAttribute('aria-selected')) === 'true', '① 「Language」应是选中的那一节'));
+  await S.check(async () => expect(JSON.stringify(await tabTexts(pg)) === JSON.stringify(['Usage', 'Models', 'System']), `① 左栏应是三节英文：${JSON.stringify(await tabTexts(pg))}`));
+  await S.check(async () => expect((await pg.getByTestId('settings-tab-system').getAttribute('aria-selected')) === 'true', '① 「System」应是选中的那一节'));
   await S.check(async () => expect((await pg.locator('#settings-title').innerText()).trim() === 'Settings', `① 弹层标题应是 Settings：${await pg.locator('#settings-title').innerText()}`));
   await S.check(async () => {
     const zhOpt = (await pg.getByTestId('locale-zh').locator('span[lang="zh-CN"]').innerText()).trim();
@@ -198,12 +198,13 @@ await step('TC-CORE-131', async () => {
     expect(zhOpt === '中文' && enOpt === 'English', `① 选项应写「中文」（lang=zh-CN）与「English」（lang=en）：${zhOpt} / ${enOpt}`);
   });
   await S.check(async () => expect(await pg.getByTestId('locale-en').locator('input').isChecked() && !(await pg.getByTestId('locale-zh').locator('input').isChecked()), '① 应是 English 选中'));
-  await S.check(async () => expect((await pg.getByTestId('language').innerText()).includes('Screens you generate from now on are written in this language too'), '① 「Language」一节的说明应写明之后生成的屏也用这种语言'));
-  for (const sec of ['usage', 'runners', 'appearance', 'language']) {
+  await S.check(async () => expect((await pg.getByTestId('language').innerText()).includes('Screens you generate from now on are written in this language too'), '① 「Language」一组的说明应写明之后生成的屏也用这种语言'));
+  for (const sec of ['usage', 'models', 'system']) {
     await pg.getByTestId(`settings-tab-${sec}`).click();
     await pg.getByTestId(sec).waitFor({ timeout: 5000 });
     if (sec === 'usage') await pg.getByTestId('usage-totals').waitFor({ timeout: 10000 }).catch(() => {});
-    if (sec === 'runners') await pg.getByTestId('channel-manager').waitFor({ timeout: 10000 }).catch(() => {});
+    if (sec === 'models') await pg.getByTestId('channel-manager').waitFor({ timeout: 10000 }).catch(() => {});
+    if (sec === 'system') await pg.getByTestId('record-stats').waitFor({ timeout: 10000 }).catch(() => {});
     await pg.waitForTimeout(600);
     const left = await chineseLeft(pg);
     await S.check(() => expect(left.length === 0, `① 设置「${sec}」一节还有中文 ${left.length} 处：${left.slice(0, 10).join(' ｜ ')}`));
@@ -212,20 +213,20 @@ await step('TC-CORE-131', async () => {
   await pg.evaluate(() => { (window as unknown as { __noReload: number }).__noReload = 1; });
   await pg.getByTestId('locale-zh').click();
   await S.check(() => eventually(async () => expect((await htmlLang(pg)) === 'zh-CN', `② 点「中文」后 <html lang> 应为 zh-CN：${await htmlLang(pg)}`), 3000));
-  await S.check(async () => expect((await pg.locator('#settings-title').innerText()).trim() === '设置' && JSON.stringify(await tabTexts(pg)) === JSON.stringify(['本月用量', '生成通道', '外观', '语言']), `② 弹层应当场换成中文：${await pg.locator('#settings-title').innerText()} ${JSON.stringify(await tabTexts(pg))}`));
+  await S.check(async () => expect((await pg.locator('#settings-title').innerText()).trim() === '设置' && JSON.stringify(await tabTexts(pg)) === JSON.stringify(['用量', '模型', '系统']), `② 弹层应当场换成中文：${await pg.locator('#settings-title').innerText()} ${JSON.stringify(await tabTexts(pg))}`));
   await S.check(async () => expect((await pg.evaluate(() => localStorage.getItem('quilt:locale'))) === 'zh', `② 本机应记为 zh：${await pg.evaluate(() => localStorage.getItem('quilt:locale'))}`));
-  await S.check(async () => expect((await pg.evaluate(() => (window as unknown as { __noReload?: number }).__noReload)) === 1 && pg.url().includes('settings=language'), `② 切换不该刷新页面：${pg.url()}`));
+  await S.check(async () => expect((await pg.evaluate(() => (window as unknown as { __noReload?: number }).__noReload)) === 1 && pg.url().includes('settings=system'), `② 切换不该刷新页面：${pg.url()}`));
   await S.check(async () => expect(await pg.getByTestId('locale-zh').locator('input').isChecked(), '② 「中文」应变成选中'));
   const from = sent.length;
-  await pg.getByTestId('settings-tab-runners').click();
+  await pg.getByTestId('settings-tab-models').click();
   await pg.getByTestId('channel-manager').waitFor({ timeout: 10000 }).catch(() => {});
-  await S.check(() => eventually(() => expect(sent.length > from, '② 切到「生成通道」应发出新请求'), 5000));
+  await S.check(() => eventually(() => expect(sent.length > from, '② 切到「模型」应发出新请求'), 5000));
   await S.check(() => expect(sent.slice(from).every((s) => s.locale === 'zh'), `② 切换后的请求应带 X-Quilt-Locale: zh：${JSON.stringify(sent.slice(from))}`));
   // 3 刷新：仍是中文，「中文」选中
   await pg.reload();
   await modal.waitFor({ timeout: 10000 });
   await S.check(async () => expect((await htmlLang(pg)) === 'zh-CN' && (await pg.locator('#settings-title').innerText()).trim() === '设置', `③ 刷新后应仍是中文：lang=${await htmlLang(pg)}`));
-  await pg.getByTestId('settings-tab-language').click();
+  await pg.getByTestId('settings-tab-system').click();
   await S.check(async () => expect(await pg.getByTestId('locale-zh').locator('input').isChecked(), '③ 刷新后「中文」应仍是选中'));
   // 4 点「English」换回；同一浏览器里打开草稿本也是英文
   await pg.getByTestId('locale-en').click();
@@ -275,8 +276,8 @@ await step('TC-CORE-132', async () => {
   const badChannel = JSON.stringify({ kind: 'openai', vendor: 'custom', label: 'No endpoint', model: 'm-1', apiKey: 'k-0001' });
   const vEn = await apiJson<Problem>('/v1/channels', { method: 'POST', body: badChannel, headers: { 'X-Quilt-Locale': 'en' } });
   const vZh = await apiJson<Problem>('/v1/channels', { method: 'POST', body: badChannel });
-  await S.check(() => expect(vEn.status === 400 && vEn.body.type === '/errors/validation' && vEn.body.title === 'Invalid request parameters' && vEn.body.errors?.[0]?.message === 'OpenAI-compatible channels need an endpoint', `⑤ 英文的校验错误不对：${vEn.status} ${JSON.stringify(vEn.body)}`));
-  await S.check(() => expect(vZh.status === 400 && vZh.body.type === '/errors/validation' && vZh.body.title === '请求参数不合法' && vZh.body.errors?.[0]?.message === 'OpenAI 兼容通道必须填端点', `⑤ 不带语言头的校验错误应是中文：${vZh.status} ${JSON.stringify(vZh.body)}`));
+  await S.check(() => expect(vEn.status === 400 && vEn.body.type === '/errors/validation' && vEn.body.title === 'Invalid request parameters' && vEn.body.errors?.[0]?.message === 'OpenAI-compatible models need an endpoint', `⑤ 英文的校验错误不对：${vEn.status} ${JSON.stringify(vEn.body)}`));
+  await S.check(() => expect(vZh.status === 400 && vZh.body.type === '/errors/validation' && vZh.body.title === '请求参数不合法' && vZh.body.errors?.[0]?.message === 'OpenAI 兼容的模型必须填端点', `⑤ 不带语言头的校验错误应是中文：${vZh.status} ${JSON.stringify(vZh.body)}`));
   await S.check(() => expect(JSON.stringify(vEn.body.errors?.map((e) => e.path)) === JSON.stringify(vZh.body.errors?.map((e) => e.path)) && vEn.body.errors?.[0]?.path === 'endpoint', `⑤ errors[].path 应两边一样且是 endpoint：${JSON.stringify(vEn.body.errors)} / ${JSON.stringify(vZh.body.errors)}`));
   // 6 来源校验拒掉的请求也按语言出文案（语言先于来源校验定下来）
   const fEn = await fetch(`${API}/v1/projects`, { headers: { Origin: 'http://evil.example', 'X-Quilt-Locale': 'en' } });
@@ -323,7 +324,7 @@ await step('TC-CORE-133', async () => {
   expect(msg.status === 202, `发改屏 ${msg.status} ${JSON.stringify(msg.body).slice(0, 160)}`);
   const chip1 = await failed(msg.body.job.id);
   const t1 = flat(await chip1.locator('[role="status"]').innerText());
-  await S.check(() => expect(t1 === 'Edit “Screen 1” · Edit failed: the channel’s key was rejected (HTTP 401).', `① 改屏失败 chip 的英文不对：${t1}`));
+  await S.check(() => expect(t1 === 'Edit “Screen 1” · Edit failed: the model’s key was rejected (HTTP 401).', `① 改屏失败 chip 的英文不对：${t1}`));
   await S.check(async () => { const b = chip1.getByTestId('retry-job'); expect((await b.innerText()).trim() === 'Retry' && (await b.getAttribute('aria-label')) === 'Retry: Edit “Screen 1”', `① 「重试」应写 Retry、标签 Retry: Edit “Screen 1”：${await b.innerText()} / ${await b.getAttribute('aria-label')}`); });
   await S.check(async () => expect((await chip1.getByTestId('dismiss-job').getAttribute('aria-label')) === 'Dismiss failure notice: Edit “Screen 1”', `① × 的标签不对：${await chip1.getByTestId('dismiss-job').getAttribute('aria-label')}`));
   await S.check(async () => expect((await pg.getByTestId('job-chips').getAttribute('aria-label')) === 'Jobs', `① 整叠的标签应是 Jobs：${await pg.getByTestId('job-chips').getAttribute('aria-label')}`));
@@ -334,14 +335,14 @@ await step('TC-CORE-133', async () => {
   expect(sub.status === 202, `建重生成一块 ${sub.status} ${JSON.stringify(sub.body).slice(0, 160)}`);
   const chip2 = await failed(sub.body.job.id);
   const t2 = flat(await chip2.locator('[role="status"]').innerText());
-  await S.check(() => expect(t2 === 'Regenerate block in “Screen 1” · Regenerating this block failed: the channel’s key was rejected (HTTP 401). Check this channel’s key in Settings → Channels or switch to another channel, then click “Regenerate block” in the Inspector again', `② 重生成一块失败 chip 的英文不对：${t2}`));
+  await S.check(() => expect(t2 === 'Regenerate block in “Screen 1” · Regenerating this block failed: the model’s key was rejected (HTTP 401). Check this model’s key in Settings → Models or switch to another model, then click “Regenerate block” in the Inspector again', `② 重生成一块失败 chip 的英文不对：${t2}`));
   await S.check(async () => expect((await chip2.getByTestId('retry-job').count()) === 0 && (await chip2.getByTestId('dismiss-job').count()) === 1, '② 不能重试的 chip 上应只有 ×'));
   const chipsText = flat(await pg.getByTestId('job-chips').innerText());
   await S.check(() => expect(!HAN.test(chipsText), `①② 英文界面的作业 chip 里不该有中文：${chipsText}`));
   // 3 换成中文：两枚失败 chip 留着，文字当场换成中文
   await switchLocale(pg, 'zh');
-  await S.check(() => eventually(async () => { const t = flat(await chip1.locator('[role="status"]').innerText()); expect(t === '改「Screen 1」 · 改屏失败：通道的 Key 被拒绝（HTTP 401）。', `③ 换中文后改屏 chip 不对：${t}`); }, 3000));
-  await S.check(() => eventually(async () => { const t = flat(await chip2.locator('[role="status"]').innerText()); expect(t === '重生成「Screen 1」的一块 · 重做这一块失败：通道的 Key 被拒绝（HTTP 401）。到「设置 → 生成通道」检查这条通道的 Key 或换一个通道，然后在检查器里再点一次「重生成这块」', `③ 换中文后重生成一块 chip 不对：${t}`); }, 3000));
+  await S.check(() => eventually(async () => { const t = flat(await chip1.locator('[role="status"]').innerText()); expect(t === '改「Screen 1」 · 改屏失败：模型的 Key 被拒绝（HTTP 401）。', `③ 换中文后改屏 chip 不对：${t}`); }, 3000));
+  await S.check(() => eventually(async () => { const t = flat(await chip2.locator('[role="status"]').innerText()); expect(t === '重生成「Screen 1」的一块 · 重做这一块失败：模型的 Key 被拒绝（HTTP 401）。到「设置 → 模型」检查这个模型的 Key 或换一个模型，然后在检查器里再点一次「重生成这块」', `③ 换中文后重生成一块 chip 不对：${t}`); }, 3000));
   await S.check(async () => expect((await chip1.getByTestId('retry-job').innerText()).trim() === '重试', `③ 「重试」应换成中文：${await chip1.getByTestId('retry-job').innerText()}`));
   S.done();
   return '两枚失败 chip 英文正确，换中文后当场换字';

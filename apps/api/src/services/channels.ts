@@ -69,28 +69,32 @@ export async function updateChannel(userId: string, id: string, patch: { label?:
 }
 
 export async function deleteChannel(userId: string, id: string): Promise<void> {
-  await owned(userId, id);
-  await db.delete(schema.channels).where(eq(schema.channels.id, id));
+  const row = await owned(userId, id);
+  // 台账快照名刷成删除前的显示名（ADR-036）：改过名再删，用量看板也按最后的名字显示
+  await db.transaction(async (tx) => {
+    await tx.update(schema.usageEntries).set({ channelLabel: row.label }).where(eq(schema.usageEntries.channelId, id));
+    await tx.delete(schema.channels).where(eq(schema.channels.id, id));
+  });
 }
 
 /** worker 用：把作业里的 channelId 还原成可调用的驱动规格（此时才解密）。报错按当前请求的语言（设置页验证时直接显示）；worker 里不在请求中，是中文的原始原因 */
 export async function resolveChannelSpec(userId: string, channelId: string): Promise<LlmSpec & { model: string }> {
   const [row] = await db.select().from(schema.channels).where(and(eq(schema.channels.id, channelId), eq(schema.channels.userId, userId)));
-  if (!row) throw new Error(tr('通道已删除或不属于该账号', 'The channel was deleted or does not belong to this account'));
+  if (!row) throw new Error(tr('模型已删除或不属于该账号', 'The model was deleted or does not belong to this account'));
   const driver = KIND_DRIVER[row.kind as ChannelKind];
   // 本机订阅没有密钥，凭据是机器上的 claude / codex 登录态
   if (LOCAL_CHANNEL_KINDS.includes(row.kind as ChannelKind)) return { driver, model: row.model };
-  if (!row.apiKeyEnc) throw new Error(tr('通道没有密钥', 'The channel has no key'));
+  if (!row.apiKeyEnc) throw new Error(tr('模型没有密钥', 'The model has no key'));
   let apiKey: string;
   try { apiKey = decryptSecret(row.apiKeyEnc); }
-  catch { throw new Error(tr('通道密钥无法解密：QUILT_SECRETS_KEY 已更换，请到设置页重新填写', 'The channel key cannot be decrypted: QUILT_SECRETS_KEY has changed; enter the key again in Settings')); }
+  catch { throw new Error(tr('模型密钥无法解密：QUILT_SECRETS_KEY 已更换，请到设置页重新填写', 'The model key cannot be decrypted: QUILT_SECRETS_KEY has changed; enter the key again in Settings')); }
   return { driver, model: row.model, apiKey, baseUrl: row.endpoint ?? undefined };
 }
 
 const LOCAL_HINT: Partial<Record<ChannelKind, Localized>> = {
   'agent-sdk': L('在本机终端执行 `claude` 并完成登录；Quilt 进程会复用这份登录态。', 'Run `claude` in a terminal on this machine and log in; the Quilt process reuses that login.'),
-  codex: L('安装 Codex 并执行 `codex` 用 ChatGPT 账号登录；Quilt 每次生成拉起一次 `codex exec`（不在你的 Codex 历史里留会话，也不读你的 Codex 配置、MCP 与技能），模型名填 Codex 里可选的模型。验证约 20 秒；生成一屏约 2～4 分钟（桌面屏更久），比 API 通道慢得多，gpt-reserve 比 gpt-6-astra 快约三成。',
-    'Install Codex and run `codex` to log in with your ChatGPT account; Quilt starts `codex exec` once per generation (it leaves no session in your Codex history and does not read your Codex config, MCP servers or skills). Enter a model name that Codex offers. Verifying takes about 20 seconds; a screen takes about 2–4 minutes (longer for desktop screens), much slower than API channels, and gpt-reserve is about 30% faster than gpt-6-astra.'),
+  codex: L('安装 Codex 并执行 `codex` 用 ChatGPT 账号登录；Quilt 每次生成拉起一次 `codex exec`（不在你的 Codex 历史里留会话，也不读你的 Codex 配置、MCP 与技能），模型名填 Codex 里可选的模型。验证约 20 秒；生成一屏约 2～4 分钟（桌面屏更久），比走 API 的模型慢得多，gpt-reserve 比 gpt-6-astra 快约三成。',
+    'Install Codex and run `codex` to log in with your ChatGPT account; Quilt starts `codex exec` once per generation (it leaves no session in your Codex history and does not read your Codex config, MCP servers or skills). Enter a model name that Codex offers. Verifying takes about 20 seconds; a screen takes about 2–4 minutes (longer for desktop screens), much slower than API-based models, and gpt-reserve is about 30% faster than gpt-6-astra.'),
 };
 
 /** 统一目录（API-CORE-023）：输入框只渲染 available 的，设置页渲染全部 */

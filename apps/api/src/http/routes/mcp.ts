@@ -11,7 +11,8 @@ export const mcpRoutes = new Hono<Env>();
 // 本地版免鉴权（ADR-016）：服务只绑 127.0.0.1，不校验凭据；来源由 app.ts 按本机名单挡过一道（v0.75），
 // SDK 自带的 DNS 重绑防护也开着，名单同一份
 mcpRoutes.all('/mcp', async (c) => {
-  const server = buildMcpServer(await localUser());
+  // 使用记录的 session_id 由服务端每请求生成：requestId 会原样透传客户端的 X-Request-Id，固定发同一个的客户端会撞 (session_id, seq)
+  const server = buildMcpServer(await localUser(), `mcp:${crypto.randomUUID()}`);
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined, enableJsonResponse: true,
     enableDnsRebindingProtection: true, allowedHosts: requestSource.hosts, allowedOrigins: requestSource.origins,

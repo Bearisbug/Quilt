@@ -36,10 +36,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 // 不可用时用 aria-disabled 而非原生 disabled：工具栏按钮要能被键盘发现、并在提示里说明为什么用不了（A11Y-007 / INT-013）。
 // 尺寸：2xs 24px（列表行内的小按钮，点击区下限 A11Y-009）、xs 32px（面板角落的收起 / 关闭）、sm 40px（输入框的发送 / 取消）、md 44px（工具栏）。
 // tone=invert 是反色实心钮，只给「此刻唯一的主动作」（发送 / 停止）用。active 是工具栏里开着的工具：一块淡灰底（.rail-on，状态层常驻按下那一档）、图标用主文字色。
+// round：圆形，给表格行尾成排的操作（设置「模型」的验证 / 编辑 / 删除）。
 type IconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'disabled'> & {
-  label: string; hint?: string; desc?: string; active?: boolean; tip?: 'left' | 'top' | 'top-end' | 'bottom' | 'bottom-start' | 'bottom-end' | 'none'; unavailable?: string | false; size?: '2xs' | 'xs' | 'sm' | 'md'; tone?: 'default' | 'invert';
+  label: string; hint?: string; desc?: string; active?: boolean; tip?: 'left' | 'top' | 'top-end' | 'bottom' | 'bottom-start' | 'bottom-end' | 'none'; unavailable?: string | false; size?: '2xs' | 'xs' | 'sm' | 'md'; tone?: 'default' | 'invert'; round?: boolean;
 };
-export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton({ label, hint, desc, active, tip = 'left', unavailable, size = 'md', tone = 'default', className, children, onClick, ...rest }, ref) {
+export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton({ label, hint, desc, active, tip = 'left', unavailable, size = 'md', tone = 'default', round, className, children, onClick, ...rest }, ref) {
   return (
     <span className="group relative flex">
       <button
@@ -49,7 +50,8 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
         aria-disabled={unavailable ? true : undefined}
         onClick={(e) => { if (unavailable) { e.preventDefault(); return; } onClick?.(e); }}
         className={cn(
-          'state-layer focus-ring grid place-items-center rounded-md transition-[scale] duration-(--semantic-motion-duration-fast) ease-(--semantic-motion-easing-standard) active:scale-[0.96] aria-disabled:cursor-not-allowed aria-disabled:active:scale-100',
+          'state-layer focus-ring grid place-items-center transition-[scale] duration-(--semantic-motion-duration-fast) ease-(--semantic-motion-easing-standard) active:scale-[0.96] aria-disabled:cursor-not-allowed aria-disabled:active:scale-100',
+          round ? 'rounded-full' : 'rounded-md',
           size === 'md' ? 'size-11' : size === 'sm' ? 'size-10' : size === 'xs' ? 'size-8' : 'size-6',
           active ? 'rail-on text-text-primary' : tone === 'invert' ? 'inverse' : 'text-text-secondary',
           className,

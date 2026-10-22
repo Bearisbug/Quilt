@@ -1,6 +1,6 @@
 import { defineMessages } from '@/i18n';
 
-// 输入框、作业 chip、通道与投递会话下拉（composer/，PAGE-CANVAS「输入框」「作业 chip」「停靠与收起」）
+// 输入框、作业 chip、模型与投递会话下拉（composer/，PAGE-CANVAS「输入框」「作业 chip」「停靠与收起」）
 export default defineMessages('composer', {
   inputLabel: '对话输入',
   targetsLabel: '本次的目标',
@@ -48,6 +48,7 @@ export default defineMessages('composer', {
     removeAnchor: '取消锚点',
     removeTarget: '不再以「{{name}}」为目标',
     removePick: '去掉{{label}}，改回整张',
+    removePickOf: '去掉{{label}}',
     component: '组件 · {{name}}',
     removeComponent: '不再以组件「{{name}}」为目标',
   },
@@ -63,7 +64,7 @@ export default defineMessages('composer', {
     label: '本次参考图',
     uploading: '上传中…',
     remove: '移除参考图「{{name}}」',
-    noVision: '当前通道不支持参考图，先在左下角换一个支持的通道',
+    noVision: '当前模型不支持参考图，先在左下角换一个支持的模型',
     notImage_one: '有 {{count}} 个文件不是 PNG / JPEG / WebP，已跳过',
     notImage_other: '有 {{count}} 个文件不是 PNG / JPEG / WebP，已跳过',
     tooMany: '一条消息最多 {{max}} 张参考图',
@@ -73,10 +74,10 @@ export default defineMessages('composer', {
   addImage: {
     label: '加参考图',
     desc: '贴图、拖进来或点这里选；至多 4 张，发给模型作为风格参照',
-    noVision: '当前通道不支持参考图，先换一个通道',
+    noVision: '当前模型不支持参考图，先换一个模型',
   },
   blocked: { uploading: '参考图还在上传', pickSession: '先选要投递的会话' },
-  runnersFailed: '通道清单没加载出来 · 重试',
+  runnersFailed: '模型清单没加载出来 · 重试',
   count: { label: '屏数（几张不同的屏）', auto: '自动' },
   versions: { label: '版数（同一屏的几种画法）', option: '{{count}} 版' },
   send: {
@@ -105,14 +106,14 @@ export default defineMessages('composer', {
     menuNarrow: '窄屏放不下侧停的输入框，只停底边',
   },
   runner: {
-    label: '生成通道',
-    choose: '选择通道',
-    none: '没有可用通道',
+    label: '模型',
+    choose: '选择模型',
+    none: '没有可用的模型',
     cloud: '云端模型',
     agents: '本机 agent',
-    noneVerified: '没有验证通过的通道，先去设置页添加一个。',
-    manage: '管理通道',
-    manageItem: '管理通道…',
+    noneVerified: '没有验证通过的模型，先去设置里添加一个。',
+    manage: '管理模型',
+    manageItem: '管理模型…',
   },
   session: {
     label: '投递到哪个会话',
@@ -183,6 +184,7 @@ export default defineMessages('composer', {
     removeAnchor: 'Remove new-screen spot',
     removeTarget: 'Stop targeting “{{name}}”',
     removePick: 'Remove {{label}} and edit the whole draft',
+    removePickOf: 'Remove {{label}}',
     component: 'Component · {{name}}',
     removeComponent: 'Stop targeting component “{{name}}”',
   },
@@ -198,7 +200,7 @@ export default defineMessages('composer', {
     label: 'Reference images for this message',
     uploading: 'Uploading…',
     remove: 'Remove reference image “{{name}}”',
-    noVision: 'The current channel doesn’t support reference images; switch to one that does in the bottom-left corner',
+    noVision: 'The current model doesn’t support reference images; switch to one that does in the bottom-left corner',
     notImage_one: '{{count}} file isn’t PNG / JPEG / WebP and was skipped',
     notImage_other: '{{count}} files aren’t PNG / JPEG / WebP and were skipped',
     tooMany: 'Up to {{max}} reference images per message',
@@ -208,10 +210,10 @@ export default defineMessages('composer', {
   addImage: {
     label: 'Add reference image',
     desc: 'Paste, drag in or click here to choose; up to 4 images, sent to the model as style references',
-    noVision: 'The current channel doesn’t support reference images; switch channels first',
+    noVision: 'The current model doesn’t support reference images; switch models first',
   },
   blocked: { uploading: 'Reference images are still uploading', pickSession: 'Pick a session to deliver to first' },
-  runnersFailed: 'Couldn’t load channels · Retry',
+  runnersFailed: 'Couldn’t load models · Retry',
   count: { label: 'Screens (how many different screens)', auto: 'Auto' },
   versions: { label: 'Versions (different takes on the same screen)', option: '×{{count}}' },
   send: {
@@ -239,14 +241,14 @@ export default defineMessages('composer', {
     menuNarrow: 'A narrow window has no room for a side-docked composer, so it stays at the bottom',
   },
   runner: {
-    label: 'Channel',
-    choose: 'Choose channel',
-    none: 'No channels available',
+    label: 'Model',
+    choose: 'Choose model',
+    none: 'No models available',
     cloud: 'Cloud models',
     agents: 'Local agents',
-    noneVerified: 'No verified channels yet. Add one in Settings first.',
-    manage: 'Manage channels',
-    manageItem: 'Manage channels…',
+    noneVerified: 'No verified models yet. Add one in Settings first.',
+    manage: 'Manage models',
+    manageItem: 'Manage models…',
   },
   session: {
     label: 'Session to deliver to',

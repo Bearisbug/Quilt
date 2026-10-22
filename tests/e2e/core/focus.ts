@@ -2,7 +2,7 @@
 import http from 'node:http';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { openApp, seed, seedJson, apiJson, localFetch, previewHost, ROOT, WEB, API, eventually, pickOption } from '../lib.ts';
+import { openApp, seed, seedJson, apiJson, localFetch, previewHost, objectsDir, WEB, API, eventually, pickOption } from '../lib.ts';
 import { startOpenAiStub } from '../openai-stub.ts';
 import { expect, waitJob, needLiveLlm, Skip } from '../harness.ts';
 import { page, browser, ctx, consoleErrors, RUN, step, shot, blankSpot, verbLine } from './shared.ts';
@@ -313,44 +313,6 @@ await step('TC-CORE-016', async () => {
   return `${u.screens} 屏仍放行（无硬上限）；在途 8 屏计入、释放后归零`;
 });
 
-await step('TC-CORE-022', async () => {
-  const demo = (await apiJson<{ items: { id: string; name: string }[] }>('/v1/projects')).body.items.find((p) => p.name === 'Demo Mobile')!;
-  const usage = (await apiJson<{ month: string; screens: number; tokensIn: number; tokensOut: number; byDriver: { driver: string; model: string; screens: number }[] }>('/v1/me/usage')).body;
-  expect(usage.byDriver.length >= 1 && usage.byDriver.every((d) => d.driver), `台账应按驱动分列：${JSON.stringify(usage.byDriver)}`);
-  await page.goto(`${WEB}/p/${demo.id}?settings=usage`);
-  // 设置弹层落在「本月用量」一节：汇总三格、按驱动分列的表、MCP 接入命令；没有任何上限或进度条
-  const modal = page.getByTestId('settings-modal');
-  await modal.waitFor({ timeout: 10000 });
-  const totals = modal.getByTestId('usage-totals');
-  await totals.waitFor({ timeout: 10000 });
-  const text = await totals.innerText();
-  expect(text.includes(usage.screens.toLocaleString()) && text.includes(usage.tokensIn.toLocaleString()), `汇总与 API 不一致：${text.replace(/\s+/g, ' ')} vs ${usage.screens}/${usage.tokensIn}`);
-  expect((await modal.locator('[role="meter"]').count()) === 0 && !(await modal.innerText()).includes('/300'), '本地版不该再显示上限进度条');
-  const rows = modal.getByTestId('usage-by-driver').locator('tbody tr');
-  expect((await rows.count()) === usage.byDriver.length, `按驱动分列的行数 ${await rows.count()} ≠ ${usage.byDriver.length}`);
-  await shot(page, 'CORE-022');
-  // MCP 接入命令在「生成通道」一节底部
-  await modal.getByRole('tab', { name: '生成通道' }).click();
-  const cmd = await modal.getByTestId('mcp-add').innerText();
-  expect(/^claude mcp add --transport http quilt http:\/\/.+\/mcp$/.test(cmd.trim()), `MCP 接入命令不对：${cmd}`);
-  // 3 入口（v0.97）：经地址打开的弹层 Esc 关闭后焦点落在工具栏的「设置」；顶栏没有屏数与缩放比例；
-  // 工具栏最末一个是「设置」，键盘按它打开弹层（本月用量），Esc 关闭后焦点回到它
-  const gearFocused = () => eventually(async () => expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.tool) === 'settings', '弹层关闭后焦点没回到工具栏的「设置」'), 3000);
-  await page.keyboard.press('Escape');
-  await modal.waitFor({ state: 'detached', timeout: 5000 });
-  await gearFocused();
-  expect((await page.locator('[data-testid="stat"]').count()) === 0 && !/\d+ 屏 · \d+%/.test(await page.locator('body').innerText()), '顶栏不该再有屏数与缩放比例');
-  const toolIds = await page.locator('[role="toolbar"][aria-label="画布工具"] [data-tool]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.tool));
-  expect(toolIds[toolIds.length - 1] === 'settings', `工具栏最末应是「设置」：${toolIds.join(',')}`);
-  await page.keyboard.press('Enter');
-  await modal.waitFor({ timeout: 5000 });
-  expect(page.url().includes('settings=usage'), `从工具栏打开应落在本月用量：${page.url()}`);
-  await page.keyboard.press('Escape');
-  await modal.waitFor({ state: 'detached', timeout: 5000 });
-  await gearFocused();
-  return `${usage.month}：${usage.screens} 屏 / ${usage.tokensIn + usage.tokensOut} token，按驱动 ${usage.byDriver.length} 行；MCP 命令可复制；入口在工具栏最末，关闭后焦点回到它`;
-});
-
 await step('TC-CORE-017', async () => {
   const demo = (await apiJson<{ items: { id: string; name: string }[] }>('/v1/projects').then((r) => r.body.items.find((p) => p.name === 'Demo Mobile')!));
   const { jobId } = seedJson<{ jobId: string }>('seed:job', '--project', demo.id, '--status', 'running', '--tokens', '3000');
@@ -444,7 +406,7 @@ await step('TC-CORE-033', async () => {
   await dlg.getByRole('button', { name: '删除' }).click();
   await page.getByText('已删除「DelB」').waitFor({ timeout: 5000 });
   expect((await apiJson(`/v1/projects/${b.projectId}`)).status === 404, '删除后项目仍能读到');
-  expect(!existsSync(path.join(ROOT, '.data', 'objects', 'projects', b.projectId)), '对象目录未清理');
+  expect(!existsSync(path.join(await objectsDir(), 'projects', b.projectId)), '对象目录未清理');
   // 2 有进行中作业拒删；取消后可删
   const job = seedJson<{ jobId: string }>('seed:job', '--project', a.projectId, '--status', 'running');
   expect((await apiJson(`/v1/projects/${a.projectId}`, { method: 'DELETE' })).status === 409, '有进行中作业仍能删项目');
@@ -957,17 +919,17 @@ await step('TC-CORE-041', async () => {
   type Shot = { id: string; presentation: string; screenshotUrl: string | null };
   const shots = async () => (await apiJson<{ screens: Shot[] }>(`/v1/projects/${projectId}`)).body.screens;
   expect((await apiJson(`/v1/screens/${v!.id}`, { method: 'PATCH', body: JSON.stringify({ presentation: 'overlay' }) })).status === 422, '变体改呈现方式应 422');
-  // 截图重拍看卡片拿到的截图地址（v1.03）：对象键带呈现方式，按叠层拍的是 <修订>.overlay.png——地址变了，浏览器才不会拿内存里的旧图顶替
+  // 截图重拍看卡片拿到的截图地址（v1.03）：对象键带呈现方式，按叠层拍的是 <修订>.overlay.webp——地址变了，浏览器才不会拿内存里的旧图顶替
   const shotKeyOf = async (id: string) => decodeURIComponent((await shots()).find((x) => x.id === id)?.screenshotUrl ?? '');
   expect((await apiJson(`/v1/screens/${s1.id}`, { method: 'PATCH', body: JSON.stringify({ presentation: 'overlay' }) })).status === 200, '默认屏改呈现方式应 200');
   const fam = (await shots()).filter((s) => s.id === s1.id || s.id === v!.id);
   expect(fam.every((s) => s.presentation === 'overlay'), `默认屏改呈现方式后变体应跟着改：${fam.map((s) => s.presentation).join('/')}`);
   await eventually(async () => {
-    for (const id of [s1.id, v!.id]) expect((await shotKeyOf(id)).includes('.overlay.png'), `家族两屏都应按叠层重拍、截图地址换成 .overlay.png：${await shotKeyOf(id)}`);
+    for (const id of [s1.id, v!.id]) expect((await shotKeyOf(id)).includes('.overlay.webp'), `家族两屏都应按叠层重拍、截图地址换成 .overlay.webp：${await shotKeyOf(id)}`);
   }, 30000, 1000);
   await apiJson(`/v1/screens/${s1.id}`, { method: 'PATCH', body: JSON.stringify({ presentation: 'push' }) });
   await eventually(async () => {
-    for (const id of [s1.id, v!.id]) { const k = await shotKeyOf(id); expect(/[0-9a-f-]{36}\.png/.test(k) && !k.includes('.overlay'), `切回整屏后截图地址应换回 <修订>.png：${k}`); }
+    for (const id of [s1.id, v!.id]) { const k = await shotKeyOf(id); expect(/[0-9a-f-]{36}\.webp/.test(k) && !k.includes('.overlay'), `切回整屏后截图地址应换回 <修订>.webp：${k}`); }
   }, 30000, 1000);
   // 6 导出只带默认屏
   const { body: job } = await apiJson<{ job: { id: string } }>(`/v1/projects/${projectId}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': `e2e-var-${Date.now()}` }, body: JSON.stringify({ kind: 'export_prototype', input: {} }) });

@@ -9,8 +9,9 @@ import { useViewport, WHEEL_PAN_SPEED } from '@/canvas/useViewport';
 import { frameSide } from '@/lib/frameZoom';
 import { useFocusedFrame } from '@/canvas/useFocusedFrame';
 import { ScreenCard, ComponentCard, keepPointerFocus, type CardActions, type CardKind } from '@/canvas/cards';
-import { keyAction, toSelection, type ElementSelection } from '@/canvas/frameMessages';
+import { keyAction, type SelectMessage } from '@/canvas/frameMessages';
 import { markPalette, useResolvedMode } from '@/lib/theme';
+import { recordEvent, recordPreview } from '@/lib/recorder';
 import { useLocale, useT } from '@/i18n';
 import canvasMessages from '@/i18n/locales/canvas-parts';
 
@@ -59,10 +60,12 @@ export type CanvasProps = {
   onCandidates: (jobId: string, screenId: string) => void;
   /** 正展开候选的屏：展开层画在世界层、盖在该卡片原位（节点由父组件提供） */
   candidateStack: { screenId: string; node: ReactNode } | null;
-  /** null = 热更新后元素已不在（被删 / 子树换了 qid），父页清空选中；component = 元素所在的共享组件名（REQ-EDIT-006） */
-  onElementSelect: (sel: ElementSelection | null) => void;
-  /** 当前选中元素的 qid：热更新换了修订后让运行时按它重选，检查器不必退回空态 */
-  selectedQid: string | null;
+  /** 运行时报上来的点选（v1.26 起带 additive / replace，加选减选与逐级选的规则在 frameMessages.ts 的 applySelect）；component = 元素所在的共享组件名（REQ-EDIT-006） */
+  onElementSelect: (m: SelectMessage) => void;
+  /** 热更新后这一块已不在（被删 / 子树换了 qid），父页把它去掉；null = 全部清空（切了状态变体） */
+  onElementDeselect: (qid: string | null) => void;
+  /** 选中的几块（最后点中的排最后）：热更新换了修订后让运行时逐块重选，检查器不必退回空态 */
+  selectedQids: string[];
   /** 正在被子树重生成作业改的元素（REQ-EDIT-002）：聚焦屏内描边 + 「修改中…」，回写后换成「已更新」；未聚焦的卡片标「局部修改中」 */
   workingSubtrees: { screenId: string; qid: string }[];
   inspectMode: boolean;
@@ -94,10 +97,10 @@ export type CanvasProps = {
 // 画布对外 API（Canvas.tsx 经 registerApi 取）：reveal 把一张卡摆到可用区中央（找屏 / 屏列表用）
 export type CanvasApi = {
   /** false = 缩到下限 MIN_ZOOM 仍装不下全部 */
-  fitView: () => boolean; goBack: () => void; highlight: (qid: string | null) => void; focus: (id: string) => void; resetToOwn: () => void; createAtCenter: () => void; markDone: (qids: string[]) => void;
+  fitView: () => boolean; goBack: () => void; highlight: (qids: string[]) => void; focus: (id: string) => void; resetToOwn: () => void; createAtCenter: () => void; markDone: (qids: string[]) => void;
   /** 键盘进入交互（屏或组件卡，v0.80）：就绪后焦点移进 iframe，退出后焦点回到这张卡 */
   enter: (id: string) => void;
-  /** 逐级选（v1.00）：发给此刻处于选择元素态的那个 iframe——Shift+Enter / Enter、祖先路径的点选与悬停预览 */
+  /** 逐级选（v1.00）：发给此刻处于选择元素态的那个 iframe——Shift+↑ / Shift+↓、祖先路径的点选与悬停预览 */
   climb: (dir: 'up' | 'down') => void; pick: (qid: string) => void; peek: (qid: string | null) => void;
   reveal: (id: string) => void;
 };
@@ -339,6 +342,8 @@ export function CanvasView(p: CanvasProps) {
   const climb = useCallback((dir: 'up' | 'down') => postToInspected({ type: 'quilt:climb', dir }), [postToInspected]);
   const pick = useCallback((qid: string) => postToInspected({ type: 'quilt:pick', qid }), [postToInspected]);
   const peek = useCallback((qid: string | null) => postToInspected({ type: 'quilt:peek', qid }), [postToInspected]);
+  // 父页的选中是事实源（v1.26 多选）：选中的几块都画框，最后一块是逐级选移动的那块；组件卡也要发——按着 Shift 点的那块由这里画出来
+  const highlight = useCallback((qids: string[]) => postToInspected({ type: 'quilt:highlight', qid: qids[qids.length - 1] ?? null, ...(qids.length > 1 ? { qids } : null) }), [postToInspected]);
   // 工具栏 / ⌥G 走这里：把可见区中心当作锚点落点，等价于在那里双击
   const createAtCenter = useCallback(() => {
     const node = viewportRef.current;
@@ -410,7 +415,7 @@ export function CanvasView(p: CanvasProps) {
     if (a && a !== document.body && a !== compFrames.current.get(id) && a !== iframeRef.current) return;
     requestAnimationFrame(() => gestures.current.get(id)?.focus({ preventScroll: true }));
   }, [p.focusedId, p.focusedComponentId, iframeRef]);
-  const { highlight, resetToOwn, markDone } = frame;
+  const { resetToOwn, markDone } = frame;
   useEffect(() => { propsRef.current.registerApi?.({ fitView, goBack, highlight, focus: focusCard, resetToOwn, createAtCenter, markDone, reveal, enter: enterByKey, climb, pick, peek }); }, [fitView, goBack, highlight, focusCard, resetToOwn, createAtCenter, markDone, reveal, enterByKey, climb, pick, peek]);
   // 小地图的矩形：屏、组件、风格指南卡
   const miniRects = useMemo<MiniRect[]>(() => [
@@ -464,6 +469,7 @@ export function CanvasView(p: CanvasProps) {
     // Esc 靠运行时转发；选中元素同样由它上报，父页据此开检查器。组件没有路由，navigate / dead
     // 一类对它没有意义（组件里的链接在运行时侧已做成惰性）
     if (p.focusedComponentId && compFrames.current.get(p.focusedComponentId)?.contentWindow === e.source) {
+      recordPreview(m, { componentId: p.focusedComponentId });
       // 组件版本一升，previewUrl 的 ?v= 就变、iframe 重新导航，新文档里运行时是初始的 interact——
       // 而同步模式那个 effect 的依赖（focusedComponentId / inspectMode）都没变，不会重跑。
       // 所以这里接住新文档的 ready，把当前模式补发一次；不接的话「改完一个元素就得退出重进」。
@@ -473,19 +479,20 @@ export function CanvasView(p: CanvasProps) {
       if (m.type === 'quilt:key') { const a = keyAction(m, false); if (a?.kind === 'exit') p.onFocusComponent?.(null); else if (a?.kind === 'shortcut') p.onShortcut?.(a.code, a.alt); }
       // 交互态组件卡上的捏合与滚轮（v0.80）：与屏同一条 quilt:wheel，按这张卡的 iframe 换算
       if (m.type === 'quilt:wheel') frameWheel(compFrames.current.get(p.focusedComponentId), m);
-      if (m.type === 'quilt:select') p.onElementSelect(toSelection(m));
-      if (m.type === 'quilt:deselect') p.onElementSelect(null);
+      if (m.type === 'quilt:select') p.onElementSelect(m);
+      if (m.type === 'quilt:deselect') p.onElementDeselect(m.qid);
       return;
     }
     // 只认聚焦 iframe 发来的：候选展开层里的活 iframe（REQ-CORE-015）也跑同一套运行时，它们的 ready / navigate / key 不能动聚焦态
     if (!frame.focused || e.source !== iframeRef.current?.contentWindow) return;
+    recordPreview(m, { screenId: frame.shownId });
     if (m.type === 'quilt:ready') {
       frame.markReady();
       if (kbFocusPending.current) { kbFocusPending.current = false; iframeRef.current?.focus(); }
     }
     if (m.type === 'quilt:swapped') frame.markSwapped();
-    if (m.type === 'quilt:select') p.onElementSelect(toSelection(m));
-    if (m.type === 'quilt:deselect') p.onElementSelect(null);
+    if (m.type === 'quilt:select') p.onElementSelect(m);
+    if (m.type === 'quilt:deselect') p.onElementDeselect(m.qid);
     if (m.type === 'quilt:navigate') frame.navigate(m.href);
     if (m.type === 'quilt:overlay-dismiss') goBack();
     if (m.type === 'quilt:key') {
@@ -582,6 +589,7 @@ export function CanvasView(p: CanvasProps) {
       setMarquee(null); setMarqueeHits({ screens: [], comps: [] });
       if (!moved) { propsRef.current.onSelect(null); return; }
       const hit = hitsIn(ev.clientX - nr.left, ev.clientY - nr.top);
+      recordEvent('drag', 'marquee', { screens: hit.screens.length, components: hit.comps.length, additive });
       propsRef.current.onSelectMany(hit.screens, hit.comps, additive);
     };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', finish); window.addEventListener('pointercancel', finish);
@@ -642,6 +650,7 @@ export function CanvasView(p: CanvasProps) {
       if (moved) {
         // 先把终点交给父页写进详情，再撤掉本地覆盖：同一个事件里的两次 setState 合成一帧，不会闪回旧位置（MOTION-026）
         propsRef.current.onMove(shifted(screens), shifted(comps));
+        recordEvent('drag', kind === 'screen' ? 'screen-card' : 'component-card', { dx: offset.x, dy: offset.y, screenIds: screens.map((o) => o.id), componentIds: comps.map((o) => o.id) });
         setDragPos((m) => omit(m, screens.map((o) => o.id)));
         if (comps.length) setCompDrag((m) => omit(m, comps.map((o) => o.id)));
       } else if (kind === 'screen' && propsRef.current.armed && !propsRef.current.focusedId) {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { recordEvent } from '@/lib/recorder';
 
 /** 输入框停的边（PAGE-CANVAS「停靠与收起」v1.16）：不去顶边，顶边是项目切换器与草稿工具条 */
 export type DockEdge = 'bottom' | 'left' | 'right';
@@ -57,7 +58,7 @@ export function useComposerDock(page: 'canvas' | 'sketch') {
   const toastBottom = edge === 'bottom' && measure ? Math.round(measure.h + measure.stack) + 32 : 24;
   return {
     prefs, narrow, edge, at, shellStyle, toastBottom, onMeasure, measure,
-    move: (to: DockEdge, toAt: number) => save({ edge: to, at: toAt }),
+    move: (to: DockEdge, toAt: number) => { recordEvent('drag', 'composer-dock', { page, edge: to, at: Math.round(toAt * 1000) / 1000 }); save({ edge: to, at: toAt }); },
     setCollapsed: (collapsed: boolean) => save({ collapsed }),
   };
 }

@@ -8,6 +8,7 @@ import { findCodexThread, openCodexThread, queueCodexMessage } from '../lib/code
 import { registerAgentHooks } from '../services/jobs.ts';
 import { deriveLinks, priorInstructions } from '../services/screens.ts';
 import { componentInstructions } from '../services/components.ts';
+import { recordModelCall } from '../services/record.ts';
 import type { JobRow } from '../services/projects.ts';
 import { priorInstructionsBlock, sketchRules, sketchFrameRule, withUiLanguage, jobLocale, failureText, type AgentTool, type JobKind, type DraftFrame, type DraftFrameChoice } from '@quilt/core';
 
@@ -26,21 +27,24 @@ const MCP_SETUP: Record<AgentTool, (url: string) => string> = {
   codex: (url) => `If this thread has no MCP tools from a server named "quilt", do not attempt the job: tell the user to run \`codex mcp add quilt --url ${url}\` and then start a new Codex thread or reopen this one (MCP servers are loaded when a thread is opened), then send the job again from the Quilt canvas.`,
 };
 
-// 子树重生成（REQ-EDIT-002）只动那一块：屏与草稿（REQ-CORE-045）同一句
-const subtreeScope = (qid: string, target: 'screen' | 'draft') => `Scope: rewrite ONLY the element with data-qid="${qid}" (and its subtree) on the target ${target}. Keep every other element identical: change it with quilt.patch_screen (find = that element's current HTML from quilt.get_screen, replace = the new HTML) instead of resending the whole ${target}.`;
+// 子树重生成（REQ-EDIT-002）只动那一块：屏与草稿（REQ-CORE-045）同一句。按住 Shift 选的几块（v1.26 qids）全部列出，
+// 一次 patch_screen 每块一条 edit，这一屏只多一版
+const subtreeScope = (qids: string[], target: 'screen' | 'draft') => qids.length > 1
+  ? `Scope: rewrite ONLY these ${qids.length} elements (each with its subtree) on the target ${target}, applying the one instruction to each of them: ${qids.map((q) => `data-qid="${q}"`).join(', ')}. Keep every other element identical: change them in ONE quilt.patch_screen call with one edit per element (find = that element's current HTML from quilt.get_screen, replace = its new HTML), so the ${target} gets a single new version, instead of resending the whole ${target}.`
+  : `Scope: rewrite ONLY the element with data-qid="${qids[0]}" (and its subtree) on the target ${target}. Keep every other element identical: change it with quilt.patch_screen (find = that element's current HTML from quilt.get_screen, replace = the new HTML) instead of resending the whole ${target}.`;
 
 async function buildPrompt(job: JobRow): Promise<string> {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, job.projectId));
   if (job.kind === 'edit_component') return componentPrompt(job, project);
   if (project.kind === 'sketchbook') return sketchPrompt(job, project);
-  // generate / edit_screens 带 screenIds；regenerate_subtree 带单个 screenId + qid（只重写该子树）
-  const input = job.input as { prompt: string; screenIds?: string[]; screenId?: string; qid?: string };
+  // generate / edit_screens 带 screenIds；regenerate_subtree 带单个 screenId + qid（只重写该子树），一次改几块时另有 qids
+  const input = job.input as { prompt: string; screenIds?: string[]; screenId?: string; qid?: string; qids?: string[] };
   const ids = input.screenIds?.length ? input.screenIds : input.screenId ? [input.screenId] : [];
   const screens = ids.length ? await db.select().from(schema.screens).where(inArray(schema.screens.id, ids)) : [];
   const targets = screens.length
     ? screens.map((s) => `- ${s.name} (${s.route}) screenId=${s.id} expectedRevisionId=${s.currentRevisionId ?? 'none'}${s.presentation === 'overlay' ? ' — an OVERLAY screen: keep its root transparent (bg-transparent) and its close action linking back' : ''}`).join('\n')
     : '- none: create new screen(s) with quilt.create_screen (pick routes that do not collide with the app map)';
-  const scope = job.kind === 'regenerate_subtree' && input.qid ? subtreeScope(input.qid, 'screen') : '';
+  const scope = job.kind === 'regenerate_subtree' && input.qid ? subtreeScope(input.qids ?? [input.qid], 'screen') : '';
   // 每个目标屏此前已生效的用户指令（ADR-012 v0.87）：别的通道、MCP 改过的轮次不在这个会话的记忆里
   const history = job.kind === 'edit_screens' || job.kind === 'regenerate_subtree'
     ? (await Promise.all(screens.map(async (s) => priorInstructionsBlock(`SCREEN "${s.name}" (${s.route})`, await priorInstructions(s.id, s.currentRevisionId)).trim()))).filter(Boolean).join('\n\n')
@@ -87,7 +91,7 @@ async function componentPrompt(job: JobRow, project: typeof schema.projects.$inf
 // 改草稿与只改一块（REQ-CORE-045）带 expectedRevisionId，与改屏同一道回写守卫。草稿有参照项目时（REQ-CORE-042 / ADR-033）让会话读那个项目的
 // 设计契约照着写，写回仍进草稿本（按参照项目的 prelude 拼装由 ingestScreen 做）
 async function sketchPrompt(job: JobRow, project: typeof schema.projects.$inferSelect): Promise<string> {
-  const input = job.input as { prompt: string; screenIds?: string[]; screenId?: string; qid?: string; frame?: DraftFrameChoice };
+  const input = job.input as { prompt: string; screenIds?: string[]; screenId?: string; qid?: string; qids?: string[]; frame?: DraftFrameChoice };
   const draftId = job.kind === 'edit_screens' ? input.screenIds?.[0] : job.kind === 'regenerate_subtree' ? input.screenId : undefined;
   const [draft] = draftId ? await db.select().from(schema.screens).where(eq(schema.screens.id, draftId)) : [];
   if (draftId && !draft) throw new Error('草稿已被删除');
@@ -96,7 +100,7 @@ async function sketchPrompt(job: JobRow, project: typeof schema.projects.$inferS
   const task = draft
     ? [
       priorInstructionsBlock(`DRAFT "${draft.name}"`, await priorInstructions(draft.id, draft.currentRevisionId)).trim(),
-      job.kind === 'regenerate_subtree' && input.qid ? subtreeScope(input.qid, 'draft') : '',
+      job.kind === 'regenerate_subtree' && input.qid ? subtreeScope(input.qids ?? [input.qid], 'draft') : '',
       `Target draft: "${draft.name}" screenId=${draft.id} expectedRevisionId=${draft.currentRevisionId ?? 'none'}`,
       `Steps: read the draft with quilt.get_screen (the body with data-qid) → change what the instruction asks and keep everything else identical, including the root's data-frame → write it back with quilt.patch_screen { screenId, expectedRevisionId, edits:[{ find, replace }], jobId: "${job.id}" } for a partial change (only the changed text) or quilt.update_screen { projectId: "${project.id}", screenId, html, expectedRevisionId, jobId: "${job.id}" } for a rewrite. On 409 revision-conflict call quilt.get_screen and redo the change on the current version.`,
     ]
@@ -180,12 +184,18 @@ export async function deliverAgentJob(jobId: string): Promise<void> {
   const codex = tool === 'codex' ? await findCodexThread(sessionId) : null;
   const session = claude ?? codex;
   if (!session) { await finishAgentJob(claimed, 'failed', { errorClass: 'agent', message: '会话已关闭或不存在，没有投递出去' }); return; }
+  let prompt: string | null = null;
+  const startedAt = new Date();
   try {
     // 网页端建的作业带界面语言（REQ-CORE-046）：指令末尾补同一句语言要求
-    const prompt = withUiLanguage(await buildPrompt(claimed), claimed);
+    prompt = withUiLanguage(await buildPrompt(claimed), claimed);
     if (claude) await injectMessage(claude.socketPath, prompt);
     else if (codex) await queueCodexMessage(codex.sessionId, prompt);
-  } catch (e) { await finishAgentJob(claimed, 'failed', { errorClass: 'agent', message: `投递失败：${(e as Error).message}` }); return; }
+  } catch (e) {
+    if (prompt) await recordDelivery(claimed, tool, prompt, startedAt, (e as Error).message);
+    await finishAgentJob(claimed, 'failed', { errorClass: 'agent', message: `投递失败：${(e as Error).message}` }); return;
+  }
+  await recordDelivery(claimed, tool, prompt, startedAt, null);
   // 线程没在任何 Codex 窗口里打开：消息只会躺在队列里，让桌面版打开它（会切到前台）才会被取走。
   // 打不开（只装了 CLI / VS Code 插件）不算投递失败：消息已经在队列里，之后在哪个窗口打开这个线程就由哪个窗口执行，
   // 作业照常等它收口——标成失败的话，那一轮的回写与收口全被 409 job-finished 挡掉
@@ -203,6 +213,16 @@ export async function deliverAgentJob(jobId: string): Promise<void> {
   }
   await emitJobEvent(jobId, 'progress', { stage: 'delivered', session: delivery.name });
   arm({ ...claimed, output: { delivery } });
+}
+
+// 使用记录（REQ-CORE-047）：交给本机会话的作业不经 llmCall，投递出去的那段指令记一条 purpose=agent 的模型调用
+function recordDelivery(job: JobRow, tool: AgentTool, prompt: string, startedAt: Date, error: string | null): Promise<void> {
+  const imageKeys = (job.input as { imageKeys?: string[] }).imageKeys ?? [];
+  return recordModelCall({
+    userId: job.createdBy, jobId: job.id, projectId: job.projectId, seq: 1, purpose: 'agent', runner: job.runner, driver: tool, model: null,
+    ok: !error, error, attempts: [{ attempt: 1, ok: !error, ...(error ? { error } : {}), at: new Date().toISOString() }], tokensIn: 0, tokensOut: 0, imageKeys,
+    system: null, prompt, response: null, startedAt, finishedAt: new Date(),
+  });
 }
 
 export function cancelAgentJob(jobId: string) { disarm(jobId); }

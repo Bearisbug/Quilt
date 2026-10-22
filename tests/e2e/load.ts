@@ -291,8 +291,8 @@ await step('TC-CORE-085', async () => {
   const page = await newPage();
   // 新修订的截图：delay = 对象响应推迟 1.5 s（截图本身不到 1 s，留存窗口要看得见）；hold = 扣住到放行
   let gateRev = ''; let gateMode: 'delay' | 'hold' = 'delay'; let release: (() => void) | null = null;
-  await page.route(/\.png(\?|$)/, async (route) => {
-    if (!gateRev || !route.request().url().includes(`${gateRev}.png`)) return route.continue();
+  await page.route(/\.webp(\?|$)/, async (route) => {
+    if (!gateRev || !route.request().url().includes(`${gateRev}.webp`)) return route.continue();
     if (gateMode === 'delay') await sleep(1500); else await new Promise<void>((r) => { release = r; });
     return route.continue();
   });
@@ -300,7 +300,7 @@ await step('TC-CORE-085', async () => {
   await page.route(new RegExp(`/p/${pid}/${s1.id}\\?`), (route) => { if (route.request().resourceType() === 'document') docs += 1; return route.continue(); });
   await page.goto(`${WEB}/p/${pid}`);
   const card = page.locator('[data-testid="screen-card"][data-route="/s1"]');
-  const shotIs = (rev: string) => card.evaluate((el, r) => [...el.querySelectorAll('img')].some((i) => i.src.includes(`${r}.png`) && i.complete && i.naturalWidth > 0 && getComputedStyle(i).opacity === '1') && !el.querySelector('iframe'), rev);
+  const shotIs = (rev: string) => card.evaluate((el, r) => [...el.querySelectorAll('img')].some((i) => i.src.includes(`${r}.webp`) && i.complete && i.naturalWidth > 0 && getComputedStyle(i).opacity === '1') && !el.querySelector('iframe'), rev);
   await eventually(async () => expect(await card.locator('img').evaluateAll((els) => els.some((i) => (i as HTMLImageElement).complete && (i as HTMLImageElement).naturalWidth > 0)), '截图没加载出来'), 15000);
   const focusS1 = async () => { await card.locator('.gesture').dblclick(); await page.locator('.card.focused .badge', { hasText: '交互中' }).waitFor({ timeout: 30000 }); };
   const fl = page.frameLocator('.card.focused iframe');

@@ -5,7 +5,7 @@ export default defineMessages('panels-inspect', {
   inspector: {
     title: '检查器 · {{name}}',
     pathLabel: '元素层级',
-    pathHint: 'Shift+Enter 选父级 · Enter 回到子级',
+    pathHint: 'Shift+↑ 选父级 · Shift+↓ 回到子级',
     emptyComponent: '在组件里点选一个元素',
     emptyScreen: '在屏幕里点选一个元素',
     emptyHint: '选择模式下移动鼠标会高亮元素，点击即选中；Esc 退出交互。',
@@ -50,6 +50,19 @@ export default defineMessages('panels-inspect', {
       submit: '重生成这块',
       working: '这块正在修改中，回写后会标「已更新」',
       pickSession: '先选要投递的会话',
+    },
+    // 多选（v1.26 REQ-EDIT-002）：选中 2 块以上时的检查器
+    multi: {
+      title: '已选 {{n}} 个元素',
+      listLabel: '选中的元素',
+      remove: '去掉 {{tag}} · {{qid}}',
+      merged: '已合并到外层',
+      max: '一次最多选 {{max}} 块',
+      regenTitle: '用 AI 重生成这几块',
+      regenPlaceholder: '例如：都改成红色，字号加大一档',
+      regenSubmit: '重生成这几块',
+      regenWorking: '这几块正在修改中，回写后会标「已更新」',
+      locked: '{{tag}} · {{qid}} 在共享组件「{{name}}」里，不能一起用 AI 重生成：先去掉这一块',
     },
     fork: {
       title: '到草稿本里改',
@@ -138,7 +151,7 @@ export default defineMessages('panels-inspect', {
   inspector: {
     title: 'Inspector · {{name}}',
     pathLabel: 'Element hierarchy',
-    pathHint: 'Shift+Enter: select parent · Enter: back to child',
+    pathHint: 'Shift+↑: select parent · Shift+↓: back to child',
     emptyComponent: 'Click an element in the component',
     emptyScreen: 'Click an element on the screen',
     emptyHint: 'In Select element mode, hover to highlight an element and click to select it. Press Esc to stop interacting.',
@@ -183,6 +196,18 @@ export default defineMessages('panels-inspect', {
       submit: 'Regenerate block',
       working: 'This block is being edited; it’s marked “Updated” once written back',
       pickSession: 'Pick a session to deliver to first',
+    },
+    multi: {
+      title: '{{n}} elements selected',
+      listLabel: 'Selected elements',
+      remove: 'Remove {{tag}} · {{qid}}',
+      merged: 'Merged into the outer block',
+      max: 'You can select up to {{max}} blocks',
+      regenTitle: 'Regenerate these blocks with AI',
+      regenPlaceholder: 'e.g. make them all red, one size larger',
+      regenSubmit: 'Regenerate blocks',
+      regenWorking: 'These blocks are being edited; they’re marked “Updated” once written back',
+      locked: '{{tag}} · {{qid}} is inside the shared component “{{name}}” and can’t be regenerated with the others; remove it first',
     },
     fork: {
       title: 'Edit in Sketchbook',

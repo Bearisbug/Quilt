@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { XYPanZoom, PanOnScrollMode, type PanZoomInstance, type Viewport } from '@xyflow/system';
 import type { ViewInfo } from '@/canvas/Minimap';
 import { MIN_ZOOM, MAX_ZOOM } from '@/canvas/geometry';
+import { recordEvent } from '@/lib/recorder';
 
 // 滚轮平移速度：画布上的滚轮（panzoom）与交互态组件卡转发来的滚轮（v0.80）同一个值
 export const WHEEL_PAN_SPEED = 0.5;
@@ -93,7 +94,7 @@ export function useViewport(o: { projectId: string; safeAreaRef?: { current: HTM
       }
       if (movingTimer.current) clearTimeout(movingTimer.current);
       // 停下时顺手写 --canvas-zoom（v0.80）：选中描边与卡片焦点环按它保持屏幕像素宽度。逐帧写的话每帧全部卡片重算样式
-      movingTimer.current = window.setTimeout(() => { world.classList.remove('moving'); world.style.setProperty('--canvas-zoom', String(vp.current.zoom)); movingTimer.current = null; opts.current.onStop(vp.current); }, 200);
+      movingTimer.current = window.setTimeout(() => { world.classList.remove('moving'); world.style.setProperty('--canvas-zoom', String(vp.current.zoom)); movingTimer.current = null; opts.current.onStop(vp.current); recordEvent('viewport', undefined, { x: Math.round(vp.current.x), y: Math.round(vp.current.y), zoom: Math.round(vp.current.zoom * 1000) / 1000 }); }, 200);
     }
     opts.current.onFrame(v);
     if (viewSubs.current.size) { const node = viewportRef.current; const info = { ...v, w: node?.clientWidth ?? 0, h: node?.clientHeight ?? 0 }; for (const cb of viewSubs.current) cb(info); }

@@ -4,6 +4,7 @@ import { DropdownMenu, Select } from 'radix-ui';
 import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, GripVertical, ImagePlus, MapPin, PenLine, Settings2, X } from 'lucide-react';
 import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MAX_VERSIONS, SCREEN_COUNT_OPTIONS, estimateJob, type ScreenDto, type ComponentDto, type RunnerOptionDto, type AgentSessionDto, type AgentTool, type ScreenCount } from '@quilt/core/browser';
 import { cn, IconButton } from '@/ui/ui';
+import { recordEvent } from '@/lib/recorder';
 import { VendorIcon } from '@/ui/VendorIcon';
 import { useT } from '@/i18n';
 import composerMessages from '@/i18n/locales/composer';
@@ -68,8 +69,8 @@ type ComposerProps = {
   handle?: Ref<ComposerHandle>;
   /** 草稿本（REQ-CORE-040）：不显示目标标签、屏数与版数；动词行与占位示例由草稿本页给，extra 插在工具条右组（新草稿的画框选择）。
    *  onEmptyEscape：输入框空着时按 Esc 交给页面（收起看板），不失焦。
-   *  chip：草稿里点选的那一块（REQ-CORE-045），与目标标签同形、可移除 */
-  sketch?: { verb: string; phrases: string[]; extra?: ReactNode; onEmptyEscape?: () => void; chip?: { label: string; onRemove: () => void } };
+   *  chips：草稿里点选的那几块（REQ-CORE-045，v1.26 按住 Shift 可选几块），每块一枚，与目标标签同形、各自可移除 */
+  sketch?: { verb: string; phrases: string[]; extra?: ReactNode; onEmptyEscape?: () => void; chips?: { key: string; label: string; onRemove: () => void }[]; onClimb?: (dir: 'up' | 'down') => void };
 };
 
 // 空闲且没有目标时轮播的示例：让第一次进来的人知道能说什么（文案在 composer 命名空间的 idle.*）
@@ -373,14 +374,18 @@ export function Composer(p: ComposerProps) {
     if (!batch.length) return;
     shotsRef.current = [...shotsRef.current, ...batch.map((b) => b.shot)];
     setShots((prev) => [...prev, ...batch.map((b) => b.shot)]);
+    recordEvent('attach', undefined, { op: 'add', files: batch.map(({ file }) => ({ name: file.name, type: file.type, bytes: file.size })) });
     for (const { file, shot } of batch) {
       p.onUploadImage(file).then(
-        (id) => setShots((prev) => prev.map((s) => (s.key === shot.key ? { ...s, id } : s))),
-        () => { setShots((prev) => prev.filter((s) => s.key !== shot.key)); p.onError(t('shots.failed', { name: file.name })); },
+        (id) => { recordEvent('attach', undefined, { op: 'uploaded', name: file.name, attachmentId: id }); setShots((prev) => prev.map((s) => (s.key === shot.key ? { ...s, id } : s))); },
+        () => { recordEvent('attach', undefined, { op: 'failed', name: file.name }); setShots((prev) => prev.filter((s) => s.key !== shot.key)); p.onError(t('shots.failed', { name: file.name })); },
       );
     }
   };
-  const removeShot = (key: string) => setShots((prev) => { prev.filter((s) => s.key === key).forEach((s) => URL.revokeObjectURL(s.url)); return prev.filter((s) => s.key !== key); });
+  const removeShot = (key: string) => {
+    recordEvent('attach', undefined, { op: 'remove', name: shotsRef.current.find((s) => s.key === key)?.name });
+    setShots((prev) => { prev.filter((s) => s.key === key).forEach((s) => URL.revokeObjectURL(s.url)); return prev.filter((s) => s.key !== key); });
+  };
 
   const uploading = shots.some((s) => !s.id);
   // 冲突之外挡住发送的本地原因：按 Enter 被它们挡住时写在冲突理由同一行，原因消失即撤（REQ-CORE-020 v0.74）
@@ -417,6 +422,10 @@ export function Composer(p: ComposerProps) {
     addFiles([...e.dataTransfer.files]);
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // 草稿本：还没打字、上面有选中块的胶囊时，Shift+↑ / Shift+↓ 走层级（同画布逐级选，v1.28）；打了字之后照旧是扩选文字
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && p.sketch?.onClimb && p.sketch.chips?.length && !text.trim()) {
+      e.preventDefault(); p.sketch.onClimb(e.key === 'ArrowUp' ? 'up' : 'down'); return;
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); return; }
     // 输入框内 Esc：有草稿清草稿、无草稿失焦；都不清目标标签（REQ-CORE-006）。草稿本里无草稿时是收起看板，焦点留在输入框
     if (e.key === 'Escape') { e.stopPropagation(); if (text) clearDraft(); else if (p.sketch?.onEmptyEscape) p.sketch.onEmptyEscape(); else taRef.current?.blur(); }
@@ -512,14 +521,14 @@ export function Composer(p: ComposerProps) {
               </button>
             </li>
           ))}
-          {p.sketch?.chip && (
-            <li className="tint-link inline-flex min-w-0 items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="draft-pick-chip">
-              <span className="min-w-0 max-w-64 truncate">{p.sketch.chip.label}</span>
-              <button type="button" aria-label={t('chip.removePick', { label: p.sketch.chip.label })} onClick={p.sketch.chip.onRemove} className="grid size-5 shrink-0 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
+          {p.sketch?.chips?.map((c, _, all) => (
+            <li key={c.key} className="tint-link inline-flex min-w-0 items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="draft-pick-chip" data-qid={c.key}>
+              <span className="min-w-0 max-w-64 truncate">{c.label}</span>
+              <button type="button" aria-label={t(all.length > 1 ? 'chip.removePickOf' : 'chip.removePick', { label: c.label })} onClick={c.onRemove} className="grid size-5 shrink-0 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
                 <X size={12} />
               </button>
             </li>
-          )}
+          ))}
           {/* 共享组件目标（REQ-EDIT-006）：与屏标签同一排、同一形状，前缀「组件 ·」区分 */}
           {p.componentTargets.map((c) => (
             <li key={c.id} className="tint-link inline-flex items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="component-chip" data-name={c.name}>
@@ -728,7 +737,7 @@ function Placeholder({ phrases, active }: { phrases: string[]; active: boolean }
 // 云端模型与本机 agent 分两组。
 // maxWidth：输入框差一点放不下时截短触发器（px，由 Composer 量出来）
 export function RunnerSelect({ runners, value, onChange, disabled, testId = 'runner-select', maxWidth }: { runners: RunnerOptionDto[]; value: string; onChange: (id: string) => void; disabled?: boolean; testId?: string; maxWidth?: number | null }) {
-  // 「管理通道…」只加 ?settings=runners、不动地址里别的参数：草稿本页的 ?d=<草稿> 是看板上开着的那张，整体换掉会把它收起（PAGE-SKETCH）
+  // 「管理模型…」只加 ?settings=models、不动地址里别的参数：草稿本页的 ?d=<草稿> 是看板上开着的那张，整体换掉会把它收起（PAGE-SKETCH）
   const t = useT(composerMessages);
   const [, setParams] = useSearchParams();
   // 只列可用项（REQ-CORE-013）：不可用的去设置页看原因，这里不灰化陈列
@@ -737,7 +746,7 @@ export function RunnerSelect({ runners, value, onChange, disabled, testId = 'run
   const agents = usable.filter((r) => r.runner.kind === 'agent');
   const cur = usable.find((r) => r.id === value);
   return (
-    <Select.Root value={cur?.id} onValueChange={(v) => { if (v === MANAGE_ID) setParams((q) => { q.set('settings', 'runners'); return q; }); else onChange(v); }} disabled={disabled}>
+    <Select.Root value={cur?.id} onValueChange={(v) => { if (v === MANAGE_ID) setParams((q) => { q.set('settings', 'models'); return q; }); else onChange(v); }} disabled={disabled}>
       <Select.Trigger
         aria-label={t('runner.label')} data-testid={testId} data-value={value} style={maxWidth ? { maxWidth } : undefined}
         className="fill group flex h-9 max-w-44 shrink-0 items-center gap-1.5 rounded-md px-2.5 type-label font-medium text-text-primary disabled:pointer-events-none sm:max-w-56 state-layer focus-ring"

@@ -24,7 +24,8 @@ const KNOWN: [RegExp, Localized][] = [
 ];
 const CJK = /[\u3400-\u9fff]/;
 // 中文原因的英文（英文界面用）：中文版把中文原因原样写进文案，英文版按这张表换；表里没有的退回按失败类别的通用原因，
-// 不把中文夹进英文句子。流水线、本机投递、通道解析里新加中文原因时在这里补一行
+// 不把中文夹进英文句子。流水线、本机投递、通道解析里新加中文原因时在这里补一行。
+// 作业 output.message 是落库的原文：v1.24 之前的作业写的是「通道…」，界面改叫「模型」后两种说法都要认
 const ZH_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^组件 HTML 超过 (\d+) KB$/, (m) => `the component HTML is over ${m[1]} KB`],
   [/^组件必须恰好一个根元素，现在有 (\d+) 个$/, (m) => `a component must have exactly one root element; this one has ${m[1]}`],
@@ -36,13 +37,13 @@ const ZH_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^目标屏都已被删除$/, 'all target screens were deleted'],
   [/^目标屏有的已被删除，其余还没有生成出内容$/, 'some target screens were deleted and the rest have no content yet'],
   [/^目标屏还没有生成出内容$/, 'the target screens have no content yet'],
-  [/^聊天只能用「本机 Claude 订阅」通道$/, 'chat only works with the Local Claude subscription channel'],
+  [/^聊天只能用「本机 Claude 订阅」(?:通道|的模型)$/, 'chat only works with a Local Claude subscription model'],
   [/^作业输入不合法/, 'the job input is invalid'],
   [/^Quilt 重启时作业未完成$/, 'the job had not finished when Quilt restarted'],
-  [/^通道不可用：(.*)$/s, (m) => `the channel is unavailable${detail(m[1])}`],
-  [/^通道已删除或不属于该账号$/, 'the channel was deleted or does not belong to this account'],
-  [/^通道没有密钥$/, 'the channel has no key'],
-  [/^通道密钥无法解密/, 'the channel key cannot be decrypted because QUILT_SECRETS_KEY changed; enter the key again in Settings'],
+  [/^(?:通道|模型)不可用：(.*)$/s, (m) => `the model is unavailable${detail(m[1])}`],
+  [/^(?:通道|模型)已删除或不属于该账号$/, 'the model was deleted or does not belong to this account'],
+  [/^(?:通道|模型)没有密钥$/, 'the model has no key'],
+  [/^(?:通道|模型)密钥无法解密/, 'the model key cannot be decrypted because QUILT_SECRETS_KEY changed; enter the key again in Settings'],
   [/^本机没有找到 codex 命令：/, 'the codex command was not found on this machine; install Codex and run codex to log in with your ChatGPT account'],
   [/^本机没有找到 codex 命令$/, 'the codex command was not found on this machine'],
   [/^codex 启动失败/, 'codex failed to start'],
@@ -64,7 +65,7 @@ function zhReasonEn(msg: string): string | null {
   }
   return null;
 }
-// 「通道不可用：…」「投递失败：…」后半句是下层的原因：认得就接上，认不得只说前半句
+// 「模型不可用：…」「投递失败：…」后半句是下层的原因：认得就接上，认不得只说前半句
 const detail = (inner: string): string => { const r = CJK.test(inner) ? zhReasonEn(inner.trim()) : null; return r ? `: ${r}` : ''; };
 // 下一步：能原样重试的四类（API-CORE-034）写「点「重试」」——失败的作业 chip 上有这个按钮；其余几类没有重试，写它们各自再发一次的入口
 const AGAIN: Partial<Record<JobKind, Localized>> = {
@@ -88,33 +89,33 @@ export function failureText(kind: JobKind | null | undefined, errorClass?: Error
   let why = ''; let next = again ?? t('点「重试」再来一次', 'click “Retry” to try again');
   if (errorClass === 'provider') {
     const status = Number(msg.match(/\b([45]\d\d)\b/)?.[1] ?? 0);
-    next = again ? t(`稍后${again}，或换一个通道`, `${again} later, or switch to another channel`) : t('稍后点「重试」，或在输入框换一个通道再发', 'click “Retry” later, or pick another channel in the composer and send again');
+    next = again ? t(`稍后${again}，或换一个模型`, `${again} later, or switch to another model`) : t('稍后点「重试」，或在输入框换一个模型再发', 'click “Retry” later, or pick another model in the composer and send again');
     // 先于状态码判：本机 Claude 订阅的报文是「exceeded the 32000 output token maximum」，上限数字可能恰好是三位数
     if (/output hit the token limit|output token maximum/.test(msg)) {
       why = t('模型这次要写的内容超过了单次输出上限，结果不完整，没有保存', 'the output went over the model’s single-response limit, so the result was incomplete and was not saved');
       next = t('把这次的要求拆成几次发', 'split this request into several smaller ones');
     } else if (status === 401 || status === 403) {
-      why = t(`通道的 Key 被拒绝（HTTP ${status}）`, `the channel’s key was rejected (HTTP ${status})`);
+      why = t(`模型的 Key 被拒绝（HTTP ${status}）`, `the model’s key was rejected (HTTP ${status})`);
       next = again
-        ? t(`到「设置 → 生成通道」检查这条通道的 Key 或换一个通道，然后${again}`, `check this channel’s key in Settings → Channels or switch to another channel, then ${again}`)
-        : t('到「设置 → 生成通道」检查这条通道的 Key，或换一个通道再发', 'check this channel’s key in Settings → Channels, or send again with another channel');
+        ? t(`到「设置 → 模型」检查这个模型的 Key 或换一个模型，然后${again}`, `check this model’s key in Settings → Models or switch to another model, then ${again}`)
+        : t('到「设置 → 模型」检查这个模型的 Key，或换一个模型再发', 'check this model’s key in Settings → Models, or send again with another model');
     }
-    else if (status === 429) why = t('通道限流（HTTP 429）', 'the channel is rate limited (HTTP 429)');
+    else if (status === 429) why = t('模型限流（HTTP 429）', 'the model is rate limited (HTTP 429)');
     else if (status >= 500) why = t(`模型服务暂时不可用（HTTP ${status}）`, `the model service is temporarily unavailable (HTTP ${status})`);
     else if (status >= 400) {
-      why = t(`通道拒绝了这次请求（HTTP ${status}）`, `the channel rejected this request (HTTP ${status})`);
-      next = t(`${again ? `换一个通道，然后${again}` : '换一个通道再发'}；到「设置 → 生成通道」重新验证这条通道可以看到具体原因`,
-        `${again ? `switch to another channel, then ${again}` : 'send again with another channel'}; verify this channel again in Settings → Channels to see the exact reason`);
+      why = t(`模型拒绝了这次请求（HTTP ${status}）`, `the model rejected this request (HTTP ${status})`);
+      next = t(`${again ? `换一个模型，然后${again}` : '换一个模型再发'}；到「设置 → 模型」重新验证这个模型可以看到具体原因`,
+        `${again ? `switch to another model, then ${again}` : 'send again with another model'}; verify this model again in Settings → Models to see the exact reason`);
     }
-    else why = cjk ?? t('连不上模型通道或它没有回应', 'could not reach the model channel, or it did not respond');
+    else why = cjk ?? t('连不上模型或它没有回应', 'could not reach the model, or it did not respond');
   } else if (errorClass === 'timeout') {
     why = t('超过时限没做完', 'it did not finish within the time limit');
     if (kind === 'generate' || kind === 'edit_screens') next = t('点「重试」；屏数或版数多时先减少再发', 'click “Retry”, or if there were many screens or versions, send again with fewer');
   } else if (errorClass === 'agent') {
     why = cjk ?? t('本机会话没有完成', 'the local session did not finish');
     next = again
-      ? t(`在本机 agent 面板看详情，或换一个模型通道，然后${again}`, `see the details in the Local agents panel, or switch to a model channel, then ${again}`)
-      : t('在本机 agent 面板看详情，或换一个模型通道再发', 'see the details in the Local agents panel, or send again with a model channel');
+      ? t(`在本机 agent 面板看详情，或换成一个模型，然后${again}`, `see the details in the Local agents panel, or switch to a model, then ${again}`)
+      : t('在本机 agent 面板看详情，或换成一个模型再发', 'see the details in the Local agents panel, or send again with a model');
   } else if (errorClass) {
     why = known ?? cjk ?? (errorClass === 'system' ? t('Quilt 内部出错', 'Quilt hit an internal error') : t('模型产出不合格', 'the model output did not pass the checks'));
     next = errorClass === 'system' ? t(`${retry}；反复出现时看 API 日志`, `${retry}; if it keeps happening, check the API log`) : again ?? t('点「重试」，或换个说法再发', 'click “Retry”, or rephrase and send again');

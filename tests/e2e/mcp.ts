@@ -323,7 +323,7 @@ await step('TC-AGENT-018', async () => {
   let shotUrl: string | null = null;
   for (let i = 0; i < 40 && !shotUrl; i++) { shotUrl = (await revisionsOf(c1.screenId) as unknown as { id: string; screenshotUrl: string | null }[]).find((x) => x.id === rest.revision.id)?.screenshotUrl ?? null; if (!shotUrl) await sleep(500); }
   // 屏此刻是叠层：按叠层拍，键带 .overlay（§16 v1.03）
-  check(shotUrl?.includes(`${rest.revision.id}.overlay.png`), `回溯出的修订应按叠层重拍、截图是它自己的：${shotUrl ? (shotUrl.includes(c1.revisionId) ? '复用了 rev1 的截图' : shotUrl.slice(0, 120)) : '20 s 内没有截图'}`);
+  check(shotUrl?.includes(`${rest.revision.id}.overlay.webp`), `回溯出的修订应按叠层重拍、截图是它自己的：${shotUrl ? (shotUrl.includes(c1.revisionId) ? '复用了 rev1 的截图' : shotUrl.slice(0, 120)) : '20 s 内没有截图'}`);
 
   // 3 append_upload：没签发过的上传位 404；同 offset 并发 5 段只成一段；写入口用掉之后再追加 404
   // 每次换一个 id：修复前的服务端会把这个 id 当成新上传位写下去，固定 id 会被上一轮留下的文件顶成「已存在」

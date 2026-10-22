@@ -7,12 +7,12 @@ test('failureText：开头按作业种类，原因不带供应商原始报文', 
   const t = failureText('generate', 'provider', gemini);
   assert.ok(t.startsWith('造屏失败：模型服务暂时不可用（HTTP 503）'), t);
   assert.ok(!/[{}]|gemini|UNAVAILABLE/.test(t), t);
-  assert.ok(t.includes('重试') && t.includes('换一个通道'), t);
-  assert.ok(failureText('edit_screens', 'provider', 'openai-compatible 401 {"error":{"message":"invalid api key"}}').startsWith('改屏失败：通道的 Key 被拒绝（HTTP 401）'));
-  assert.ok(failureText('edit_screens', 'provider', 'openai-compatible 401 x').includes('设置 → 生成通道'));
-  assert.ok(failureText('chat', 'provider', 'agent-sdk: API Error: 429 rate limited').startsWith('回答失败：通道限流（HTTP 429）'));
-  assert.ok(failureText('generate', 'provider', 'agent-sdk: API Error: 400 Claude Code 2.1.263 does not support this model').startsWith('造屏失败：通道拒绝了这次请求（HTTP 400）'));
-  assert.ok(failureText('generate', 'provider', 'openai-compatible fetch failed: ECONNREFUSED').startsWith('造屏失败：连不上模型通道或它没有回应'));
+  assert.ok(t.includes('重试') && t.includes('换一个模型'), t);
+  assert.ok(failureText('edit_screens', 'provider', 'openai-compatible 401 {"error":{"message":"invalid api key"}}').startsWith('改屏失败：模型的 Key 被拒绝（HTTP 401）'));
+  assert.ok(failureText('edit_screens', 'provider', 'openai-compatible 401 x').includes('设置 → 模型'));
+  assert.ok(failureText('chat', 'provider', 'agent-sdk: API Error: 429 rate limited').startsWith('回答失败：模型限流（HTTP 429）'));
+  assert.ok(failureText('generate', 'provider', 'agent-sdk: API Error: 400 Claude Code 2.1.263 does not support this model').startsWith('造屏失败：模型拒绝了这次请求（HTTP 400）'));
+  assert.ok(failureText('generate', 'provider', 'openai-compatible fetch failed: ECONNREFUSED').startsWith('造屏失败：连不上模型或它没有回应'));
   // 中文原因原样保留（本机没装 codex 这类说明本身就是下一步）
   assert.ok(failureText('generate', 'provider', '本机没有找到 codex 命令：安装 Codex').includes('本机没有找到 codex 命令'));
 });
@@ -46,7 +46,7 @@ test('failureText：没有「重试」的作业写各自再发一次的入口（
       const t = failureText(kind, cls, 'HTTP 500 upstream');
       assert.ok(t.includes(want) && !t.includes('重试'), `${kind}/${cls ?? '无类别'}：${t}`);
     }
-    // Key 被拒、通道拒绝请求：下一步先修通道，再说从哪儿再发一次
+    // Key 被拒、模型拒绝请求：下一步先修模型，再说从哪儿再发一次
     for (const msg of ['HTTP 401 unauthorized', 'HTTP 403 forbidden', 'HTTP 400 bad request']) {
       const t = failureText(kind, 'provider', msg);
       assert.ok(t.includes(want) && !t.includes('重试'), `${kind}/${msg}：${t}`);
@@ -61,12 +61,12 @@ test('failureText 英文版：开头按作业种类，原因与下一步逐句�
   const t = failureText('generate', 'provider', gemini, 0, 'en');
   assert.ok(t.startsWith('Generation failed: the model service is temporarily unavailable (HTTP 503). '), t);
   assert.ok(!/[{}]|gemini|UNAVAILABLE/.test(t), t);
-  assert.ok(t.includes('“Retry”') && t.includes('another channel'), t);
+  assert.ok(t.includes('“Retry”') && t.includes('another model'), t);
   assert.equal(failureText('edit_screens', 'provider', 'openai-compatible 401 x', 0, 'en'),
-    'Edit failed: the channel’s key was rejected (HTTP 401). Check this channel’s key in Settings → Channels, or send again with another channel');
-  assert.ok(failureText('chat', 'provider', 'agent-sdk: API Error: 429 rate limited', 0, 'en').startsWith('Reply failed: the channel is rate limited (HTTP 429)'));
-  assert.ok(failureText('generate', 'provider', 'API Error: 400 nope', 0, 'en').startsWith('Generation failed: the channel rejected this request (HTTP 400)'));
-  assert.ok(failureText('generate', 'provider', 'fetch failed: ECONNREFUSED', 0, 'en').startsWith('Generation failed: could not reach the model channel, or it did not respond'));
+    'Edit failed: the model’s key was rejected (HTTP 401). Check this model’s key in Settings → Models, or send again with another model');
+  assert.ok(failureText('chat', 'provider', 'agent-sdk: API Error: 429 rate limited', 0, 'en').startsWith('Reply failed: the model is rate limited (HTTP 429)'));
+  assert.ok(failureText('generate', 'provider', 'API Error: 400 nope', 0, 'en').startsWith('Generation failed: the model rejected this request (HTTP 400)'));
+  assert.ok(failureText('generate', 'provider', 'fetch failed: ECONNREFUSED', 0, 'en').startsWith('Generation failed: could not reach the model, or it did not respond'));
   assert.ok(failureText('edit_screens', 'provider', 'gemini output hit the token limit (finishReason=MAX_TOKENS)', 0, 'en').endsWith('. Split this request into several smaller ones'));
   assert.ok(failureText('generate', 'timeout', 'job exceeded 480s', 0, 'en').startsWith('Generation failed: it did not finish within the time limit. Click “Retry”'));
   assert.equal(failureText('edit_screens', 'validation', 'revision conflict', 0, 'en').split('. ')[0], 'Edit failed: this screen was changed while the job was running');
@@ -84,9 +84,11 @@ test('failureText 英文版：中文原因换成英文，认不得的退回按�
   assert.ok(failureText('edit_component', 'validation', '组件必须恰好一个根元素，现在有 0 个', 0, 'en').startsWith('Component edit failed: a component must have exactly one root element; this one has 0. '));
   assert.ok(failureText('generate', 'system', 'Quilt 重启时作业未完成', 0, 'en').startsWith('Generation failed: the job had not finished when Quilt restarted. '));
   assert.ok(failureText('generate', 'provider', '本机没有找到 codex 命令：安装 Codex 并运行 codex 用 ChatGPT 账号登录', 0, 'en').startsWith('Generation failed: the codex command was not found on this machine; install Codex'));
-  // 「通道不可用：…」「投递失败：…」：后半句认得就接上，认不得只说前半句
-  assert.ok(failureText('generate', 'validation', '通道不可用：通道没有密钥', 0, 'en').startsWith('Generation failed: the channel is unavailable: the channel has no key. '));
-  assert.ok(failureText('generate', 'validation', '通道不可用：boom', 0, 'en').startsWith('Generation failed: the channel is unavailable. '));
+  // 「模型不可用：…」「投递失败：…」：后半句认得就接上，认不得只说前半句；v1.24 之前落库的「通道…」原文同样认得
+  assert.ok(failureText('generate', 'validation', '模型不可用：模型没有密钥', 0, 'en').startsWith('Generation failed: the model is unavailable: the model has no key. '));
+  assert.ok(failureText('generate', 'validation', '通道不可用：通道没有密钥', 0, 'en').startsWith('Generation failed: the model is unavailable: the model has no key. '));
+  assert.ok(failureText('chat', 'validation', '聊天只能用「本机 Claude 订阅」通道', 0, 'en').startsWith('Reply failed: chat only works with a Local Claude subscription model. '));
+  assert.ok(failureText('generate', 'validation', '通道不可用：boom', 0, 'en').startsWith('Generation failed: the model is unavailable. '));
   assert.ok(failureText('generate', 'agent', '投递失败：写入会话 inbox 超时', 0, 'en').startsWith('Generation failed: delivery failed: timed out writing to the session inbox. '));
   assert.ok(failureText('generate', 'agent', '一句表里没有的中文', 0, 'en').startsWith('Generation failed: the local session did not finish. '));
   assert.ok(failureText('generate', 'validation', '一句表里没有的中文', 0, 'en').startsWith('Generation failed: the model output did not pass the checks. '));
@@ -102,7 +104,7 @@ test('failureText 英文版：没有「重试」的作业写各自再发一次�
     }
   }
   const kinds = ['generate', 'edit_screens', 'edit_component', 'regenerate_subtree', 'apply_design_system', 'propose_design_system', 'export_prototype', 'ingest_screen', 'chat', null] as const;
-  const msgs = ['HTTP 401 x', 'HTTP 400 x', 'HTTP 502 x', 'output token maximum', 'revision conflict', 'odd', '组件里不能再放别的共享组件', '通道不可用：通道已删除或不属于该账号', '表里没有的中文', ''];
+  const msgs = ['HTTP 401 x', 'HTTP 400 x', 'HTTP 502 x', 'output token maximum', 'revision conflict', 'odd', '组件里不能再放别的共享组件', '通道不可用：通道已删除或不属于该账号', '模型不可用：模型已删除或不属于该账号', '表里没有的中文', ''];
   for (const kind of kinds) for (const cls of [undefined, 'provider', 'timeout', 'agent', 'system', 'validation', 'quality'] as const) for (const msg of msgs) {
     const t = failureText(kind, cls, msg, 2, 'en');
     assert.ok(!/[\u3400-\u9fff「」，。；：]/.test(t), `${kind}/${cls}/${msg}：${t}`);

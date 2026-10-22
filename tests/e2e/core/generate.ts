@@ -788,13 +788,13 @@ await step('TC-CORE-025', async () => {
   await sel.click();
   const listbox = page.getByRole('listbox');
   await listbox.waitFor({ timeout: 3000 });
-  // 「管理通道…」是 listbox 里的哨兵项（键盘可达），计数时剔除；lobehub 图标的 <title> 会混进 innerText，只做包含判断
+  // 「管理模型…」是 listbox 里的哨兵项（键盘可达），计数时剔除；lobehub 图标的 <title> 会混进 innerText，只做包含判断
   const opts = await listbox.getByRole('option').evaluateAll((els) => els.filter((e) => !e.closest('[data-testid="manage-channels"]')).map((e) => (e as HTMLElement).innerText));
   const avail = list.items.filter((i) => i.available);
   expect(opts.length === avail.length, `下拉项 ${opts.length} ≠ 可用通道 ${avail.length}`);
   for (const u of unavailable) expect(!opts.some((t) => t.includes(u.label)), `不可用通道「${u.label}」不该出现在下拉里`);
   expect((await listbox.innerText()).includes('云端模型'), '列表未按「云端模型 / 本机 agent」分组');
-  expect(await page.getByTestId('manage-channels').isVisible(), '下拉末尾没有「管理通道…」入口');
+  expect(await page.getByTestId('manage-channels').isVisible() && (await page.getByTestId('manage-channels').innerText()).includes('管理模型…'), '下拉末尾没有「管理模型…」入口');
   // 每项只给厂商图标 + 显示名：模型 id 是配置细节，收在设置弹层的通道管理器里（TC-CORE-028 第 7 步验它还在）
   const withModel = avail.find((i) => i.hint && !i.label.includes(i.hint));
   expect(!!withModel, '清单里没有「显示名不含模型 id」的可用通道，这条断言失去区分力');
@@ -1065,14 +1065,14 @@ await step('TC-CORE-028', async () => {
     //   先建一条已验证的自建通道当「自建通道」那一组的行
     await useStubChannel(null, { port: 3983, label: 'Stub 管理 28' });
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`${WEB}/p/${projectId}?settings=runners`);
+    await page.goto(`${WEB}/p/${projectId}?settings=models`);
     const modal = page.getByTestId('settings-modal');
     await modal.waitFor({ timeout: 10000 });
-    // 分栏：左栏四节 tab（本月用量 / 生成通道 / 外观 / 语言，v1.08 加外观、v1.20 加语言），方向键换节、URL 跟着变
+    // 分栏：左栏三节 tab（用量 / 模型 / 系统，v1.24），方向键换节、URL 跟着变
     const tabs = await modal.getByRole('tab').allInnerTexts();
-    expect(tabs.join('/') === '本月用量/生成通道/外观/语言', `设置弹层左栏应是 本月用量 / 生成通道 / 外观 / 语言 四节：${tabs.join(' / ')}`);
-    expect((await modal.getByRole('tab', { name: '生成通道' }).getAttribute('aria-selected')) === 'true', '?settings=runners 未选中「生成通道」');
-    await modal.getByRole('tab', { name: '生成通道' }).focus();
+    expect(tabs.join('/') === '用量/模型/系统', `设置弹层左栏应是 用量 / 模型 / 系统 三节：${tabs.join(' / ')}`);
+    expect((await modal.getByRole('tab', { name: '模型' }).getAttribute('aria-selected')) === 'true', '?settings=models 未选中「模型」');
+    await modal.getByRole('tab', { name: '模型' }).focus();
     await page.keyboard.press('ArrowUp');
     await modal.getByTestId('usage').waitFor({ timeout: 3000 });
     expect(page.url().includes('settings=usage'), `方向键换节后 URL 未更新：${page.url()}`);
@@ -1088,7 +1088,13 @@ await step('TC-CORE-028', async () => {
     expect(!!preset, '没有「显示名不含模型 id」的通道，这条断言失去区分力');
     expect((await mgr.locator(`[data-runner-id="${preset!.id}"]`).innerText()).includes(preset!.hint!), `管理器的「${preset!.label}」行没写出模型 id ${preset!.hint}`);
     expect((await mgr.getByTestId('probe-runner').count()) >= rows.length, '每行都应有「验证」');
-    expect((await mgr.getByTestId('setup-hint').count()) >= 1, '本机 agent 行缺「如何配置」');
+    // 本机 agent 行（v1.24）：可用时次行写「找到 claude 命令」，不可用时给「如何配置」
+    for (const a of (await catalog()).items.filter((i) => i.source === 'builtin')) {
+      const row = mgr.locator(`[data-runner-id="${a.id}"]`);
+      const bin = a.id.includes('codex') ? 'codex' : 'claude';
+      if (a.available) expect((await row.innerText()).includes(`找到 ${bin} 命令`), `可用的「${a.label}」行次行应写「找到 ${bin} 命令」：${(await row.innerText()).replace(/\s+/g, ' ')}`);
+      else expect((await row.getByTestId('setup-hint').count()) === 1, `不可用的「${a.label}」行缺「如何配置」`);
+    }
     // 8 添加面板：焦点陷阱 + Esc 归还；保存并验证 → 已验证
     await page.getByTestId('add-channel').click();
     const dlg = page.getByTestId('channel-dialog');
@@ -1101,10 +1107,10 @@ await step('TC-CORE-028', async () => {
     await page.keyboard.press('Escape');
 
     await eventually(async () => expect((await dlg.count()) === 0, 'Esc 未关闭面板'));
-    // 弹层叠弹层：内层关掉后外层设置弹层还在、背景仍隔离，焦点回到外层的「添加通道」（inert 引用计数）
-    expect(await modal.isVisible(), '关掉「添加通道」后设置弹层跟着没了');
+    // 弹层叠弹层：内层关掉后外层设置弹层还在、背景仍隔离，焦点回到外层的「添加模型」（inert 引用计数）
+    expect(await modal.isVisible(), '关掉「添加模型」后设置弹层跟着没了');
     expect(await page.evaluate(() => document.getElementById('root')?.hasAttribute('inert')), '内层关闭后背景 inert 被一起摘掉了');
-    expect(await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'add-channel'), '关闭后焦点未回到「添加通道」');
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'add-channel'), '关闭后焦点未回到「添加模型」');
     await page.getByTestId('add-channel').click();
     await dlg.waitFor({ timeout: 3000 });
     // 表单下拉一律用 Radix（原生 <select> 的列表由系统渲染，暗色下会画成亮色面板）
@@ -1143,7 +1149,7 @@ await step('TC-CORE-028', async () => {
     const stubOpt = lb.getByRole('option').filter({ hasText: 'Stub UI' });
     expect((await stubOpt.count()) === 1, '验证通过的自建通道没出现在下拉里');
     expect((await stubOpt.locator('svg').count()) > 0, '下拉项没有厂商图标');
-    expect(await page.getByTestId('manage-channels').isVisible(), '下拉末尾没有「管理通道…」');
+    expect(await page.getByTestId('manage-channels').isVisible() && (await page.getByTestId('manage-channels').innerText()).includes('管理模型…'), '下拉末尾没有「管理模型…」');
     await page.keyboard.press('Escape');
     await apiJson(`/v1/channels/${uiChannelId}`, { method: 'DELETE' });
     await shot(page, 'CORE-028');

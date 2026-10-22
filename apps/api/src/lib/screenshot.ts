@@ -4,6 +4,7 @@ import path from 'node:path';
 import { chromium, type Browser, type BrowserContext, type BrowserContextOptions, type Page, type Request } from 'playwright';
 import { withOverlayStyle, withDraftComponentStyle, DRAFT_PAD, withPaletteDarkMode, withScreenCsp, vendorFileFor } from '@quilt/core';
 import { config } from '../config.ts';
+import { SHOT_SCALE, imageHead, slots } from './shots.ts';
 
 // 服务端截图（ADR-002）：单浏览器实例复用，按屏开 page。
 // 浏览器来源（REQ-CORE-017）：SCREENSHOT_BROWSER_CHANNEL 指定的 → 本机 Chrome → 本机 Edge → Playwright 自带 Chromium；
@@ -178,7 +179,7 @@ export const DRAFT_ROOT_JS = `(function(){var r=document.body&&document.body.fir
 export async function screenshotHtml(html: string, size: { w: number; h: number }, opts: { timeoutMs?: number; overlay?: boolean; rootOnly?: boolean } = {}): Promise<Buffer> {
   const timeoutMs = opts.timeoutMs ?? 15_000;
   const transparent = !!(opts.overlay || opts.rootOnly);
-  return inPage({ viewport: { width: size.w, height: size.h }, deviceScaleFactor: 2 }, timeoutMs * 2, async (page) => {
+  return inPage({ viewport: { width: size.w, height: size.h }, deviceScaleFactor: SHOT_SCALE }, timeoutMs * 2, async (page) => {
     // 预览域外链（Tailwind CDN / 字体 / 图片）需要网络；等 networkidle 但不超过超时。
     // 屏的脚本在这里同样会执行，带上与预览域同一份 CSP（§15）：不带的话它一入库就能往本机 API 发写请求。
     // 不能改成 context.route 拦截一个固定地址来带响应头——拦截返回的文档没有对端 IP，Chromium 按公网算，
@@ -202,24 +203,58 @@ export async function screenshotHtml(html: string, size: { w: number; h: number 
   });
 }
 
-// 卡片缩略图（v1.02 ADR-029）：截图缩到 1/4、编码成 WebP。用同一个浏览器，空白页里做：屏自己的脚本碰不到它
-export async function thumbnailOf(png: Buffer): Promise<Buffer> {
-  return inPage({}, 5_000, async (page) => {
-    const b64 = await page.evaluate(async (src) => {
-      const bitmap = await createImageBitmap(new Blob([Uint8Array.from(atob(src), (c) => c.charCodeAt(0))], { type: 'image/png' }));
-      const w = Math.max(1, Math.round(bitmap.width / 4)); const h = Math.max(1, Math.round(bitmap.height / 4));
-      const small = await createImageBitmap(bitmap, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' });
+// 截图浏览器里编码 WebP，空白页里做、屏自己的脚本碰不到它：卡片缩略图（v1.02 ADR-029）缩到 1/4、质量 0.8；
+// sharp 用不了时整屏截图也走这里（v1.27 ADR-037），原尺寸、质量 1 就是无损编码。来源是 PNG 截图或已存成 WebP 的截图
+async function webpInBrowser(image: Buffer, scale: number, quality: number, capMs: number): Promise<Buffer> {
+  const type = imageHead(image)?.format === 'webp' ? 'image/webp' : 'image/png';
+  return inPage({}, capMs, async (page) => {
+    const b64 = await page.evaluate(async ({ src, type, scale, quality }) => {
+      const bitmap = await createImageBitmap(new Blob([Uint8Array.from(atob(src), (c) => c.charCodeAt(0))], { type }));
+      const w = Math.max(1, Math.round(bitmap.width * scale)); const h = Math.max(1, Math.round(bitmap.height * scale));
+      const img = scale === 1 ? bitmap : await createImageBitmap(bitmap, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' });
       const canvas = new OffscreenCanvas(w, h);
-      canvas.getContext('2d')!.drawImage(small, 0, 0);
-      const blob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.8 });
+      canvas.getContext('2d')!.drawImage(img, 0, 0);
+      const blob = await canvas.convertToBlob({ type: 'image/webp', quality });
       if (blob.type !== 'image/webp') throw new Error(`浏览器编码不出 WebP（得到 ${blob.type}）`); // 不支持时会静默退回 PNG
       const bytes = new Uint8Array(await blob.arrayBuffer());
       let bin = '';
       for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
       return btoa(bin);
-    }, png.toString('base64'));
+    }, { src: image.toString('base64'), type, scale, quality });
     return Buffer.from(b64, 'base64');
   });
+}
+
+export const thumbnailOf = (image: Buffer): Promise<Buffer> => webpInBrowser(image, 1 / 4, 0.8, 5_000);
+
+// 整屏截图存成无损 WebP（v1.27 ADR-037）：sharp（libvips）压缩档最高，逐像素不变（exact：透明像素的颜色也照存）。
+// sharp 加载失败（这个平台没有预编译包）时退回浏览器自带的无损 WebP：压缩率低得多，色块简单的屏可能比 PNG 还大；加载结果记一次，启动日志里写明用的是哪个
+type Sharp = (typeof import('sharp'))['default'];
+let sharpLoad: Promise<Sharp | null> | null = null;
+export function loadWebpEncoder(): Promise<Sharp | null> {
+  sharpLoad ??= import('sharp').then((m) => m.default, (e: Error) => {
+    console.warn(`[screenshot] sharp 加载失败，整屏截图改用浏览器自带的无损 WebP 编码（${e.message.split('\n')[0]}）`);
+    return null;
+  });
+  return sharpLoad;
+}
+
+// 进程里同时最多 2 张在编码（ADR-037）：sharp 每张占一个 libuv 线程，线程池默认 4 个，占满时同进程的文件读（预览、对象）全部排队
+const encodeSlot = slots(2);
+
+// 单张 ≤ 10 s（只计编码，不计排队），失败重试 2 次（§17 sharp 一行）；编出来的必须是无损 WebP，否则当失败
+export async function losslessWebp(png: Buffer): Promise<Buffer> {
+  const sharp = await loadWebpEncoder();
+  let last: Error = new Error('WebP 编码失败');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const { work } = await encodeSlot(() => (sharp ? sharp(png).webp({ lossless: true, effort: 6, exact: true }).toBuffer() : webpInBrowser(png, 1, 1, 10_000)));
+      const out = await within(work, 10_000, '编码 WebP');
+      if (!imageHead(out)?.lossless) throw new Error('编出来的不是无损 WebP');
+      return out;
+    } catch (e) { last = e as Error; }
+  }
+  throw last;
 }
 
 // 导出用：把全部屏放进一页让 Tailwind Play CDN 生成并集 CSS，抽出来内联（REQ-PROTO-004）

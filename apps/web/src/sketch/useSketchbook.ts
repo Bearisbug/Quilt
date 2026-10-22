@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { JobDto, JobEventDto, ProjectDetailDto, ScreenDto } from '@quilt/core/browser';
 import { api, ApiError, loadConfig, subscribeProjectEvents, type LiveState } from '@/lib/api';
 import { useToast } from '@/lib/toast';
+import { recordEvent } from '@/lib/recorder';
 import { progressText } from '@/canvas/jobTracker';
 import { tOf, useLocale, type Locale } from '@/i18n';
 import sketchMessages from '@/i18n/locales/sketch';
@@ -93,7 +94,7 @@ export function useSketchbook(onEvent: (e: SketchEvent) => void) {
   }, [detail?.activeJobs, local, finished]);
   const jobsRef = useRef(jobs);
   jobsRef.current = jobs;
-  const track = useCallback((job: JobDto) => setLocal((prev) => [...prev, { job, seq: detailSeq.current }]), []);
+  const track = useCallback((job: JobDto) => { recordEvent('job', job.kind, { jobId: job.id, status: job.status }); setLocal((prev) => [...prev, { job, seq: detailSeq.current }]); }, []);
   const settle = useCallback((id: string) => {
     setFinished((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
     setLocal((prev) => prev.filter((l) => l.job.id !== id));
@@ -130,7 +131,7 @@ export function useSketchbook(onEvent: (e: SketchEvent) => void) {
     const job = jobsRef.current.find((j) => j.id === jobId);
     const type = p.type;
     if (type === 'progress' || type === 'screen_planned' || type === 'screen_html_ready') setStages((m) => ({ ...m, [jobId]: { type, kind: job?.kind ?? 'generate', data } }));
-    if (TERMINAL.has(p.type)) { settle(jobId); void refresh(); }
+    if (TERMINAL.has(p.type)) { recordEvent('job', job?.kind, { jobId, status: p.type, errorClass: data.errorClass }); settle(jobId); void refresh(); }
     onEventRef.current({ kind: 'job', jobId, type: p.type, data, job });
   }, (st) => {
     setFeed(st);

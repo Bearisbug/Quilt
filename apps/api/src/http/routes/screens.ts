@@ -4,10 +4,9 @@ import { updateScreenSchema, restoreRevisionSchema, applyElementEditSchema, upda
 import { applyElementEdit, updateDesignSystem } from '../../services/edit.ts';
 import { db, schema } from '../../db/client.ts';
 import { problems, isUniqueViolation } from '../../lib/errors.ts';
-import { storage } from '../../lib/storage.ts';
 import { notifyCanvas } from '../../lib/events.ts';
 import { parseBody, requireUser, type Env } from '../app.ts';
-import { ownedScreen, hasActiveJob, createRevision, deriveLinks, listRevisions, getRevision, revisionDto, adoptCandidate, deleteScreen, setFamilyPresentation, setDraftFrame } from '../../services/screens.ts';
+import { ownedScreen, deriveLinks, listRevisions, getRevision, revisionDto, adoptCandidate, deleteScreen, setFamilyPresentation, setDraftFrame, restoreRevision } from '../../services/screens.ts';
 import { screenDtos, ownedProject } from '../../services/projects.ts';
 import { isSketchbook } from '../../services/sketchbook.ts';
 import { enqueueScreenshot } from '../../services/jobs.ts';
@@ -69,6 +68,8 @@ screenRoutes.post('/v1/screens/:screenId/revisions/:revisionId/adopt', async (c)
     await adoptCandidate(tx, screen, c.req.param('revisionId'));
     await deriveLinks(tx, project.id);
   });
+  // 已结清的旧候选可能已被 screenshot.prune 清掉整屏截图（v1.27 ADR-037），它成了当前版、卡片要用，当场重拍
+  if (!(await getRevision(screen.id, c.req.param('revisionId'))).screenshotKey) await enqueueScreenshot(c.req.param('revisionId'));
   await notifyCanvas(project.id, { reason: 'revision', screenId: screen.id, revisionId: c.req.param('revisionId') });
   const [updated] = await db.select().from(schema.screens).where(eq(schema.screens.id, screen.id));
   return c.json({ screen: (await screenDtos(project, [updated]))[0] });
@@ -107,21 +108,14 @@ screenRoutes.get('/v1/screens/:screenId/revisions/:revisionId', async (c) => {
 });
 
 // API-CORE-015：以旧版内容建新修订（source_kind=restore），父修订是被回溯到的那一版——沿父链取历史指令时不经过已放弃的分支（ADR-012 v0.87）。
-// 截图重拍：旧版的截图可能是按另一种呈现方式拍的（v0.63 切过整屏 / 叠层）
+// 共用源修订的对象（v1.27 ADR-037）；截图沿用不了时重拍：旧版的截图可能是按另一种呈现方式或另一个尺寸拍的，也可能已被 screenshot.prune 清掉
 screenRoutes.post('/v1/screens/:screenId/revisions/:revisionId/restore', async (c) => {
   const user = requireUser(c);
   const { screen, project } = await ownedScreen(user.id, c.req.param('screenId'));
   const source = await getRevision(screen.id, c.req.param('revisionId'));
   const { expectedRevisionId } = await parseBody(c, restoreRevisionSchema);
-  const html = (await storage.get(source.htmlKey)).toString('utf8');
-  const rev = await db.transaction(async (tx) => {
-    if (await hasActiveJob(tx, project.id, screen.id)) throw problems.screenBusy();
-    const r = await createRevision(tx, { projectId: project.id, screenId: screen.id, html, sourceKind: 'restore', lintReport: source.lintReport, expectedRevisionId, parentRevisionId: source.id });
-    if (!r) throw problems.revisionConflict();
-    await deriveLinks(tx, project.id);
-    return r;
-  });
-  await enqueueScreenshot(rev.id);
+  const rev = await restoreRevision(project, screen, source, expectedRevisionId);
+  if (!rev.screenshotKey) await enqueueScreenshot(rev.id);
   await notifyCanvas(project.id, { reason: 'revision', screenId: screen.id, revisionId: rev.id });
   return c.json({ revision: await revisionDto(rev) }, 201);
 });

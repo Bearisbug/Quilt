@@ -54,7 +54,7 @@ await step('TC-AGENT-001', async () => {
   }
   await mcp.close();
   // 设置弹层给出的接入命令与本机 API 一致
-  await page.goto(`${WEB}/p/${demo.id}?settings=runners`);
+  await page.goto(`${WEB}/p/${demo.id}?settings=models`);
   const cmd = await page.getByTestId('mcp-add').innerText();
   expect(cmd.trim() === `claude mcp add --transport http quilt ${API}/mcp`, `接入命令不对：${cmd}`);
   return note;
@@ -406,7 +406,7 @@ await step('TC-AGENT-012', async () => {
   // 8 本机 Codex 订阅通道：在设置弹窗里添加（不填 Key）→「保存并验证」。桩让验证拖 18 s（真 codex 约 20 s），
   //   前端要等得住——此前所有请求共用 15 s 上限，服务端验证成功了面板却报「保存失败」（v0.69）。
   //   探测经 codex exec（--json --ephemeral 只读、去掉 API Key）；再用它改屏，产出进修订、用量记账
-  await page.goto(`${WEB}/p/${r.projectId}?settings=runners`);
+  await page.goto(`${WEB}/p/${r.projectId}?settings=models`);
   await page.getByTestId('add-channel').click();
   const dlg = page.getByTestId('channel-dialog');
   await dlg.waitFor({ timeout: 5000 });

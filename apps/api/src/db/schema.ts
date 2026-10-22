@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, uuid, text, integer, bigserial, jsonb, timestamp, uniqueIndex, index, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, bigserial, boolean, jsonb, timestamp, uniqueIndex, index, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 // 数据模型（设计文档 §7/§9），并发约束（§16）。字段口径以 §9 数据字典为准。
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -9,6 +9,9 @@ const now = () => sql`now()`;
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: text('email').notNull().unique(),
+  // 本机使用记录（REQ-CORE-047 / ADR-035）：开关缺省关；since 是最近一次从关到开的时间
+  recordUsage: boolean('record_usage').notNull().default(false),
+  recordSince: ts('record_since'),
   createdAt: ts('created_at').notNull().default(now()),
 });
 
@@ -250,5 +253,49 @@ export const usageEntries = pgTable('usage_entries', {
   // 这笔用量出自哪个驱动 / 模型（REQ-CORE-011 通道可选后，同一账号会混用多个）
   driver: text('driver'),
   model: text('model'),
+  // 记账时的快照（v1.24 ADR-036）：项目、任务类型与通道，不建外键——项目、作业、通道删了，看板照样能按它们归类
+  projectId: uuid('project_id'),
+  projectName: text('project_name'),
+  kind: text('kind'),
+  channelId: uuid('channel_id'),
+  channelLabel: text('channel_label'),
   createdAt: ts('created_at').notNull().default(now()),
 }, (t) => [index('usage_entries_user_created_idx').on(t.userId, t.createdAt)]);
+
+// 本机使用记录（REQ-CORE-047 / ADR-035）：一行一条事件——浏览器里的操作与输入（source=web）或一次 MCP 工具调用（source=mcp）。
+// 项目、屏不建外键：删了项目，记录还在；(session_id, seq) 唯一，浏览器重发的批次靠它去重
+export const recordEvents = pgTable('record_events', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  source: text('source').notNull(),
+  sessionId: text('session_id').notNull(),
+  seq: integer('seq').notNull(),
+  at: ts('at').notNull(),
+  page: text('page'),
+  type: text('type').notNull(),
+  target: text('target'),
+  projectId: uuid('project_id'),
+  screenId: uuid('screen_id'),
+  data: jsonb('data'),
+}, (t) => [uniqueIndex('record_events_session_seq_uq').on(t.sessionId, t.seq), index('record_events_user_at_idx').on(t.userId, t.at)]);
+
+// 作业里的一次模型调用（ENT-ModelCall）：完整提示词与原始回复在对象存储 records/model-calls/<日期>/<id>.json，行里只存键；作业、项目不建外键
+export const modelCalls = pgTable('model_calls', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  jobId: uuid('job_id'),
+  projectId: uuid('project_id'),
+  seq: integer('seq').notNull(),
+  purpose: text('purpose').notNull(),
+  runner: text('runner'),
+  driver: text('driver'),
+  model: text('model'),
+  ok: boolean('ok').notNull(),
+  error: text('error'),
+  attempts: integer('attempts').notNull().default(1),
+  tokensIn: integer('tokens_in').notNull().default(0),
+  tokensOut: integer('tokens_out').notNull().default(0),
+  imageKeys: jsonb('image_keys'),
+  bodyKey: text('body_key').notNull(),
+  startedAt: ts('started_at').notNull(),
+  finishedAt: ts('finished_at').notNull(),
+}, (t) => [index('model_calls_job_seq_idx').on(t.jobId, t.seq)]);

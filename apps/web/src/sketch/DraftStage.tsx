@@ -2,8 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 're
 import { Crosshair, FolderInput, Minimize2, Trash2 } from 'lucide-react';
 import { DEVICE_SIZE, DRAFT_PAD, isPreviewMessage, type DraftFrame, type DraftFrameChoice, type ParentToPreview, type ProjectDetailDto, type ScreenDto } from '@quilt/core/browser';
 import { markPalette, useResolvedMode } from '@/lib/theme';
+import { recordPreview } from '@/lib/recorder';
 import { frameSide } from '@/lib/frameZoom';
-import { toSelection, type ElementSelection } from '@/canvas/frameMessages';
+import type { SelectMessage } from '@/canvas/frameMessages';
 import { cn, IconButton } from '@/ui/ui';
 import { ChoiceGroup } from '@/sketch/ChoiceGroup';
 import { DraftVersions } from '@/sketch/DraftVersions';
@@ -69,9 +70,12 @@ type StageProps = {
   /** 草稿工具条上的「选元素」开关（REQ-CORE-045）：关着时草稿照常可点可滚 */
   picking: boolean;
   onPicking: (on: boolean) => void;
-  /** 选元素点中的那一块（输入框里的胶囊）：草稿里框着它；null = 改整张 */
-  pickQid: string | null;
-  onPick: (sel: ElementSelection) => void;
+  /** 选元素点中的几块（输入框里的胶囊，最后点中的排最后）：草稿里框着它们；空 = 改整张 */
+  pickQids: string[];
+  /** 运行时报上来的点选（带 additive / replace，v1.26），加选减选的规则在页面 */
+  onPick: (m: SelectMessage) => void;
+  /** 草稿 iframe 就绪且开着选元素时，由看板填上：让输入框把 Shift+↑ / Shift+↓ 转成逐级选（`quilt:climb`） */
+  climbRef?: { current: ((dir: 'up' | 'down') => void) | null };
   /** 草稿工具条的实际底边 + 间隙（px，相对外壳顶）：页面拿它当看板的上沿；没有草稿（工具条不在）时 null */
   onTopRow: (bottom: number | null) => void;
 };
@@ -137,7 +141,7 @@ export function DraftStage(p: StageProps) {
           {/* 换一张草稿、新草稿第一版落地才整个重挂（之前没有地址可载）；之后出新版、换画框都在 DraftFrameView 里原地换（PAGE-SKETCH「看板」） */}
           <DraftFrameView
             key={`${p.draft.id}|${p.draft.currentRevisionId ? 'live' : 'pending'}`} draft={p.draft} avail={room} progress={p.progress} previewOrigin={p.previewOrigin} onEscape={p.onEscape} onShortcut={p.onShortcut} onStale={p.onStale}
-            picking={p.picking} pickQid={p.pickQid} onPick={p.onPick}
+            picking={p.picking} pickQids={p.pickQids} onPick={p.onPick} climbRef={p.climbRef}
           />
         </section>
       ) : p.state === 'generating' ? (
@@ -242,10 +246,10 @@ function Skeleton({ nat, scale, label }: { nat: Size; scale: number; label: stri
 // 只认这个 iframe 发来、来源是预览域、形状过 previewMessageSchema 的消息。
 // 手机页 / 桌面页给对应视口；组件画框（画框还没定的按组件）的视口就是 quilt:draft-size 报的根元素框，iframe 透明，四周露出看板底色。
 // 就绪看门同画布：load 后 2 s 还没 quilt:ready 多半是签名过期，重取详情换新地址重载一次，仍不行给「重试」
-type FrameProps = Pick<StageProps, 'previewOrigin' | 'onEscape' | 'onShortcut' | 'onStale' | 'picking' | 'pickQid' | 'onPick'> & {
+type FrameProps = Pick<StageProps, 'previewOrigin' | 'onEscape' | 'onShortcut' | 'onStale' | 'picking' | 'pickQids' | 'onPick' | 'climbRef'> & {
   draft: ScreenDto; avail: Size | null; progress: string | null;
 };
-function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onShortcut, onStale, picking, pickQid, onPick }: FrameProps) {
+function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onShortcut, onStale, picking, pickQids, onPick, climbRef }: FrameProps) {
   const t = useT(sketchMessages);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   // 地址钉住：签名每 30 分钟换一个窗口，换了也不重载正在看的草稿；新的一版经 quilt:swap 送进去（见下），换画框只改视口
@@ -282,11 +286,21 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
   const locale = useLocale();
   // 换外观、换界面语言时重发一次：屏内的标记跟着换色、换字（§13.1）
   useEffect(() => { if (ready) post({ type: 'quilt:mode', mode: picking ? 'inspect' : 'interact', marks: markPalette() }); }, [ready, readySeq, themeMode, locale, picking]); // eslint-disable-line react-hooks/exhaustive-deps
-  // 草稿里框着哪个元素由父页定：输入框里那枚胶囊。运行时点中就先框上，
-  // 每次点中之后按父页的决定再对一次——点在草稿根上不出胶囊（等同改整张），框要撤掉
+  // 草稿里框着哪几块由父页定：输入框里的胶囊。运行时点中就先框上（按着 Shift 点的等这里画），
+  // 每次点中之后按父页的决定再对一次——点在草稿根上不出胶囊（等同改整张），框要撤掉；合并到外层、超过上限时框跟着胶囊走
   const [selSeq, setSelSeq] = useState(0);
-  const framed = picking ? pickQid : null;
-  useEffect(() => { if (ready && picking) post({ type: 'quilt:highlight', qid: framed }); }, [ready, readySeq, picking, framed, selSeq]); // eslint-disable-line react-hooks/exhaustive-deps
+  const framed = picking ? pickQids.join(',') : '';
+  useEffect(() => {
+    if (!ready || !picking) return;
+    const qids = framed ? framed.split(',') : [];
+    post({ type: 'quilt:highlight', qid: qids[qids.length - 1] ?? null, ...(qids.length > 1 ? { qids } : null) });
+  }, [ready, readySeq, picking, framed, selSeq]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 输入框是空的、有胶囊时，Shift+↑ / Shift+↓ 由输入框转来这里走层级（v1.28）
+  useEffect(() => {
+    if (!climbRef) return;
+    climbRef.current = ready && picking ? (dir) => post({ type: 'quilt:climb', dir }) : null;
+    return () => { climbRef.current = null; };
+  }, [climbRef, ready, picking]); // eslint-disable-line react-hooks/exhaustive-deps
   const escape = useRef(onEscape);
   escape.current = onEscape;
   const shortcutRef = useRef(onShortcut);
@@ -300,6 +314,7 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
     const on = (e: MessageEvent) => {
       if (e.origin !== previewOrigin || e.source !== iframeRef.current?.contentWindow || !isPreviewMessage(e.data)) return;
       const m = e.data;
+      recordPreview(m, { screenId: draft.id });
       if (m.type === 'quilt:ready') { readyRef.current = true; setReady(true); setReadySeq((n) => n + 1); setFailed(false); }
       if (m.type === 'quilt:draft-size' && m.screenId === draft.id) {
         const w = Math.max(48, Math.ceil(m.w));
@@ -313,7 +328,7 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
       }
       if (m.type === 'quilt:select') {
         setSelSeq((n) => n + 1);
-        if (pickingRef.current) pickRef.current(toSelection(m));
+        if (pickingRef.current) pickRef.current(m);
       }
       // 焦点在草稿里时父页收不到键盘：Esc 与 ⌘ 组合键靠运行时转发，交给页面同一套处理
       if (m.type === 'quilt:key' && m.key === 'Escape') escape.current();

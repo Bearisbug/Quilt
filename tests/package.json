@@ -19,6 +19,8 @@
     "e2e:mcp": "tsx e2e/mcp.ts",
     "e2e:sketch": "tsx e2e/sketch.ts",
     "e2e:i18n": "tsx e2e/i18n.ts",
+    "e2e:settings": "tsx e2e/settings.ts",
+    "e2e:record": "tsx e2e/record.ts",
     "mcp:call": "tsx e2e/mcp-call.ts"
   },
   "devDependencies": {
@@ -28,6 +30,7 @@
     "happy-dom": "^20.14.6",
     "hono": "^4.13.7",
     "playwright": "^1.63.0",
+    "sharp": "^0.35.5",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "zod": "^4.0.0"

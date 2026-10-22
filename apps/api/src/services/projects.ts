@@ -3,6 +3,7 @@ import { db, schema } from '../db/client.ts';
 import { config } from '../config.ts';
 import { problems } from '../lib/errors.ts';
 import { storage } from '../lib/storage.ts';
+import { archiveProject, saveArchive } from './record.ts';
 import { notifyCanvas } from '../lib/events.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
 import { requestLocale, sketchbookName } from '../lib/locale.ts';
@@ -61,13 +62,19 @@ export async function updateProject(ownerId: string, projectId: string, patch: {
 }
 
 // API-CORE-031：删项目——行级联（屏 / 修订 / 作业 / 消息 / 连线 / 设计系统都挂在 projects 上），对象文件按前缀清；
-// 有进行中的作业先拒（worker 还在往里写，删了它会撞外键）
+// 有进行中的作业先拒（worker 还在往里写，删了它会撞外键）。使用记录开着时（ADR-035）删之前取下各表的行，删掉之后、清对象之前写进归档
 export async function deleteProject(ownerId: string, projectId: string): Promise<void> {
   const project = await ownedProject(ownerId, projectId);
   const [active] = await db.select({ id: schema.generationJobs.id }).from(schema.generationJobs)
     .where(and(eq(schema.generationJobs.projectId, project.id), inArray(schema.generationJobs.status, ['queued', 'running']))).limit(1);
   if (active) throw problems.projectBusy();
-  await db.delete(schema.projects).where(eq(schema.projects.id, project.id));
+  const archive = await archiveProject(project.id);
+  // 台账快照名刷成删除前的名字（ADR-036）：改过名再删，用量看板也按最后的名字显示
+  await db.transaction(async (tx) => {
+    await tx.update(schema.usageEntries).set({ projectName: project.name }).where(eq(schema.usageEntries.projectId, project.id));
+    await tx.delete(schema.projects).where(eq(schema.projects.id, project.id));
+  });
+  await saveArchive(archive);
   await storage.deletePrefix(`projects/${project.id}/`).catch((e) => console.warn(`[project ${project.id}] 对象文件清理失败：${(e as Error).message}`));
   // 还开着这个项目的画布：事件流发完这一条就关，画布重取得 404（API-CORE-030 v0.77）
   await notifyCanvas(project.id, { reason: 'project_deleted' });

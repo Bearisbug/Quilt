@@ -3,11 +3,12 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import type { BrowserContext, Frame, Page } from 'playwright';
-import { RESTYLE_PROMPT, DRAFT_PAD, SKETCH_GENERATOR_MARK, SKETCH_REFERENCE_IMAGE_NOTE, draftNameFromPrompt, forkDraftName, forkBody, extractBody, buildPrelude, type Tokens } from '@quilt/core';
+import sharp from 'sharp';
+import { RESTYLE_PROMPT, DRAFT_PAD, SKETCH_GENERATOR_MARK, SKETCH_REFERENCE_IMAGE_NOTE, SUBTREE_BLOCKS_HEADER, draftNameFromPrompt, forkDraftName, forkBody, extractBody, buildPrelude, quiltBlock, quiltBlocks, type Tokens } from '@quilt/core';
 import { launch, seed, seedJson, apiJson, assertTestApi, localFetch, pickOption, selectedValue, eventually, EVIDENCE, WEB, API } from './lib.ts';
 import { connectMcp, callTool } from './mcp-client.ts';
 import { startOpenAiStub, type StubHit } from './openai-stub.ts';
-import { suite, expect, sleep, waitJob, Skip, type JobView } from './harness.ts';
+import { suite, expect, softly, sleep, waitJob, Skip, type JobView } from './harness.ts';
 
 // docs/TEST.md「CORE · 草稿本」TC-CORE-098～118（REQ-CORE-040～045，v1.13 / v1.14）AI 执行脚本；TC-CORE-112～118（写回与参照）只走接口、MCP 与假会话。
 // 接口级的用例走 stub 驱动（runner 显式写 STUB）：这句话第二行的 [stub-frame:…] 定画框、[stub-script] 让草稿带 <script> 与 <style>、
@@ -59,6 +60,13 @@ const LOGIN = '<form data-frame="component" style="width:320px" class="rounded-x
 const instrOf = (hit: StubHit) => (hit.user.startsWith('Revise the screen') ? hit.user.split('\n')[1] ?? '' : hit.user);
 function draftReply(hit: StubHit): string {
   if (hit.user === 'ping') return 'OK';
+  // 一次改几块（v1.26，subtreeBlocksUserPrompt）：每块原样回，根元素加 data-stub="multi"、开标签后接「已改 · 」；
+  // [stub-blocks-miss] 每次都少回最后一块（补问那一轮同样少）。调用次数与提示词照常记在 draftStub.hits，按 user 里有没有 SUBTREE_BLOCKS_HEADER 认
+  const asked = hit.user.split(`\n${SUBTREE_BLOCKS_HEADER}\n`)[1];
+  if (asked !== undefined) {
+    const blocks = quiltBlocks(asked).map((b) => quiltBlock(b.qid, b.html.replace(/^(<[a-zA-Z][\w-]*)([^>]*>)/, '$1 data-stub="multi"$2已改 · ')));
+    return (hit.user.includes('[stub-blocks-miss]') ? blocks.slice(0, -1) : blocks).join('\n');
+  }
   const instr = instrOf(hit);
   if (instr.includes('迷你控制条')) return PLAYER(false);
   if (instr.includes('圆形')) return PLAYER(true);
@@ -115,14 +123,14 @@ const jobsOf = async (pid: string) => (await apiJson<{ items: JobView[] }>(`/v1/
 const messagesOf = async (pid: string) => (await apiJson<{ items: { role: string; jobId: string | null }[] }>(`/v1/projects/${pid}/messages?limit=100`)).body.items;
 const seedProject = (name: string, device: 'mobile' | 'desktop', screens: number) => seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', name, '--device', device, '--screens', String(screens), '--no-shot');
 const paths = (b: Problem) => JSON.stringify(b.errors ?? []);
-const pngSize = async (url: string) => { const b = Buffer.from(await (await localFetch(url)).arrayBuffer()); return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) }; };
+const shotPixels = async (url: string) => { const m = await sharp(Buffer.from(await (await localFetch(url)).arrayBuffer())).metadata(); return { w: m.width, h: m.height }; };
 /** 当前修订的截图尺寸（等截图拍好）；want 给了就等到尺寸对上为止（改画框后的重拍） */
 async function shotSize(sb: string, id: string, want?: { w: number; h: number }, ms = 30000): Promise<{ w: number; h: number }> {
   let got = { w: 0, h: 0 };
   await eventually(async () => {
     const s = (await detail(sb)).screens.find((x) => x.id === id);
     expect(s?.screenshotUrl, `草稿 ${id.slice(0, 8)} 的截图还没拍好`);
-    got = await pngSize(s!.screenshotUrl!);
+    got = await shotPixels(s!.screenshotUrl!);
     if (want) expect(got.w === want.w && got.h === want.h, `截图 ${got.w}×${got.h}，应为 ${want.w}×${want.h}`);
   }, ms, 500);
   return got;
@@ -422,7 +430,7 @@ await step('TC-CORE-103', async () => {
   expect(revs1.length === revs0.length && revs1[0].id === revs0[0].id, '改画框不该建修订');
   await shotSize(sb, m.id, { w: 2560, h: 1600 });
   const k1 = await shotKey();
-  expect(k0.endsWith('.mobile.png') && k1.endsWith('.desktop.png'), `截图地址应随画框换：${k0} → ${k1}`);
+  expect(k0.endsWith('.mobile.webp') && k1.endsWith('.desktop.webp'), `截图地址应随画框换：${k0} → ${k1}`);
   // 5 普通项目的屏改画框：422，屏不变
   const app = seedProject('FrameApp', 'mobile', 1);
   const s1 = app.screens[0].id;
@@ -1809,6 +1817,187 @@ await step('TC-CORE-111', async () => {
   await writeFile(path.join(out, 'hotspots.json'), JSON.stringify(hotspots, null, 2));
   seed('seed'); // 复位
   return `7 张截图与热点在 ${path.relative(path.resolve(EVIDENCE, '../..'), out)}/`;
+});
+
+// ---------- TC-CORE-150 草稿本按 ⌘Z 回到上一版（v1.25） ----------
+await step('TC-CORE-150', async () => {
+  const sb = await sketchbook();
+  const a = await newDraft(sb, '一个音乐播放器的迷你控制条');
+  await editDraft(sb, a.id, '按钮换成圆形，加一个音量滑块');
+  await editDraft(sb, a.id, '标题改成夜航星 · 现场版');
+  const r3 = await revisions(a.id);
+  expect(r3.length === 3, `前置应有 3 版：${r3.length}`);
+  const bySeq = (rs: Rev[], seq: number) => rs.find((r) => r.seq === seq)!;
+  const toastHas = (text: string) => eventually(async () => expect((await page.getByText(text).count()) >= 1, `应提示「${text}」`), 5000, 100);
+  await openSketch(a.id);
+  await waitStage('draft');
+  await settledComponent();
+  // 1 焦点不在文本框里：⌘Z 回到第 2 版
+  const stage = await box('sketch-stage');
+  await page.mouse.click(stage.x + 8, stage.y + stage.height - 8);
+  await page.keyboard.press('ControlOrMeta+z');
+  await toastHas('已回到第 2 版');
+  await eventually(async () => expect((await revisions(a.id)).length === 4, '① ⌘Z 后应有第 4 版'), 10000, 200);
+  const r4 = await revisions(a.id);
+  const v4 = bySeq(r4, 4);
+  expect(v4.sourceKind === 'restore' && v4.parentRevisionId === bySeq(r4, 2).id && (await revBody(v4)) === (await revBody(bySeq(r4, 2))), '① 第 4 版应是 restore、父修订是第 2 版、内容同第 2 版');
+  // 2 焦点在草稿 iframe 里：运行时转发 ⌘Z
+  await eventually(async () => expect((await detail(sb)).screens.find((s) => s.id === a.id)?.currentRevisionId === v4.id, '① 看板还没换到第 4 版'), 10000, 200);
+  await page.waitForTimeout(800);
+  const f = await draftFrame();
+  await f.locator('body').click({ position: { x: 4, y: 4 } });
+  await page.keyboard.press('ControlOrMeta+z');
+  await eventually(async () => expect((await revisions(a.id)).length === 5, '② iframe 里按 ⌘Z 后应有第 5 版'), 10000, 200);
+  const r5 = await revisions(a.id);
+  expect((await revBody(bySeq(r5, 5))) === (await revBody(bySeq(r5, 1))), '② 第 5 版内容应同第 1 版');
+  // 3 已是第一版
+  await eventually(async () => expect((await detail(sb)).screens.find((s) => s.id === a.id)?.currentRevisionId === bySeq(r5, 5).id, '② 看板还没换到第 5 版'), 10000, 200);
+  await page.waitForTimeout(800);
+  await page.mouse.click(stage.x + 8, stage.y + stage.height - 8);
+  await page.keyboard.press('ControlOrMeta+z');
+  await toastHas('已经是第一版');
+  await page.waitForTimeout(800);
+  expect((await revisions(a.id)).length === 5, '③ 第一版上按 ⌘Z 不该建版本');
+  // 4 输入框里的 ⌘Z 留给输入框
+  const input = page.getByTestId('composer-input');
+  await input.click(); await input.fill(''); await page.keyboard.type('abc');
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(600);
+  expect((await input.inputValue()) !== 'abc', `④ 输入框里的字应被撤销：${await input.inputValue()}`);
+  expect((await revisions(a.id)).length === 5, '④ 输入框里按 ⌘Z 不该建版本');
+  await input.fill('');
+  // 5 生成中按 ⌘Z：提示正在改，不建版本
+  const held = await post<{ job: JobView }>(`/v1/projects/${sb}/messages`, { content: '标题改大\n[stub-hold:5000]', targetScreenIds: [a.id], runner: STUB });
+  expect(held.status === 202, `⑤ 拖住的改稿 ${held.status}`);
+  await eventually(async () => expect((await page.getByText('这张草稿正在改').count()) >= 1 || (await page.getByTestId('job-chip').count()) >= 1, '⑤ 界面还没看到这一轮在跑'), 5000, 100).catch(() => {});
+  await page.mouse.click(stage.x + 8, stage.y + stage.height - 8);
+  await page.keyboard.press('ControlOrMeta+z');
+  await toastHas('这张草稿正在改');
+  await waitJob(held.body.job.id, 60);
+  await page.waitForTimeout(500);
+  expect((await revisions(a.id)).length === 6, `⑤ 只应多出这一轮的 1 版：${(await revisions(a.id)).length}`);
+  return '⌘Z 回到第 2 版（restore、父修订第 2 版）；iframe 里转发同样生效；第一版上提示；输入框里留给输入框；生成中提示正在改';
+});
+
+// ---------- TC-EDIT-041 草稿本里按住 Shift 选几块、一次改完（v1.26） ----------
+await step('TC-EDIT-041', async () => {
+  const sb = await sketchbook();
+  const S = softly();
+  // 同一套里更早的用例（§3 种子）会删掉桩通道：用之前确认它在
+  await ensureChannel();
+  // 前置：草稿桩的播放器控制条（一行里：封面、标题与副标题那一块、三个按钮）
+  const d = await newDraft(sb, '一个音乐播放器的迷你控制条', { runner: CHANNEL() });
+  const html0 = await currentHtml(d.id);
+  // 存下的 HTML 里某一块的整段（p、button 里没有同名元素嵌套）与它的开标签
+  const outerOf = (html: string, tag: string, qid: string) => { const m = new RegExp(`<${tag}\\b[^>]*data-qid="${qid}"[^>]*>[\\s\\S]*?</${tag}>`).exec(html); expect(m, `找不到 ${tag} · ${qid}`); return m![0]; };
+  const tagOf = (html: string, qid: string) => new RegExp(`<[a-z][a-z0-9]*\\b[^>]*data-qid="${qid}"[^>]*>`).exec(html)?.[0] ?? '';
+  const set = (...xs: string[]) => [...xs].sort().join(',');
+  const chips = page.getByTestId('draft-pick-chip');
+  const chipQids = async () => set(...(await chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-qid') ?? ''))));
+  const verb = async () => (await page.getByTestId('verb-line').innerText()).trim();
+  const boxes = async () => set(...(await (await draftFrame()).evaluate(() => Array.from(document.querySelectorAll('[data-quilt-selection]')).map((b) => (b as HTMLElement).innerText.trim()))));
+  // 看板上的草稿可能缩小显示：按 iframe 的实际缩放换算指针位置；按钮正中是 lucide 的 svg（它自己带 qid），点按钮的左缘
+  const pick = async (sel: string, i: number, o: { shift?: boolean; edge?: boolean } = {}) => {
+    const shown = (await page.getByTestId('draft-iframe').boundingBox())!;
+    const p = await (await draftFrame()).evaluate(({ s, k, edge }) => { const r = document.querySelectorAll(s)[k].getBoundingClientRect(); return { x: edge ? r.x + 3 : r.x + r.width / 2, y: r.y + r.height / 2, vw: innerWidth }; }, { s: sel, k: i, edge: !!o.edge });
+    const z = shown.width / p.vw;
+    if (o.shift) await page.keyboard.down('Shift');
+    await page.mouse.click(shown.x + p.x * z, shown.y + p.y * z);
+    if (o.shift) await page.keyboard.up('Shift');
+  };
+  /** 输入框发一句：返回界面发出的建作业请求体与建出的作业 */
+  const send = async (text: string) => {
+    await page.getByTestId('composer-input').fill(text);
+    const res = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === `/v1/projects/${sb}/jobs`, { timeout: 10000 });
+    await page.getByTestId('composer-send').click();
+    const r = await res;
+    expect(r.status() === 202, `建作业应 202，实际 ${r.status()}：${(await r.text()).slice(0, 200)}`);
+    const body = JSON.parse(r.request().postData() ?? '{}') as { kind?: string; input?: { screenId?: string; qid?: string; qids?: string[] } };
+    return { body, job: ((await r.json()) as { job: JobView }).job };
+  };
+  try {
+    await openSketch(d.id);
+    await useStubRunner();
+    await waitStage('draft', 10000);
+    await page.getByTestId('draft-pick').click();
+    await settledComponent();
+    // 页面里跑的函数不能再声明具名函数（tsx 会给它包一层 __name，页面里没有）
+    const q = await (await draftFrame()).evaluate(() => {
+      const ps = document.querySelectorAll('p'); const bs = document.querySelectorAll('button');
+      const [title, sub, block, row, pause, next] = [ps[0], ps[1], ps[0]?.parentElement, bs[0]?.parentElement, bs[1], bs[2]].map((e) => e?.getAttribute('data-qid') ?? '');
+      return { title, sub, block, row, pause, next };
+    });
+    expect(Object.values(q).every(Boolean) && outerOf(html0, 'button', q.pause).includes('data-lucide="pause"') && q.block !== q.row, `草稿结构不是播放器控制条：${JSON.stringify(q)}`);
+    // 1 点标题文字：一枚胶囊，动词行「改这一块」
+    await pick('p', 0);
+    await S.check(() => eventually(async () => expect((await chipQids()) === q.title && (await verb()).includes('改这一块'), `① 应一枚标题的胶囊、动词行「改这一块」：胶囊 ${await chipQids()}，动词行「${await verb()}」`), 5000));
+    // 2 按住 Shift 点暂停按钮：两枚胶囊、「改这 2 块」，草稿里两处选中框
+    await pick('button', 1, { shift: true, edge: true });
+    await S.check(() => eventually(async () => expect((await chips.count()) === 2 && (await verb()).includes('改这 2 块'), `② 应两枚胶囊、动词行「改这 2 块」：${await chips.count()} 枚，「${await verb()}」`), 5000));
+    await S.check(() => eventually(async () => expect((await boxes()) === set(`p · ${q.title}`, `button · ${q.pause}`), `② 草稿里应框住标题与暂停按钮：${await boxes()}`), 3000));
+    // 3 按住 Shift 再点标题：标题那枚去掉，剩暂停按钮一枚
+    await pick('p', 0, { shift: true });
+    await S.check(() => eventually(async () => expect((await chipQids()) === q.pause && (await boxes()) === `button · ${q.pause}`, `③ 应只剩暂停按钮：胶囊 ${await chipQids()}，框 ${await boxes()}`), 5000));
+    // 4 按住 Shift 点副标题，再按两次 Shift+↑：副标题 → 标题与副标题那一块 → 连按钮在内的整行（合并到外层）
+    await pick('p', 1, { shift: true });
+    await S.check(() => eventually(async () => expect((await chipQids()) === set(q.pause, q.sub), `④ 应是暂停按钮与副标题两枚：${await chipQids()}`), 5000));
+    // 按键前焦点在哪、按完输入框里多了什么：不换层时据此分辨按键落到了哪里
+    const where = async () => `焦点 ${await page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? document.activeElement?.tagName)}，输入框 ${JSON.stringify(await page.getByTestId('composer-input').inputValue())}`;
+    await page.keyboard.press('Shift+ArrowUp');
+    await S.check(() => eventually(async () => expect((await chipQids()) === set(q.pause, q.block), `④ 第一次 Shift+↑ 后应是按钮与标题副标题那一块：${await chipQids()}（${await where()}）`), 5000));
+    await page.keyboard.press('Shift+ArrowUp');
+    await S.check(() => eventually(async () => expect((await page.getByText('已合并到外层').count()) >= 1, '④ 整行包住按钮时应提示「已合并到外层」'), 5000));
+    await S.check(() => eventually(async () => expect((await chipQids()) === q.row && (await boxes()) === `div · ${q.row}`, `④ 应只剩整行一枚：胶囊 ${await chipQids()}，框 ${await boxes()}（${await where()}）`), 5000));
+    // 5 Esc 清空；点标题、按住 Shift 点暂停按钮，写「都改成红色」发送
+    await page.keyboard.press('Escape');
+    await S.check(() => eventually(async () => expect((await chips.count()) === 0 && (await boxes()) === '', `⑤ Esc 应清掉全部胶囊与框：胶囊 ${await chipQids()}，框 ${await boxes()}`), 3000));
+    await pick('p', 0);
+    await pick('button', 1, { shift: true, edge: true });
+    await eventually(async () => expect((await chipQids()) === set(q.title, q.pause), `⑤ 发送前应选中标题与暂停按钮：${await chipQids()}`), 5000);
+    const revs5 = (await revisions(d.id)).length;
+    const h5 = draftStub.hits.length;
+    const s5 = await send('都改成红色');
+    await S.check(() => expect(s5.body.kind === 'regenerate_subtree' && s5.body.input?.screenId === d.id && set(...(s5.body.input?.qids ?? [])) === set(q.title, q.pause) && s5.body.input.qids!.includes(s5.body.input.qid ?? ''), `⑤ 请求体不对：${JSON.stringify(s5.body)}`));
+    const j5 = await waitJob(s5.job.id, 60);
+    await S.check(() => expect(j5.status === 'succeeded' && set(...((j5.input.qids as string[] | undefined) ?? [])) === set(q.title, q.pause), `⑤ 作业应成功、input.qids 是这两块：${j5.status} ${JSON.stringify(j5.input.qids)}`));
+    const calls5 = draftStub.hits.slice(h5);
+    await S.check(() => expect(calls5.length === 1, `⑤ 桩应只收到一次调用：${calls5.length}`));
+    const sent = quiltBlocks(calls5[0]?.user.split(`\n${SUBTREE_BLOCKS_HEADER}\n`)[1] ?? '');
+    const sentOf = (qid: string) => strip(sent.find((b) => b.qid === qid)?.html ?? '');
+    await S.check(() => expect(sent.length === 2 && sentOf(q.title) === strip(outerOf(html0, 'p', q.title)) && sentOf(q.pause) === strip(outerOf(html0, 'button', q.pause)), `⑤ 提示词里应是这两块的原 HTML：${JSON.stringify(sent).slice(0, 300)}`));
+    const list5 = await revisions(d.id);
+    const html5 = await revHtml(list5[0]);
+    await S.check(() => expect(list5.length === revs5 + 1 && list5[0].sourceKind === 'subtree', `⑤ 草稿应多一版 subtree：${revs5} → ${list5.length}，${list5[0].sourceKind}`));
+    await S.check(() => expect(tagOf(html5, q.title).includes('data-stub="multi"') && tagOf(html5, q.pause).includes('data-stub="multi"') && (html5.match(/data-stub="multi"/g) ?? []).length === 2 && outerOf(html5, 'p', q.title).includes('已改 · 夜航星'), `⑤ 这两块应换成桩回的内容：${tagOf(html5, q.title)} ｜ ${tagOf(html5, q.pause)}`));
+    await S.check(() => expect(strip(outerOf(html5, 'p', q.sub)) === strip(outerOf(html0, 'p', q.sub)), `⑤ 副标题应原样：${outerOf(html5, 'p', q.sub)}`));
+    await S.check(() => eventually(async () => expect((await chips.count()) === 0, `⑤ 新版落库后胶囊应清空：${await chipQids()}`), 10000));
+    // 6 再选两块（副标题、下一首按钮），带 [stub-blocks-miss] 发送：桩每次少回一块，补问一轮后作业失败，版本数不变
+    await settledComponent();
+    await pick('p', 1);
+    await pick('button', 2, { shift: true, edge: true });
+    await eventually(async () => expect((await chipQids()) === set(q.sub, q.next), `⑥ 发送前应选中副标题与下一首按钮：${await chipQids()}`), 5000);
+    const revs6 = (await revisions(d.id)).length;
+    const h6 = draftStub.hits.length;
+    const s6 = await send('都改成蓝色 [stub-blocks-miss]');
+    await S.check(() => expect(set(...(s6.body.input?.qids ?? [])) === set(q.sub, q.next), `⑥ 请求体的 qids 不对：${JSON.stringify(s6.body.input)}`));
+    const j6 = await waitJob(s6.job.id, 60);
+    const calls6 = draftStub.hits.slice(h6);
+    await S.check(() => expect(calls6.length === 2 && calls6.every((h) => h.user.includes(`\n${SUBTREE_BLOCKS_HEADER}\n`)), `⑥ 桩应收到两次多块调用（补问一轮）：${calls6.length}`));
+    await S.check(() => expect(j6.status === 'failed', `⑥ 作业应失败：${j6.status}`));
+    await S.check(async () => expect((await revisions(d.id)).length === revs6, `⑥ 草稿的版本数应不变：${revs6} → ${(await revisions(d.id)).length}`));
+    // 7 接口：qids 9 个；一块包住另一块；qids 不含 qid——都 400 /errors/validation，不建作业
+    const cur7 = (await revisions(d.id))[0];
+    const all = [...new Set([...((await revHtml(cur7)).split('<body')[1] ?? '').matchAll(/data-qid="(q\d+)"/g)].map((m) => m[1]))];
+    expect(all.length >= 9, `⑦ 草稿里的块不到 9 个：${all.length}`);
+    const jobs7 = (await jobsOf(sb)).length;
+    for (const [what, qid, qids] of [['qids 9 个', all[0], all.slice(0, 9)], ['一块包住另一块', q.row, [q.row, q.pause]], ['qids 不含 qid', q.pause, [q.title, q.sub]]] as const) {
+      const r = await post<Problem>(`/v1/projects/${sb}/jobs`, { kind: 'regenerate_subtree', input: { screenId: d.id, qid, qids, prompt: '都改成红色', expectedRevisionId: cur7.id, runner: STUB } });
+      await S.check(() => expect(r.status === 400 && r.body.type === '/errors/validation' && paths(r.body).includes('qids'), `⑦ ${what}应 400 /errors/validation（qids）：${r.status} ${r.body.type} ${paths(r.body).slice(0, 160)}`));
+    }
+    await S.check(async () => expect((await jobsOf(sb)).length === jobs7, '⑦ 被拒的请求不该建出作业'));
+  } catch (e) { S.fail(e); }
+  S.done();
+  return 'Shift 加选减选、每块一枚胶囊、Shift+↑ 走到整行时合并到外层；两块一次发出（一次调用、原 HTML、一版、副标题原样）；少回一块补问后失败不落版；qids 超 8、互相包含、不含 qid 都 400';
 });
 
 await browser.close();

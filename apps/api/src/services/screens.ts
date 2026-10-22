@@ -3,11 +3,13 @@ import { db, schema, type Db } from '../db/client.ts';
 import { problems } from '../lib/errors.ts';
 import { notifyCanvas } from '../lib/events.ts';
 import { storage, objectKeys } from '../lib/storage.ts';
-import { thumbnailOf } from '../lib/screenshot.ts';
+import { thumbnailOf, losslessWebp } from '../lib/screenshot.ts';
+import { imageHead, canReuseShot } from '../lib/shots.ts';
 import { config } from '../config.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
-import { extractLinks, extractBody, outlineBody, componentNamesIn, screenInstructionHistory, type RevisionDto, type SourceKind, type CandidatesDto, DEVICE_SIZE, type DeviceType, type Presentation, type DraftFrame } from '@quilt/core';
+import { extractLinks, extractBody, outlineBody, componentNamesIn, screenInstructionHistory, shotSpecFor, type RevisionDto, type SourceKind, type CandidatesDto, DEVICE_SIZE, type DeviceType, type Presentation, type DraftFrame } from '@quilt/core';
 import { ownedProject, type ScreenRow, type RevisionRow, type ProjectRow } from './projects.ts';
+import { archiveScreen, saveArchive } from './record.ts';
 
 type Tx = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
 
@@ -27,26 +29,53 @@ export async function hasActiveJob(tx: Tx, projectId: string, screenId: string):
 // 新修订（ADR-014 修订树）：先锁屏行再取号——并行落候选时两笔事务会算出同一 seq 撞唯一键（RUN-059）。
 // parentRevisionId 默认取此刻的 current；候选批要显式传同一个父版（第 1 版落库后 current 已变），回溯传被回溯到的那一版（v0.87）。
 // advanceCurrent=false 只落修订不推进 current（候选批由调用方在全部落完后统一指向第 1 版）。
+// reuse：回到旧版（v1.27 ADR-037）直接引用源修订的对象，不另存 HTML；html 仍要传，链接与组件名照常从它解析。
 // 返回 null 表示 expectedRevisionId 已过期。
 export async function createRevision(tx: Tx, args: {
   projectId: string; screenId: string; html: string; sourceKind: SourceKind; jobId?: string | null; lintReport: unknown;
   expectedRevisionId?: string | null; parentRevisionId?: string | null; candidateIndex?: number | null; advanceCurrent?: boolean;
+  reuse?: { htmlKey: string; thumbKey: string | null; screenshotKey: string | null };
 }): Promise<RevisionRow | null> {
   const [screen] = await tx.select().from(schema.screens).where(eq(schema.screens.id, args.screenId)).for('update');
   if (!screen) return null;
   if (args.expectedRevisionId !== undefined && (screen.currentRevisionId ?? null) !== args.expectedRevisionId) return null;
   const [{ seq }] = await tx.select({ seq: sql<number>`coalesce(max(${schema.screenRevisions.seq}), 0) + 1` }).from(schema.screenRevisions).where(eq(schema.screenRevisions.screenId, args.screenId));
   const id = crypto.randomUUID();
-  const htmlKey = objectKeys.revisionHtml(args.projectId, args.screenId, id);
-  await storage.put(htmlKey, args.html, 'text/html; charset=utf-8');
+  const htmlKey = args.reuse?.htmlKey ?? objectKeys.revisionHtml(args.projectId, args.screenId, id);
+  if (!args.reuse) await storage.put(htmlKey, args.html, 'text/html; charset=utf-8');
   const [rev] = await tx.insert(schema.screenRevisions).values({
     id, screenId: args.screenId, seq, htmlKey, sourceKind: args.sourceKind, jobId: args.jobId ?? null, lintReport: args.lintReport as object,
+    screenshotKey: args.reuse?.screenshotKey ?? null, thumbKey: args.reuse?.thumbKey ?? null,
     parentRevisionId: args.parentRevisionId === undefined ? screen.currentRevisionId : args.parentRevisionId,
     candidateIndex: args.candidateIndex ?? null,
   }).returning();
   rememberRevisionLinks(id, args.html);
   if (args.advanceCurrent !== false) await tx.update(schema.screens).set({ currentRevisionId: rev.id, updatedAt: new Date() }).where(eq(schema.screens.id, args.screenId));
   return rev;
+}
+
+// 回到旧版（API-CORE-015 / quilt.restore_revision 共用）：以源修订的内容建新修订并置为当前，父修订是源修订（v0.87）。
+// 新修订直接引用源修订的 HTML 与缩略图对象（v1.27 ADR-037，同一屏、同一前缀）；截图三条都成立才沿用（shots.ts canReuseShot），
+// 否则留空、由调用方入队重拍。读对象头在事务外，锁住屏行后再核一遍源修订的键、屏的呈现方式与画框：
+// screenshot.prune 在同一把锁下清键，这里沿用的键不会在之后被它当成没人引用而删掉
+export async function restoreRevision(project: ProjectRow, screen: ScreenRow, source: RevisionRow, expectedRevisionId: string): Promise<RevisionRow> {
+  const html = (await storage.get(source.htmlKey)).toString('utf8');
+  const spec = shotSpecFor(project, screen);
+  const head = source.screenshotKey ? await storage.get(source.screenshotKey).then(imageHead, () => null) : null;
+  const reusable = source.screenshotKey && canReuseShot({ key: source.screenshotKey, head }, screen.presentation, { ...spec.size, rootOnly: spec.rootOnly }) ? source.screenshotKey : null;
+  return db.transaction(async (tx) => {
+    if (await hasActiveJob(tx, project.id, screen.id)) throw problems.screenBusy();
+    const [locked] = await tx.select({ presentation: schema.screens.presentation, frame: schema.screens.frame }).from(schema.screens).where(eq(schema.screens.id, screen.id)).for('update');
+    const [src] = await tx.select({ screenshotKey: schema.screenRevisions.screenshotKey, thumbKey: schema.screenRevisions.thumbKey }).from(schema.screenRevisions).where(eq(schema.screenRevisions.id, source.id));
+    const same = !!locked && locked.presentation === screen.presentation && locked.frame === screen.frame && src?.screenshotKey === reusable;
+    const r = await createRevision(tx, {
+      projectId: project.id, screenId: screen.id, html, sourceKind: 'restore', lintReport: source.lintReport, expectedRevisionId, parentRevisionId: source.id,
+      reuse: { htmlKey: source.htmlKey, thumbKey: src?.thumbKey ?? null, screenshotKey: same ? reusable : null },
+    });
+    if (!r) throw problems.revisionConflict();
+    await deriveLinks(tx, project.id);
+    return r;
+  });
 }
 
 // 候选批落完后把 current 指向序号最小的那一版（REQ-CORE-015：current 默认第 1 版，不选也不阻塞连线 / 导出）
@@ -196,15 +225,18 @@ export async function projectOutline(ownerId: string, projectId: string, screenI
 }
 
 // 删屏（API-CORE-018 / quilt.delete_screen 共用）：默认屏连同它的变体一起删（外键级联），所以在跑作业要按整个家族查，
-// 样板屏指针对每一张都清；库里删完再删对象存储里这些屏的修订 HTML 与截图——不删的话它们一直留到整个项目被删
+// 样板屏指针对每一张都清；库里删完再删对象存储里这些屏的修订 HTML 与截图——不删的话它们一直留到整个项目被删。
+// 使用记录开着时（ADR-035）删之前取下这些屏与修订的行，删掉之后、清对象之前写进归档；被 409 挡下的不留归档
 export async function deleteScreen(projectId: string, screenId: string): Promise<void> {
   const family = (await db.select({ id: schema.screens.id }).from(schema.screens).where(or(eq(schema.screens.id, screenId), eq(schema.screens.variantOf, screenId)))).map((r) => r.id);
+  const archive = await archiveScreen(projectId, screenId, family);
   await db.transaction(async (tx) => {
     for (const id of family) if (await hasActiveJob(tx, projectId, id)) throw problems.screenBusy();
     await tx.delete(schema.screens).where(eq(schema.screens.id, screenId));
     for (const id of family) await clearExemplarIfDeleted(tx, projectId, id);
     await deriveLinks(tx, projectId);
   });
+  await saveArchive(archive);
   for (const id of family) await storage.deletePrefix(`projects/${projectId}/screens/${id}/`).catch((e) => console.warn(`[delete screen] ${id}: ${(e as Error).message}`));
   await notifyCanvas(projectId, { reason: 'deleted', screenId });
 }
@@ -213,10 +245,11 @@ export async function deleteScreen(projectId: string, screenId: string): Promise
 // 行已不在就清掉这一屏（项目也不在了就清整个项目）的前缀——否则刚写的 PNG 没有任何行指向它，再也没人清。返回 null = 屏已删。
 // 缩略图（v1.02 ADR-029）随截图一起写、同一条 UPDATE 回填；做不出来只回填截图，留给 screenshot.retry 补。
 // 回填是条件更新（§16 v1.03）：截图还空着、且屏的呈现方式仍是拍摄时那一个；拍的途中切了呈现方式，这两张图就作废。
-// 草稿的画框（REQ-CORE-040）同理：拍的途中改了画框（PATCH frame 已作废截图），按旧画框拍的这张不能落库，否则随后的重拍见已有截图就退出
+// 草稿的画框（REQ-CORE-040）同理：拍的途中改了画框（PATCH frame 已作废截图），按旧画框拍的这张不能落库，否则随后的重拍见已有截图就退出。
+// 浏览器拍的是 PNG，存成无损 WebP（v1.27 ADR-037）；缩略图照旧从 PNG 缩
 export async function storeRevisionShot(projectId: string, screenId: string, revisionId: string, png: Buffer, presentation: Presentation = 'push', frame: string | null = null): Promise<string | null> {
   const key = objectKeys.revisionShot(projectId, screenId, revisionId, presentation, frame);
-  await storage.put(key, png, 'image/png');
+  await storage.put(key, await losslessWebp(png), 'image/webp');
   const thumbKey = await storeThumb(projectId, screenId, revisionId, png, presentation, frame).catch((e: Error) => { console.warn(`[thumbnail] ${revisionId}: ${e.message}`); return null; });
   const sameFrame = frame ? sql`${schema.screens.frame} = ${frame}` : sql`${schema.screens.frame} is null`;
   const rows = await db.update(schema.screenRevisions).set({ screenshotKey: key, thumbKey })
@@ -226,15 +259,24 @@ export async function storeRevisionShot(projectId: string, screenId: string, rev
   if (rows.length) return key;
   const [rev] = await db.select({ screenshotKey: schema.screenRevisions.screenshotKey }).from(schema.screenRevisions).where(eq(schema.screenRevisions.id, revisionId));
   if (rev) {
-    // 行还在：别处已按同一呈现方式（与画框）写过同一个键就算成了；否则刚写的是按过期的呈现方式或画框拍的，没有任何行指向它
+    // 行还在：别处已按同一呈现方式（与画框）写过同一个键就算成了；否则刚写的是按过期的呈现方式或画框拍的。
+    // 同名的对象可能正被回到旧版建的修订共用（重拍被清掉截图的旧版时键不变），还有修订引用就不删
     if (rev.screenshotKey === key) return key;
-    await storage.delete(key).catch(() => {});
-    if (thumbKey) await storage.delete(thumbKey).catch(() => {});
+    await deleteUnreferenced([key, thumbKey]);
     return null;
   }
   const [project] = await db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.id, projectId));
   await storage.deletePrefix(project ? `projects/${projectId}/screens/${screenId}/` : `projects/${projectId}/`).catch(() => {});
   return null;
+}
+
+// 没有任何修订再引用（截图或缩略图）的对象才删：回到旧版建的修订与源修订共用对象（v1.27 ADR-037）
+export async function deleteUnreferenced(keys: (string | null)[]): Promise<void> {
+  for (const key of keys) {
+    if (!key) continue;
+    const [used] = await db.select({ id: schema.screenRevisions.id }).from(schema.screenRevisions).where(or(eq(schema.screenRevisions.screenshotKey, key), eq(schema.screenRevisions.thumbKey, key))).limit(1);
+    if (!used) await storage.delete(key).catch(() => {});
+  }
 }
 
 export async function storeThumb(projectId: string, screenId: string, revisionId: string, png: Buffer, presentation: Presentation = 'push', frame: string | null = null): Promise<string> {

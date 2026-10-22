@@ -148,6 +148,20 @@
       "when": 1792587828904,
       "tag": "0020_drop_annotations",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792593811798,
+      "tag": "0021_record_usage",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792593824423,
+      "tag": "0022_usage_snapshot",
+      "breakpoints": true
     }
   ]
 }

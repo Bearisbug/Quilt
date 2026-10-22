@@ -89,6 +89,9 @@ const componentIdsSchema = z.array(z.uuid()).max(MAX_COMPONENT_TARGETS).optional
 export const variantNameSchema = z.string().trim().min(1).max(20);
 // 界面语言（REQ-CORE-046）：写屏上文字的四种作业可带，建作业时服务端按请求的 X-Quilt-Locale 填（不看请求体），提示词据此补一句语言要求
 const jobLocaleSchema = localeSchema.optional();
+// 选元素时按住 Shift 多选（REQ-EDIT-002 v1.26）：同一屏或同一张组件卡里最多 8 块
+export const MAX_SUBTREE_BLOCKS = 8;
+const qidSchema = z.string().regex(/^q\d+$/);
 export const jobInputSchemas = {
   // 造（REQ-CORE-003 / REQ-CORE-014 / REQ-PROTO-003）：count 是屏数档位（1 单屏规划、2–4 与 auto 整组规划）；
   // versions 是每张新屏的候选版数；anchor 是画布世界坐标；route 钉死即懒生成（跳过规划器，fromScreenId 作来源屏参考）
@@ -116,8 +119,13 @@ export const jobInputSchemas = {
   edit_screens: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).min(1).max(20), versions: versionsSchema.default(1), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), componentIds: componentIdsSchema, locale: jobLocaleSchema }),
   // 改共享组件（REQ-EDIT-006）：一次一个；成功后所有用到它的屏确定性回刷（零 LLM）
   edit_component: z.object({ componentId: z.uuid(), prompt: z.string().trim().min(1).max(8000), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), locale: jobLocaleSchema }),
-  // 子树重生成（REQ-EDIT-002）：runner 可单独选（检查器里有自己的通道 / 会话选择器，记忆独立于输入框）；草稿里只改一块时可带参考图（REQ-CORE-045）
-  regenerate_subtree: z.object({ screenId: z.uuid(), qid: z.string().regex(/^q\d+$/), prompt: z.string().trim().min(1).max(4000), expectedRevisionId: z.uuid(), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), locale: jobLocaleSchema }),
+  // 子树重生成（REQ-EDIT-002）：runner 可单独选（检查器里有自己的通道 / 会话选择器，记忆独立于输入框）；草稿里只改一块时可带参考图（REQ-CORE-045）。
+  // qids（v1.26）：按住 Shift 选的几块一次改完，要含 qid、不重复；互不包含要看那一版的 HTML，由建作业时查
+  regenerate_subtree: z.object({
+    screenId: z.uuid(), qid: qidSchema,
+    qids: z.array(qidSchema).min(2).max(MAX_SUBTREE_BLOCKS).refine((a) => new Set(a).size === a.length, 'qids 里有重复的块').optional(),
+    prompt: z.string().trim().min(1).max(4000), expectedRevisionId: z.uuid(), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), locale: jobLocaleSchema,
+  }).refine((v) => !v.qids || v.qids.includes(v.qid), { path: ['qids'], message: 'qids 要含 qid' }),
   apply_design_system: z.object({ screenIds: z.union([z.literal('all'), z.array(z.uuid()).min(1)]) }),
   // 设计系统提炼（REQ-EDIT-003）：只产出提案（output.proposal），写入由 API-EDIT-002 在预览确认后完成
   propose_design_system: z.object({ instruction: z.string().trim().min(1).max(4000), screenId: z.uuid().optional(), runner: runnerSchema.optional() }),
@@ -438,8 +446,8 @@ export const createChannelSchema = z.object({
   model: z.string().trim().min(1).max(80),
   // 本机订阅走的是机器上的登录态，没有 Key 可填
   apiKey: z.string().max(500).optional(),
-}).refine((v) => v.kind !== 'openai' || !!v.endpoint, { path: ['endpoint'], message: 'OpenAI 兼容通道必须填端点' })
-  .refine((v) => LOCAL_CHANNEL_KINDS.includes(v.kind) || !!v.apiKey, { path: ['apiKey'], message: '这类通道必须填 API Key' });
+}).refine((v) => v.kind !== 'openai' || !!v.endpoint, { path: ['endpoint'], message: 'OpenAI 兼容的模型必须填端点' })
+  .refine((v) => LOCAL_CHANNEL_KINDS.includes(v.kind) || !!v.apiKey, { path: ['apiKey'], message: '这类模型必须填 API Key' });
 export const updateChannelSchema = z.object({
   label: z.string().trim().min(1).max(60).optional(),
   endpoint: endpointSchema.optional(),
@@ -483,4 +491,70 @@ export type RevisionDto = { id: string; screenId: string; seq: number; sourceKin
 export type CandidatesDto = { jobId: string; versions: number; screens: { screenId: string; name: string; route: string; width: number; height: number; currentRevisionId: string | null; settled: boolean; revisions: { id: string; index: number; seq: number; screenshotUrl: string | null; thumbUrl: string | null; htmlUrl: string; previewUrl: string }[] }[] };
 /** 用量台账（REQ-CORE-008，v0.32 无上限只作展示） */
 export type UsageDto = { month: string; screens: number; tokensIn: number; tokensOut: number; byDriver: { driver: string; model: string; screens: number; tokensIn: number; tokensOut: number }[]; inflight: { calls: number; screens: number } };
+
+// 用量看板（API-CORE-052，v1.24 ADR-036）。模型键：台账有通道 id 时就是它；没有时恰有一个通道同驱动同模型就归它，否则 `driver:model`
+export const USAGE_RANGES = ['7d', '30d', 'all'] as const;
+export type UsageRange = (typeof USAGE_RANGES)[number];
+export const usageStatsQuerySchema = z.object({
+  range: z.enum(USAGE_RANGES),
+  utcOffset: z.coerce.number().int().min(-840).max(840).default(0),
+});
+/** 某一模型键在这一格里的量：Token 或作业次数 */
+export type UsageByModel = Record<string, number>;
+export type UsageStatsDto = {
+  range: UsageRange;
+  /** 所选范围的第一天与最后一天（按 utcOffset 的自然日，YYYY-MM-DD） */
+  from: string; to: string;
+  unit: 'day' | 'week';
+  totals: { jobs: number; tokensIn: number; tokensOut: number; screens: number; sketchScreens: number; maxJobTokens: number };
+  /** 全部时间里出现过的模型，按全部时间的 Token 降序；数是所选范围内的 */
+  models: { key: string; label: string; modelId: string; driver: string; deleted: boolean; tokensIn: number; tokensOut: number; jobs: number; lastAt: string | null }[];
+  buckets: { from: string; to: string; jobs: number; tokens: UsageByModel }[];
+  /** id 为 null 的一项是迁移前就找不到项目的旧记录，界面写「已删除的项目」 */
+  projects: { id: string | null; name: string | null; deleted: boolean; sketchbook: boolean; tokens: number; screens: number; byModel: UsageByModel }[];
+  /** kind 为 other 的是没有快照的旧记录 */
+  kinds: { kind: JobKind | 'other'; jobs: number; byModel: UsageByModel }[];
+  /** 固定是含今天的近 90 天，与 range 无关 */
+  activity: { from: string; to: string; days: { date: string; jobs: number }[]; topModel: string | null; topShare: number | null };
+  inflight: { calls: number; screens: number };
+};
+
+// 本机使用记录（REQ-CORE-047，ADR-035；API-CORE-049～051）
+export type RecordingDto = { enabled: boolean; since: string | null; events: number; modelCalls: number; archived: number; bytes: number; dir: string | null };
+export const updateRecordingSchema = z.object({ enabled: z.boolean() });
+export const RECORD_EVENT_TYPES = ['view', 'click', 'key', 'input', 'change', 'attach', 'drag', 'viewport', 'select', 'preview', 'toast', 'job', 'record', 'tool'] as const;
+export type RecordEventType = (typeof RECORD_EVENT_TYPES)[number];
+export const recordEventSchema = z.object({
+  seq: z.number().int().min(1),
+  at: z.iso.datetime(),
+  page: z.string().max(200),
+  path: z.string().max(2000).optional(),
+  type: z.enum(RECORD_EVENT_TYPES),
+  target: z.string().max(400).optional(),
+  projectId: z.uuid().optional(),
+  screenId: z.uuid().optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
+});
+export type RecordEventInput = z.infer<typeof recordEventSchema>;
+/** 一批 1–200 条；单条序列化后 ≤ 16 KB 由路由另查（zod 量不了序列化长度） */
+export const recordEventsBatchSchema = z.object({ sessionId: z.string().min(1).max(100), events: z.array(recordEventSchema).min(1).max(200) });
+export const RECORD_EVENT_MAX_BYTES = 16 * 1024;
+/** 记录里超过这个长度的字符串只记长度（§9 record_events.data） */
+export const RECORD_STRING_MAX = 2000;
+export const MODEL_CALL_PURPOSES = ['plan', 'screen', 'edit', 'subtree', 'component', 'propose', 'chat', 'warmup', 'agent'] as const;
+export type ModelCallPurpose = (typeof MODEL_CALL_PURPOSES)[number];
 export type ProblemDto = { type: string; title: string; status: number; detail?: string; requestId: string; [k: string]: unknown };
+
+// 使用记录里的值（§9 record_events.data、INV-CORE-006）：超过 max 的字符串换成它的长度（数字），其余字符串去掉 URL 里的签名参数值；
+// \u0000 去掉（jsonb 存不下）。也从 @quilt/core/browser 导出，浏览器端可以先过一遍；服务端对发来的批次、MCP 参数与归档清单都过它
+const SIGNED_PARAM = /([?&](?:sig|exp|t|token|X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token)=)[^&#\s"'<>]+/g;
+export function recordSafe(v: unknown, max: number = RECORD_STRING_MAX): unknown {
+  if (typeof v === 'string') return v.length > max ? v.length : v.replace(SIGNED_PARAM, '$1-').replace(/\u0000/g, '');
+  if (Array.isArray(v)) return v.map((x) => recordSafe(x, max));
+  if (v && typeof v === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(v))) {
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, recordSafe(x, max)]));
+  }
+  return v;
+}
+/** 一条事件序列化后的字节数，与 RECORD_EVENT_MAX_BYTES 比（API-CORE-051） */
+export const recordEventBytes = (e: unknown): number => new TextEncoder().encode(JSON.stringify(e)).length;

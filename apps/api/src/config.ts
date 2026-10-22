@@ -20,8 +20,8 @@ const previewPort = Number(env('PREVIEW_PORT', '3101'));
 const llmDriver = env('LLM_DRIVER', 'agent-sdk') as 'agent-sdk' | 'codex' | 'anthropic' | 'gemini' | 'stub';
 
 export const config = {
-  /** 本地数据目录：打包运行时 = QUILT_HOME（默认 ~/.quilt）；仓库内开发 = 仓库根 .data */
-  dataDir: home ?? path.resolve(import.meta.dirname, '../../../.data'),
+  /** 本地数据目录：打包运行时 = QUILT_HOME（默认 ~/.quilt）；仓库内开发 = 仓库根 .data；隔离测试栈用 QUILT_DATA_DIR 各给一份，测试写的对象与使用记录不混进开发实例 */
+  dataDir: home ?? (process.env.QUILT_DATA_DIR ? path.resolve(process.env.QUILT_DATA_DIR) : path.resolve(import.meta.dirname, '../../../.data')),
   /** 留空 = 内置 PGlite（$dataDir/db）；设了 = 外部 Postgres（开发 docker / 将来 SaaS） */
   databaseUrl: process.env.DATABASE_URL ?? '',
   migrationsDir: process.env.QUILT_MIGRATIONS_DIR ?? path.resolve(import.meta.dirname, '../drizzle'),
@@ -61,6 +61,8 @@ export const config = {
   storageDriver: env('STORAGE_DRIVER', 'fs') as 'fs' | 's3',
   s3: { bucket: process.env.S3_BUCKET ?? '', region: process.env.S3_REGION ?? '', endpoint: process.env.S3_ENDPOINT ?? '', accessKeyId: process.env.S3_ACCESS_KEY_ID ?? '', secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? '' },
   screenshotChannel: process.env.SCREENSHOT_BROWSER_CHANNEL ?? '',
+  // screenshot.prune 启动后多久先扫一轮（§17 v1.27，缺省 2 分钟）。QUILT_SCREENSHOT_PRUNE_FIRST_MS 只给测试用（TC-CORE-151），只在 LLM_DRIVER=stub 时认
+  screenshotPruneFirstMs: llmDriver === 'stub' && process.env.QUILT_SCREENSHOT_PRUNE_FIRST_MS ? Number(process.env.QUILT_SCREENSHOT_PRUNE_FIRST_MS) : 2 * 60_000,
   // §15 容量与限流
   workerConcurrency: Number(env('WORKER_CONCURRENCY', '20')),
   screenConcurrency: Number(env('SCREEN_CONCURRENCY', '4')),

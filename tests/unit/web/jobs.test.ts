@@ -25,6 +25,7 @@ test('jobLabel：在跑作业行的文案', () => {
   assert.equal(jobLabel(job('edit_screens', { screenIds: ['s1'] }), screens, []), '改「首页」');
   assert.equal(jobLabel(job('edit_screens', { screenIds: 'all', versions: 2 }), screens, []), '改全部 2 屏 × 2 版');
   assert.equal(jobLabel(job('regenerate_subtree', { screenId: 'zz' }), screens, []), '重生成「已删除的屏」的一块');
+  assert.equal(jobLabel(job('regenerate_subtree', { screenId: 's1', qid: 'q4', qids: ['q2', 'q4'] }), screens, []), '重生成「首页」的 2 块');
   // 系统代发的修复轮按自己的名字说（PAGE-CANVAS「同一功能一个名字」）
   assert.equal(jobLabel(job('edit_screens', { prompt: LINK_REPAIR_PROMPT, screenIds: ['s1', 's2'] }), screens, []), '接上跳转 2 屏');
   assert.equal(jobLabel(job('edit_screens', { prompt: presetPrompt(CONVENTIONS_REGENERATE_PROMPT, '衬线'), screenIds: ['s1'], versions: 2 }), screens, []), '按新约定重生成 1 屏 × 2 版');

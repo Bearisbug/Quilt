@@ -3,7 +3,7 @@ import http from 'node:http';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { seedJson, apiJson, EVIDENCE, ROOT, WEB, API, eventually, pickOption, zhCN } from '../lib.ts';
+import { seedJson, apiJson, EVIDENCE, objectsDir, WEB, API, eventually, pickOption, zhCN } from '../lib.ts';
 import { startOpenAiStub } from '../openai-stub.ts';
 import { connectMcp, callTool } from '../mcp-client.ts';
 import { expect, softly, waitJob, sleep } from '../harness.ts';
@@ -94,7 +94,7 @@ await step('TC-CORE-045', async () => {
       await S.check(() => eventually(async () => expect((await subChip.getAttribute('data-state')) === 'failed', `③ 这一轮应失败：${await subChip.getAttribute('data-state')}`), 40000));
       const text3 = await subChip.innerText();
       await S.check(async () => expect((await subChip.getByTestId('retry-job').count()) === 0 && (await subChip.getByTestId('dismiss-job').count()) === 1, '③ 不能重试的作业 chip 上只应有 ×'));
-      await S.check(() => expect(text3.includes('HTTP 401') && text3.includes('检查这条通道的 Key') && text3.includes('在检查器里再点一次「重生成这块」') && !text3.includes('点「重试」'), `③ 原因里应先说检查 Key、再写它自己再发一次的入口、不写「点「重试」」：${text3.replace(/\s+/g, ' ')}`));
+      await S.check(() => expect(text3.includes('HTTP 401') && text3.includes('检查这个模型的 Key') && text3.includes('在检查器里再点一次「重生成这块」') && !text3.includes('点「重试」'), `③ 原因里应先说检查 Key、再写它自己再发一次的入口、不写「点「重试」」：${text3.replace(/\s+/g, ' ')}`));
       await subChip.getByTestId('dismiss-job').click().catch(() => {});
     }
     // 4 改组件：模型产出两个根 → chip 写「改组件失败」+ 中文原因，仍能重试
@@ -116,7 +116,7 @@ await step('TC-CORE-045', async () => {
     await shot(page, 'CORE-045');
   } catch (e) { S.fail(e); } finally { await page.unroute(SEND_RE); await stub.close(); }
   S.done();
-  return '401 的失败 chip 写「改屏失败：通道的 Key 被拒绝（HTTP 401）」并带「重试」与 ×、不弹提示条；「重试」原样再发一轮、旧 chip 换成新作业的、× 关掉；重生成一块失败只有 × 且写回检查器的入口；改组件失败写根元素原因';
+  return '401 的失败 chip 写「改屏失败：模型的 Key 被拒绝（HTTP 401）」并带「重试」与 ×、不弹提示条；「重试」原样再发一轮、旧 chip 换成新作业的、× 关掉；重生成一块失败只有 × 且写回检查器的入口；改组件失败写根元素原因';
 });
 
 // TC-CORE-046 输入框：Esc 清草稿可撤销、贴图批量与上限、Enter 被挡说明、在途输入保留（REQ-CORE-006 / 012 / 020 v0.74）
@@ -562,8 +562,8 @@ await step('TC-CORE-063', async () => {
     for (let i = 0; i < 90 && !rendered; i++) { await sleep(1000); rendered = !!(await apiJson<{ items: { screenshotUrl: string | null }[] }>(`/v1/screens/${ctl.screenId}/revisions`)).body.items[0]?.screenshotUrl; }
     expect(rendered, '对照屏 90 s 内截图未就绪，判不了被删屏的截图写回');
     await sleep(3000);
-    const screenDir = path.join(ROOT, '.data/objects/projects', pid, 'screens', a.screenId);
-    const projectDir = path.join(ROOT, '.data/objects/projects', p2);
+    const screenDir = path.join(await objectsDir(), 'projects', pid, 'screens', a.screenId);
+    const projectDir = path.join(await objectsDir(), 'projects', p2);
     check(!existsSync(screenDir), `删屏且截图渲染完之后对象目录还在：${screenDir}（删屏时截图${pending ? '还在渲染' : '已就绪，前置不成立'}）`);
     check(!existsSync(projectDir), `删项目且截图渲染完之后对象目录还在：${projectDir}${b.screenId ? '' : '（建屏失败）'}`);
   } finally { await mcp.close(); }

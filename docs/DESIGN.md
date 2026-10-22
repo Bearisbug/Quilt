@@ -12,21 +12,21 @@
 | 项目画像 | 生产产品（全部核心节生效） |
 | Owner | @bug |
 | 评审人 | @bug（产品 / 架构） |
-| 最后更新 | 2026-10-21（v1.23 撤下批注、双击组件卡把镜头摆过去；v1.22 本机使用记录，设计待确认；v1.21 草稿里只改一块也能带参考图；v1.20 界面支持中文与英文；v1.19 缩小显示的屏改用 zoom；v1.18 草稿出新版原地换；v1.17 去掉对话记录、作业 chip、记录栏浮层、画框不能跨组件与页面；v1.16 输入框停靠与收起、草稿放大；v1.15 界面视觉换成苹果风；v1.14 草稿写回与参照；v1.13 与 v1.14 的数据模型、接口与 ADR-030～033 已由 Owner 签字） |
+| 最后更新 | 2026-10-22（v1.28 逐级选改用 Shift+↑ / Shift+↓，用量看板不把导出算给模型，截图编码限 2 路，会话列表去重；v1.27 截图存无损 WebP、旧版本只留缩略图、回到旧版复用原版的文件；v1.27 的 sharp 依赖由 Owner 选定；v1.26 选元素时按住 Shift 多选、几块一次改完；v1.25 草稿本按 ⌘Z 回到上一版、逐级选不再被焦点按钮吃掉；v1.24 设置改成用量、模型、系统三节，用量看板，台账记下项目、任务类型与模型名，界面上「通道」改叫「模型」；v1.24 的台账快照列与 v1.22 的数据模型、接口与 ADR-035 已由 Owner 签字；v1.23 撤下批注、双击组件卡把镜头摆过去；v1.22 本机使用记录；v1.21 草稿里只改一块也能带参考图；v1.20 界面支持中文与英文；v1.19 缩小显示的屏改用 zoom；v1.18 草稿出新版原地换；v1.17 去掉对话记录、作业 chip、记录栏浮层、画框不能跨组件与页面；v1.16 输入框停靠与收起、草稿放大；v1.15 界面视觉换成苹果风；v1.14 草稿写回与参照；v1.13 与 v1.14 的数据模型、接口与 ADR-030～033 已由 Owner 签字） |
 | 关联 | 契约 `api/openapi.yaml`（实现期建立） · 仓库 `github.com/Bearisbug/Quilt` · 安装 `npx quilt-canvas`（包 `apps/cli`） · 调研结论见会话记录 2026-09-07/08/09 |
 | 链路层 | 部分 |
 
-更早的版本（v0.4–v1.18）在 `docs/CHANGELOG.md`；下方两张表合计只留 v0.1–v0.3 与最近 5 版，再往前的随每次出版移过去。
+更早的版本（v0.4–v1.23）在 `docs/CHANGELOG.md`；下方两张表合计只留 v0.1–v0.3 与最近 5 版，再往前的随每次出版移过去。
 
 变更记录：
 
 | 日期 | 版本 | 涉及 ID | 一句话 | 类型 |
 | --- | --- | --- | --- | --- |
-| 2026-10-21 | v1.23 | REQ-EDIT-001、REQ-EDIT-002、REQ-EDIT-004、REQ-CORE-045、REQ-AGENT-002、FLOW-ELEMENT、FLOW-ANNOTATE、FLOW-SKETCH-REFINE、ENT-Annotation、API-EDIT-003、API-CORE-006、API-CORE-018、API-CORE-030、API-CORE-031、PAGE-CANVAS、PAGE-SKETCH、ADR-012 | 撤下批注：画布与草稿本的入口、接口、MCP 的 4 个工具与批注表一并删除；双击组件卡与双击屏一样把镜头摆过去 | 功能 |
-| 2026-10-21 | v1.22 | REQ-CORE-047、FLOW-RECORD、ENT-RecordEvent、ENT-ModelCall、API-CORE-049、API-CORE-050、API-CORE-051、API-CORE-006、API-CORE-018、API-CORE-031、API-AGENT-002、ADR-035、INV-CORE-006、INV-CORE-007、PAGE-CANVAS | 新增本机使用记录：设置里打开后记下界面操作、输入过程与每次模型调用，删掉的东西留归档 | 功能 |
-| 2026-10-21 | v1.21 | FLOW-SKETCH-REFINE、PAGE-SKETCH、API-CORE-006 | 草稿里只改一块也能带参考图，图跟着这一块的模型调用发出 | 功能 |
-| 2026-10-20 | v1.20 | REQ-CORE-046、FLOW-LOCALE、PAGE-CANVAS、API-CORE-006、API-CORE-046、ADR-034 | 界面支持中文与英文：缺省跟浏览器、设置里可切，服务端提示与生成内容跟着界面语言 | 功能 |
-| 2026-10-20 | v1.19 | PAGE-CANVAS、PAGE-SKETCH | 缩小显示的屏改用 zoom，修玻璃卡片旁闪出灰色渐变、盖住邻近内容 | 界面 |
+| 2026-10-22 | v1.28 | REQ-EDIT-001、PAGE-CANVAS、PAGE-SKETCH、API-CORE-052、API-AGENT-010、ENT-UsageEntry、ADR-037 | 逐级选改用 Shift+↑ / Shift+↓；用量看板不把导出算给模型，截图编码限 2 路，会话列表去重 | 功能 |
+| 2026-10-22 | v1.27 | ENT-ScreenRevision、API-CORE-015、ADR-037 | 截图改存无损 WebP，旧版本只留缩略图，回到旧版复用原版的文件 | 功能 |
+| 2026-10-22 | v1.26 | REQ-EDIT-002、FLOW-SKETCH-REFINE、PAGE-CANVAS、PAGE-SKETCH、API-CORE-006、API-AGENT-002 | 选元素时按住 Shift 多选，选中的几块一句话一次改完、只出一版 | 功能 |
+| 2026-10-22 | v1.25 | FLOW-SKETCH、PAGE-SKETCH、PAGE-CANVAS、REQ-EDIT-001 | 草稿本按 ⌘Z 回到上一版；逐级选不再被焦点按钮吃掉 | 功能 |
+| 2026-10-21 | v1.24 | REQ-CORE-008、REQ-CORE-011、REQ-CORE-013、FLOW-USAGE、FLOW-SETTINGS、FLOW-RECORD、ENT-UsageEntry、API-CORE-017、API-CORE-021、API-CORE-031、API-CORE-052、ADR-035、ADR-036、PAGE-CANVAS | 设置改成用量、模型、系统三节并加用量看板，界面上「通道」改叫「模型」；本机使用记录确认 | 功能 |
 
 变更记录（旧格式）：
 
@@ -63,9 +63,10 @@
 | FLOW-SKETCH-REFINE | 草稿里只改一块 | 草稿本 | 设计中 | REQ-CORE-045 |
 | FLOW-SKETCH-FORK | 屏拿到草稿本改 | 草稿本 | 设计中 | REQ-CORE-043 |
 | FLOW-SKETCH-COPY | 草稿写回项目 | 草稿本 | 设计中 | REQ-CORE-041、REQ-CORE-044 |
-| FLOW-SETTINGS | 通道、用量与外观 | 设置 | 已实现 | REQ-CORE-008、REQ-CORE-011、REQ-CORE-013、REQ-CORE-039 |
+| FLOW-SETTINGS | 模型管理与外观 | 设置 | 已实现 | REQ-CORE-011、REQ-CORE-013、REQ-CORE-039 |
+| FLOW-USAGE | 用量台账与看板 | 设置 | 已实现 | REQ-CORE-008 |
 | FLOW-LOCALE | 界面语言 | 设置 | 设计中 | REQ-CORE-046 |
-| FLOW-RECORD | 本机使用记录 | 设置 | 设计中 | REQ-CORE-047 |
+| FLOW-RECORD | 本机使用记录 | 设置 | 已实现 | REQ-CORE-047 |
 
 ### 角色：本机 agent
 
@@ -160,6 +161,9 @@
 | 边界 | 用户要回到之前某一版 | 在「版本」里点它，以它的内容建新一版 | API-CORE-015 | TC-CORE-100 |
 | 失败 | 生成中点了回到旧版 | 409 /errors/screen-busy | 竞态「用户在生成中回溯旧版」 | TC-CORE-104 |
 | 失败 | 版本列表过期时回到旧版 | 409 /errors/revision-conflict，刷新版本后重试 | /errors/revision-conflict；API-CORE-015 | TC-CORE-104 |
+| 边界 | 用户按 ⌘Z | 回到当前版的上一版，以它的内容建新一版；连按一版版往回走 | API-CORE-015；PAGE-SKETCH | TC-CORE-150 |
+| 边界 | 已是第一版时按 ⌘Z | 提示已经是第一版，不发请求 | PAGE-SKETCH | TC-CORE-150 |
+| 失败 | 生成中按 ⌘Z | 提示正在改，不发请求 | 竞态「用户在生成中回溯旧版」 | TC-CORE-150 |
 
 ##### S8 收起
 
@@ -227,28 +231,36 @@
 | S8 | `apps/web/src/sketch/DraftStage.tsx#DraftStage` |
 | S9 | `apps/web/src/sketch/DraftRail.tsx#DraftRail` |
 
-### FLOW-SKETCH-REFINE · 草稿里只改一块
+### FLOW-SKETCH-REFINE · 草稿里只改选中的几块
 
 #### 概要
 
 - **执行者**：本机用户
 - **触发**：在草稿上方的工具条打开「选元素」（PAGE-SKETCH）
 - **进入条件**：看板上打开着一张有内容的草稿
-- **结果**：只改点中的那一块，草稿多出一版，其余原样
+- **结果**：只改点中的那一块或几块，草稿多出一版，其余原样
 - **不管**：零 token 直改
 
 #### 主流程
 
 1. S1 用户打开「选元素」 〔界面：Web 草稿看板｜apps/web/src/sketch/DraftStage.tsx〕
-2. S2 用户点中草稿里的一个元素，它被框出 〔界面：Web 草稿看板｜apps/web/src/sketch/DraftStage.tsx〕
+2. S2 用户点中草稿里的元素，它被框出；按住 Shift 再点可加选或减选 〔界面：Web 草稿看板｜apps/web/src/sketch/DraftStage.tsx〕
 3. S3 在输入框写一句 〔界面：Web 草稿本输入框｜apps/web/src/sketch/SketchComposer.tsx〕
 4. S4 用户发送（API-CORE-006） 〔界面：Web 草稿本输入框｜apps/web/src/sketch/SketchComposer.tsx〕
-5. S5 后台只改那一块，落成草稿的新一版 〔无界面〕
+5. S5 后台一次调用只改选中的几块，落成草稿的新一版 〔无界面〕
 6. S6 看板换成新版，选中清掉 〔界面：Web 草稿看板｜apps/web/src/sketch/DraftStage.tsx〕
 
 #### 分支
 
-> 分支未与用户逐类核对：S1–S6
+> 分支未与用户逐类核对：S1、S3–S6
+
+##### S2 点选
+
+| 类型 | 分支 | 结果 | 依据 | 测试 |
+| --- | --- | --- | --- | --- |
+| 边界 | 按住 Shift 点已选中的元素 | 把它从选中里去掉 | PAGE-SKETCH | TC-EDIT-041 |
+| 边界 | 加选的元素与已选的互相包含 | 只留外面那一块，提示已合并到外层 | PAGE-SKETCH | TC-EDIT-041 |
+| 边界 | 已选满 8 块再加选 | 不加，提示最多 8 块 | PAGE-SKETCH；API-CORE-006 | TC-EDIT-041 |
 
 ##### S4 发送
 
@@ -260,6 +272,7 @@
 | 并发 | 点选之后这张草稿已出了新一版 | 409 /errors/revision-conflict，重新点选 | /errors/revision-conflict；API-CORE-006 | TC-CORE-117 |
 | 失败 | 一分钟内发得太多 | 429 /errors/rate-limited | /errors/rate-limited；API-CORE-006 | 无用例 |
 | 失败 | 元素在别处的改动里已被换掉 | 作业失败，提示重新点选〔提示：这一块已经变了，重新点一下〕 | 迁移 ENT-GenerationJob running→failed「生成失败」；API-CORE-006 | 无用例 |
+| 失败 | 模型回来的块对不上选中的几块 | 补问一轮；仍对不上则作业失败，草稿不变 | 迁移 ENT-GenerationJob running→failed「生成失败」；API-CORE-006 | TC-EDIT-041 |
 
 #### 待决策
 
@@ -372,70 +385,68 @@
 #### 概要
 
 - **执行者**：本机用户
-- **触发**：在设置「使用记录」一节打开开关
+- **触发**：在设置「系统」一节打开「使用记录」
 - **进入条件**：无
 - **结果**：之后的操作、输入与模型调用都留在本机，删掉的留归档
 - **不管**：分析报告、上传到外部、自动清理
 
 #### 主流程
 
-1. S1 用户在设置里打开「使用记录」（API-CORE-050） 〔界面：Web 设置弹层｜apps/web/src/settings/RecordSection.tsx〕
+1. S1 用户在设置「系统」里打开「使用记录」（API-CORE-050） 〔界面：Web 设置弹层｜apps/web/src/settings/RecordSection.tsx〕
 2. S2 用户照常在画布与草稿本里操作和输入 〔界面：Web 画布｜apps/web/src/pages/Canvas.tsx、apps/web/src/pages/Sketch.tsx〕
 3. S3 浏览器把攒下的事件成批写进本机库（API-CORE-051） 〔无界面〕
 4. S4 后台每调一次模型，存下完整提示词与原始回复 〔无界面〕
 5. S5 外部 agent 每调一次 MCP 工具，服务端记一条 〔无界面〕
 6. S6 删屏、删项目、清掉没发出的图之前，先拷进归档 〔无界面〕
-7. S7 用户在设置里看已记的条数、占用与存放位置（API-CORE-049） 〔界面：Web 设置弹层｜apps/web/src/settings/RecordSection.tsx〕
+7. S7 用户在设置「系统」里看已记的条数、占用与存放位置（API-CORE-049） 〔界面：Web 设置弹层｜apps/web/src/settings/RecordSection.tsx〕
 
 #### 分支
-
-> 分支未与用户逐类核对：S1–S7
 
 ##### S1 打开记录
 
 | 类型 | 分支 | 结果 | 依据 | 测试 |
 | --- | --- | --- | --- | --- |
-| 边界 | 关掉开关 | 之后不再记，已记的留着 | API-CORE-050；INV-CORE-007 | 无用例 |
-| 失败 | 请求来源不在本机名单 | 403 /errors/forbidden，开关不变 | /errors/forbidden；API-CORE-050 | 无用例 |
+| 边界 | 关掉开关 | 之后不再记，已记的留着 | API-CORE-050；INV-CORE-007 | TC-CORE-144 |
+| 失败 | 请求来源不在本机名单 | 403 /errors/forbidden，开关不变 | /errors/forbidden；API-CORE-050 | TC-CORE-144 |
 
 ##### S3 成批写进本机库
 
 | 类型 | 分支 | 结果 | 依据 | 测试 |
 | --- | --- | --- | --- | --- |
-| 并发 | 开关已关，别的标签页还在发 | 整批丢弃，不写库 | 竞态「关掉记录时别的标签页还在发事件」；API-CORE-051 | 无用例 |
-| 失败 | 一批超过 200 条或单条过大 | 400 /errors/validation，整批不写 | /errors/validation；API-CORE-051 | 无用例 |
-| 失败 | 请求来源不在本机名单 | 403 /errors/forbidden，整批不写 | /errors/forbidden；API-CORE-051 | 无用例 |
-| 失败 | 本机服务连不上 | 事件留在浏览器里下次再发 | §15 本机使用记录；API-CORE-051 | 无用例 |
-| 边界 | 密码框与通道密钥框 | 不记它们的内容 | 字段 record_events.data；INV-CORE-006 | 无用例 |
-| 边界 | 同一批重发了一次 | 重复的条目跳过 | API-CORE-051 | 无用例 |
+| 并发 | 开关已关，别的标签页还在发 | 整批丢弃，不写库 | 竞态「关掉记录时别的标签页还在发事件」；API-CORE-051 | TC-CORE-145 |
+| 失败 | 一批超过 200 条或单条过大 | 400 /errors/validation，整批不写 | /errors/validation；API-CORE-051 | TC-CORE-145 |
+| 失败 | 请求来源不在本机名单 | 403 /errors/forbidden，整批不写 | /errors/forbidden；API-CORE-051 | TC-CORE-145 |
+| 失败 | 本机服务连不上 | 事件留在浏览器里下次再发 | §15 本机使用记录；API-CORE-051 | TC-CORE-146 |
+| 边界 | 密码框与通道密钥框 | 不记它们的内容 | 字段 record_events.data；INV-CORE-006 | TC-CORE-146 |
+| 边界 | 同一批重发了一次 | 重复的条目跳过 | API-CORE-051 | TC-CORE-145 |
 
 ##### S4 记模型调用
 
 | 类型 | 分支 | 结果 | 依据 | 测试 |
 | --- | --- | --- | --- | --- |
-| 失败 | 模型报错或超时 | 照样记一条，带错误与重试次数 | /errors/provider-unavailable；字段 model_calls.error | 无用例 |
-| 失败 | 记录写不进去 | 作业照常完成，只在服务日志记一行 | §15 本机使用记录；ADR-035 | 无用例 |
-| 边界 | 作业交给本机会话 | 只记投递出去的那段指令 | 字段 model_calls.purpose | 无用例 |
+| 失败 | 模型报错或超时 | 照样记一条，带错误与重试次数 | /errors/provider-unavailable；字段 model_calls.error | TC-CORE-147 |
+| 失败 | 记录写不进去 | 作业照常完成，只在服务日志记一行 | §15 本机使用记录；ADR-035 | TC-CORE-147 |
+| 边界 | 作业交给本机会话 | 只记投递出去的那段指令 | 字段 model_calls.purpose | TC-CORE-147 |
 
 ##### S5 记 MCP 调用
 
 | 类型 | 分支 | 结果 | 依据 | 测试 |
 | --- | --- | --- | --- | --- |
-| 边界 | 参数里带整屏 HTML | 超过 2000 字的字段只记长度 | 字段 record_events.data | 无用例 |
+| 边界 | 参数里带整屏 HTML | 超过 2000 字的字段只记长度 | 字段 record_events.data | TC-CORE-148 |
 
 ##### S6 先拷进归档
 
 | 类型 | 分支 | 结果 | 依据 | 测试 |
 | --- | --- | --- | --- | --- |
-| 边界 | 开关关着 | 照旧直接删，不留归档 | API-CORE-018；INV-CORE-007 | 无用例 |
-| 失败 | 拷贝失败 | 照常删除，服务日志记一行 | §15 本机使用记录；ADR-035 | 无用例 |
-| 边界 | 新草稿失败或取消后删掉的空草稿 | 同样留归档 | API-CORE-018 | 无用例 |
+| 边界 | 开关关着 | 照旧直接删，不留归档 | API-CORE-018；INV-CORE-007 | TC-CORE-149 |
+| 失败 | 拷贝失败 | 照常删除，服务日志记一行 | §15 本机使用记录；ADR-035 | TC-CORE-149 |
+| 边界 | 新草稿失败或取消后删掉的空草稿 | 同样留归档 | API-CORE-018 | TC-CORE-149 |
 
 ##### S7 看已记的情况
 
 | 类型 | 分支 | 结果 | 依据 | 测试 |
 | --- | --- | --- | --- | --- |
-| 失败 | 请求来源不在本机名单 | 403 /errors/forbidden，这一节不显示数字 | /errors/forbidden；API-CORE-049 | 无用例 |
+| 失败 | 请求来源不在本机名单 | 403 /errors/forbidden，这一节不显示数字 | /errors/forbidden；API-CORE-049 | TC-CORE-144 |
 | 边界 | 对象存储不在本机 | 存放位置不显示 | API-CORE-049 | 无用例 |
 
 #### 待决策
@@ -467,6 +478,75 @@
 | S5 | `apps/api/src/mcp/ctx.ts#wrap` |
 | S6 | `apps/api/src/services/record.ts#archiveScreen`；`apps/api/src/services/record.ts#archiveProject`；`apps/api/src/worker/index.ts#sweepStorage` |
 
+### FLOW-USAGE · 用量台账与看板
+
+#### 概要
+
+- **执行者**：本机用户
+- **触发**：打开设置（缺省落在「用量」），或切换统计范围
+- **进入条件**：无
+- **结果**：看到近 90 天的活动，以及所选范围里按天、模型、项目与任务类型的用量
+- **不管**：预算与上限、换算成钱、导出
+
+#### 主流程
+
+1. S1 作业结束时记一条台账，带上项目、任务类型与模型名（ADR-036） 〔无界面〕
+2. S2 用户打开设置「用量」，先看到近 90 天的活动日历（API-CORE-052） 〔界面：Web 设置弹层｜apps/web/src/settings/UsageSection.tsx〕
+3. S3 用户切换统计范围，看板、柱图与排行跟着换（API-CORE-052） 〔界面：Web 设置弹层｜apps/web/src/settings/UsageSection.tsx〕
+4. S4 用户悬停柱子、日历格或排行行，看各模型的数与占比 〔界面：Web 设置弹层｜apps/web/src/settings/UsageSection.tsx〕
+
+#### 分支
+
+##### S1 记一条台账
+
+| 类型 | 分支 | 结果 | 依据 | 测试 |
+| --- | --- | --- | --- | --- |
+| 边界 | 作业交给本机 agent | 不记台账 | API-CORE-017 | TC-CORE-140 |
+| 边界 | 作业中途取消 | 照样记已花的 token | 场景「取消作业仍记台账」 | TC-CORE-017 |
+| 边界 | 之后项目或模型被删 | 台账里留着当时的名字 | ADR-036 | TC-CORE-140 |
+
+##### S2 打开看板
+
+| 类型 | 分支 | 结果 | 依据 | 测试 |
+| --- | --- | --- | --- | --- |
+| 失败 | 读取失败或来源不在本机名单 | 这一节写错误并给「重试」，别的节照常 | /errors/forbidden；API-CORE-052 | TC-CORE-141 |
+| 边界 | 还没有任何用量 | 日历全灰，图表与排行写「还没有用量」 | API-CORE-052 | TC-CORE-141 |
+
+##### S3 切换范围
+
+| 类型 | 分支 | 结果 | 依据 | 测试 |
+| --- | --- | --- | --- | --- |
+| 边界 | 这段时间没有用量 | 看板写 0，图表区写「这段时间没有用量」 | API-CORE-052 | TC-CORE-141 |
+| 边界 | 「全部」跨度超过 60 天 | 每日 Token 改按周汇总，横轴写日期范围 | API-CORE-052 | TC-CORE-140 |
+| 失败 | 范围或时区参数不对 | 400 /errors/validation | /errors/validation；API-CORE-052 | TC-CORE-140 |
+
+##### S4 看占比
+
+| 类型 | 分支 | 结果 | 依据 | 测试 |
+| --- | --- | --- | --- | --- |
+| 边界 | 模型已删除 | 灰色，名字旁标「已删除」，照样计入 | API-CORE-052；ADR-036 | TC-CORE-140、TC-CORE-141 |
+| 边界 | 项目已删除 | 用删除前的名字，标「已删除」 | API-CORE-052；ADR-036 | TC-CORE-140 |
+| 边界 | 迁移前就查不到项目的记录 | 归「已删除的项目」，任务类型算「其他」 | ADR-036 | TC-CORE-140 |
+| 边界 | 模型或项目改过名 | 显示现在的名字 | API-CORE-052 | TC-CORE-140 |
+
+#### 待决策
+
+无。
+
+另见：FLOW-SETTINGS
+
+#### 关联
+
+- **契约锚点**：API-CORE-017；API-CORE-052；ADR-036
+- **上游**：—
+- **下游**：—
+- **守住的不变量**：—
+
+| 步骤 | 位置 |
+| --- | --- |
+| S1 | `apps/api/src/services/usage.ts#recordUsage` |
+| S2–S4 | `apps/web/src/settings/UsageSection.tsx#UsageSection`；`apps/api/src/services/usage.ts#usageStats` |
+
 ## L3. 业务规则
 
 无。
@@ -480,8 +560,8 @@
 | INV-CORE-003 | 草稿本里的造与改只出一屏一版 | API-CORE-010；API-AGENT-002 | TC-CORE-102、TC-CORE-110 |
 | INV-CORE-004 | 项目里的屏与组件从不引用草稿 | ADR-031；API-CORE-047 | TC-CORE-107、TC-CORE-108 |
 | INV-CORE-005 | 写回覆盖只给目标屏加一条新修订，不改它已有的修订 | API-CORE-047；ADR-032 | TC-CORE-114 |
-| INV-CORE-006 | 密码、通道密钥与签名地址从不进使用记录 | ADR-035；API-CORE-051 | 无用例 |
-| INV-CORE-007 | 记录开关关着时不写事件、模型调用与归档 | API-CORE-050；ADR-035 | 无用例 |
+| INV-CORE-006 | 密码、通道密钥与签名地址从不进使用记录 | ADR-035；API-CORE-051 | TC-CORE-145、TC-CORE-146 |
+| INV-CORE-007 | 记录开关关着时不写事件、模型调用与归档 | API-CORE-050；ADR-035 | TC-CORE-145、TC-CORE-149 |
 
 ## 2. 背景 / 目标 / 非目标
 
@@ -547,7 +627,8 @@
 | 聚焦 | 画布上某屏由截图态切换为活 iframe 态 | `focus` | 前端状态 |
 | 原型播放 | 在聚焦的屏内点链接沿应用地图跳转 | `play` | 前端状态 |
 | 派活 | 把一个作业交给本机 agent 去做（v0.32：就是 `runner=agent` 的作业本身，没有单独的任务单据） | `runner=agent` | `ENT-GenerationJob` |
-| 用量台账 | 每次作业消耗的 token 与屏数的只增记录 | `usage_ledger` | `ENT-UsageEntry` |
+| 用量台账 | 每次作业消耗的 token 与屏数的只增记录，v1.24 起带上当时的项目、任务类型与模型名 | `usage_ledger` | `ENT-UsageEntry` |
+| 通道 | 一份能出屏的模型配置（类型、模型、端点、密钥）；界面上叫「模型」（v1.24），文档与代码沿用「通道 / channel」 | `channel` | `ENT-Channel` |
 | 硬上限 | （v0.32 删除）本地版不设上限，台账只记不拦 | — | — |
 | 本机 agent | `runner=agent` 作业的执行者：本机正在运行的一个 Claude Code 交互式会话（v0.34：作业经它的 inbox socket 投递进去，由它经 MCP 回写并收口；v0.32 的无头 `claude -p` 子进程与更早的伴侣进程都已删除） | `agentDelivery` | `ENT-GenerationJob`（`runner` 字段、`input.runner.sessionId`） |
 | QUILT_HOME | 本地版的全部数据目录，默认 `~/.quilt`：`db/`（PGlite）、`objects/`、`config.env`、`agent/`（子进程工作目录）、`quilt.log` | `QUILT_HOME` | — |
@@ -569,7 +650,7 @@
 | REQ-CORE-005 | 聚焦交互：双击某屏切换为活 iframe（独立预览域），可点按滚动输入，Esc 退出 | 目标 ② | P0 / M1 |
 | REQ-CORE-006 | **改**：输入框有目标标签 + 发送即改（`edit_screens`；v1.05 起模型只回改动的补丁，对不上当前 HTML 时退回整屏重写，`ADR-007` v1.05 修订），版数 > 1 时每个目标各得 N 版候选；目标标签只被「点屏（替换 / 加选）/ 标签 × / 目标区「清空」」改变，点空白只清画布高亮不清标签，输入框内 `Esc` 有草稿清草稿（`⌘Z` 可撤销，v0.74）、无草稿失焦、都不清标签；目标区始终显示动词行「造 1 屏 × 3 版 · 此处」/「改 3 屏」/「改全部 12 屏 × 2 版 = 24 次调用」；`⌘A` + 发送 = 普通改全部；消息记录受影响屏；模型看得到每个目标屏此前已生效的用户指令（最近 18 条，取法见 `ADR-012` v0.87 修订） | 目标 ③ | P0 / M1 · M9 改写 · v0.87 补充 |
 | REQ-CORE-007 | 屏幕修订树：每次生成/编辑产生新修订并记父修订；可回溯到任意一版（回溯 = 以旧版内容建新修订，父修订记被回溯到的那一版，v0.87）；修订面板按分支折叠、候选组内标「未选用」并可随时采用 | 目标 ③ | P0 / M1 · M9 改写 · v0.87 补充 |
-| REQ-CORE-008 | 用量台账：每个作业结束记一条（token 进出、屏数、驱动 / 模型），设置弹层「本月用量」按月汇总、按驱动分列；发送前动词行的预计调用数与作业超时共用一个预估函数 `estimateJob`（v1.03：造屏 = 屏数 × 版数 + 规划 1 次 + 入口屏补链至多 1 次，钉死路由的懒生成不规划、补链至多 1 次，造变体两样都没有；改屏 = 屏数 × 版数；重生成一块、改组件各 1 次。v0.43 起没有修复轮，此前的「×（1 + 修复轮）」把调用数与作业时限都算成约两倍）。**v0.32 起无硬上限、不拦截**——本地版花的是用户自己的 Key / 订阅，台账只为可见 | 非目标 ④ 的最小替代 | P0 / M1 · M10 改写 |
+| REQ-CORE-008 | 每个作业结束记一条用量，设置「用量」按天、模型、项目与任务类型展开 | 非目标 ④ 的最小替代 | P0 / M1 · M10 · v1.24 改写 |
 | REQ-CORE-015 | **选（候选）**：候选 = 同一作业产出的兄弟修订（`jobId` + `candidateIndex`），current 默认第 1 版、不选也不阻塞连线 / 导出 / agent 读屏；卡片挂「N 版 · 展开」角标、后面叠错位底板；点角标**在画布上就地展开**（v0.34）：第 1 版留在卡片原位，其余版横向排成一行铺到右边，每格与卡片同尺寸、随画布缩放，里面是该版的**活 iframe**（可滚动 / 悬停 / 填表）；动作收进每格上方右缘对齐的浮层胶囊（屏幕尺寸的图标按钮）：「第 k 版 / 当前」标签、「就用这一版」、「采用这一组（N 屏）」，第 1 格带「收起」，`Esc` 收起（焦点在候选 iframe 里时也算）；采用即结清该批并自动收起。整组采用按服务端逐屏的成败分三种反馈：全采用、部分跳过、全跳过；**一屏都没采用时不刷新也不收起**，展开层留给用户重试或逐屏采用 | 目标 ③ | P0 / M9 · v0.34 改写 |
 | REQ-CORE-016 | **持久记忆**：应用简介（首轮规划器把用户那句话扩写成 3–5 句落到 `projects.brief`，设计系统面板可编辑，每次调用都带）；样板屏（`projects.exemplarScreenId`，工具栏「设为样板」，默认首轮第 1 屏，永远取其 current 作参考屏）；屏注册表（`screens.purpose` 由规划器落库，进每次调用的稳定前缀） | 目标 ①④ | P0 / M9 |
 | REQ-CORE-009 | 项目持久化与恢复：刷新/重登后画布、对话、修订完整恢复 | 地基 | P0 / M1 |
@@ -580,15 +661,15 @@
 | REQ-PROTO-004 | 导出单文件可交互原型（全部屏 + hash 路由） | 目标 ② | P1 / M2 |
 | REQ-PROTO-005 | **叠层屏**（v0.63）：屏的呈现方式 `presentation = push \| overlay`（默认 push）。播放时跳到 overlay 屏不换 DOM，而是压在当前屏上（暗遮罩 + 该屏根元素），点遮罩或后退关掉；跳到 push 屏先清掉全部叠层；导出原型同构（起始屏取第一张整屏；直接打开叠层的 hash 时先把起始屏垫在底下）。生成侧规划器 / 懒生成 / MCP 都能指定；叠层屏的提示词只写弹层本身、根透明、不画遮罩。呈现是元数据：改它不重烤修订，预览域与截图按它临时注入透明背景（截图带 alpha，改了就重拍），画布卡片铺在暗底上并标「叠层」；默认屏与它的变体呈现方式一致。入口：工具栏「设为叠层 / 设为整屏」、`API-CORE-012 presentation`、MCP | 目标 ② | P1 / v0.63 |
 | REQ-EDIT-001 | 选中屏内元素，零 token 改文案、样式与跳转，落为新修订 | 目标 ③ | P0 / M3 |
-| REQ-EDIT-002 | 选中元素用 AI 只重写这一块，整段替换 | 目标 ③ | P0 / M3 |
+| REQ-EDIT-002 | 选中一块或几块，用 AI 一次只重写它们 | 目标 ③ | P0 / M3 |
 | REQ-EDIT-003 | 设计系统面板改色板、字体、圆角与约定，回刷所有屏（见 `PAGE-CANVAS`） | 目标 ④ | P0 / M3 · M9 改写 · v0.44 扩写 |
 | REQ-EDIT-004 | 已废弃：批注整体撤下，改一块用选元素加输入框 | 目标 ③ | P0 / M6 |
 | REQ-EDIT-005 | **品牌色板**（v0.35）：设计系统可挂一份显式色板逐键覆盖种子派生值，亮 / 暗各一套，`colorMode` 选当前生效的那套（切换 = 换一套 token 再按原路回刷）；用途是把外部品牌规范的精确色值原样搬进来——种子派生只能算出邻近色（`#284CCA` 派生出 `#3052d0`），品牌规范要的是原值；token 色键新增 `success / onSuccess / warning / onWarning`，无覆盖时由种子按固定色相派生，保证任何项目都有语义色可用；面板逐键标「派生 / 品牌」，可整份清空回到纯派生。**未覆盖键的派生值随模式走**：`colorMode=dark` 时底座取 Material 暗色方案、语义色明度切到 80/20（与 `error`/`onError` 同规则），否则暗色项目会得到一套亮色派生值（`text-on-surface-variant` 压在 `bg-surface-variant` 上只有 1.39:1）。暗色色板被撤掉时 `colorMode` 回落 `light`，`dark:{}` 等同于没有暗色色板 | 目标 ④ | P1 / v0.35 |
 | REQ-EDIT-006 | **共享组件**（v0.46）：项目级的一段 HTML 作为画布上的一等对象——有名字、活渲染、可拖、可点选 / 框选、可当输入框目标。屏**引用**它：屏 HTML 里只放占位根元素 `<nav data-component="TabBar"></nav>`，每次写入屏时（生成 / 改屏 / 子树重生成 / agent 经 MCP 写入 / 组件改动后的回刷）在注入阶段确定性展开成正式 HTML，改组件一次所有用它的屏零 LLM 同步（新修订 `source_kind=component`）。三条来路：检查器选中元素「记为共享组件」（同时把其他屏里对应的元素换成它——同标签、同深度、类名最相近）、工具栏「新建组件」建空组件再在输入框描述、agent 经 MCP `create_component`。改法三种：只框选 1 个组件发「改」→ `edit_component` 作业（1 次模型调用 + 确定性回刷；模型看得到这个组件此前改成功的用户指令，v0.87 `ADR-012`；通道选本机会话时投递到会话，由会话经 MCP `quilt.update_component` 写回，v0.99）；`PATCH` 直改 HTML / 名字（乐观锁 `version`）；屏 + 组件一起框选 / 造屏时框选组件 → 完整 HTML 进上下文。上下文分级：每个组件永远进稳定前缀一张卡（名字 + 确定性一行摘要 + 占位写法，约 30 token），完整 HTML 只在框选了它或目标屏本来就用它时附上。参数克制：导航型组件的激活项按屏路由自动算（href 等于当前屏路由的链接加 `activeClass` / 去 `inactiveClass`、置 `aria-current="page"`）；随屏变的文字用 `data-slot` 槽位。实例里的元素锁定直改（`409 /errors/component-locked`），出口是「改组件」或「脱离共享」；删组件不动屏（已展开的 HTML 留在屏里、只是不再跟着变）。不支持组件套组件；组件里不能有 `<script>` / `<style>` | 目标 ①③④ | P1 / M11 · v0.87 补充 |
 | REQ-CORE-012 | 参考图输入：输入框可贴 / 拖 / 选图片，随消息作为参考进模型（照着这个感觉做，不是复刻成屏）；至多 4 张、单张 ≤ 5 MB。一次贴 / 拖 / 选入几张就同时出几张缩略图（各自「上传中…」）、并行上传；4 张上限按输入框里已有的张数（含还在上传的）算，超出部分当场提示「一条消息最多 4 张参考图」并跳过（v0.74） | 目标 ①④ | P1 / M6 |
 | REQ-CORE-014 | 画布空白处放锚点：双击空白 / 工具栏「新建屏幕」`⌥G` 在该点放一个锚点并聚焦输入框，目标区显示「新屏 · 此处」（可移除）；下一次「造」把屏（一组屏按流程顺序排成一行，包围盒与既有屏相交则整行下移）摆在锚点，无锚点接在最右一屏右侧；规划器声明「既有屏 X 进入新组」时对 X 跑一次现成的「接上跳转」固定指令（指令里把新组路由标为「本次新增」），产生一条可回溯修订，回执列出实际改动的链接；新屏不强制与既有屏连线（`links` 可为空） | 目标 ①④ | P1 / M8 · M9 改写 |
-| REQ-CORE-013 | 生成通道可配置：设置页管理 API 类通道（Anthropic / Gemini / OpenAI 兼容端点：显示名、Endpoint、Key、模型），本机通道（Claude Code / Codex CLI）的可用性 = 命令在 PATH 上，不可用时就地给出安装步骤；两类本机订阅通道（v0.68）：「本机 Claude 订阅」（`kind=agent-sdk`，复用本机 `claude` 登录态）与「本机 Codex 订阅」（`kind=codex`，复用本机 `codex` 的 ChatGPT 登录态，经 `codex exec` 调模型），都没有 Key 与端点、只填模型名；每条可一键验证；只有验证通过的才进输入框下拉；密钥加密落库（v0.32：加密主密钥由首次启动写进 `~/.quilt/config.env`，用户不必手配） | 目标 ①③⑤ | P1 / M7 · M10 改写 |
-| REQ-CORE-011 | 生成通道可选：输入框内选择本次由谁来做——自己在设置页配的云端通道（Claude / Gemini / OpenAI 兼容端点）或本机 agent（交给本机某个 Claude Code 会话或 Codex 线程——选了它再在旁边的会话下拉里选投给谁，见 `REQ-AGENT-003`；Codex 自 v0.68 起）；可选清单与默认值在设置页配置，凭据只在服务端 | 目标 ①③⑤ | P1 / M6 · M10 · v0.34 改写 |
+| REQ-CORE-013 | 在设置「模型」里增删改并验证自己的模型，验证通过的才进输入框下拉 | 目标 ①③⑤ | P1 / M7 · M10 · v1.24 改写 |
+| REQ-CORE-011 | 在输入框里选这一次由哪个模型或本机 agent 来做，凭据只在服务端 | 目标 ①③⑤ | P1 / M6 · M10 · v1.24 改写 |
 | REQ-CORE-017 | **一键安装与本地运行**（v0.32）：`npx quilt-canvas` 首次运行即初始化 `~/.quilt`（PGlite 数据库、对象存储、`config.env` 密钥；v1.03 起目录 0700、`config.env` 0600，每次启动对已有的目录与文件补一次 chmod）、跑迁移、起服务（API + 静态前端同端口，预览域另一端口，只绑 `127.0.0.1`）、自动打开浏览器；第二次启动秒开；截图优先用本机已装的 Chrome / Edge，都没有时提示 `npx playwright install chromium`；`DATABASE_URL` 留空即用内置 PGlite，设了就连外部 Postgres（开发 / 将来 SaaS 用）；不需要 Docker、不需要手写 `.env`；API 与 MCP 只受理本机画布与本机客户端发来的请求（`Host` / `Origin` 校验，v0.75，见 §15） | 目标 ⑥ | P0 / M10 · v0.75 补充 |
 | REQ-CORE-018 | **多选排列**（v0.34）：选中 ≥ 2 屏、未聚焦、未在就地展开候选时，画布顶部出现排列条（在可用区内居中、右端避让侧面板）：左对齐 / 水平居中 / 右对齐 / 上对齐 / 垂直居中 / 下对齐（按选中集合的外接框算），横向等距 / 纵向等距（≥ 3 屏；保住首尾两屏，中间按间隙均分）；点即生效、只动位置变了的屏，落库走 `API-CORE-012` 的位置 PATCH，**等全部 PATCH 有结果再决定**：任一失败就点名哪几屏没排上并重取（成功的那几屏不回滚，它们已经落库） ；**可撤销**（v0.41）：拖动与对齐 / 等距都压进画布的位置撤销栈，`⌘Z` 逐步还原、至多 20 步；**排成一行 / 排成一列**（v0.52，≥ 2 屏）：按固定 80 px 间距把选中的屏排成同一行（同 y）或同一列（同 x），顺序取当前位置（行按 x、列按 y 升序，相同再按另一轴），起点取外接框左上角；落库与撤销同上，撤销标签「排列」 | 目标 ③ | P1 / v0.34 · v0.52 补充 |
 | REQ-CORE-019 | **项目素材库**（v0.35）：项目级素材（logo / 插图 / 模板）上传即有稳定 URL——`SVG / PNG / JPEG / WebP`（类型按文件正文认定，不信客户端给的 `Content-Type`：浏览器按扩展名给，改名的 webp 会以 `image/png` 下发、屏里永远渲染不出来），单个 ≤ 5 MB、每项目 ≤ 50 个；设计系统面板里管理（上传 / 删除 / 复制引用地址），URL 走预览域 `/a/{projectId}/{assetId}`，随项目删除一并清理；素材清单（名字 + URL + 像素尺寸）进每次生成的 prompt，模型用 `<img src="…">` 引用真实素材，不再拿纯色块占位 | 目标 ④ | P1 / v0.35 |
@@ -841,6 +922,11 @@ erDiagram
     int screens
     string driver
     string model
+    uuid project_id
+    string project_name
+    string kind
+    uuid channel_id
+    string channel_label
   }
   RECORD_EVENT {
     bigint id PK
@@ -894,6 +980,7 @@ HTML 与截图正文存对象存储，表内只存 key。**变体**（v0.62 `REQ
 `ENT-RecordEvent`（`record_events`）一行是一条事件：浏览器里的操作与输入（`source=web`）或外部 agent 的一次 MCP 工具调用（`source=mcp`）；`(session_id, seq)` 唯一，重发的批次靠它去重。
 `ENT-ModelCall`（`model_calls`）一行是作业里的一次模型调用，完整提示词与原始回复存在对象存储 `records/model-calls/<日期>/<id>.json`，行里只存 `body_key`。
 两张表都不对项目、屏、作业建外键：删了项目与作业，记录还在；归档放在对象存储 `records/archive/` 下，`storage.gc` 不扫 `records/`。
+**用量台账的快照**（v1.24 `ADR-036`）：`USAGE_ENTRY` 记账时一并写下作业的项目 id 与项目名、任务类型、通道 id 与通道显示名；这几列不建外键，项目、作业与通道删掉之后台账照样能按它们归类。
 
 ## 8. 接口契约 (API-first)
 
@@ -931,7 +1018,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
     - `generate{ prompt, count?: 1|2|3|4|"auto" = 1, versions?: 1–4 = 1, anchor?: {x,y}, route?, fromScreenId?, runner?, imageKeys?, variantOf?, variantName?, presentation? }`（v0.31 三合一；v0.62 `variantOf + variantName` 二者同给 = 造变体：钉死默认屏的路由、`count` 按 1 算、跳过规划器、默认屏作参考屏，`variantOf` 不是本项目的默认屏 → `422 /errors/validation`（建作业时就查，v0.77；此前放在 worker 里判，先回 202、作业随后以英文原因失败，还短暂占着项目级 `generate` 锁）；v0.63 `presentation` 只在懒生成 / 造变体时生效，整组规划由规划器逐屏给）：`count` 为屏数档位——`1` 走单屏规划（`planOneScreen`，路由不得与现有撞车、`links` 只指向现有路由且以空为常态），`2–4` 与 `auto` 走整组规划（`auto` = 空项目 4–6 屏主流程 / 非空项目 2–6 屏子流程；规划器同时给出 `entryFrom`：既有哪一屏进入新组）；`route` 钉死时是懒生成（跳过规划器，`fromScreenId` 作来源屏参考）；`versions` = 每张新屏的候选版数；`anchor` 为画布世界坐标（一组屏按流程顺序自锚点向右排成一行，与既有屏相交则整行下移），缺省接在最右一屏右侧。
       空项目首轮且 `brief` 为空时规划器顺手扩写应用简介落库；样板屏为空时以本次第 1 屏钦定。
       按 `count × versions` 屏计费
-    - `edit_screens{ prompt, screenIds[1..20], versions?: 1–4 = 1, runner?, imageKeys?, componentIds?[0..10] }`（`componentIds` 与 `generate` 同名字段，v0.46 `REQ-EDIT-006`：画布上一起框选的共享组件，它们的完整 HTML 进这一轮的上下文；目标屏本来就放着的组件不必列、服务端自己会附上。）；`regenerate_subtree{ screenId, qid, prompt, expectedRevisionId, runner?, imageKeys? }`（`runner` 同 `edit_screens`，v0.34；`kind:"agent"` 时该作业也投递到会话；`imageKeys` 见下「参考图」）；`apply_design_system{ screenIds[] | all }`；`propose_design_system{ instruction, screenId?, runner? }`（`REQ-EDIT-003`：输出 `output.proposal = { summary, conventions[], tokens?{ seedColor?, fontFamily?, radiusScale? }, regenerate }`，不改任何东西，由 `API-EDIT-002` 确认写入）；`export_prototype{}`
+    - `edit_screens{ prompt, screenIds[1..20], versions?: 1–4 = 1, runner?, imageKeys?, componentIds?[0..10] }`（`componentIds` 与 `generate` 同名字段，v0.46 `REQ-EDIT-006`：画布上一起框选的共享组件，它们的完整 HTML 进这一轮的上下文；目标屏本来就放着的组件不必列、服务端自己会附上。）；`regenerate_subtree{ screenId, qid, qids?[2..8], prompt, expectedRevisionId, runner?, imageKeys? }`（`runner` 同 `edit_screens`，v0.34；`kind:"agent"` 时该作业也投递到会话；`imageKeys` 见下「参考图」。`qids`（v1.26）是一起改的几块，要含 `qid`、不重复、互不包含，否则 `400 /errors/validation`；一次模型调用拿到这几块的原 HTML，每块回一段 `<quilt-block qid="…">…</quilt-block>`，块数或 qid 对不上补问一轮，仍不对作业失败；只换这几块，屏多一版）；`apply_design_system{ screenIds[] | all }`；`propose_design_system{ instruction, screenId?, runner? }`（`REQ-EDIT-003`：输出 `output.proposal = { summary, conventions[], tokens?{ seedColor?, fontFamily?, radiusScale? }, regenerate }`，不改任何东西，由 `API-EDIT-002` 确认写入）；`export_prototype{}`
     - `chat{ prompt, screenIds?[0..20], runner?, imageKeys? }`（v0.45 `REQ-CORE-023`）：`screenIds` 是「用户此刻选中的屏」这一条上下文提示，不是目标锁；`runner` 必须解析为 `agent-sdk` 通道（缺省取第一条已验证的 `agent-sdk` 通道），否则 `400 /errors/validation`（`path: runner`）；项目级同时只有一个 `chat` 在跑，撞上 `409 /errors/screen-busy`；成功时 `output.reply` = 助手最后一段文字、`output.screenIds` = 本作业名下修订所在屏
     - `edit_component{ componentId, prompt, runner?, imageKeys? }`（v0.46 `REQ-EDIT-006`）：改一个共享组件——worker 用 `componentSystemPrompt`（只产出组件自己的单根元素；保留 `data-slot`；导航型标恰好一条 `aria-current="page"`）+ `componentUserPrompt`（当前 HTML + 用在哪几屏 + 这个组件的历史指令，v0.87 `ADR-012`）调**一次**模型，校验（单根、无 `<script>` / `<style>`、不套组件）→ 重算 `activeClass` / `inactiveClass` 与 `summary` → 组件 `version+1` → 对所有放着它的屏做确定性回刷（`progress{ stage:"component_synced", screens: N }`，逐屏 `screen_html_ready` + 截图；有在跑作业的屏跳过并点名）；`estimateJob` = 1 次调用（超时 3 + 1 分钟）；成功时 `output.screenIds` = 回刷到的屏、`output.componentId`；一次一个组件；模型产出不合法 → `failed errorClass=validation`，组件不变。
       `runner.kind=agent`（v0.99）时不调模型：投递到本机会话，由会话经 `quilt.update_component { jobId }` 写回，回刷同一条路，收口见 `REQ-AGENT-003`
@@ -1000,7 +1087,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
   - 错误：`400 /errors/validation`（字段不合规；服务端未配置 `QUILT_SECRETS_KEY` 时也在这里报，点名该变量）
 - **`API-CORE-021` updateChannel / deleteChannel**
   - `PATCH /channels/{id}`，请求 `{ label?, endpoint?, model?, apiKey? }`；`apiKey` 缺省或空串 = 不改；改了 `endpoint` / `model` / `apiKey` 任一项即把 `status` 重置为 `unverified`；响应 `200 ChannelDto`
-  - `DELETE /channels/{id}` → `204`；已在排队 / 运行中的作业若引用该通道，运行时以 `errorClass=validation` 失败并说明「通道已删除」
+  - `DELETE /channels/{id}` → `204`；已在排队 / 运行中的作业若引用该通道，运行时以 `errorClass=validation` 失败并说明「通道已删除」；删之前把用量台账里这个通道的快照名刷成它现在的显示名（v1.24 `ADR-036`）
 - **`API-CORE-022` probeRunner** — 实现 `REQ-CORE-013` 的「验证」
   - `POST /runners/{runnerId}/probe`，`runnerId` 为 `API-CORE-023` 目录里的 id（`channel:<uuid>` / `model:<driver>:<model>` / `agent:<tool>`）；对模型类通道实际发一次最小请求（系统提示「只回复 OK」，`maxTokens` 8；超时按驱动分档：API 类 20 s、本机 Claude 订阅 60 s、本机 Codex 订阅 90 s——后两者每次都拉起本机 CLI 子进程；前端为这个接口等 100 s，见 §8「缓存与超时」）；对 `agent:*` 在 PATH 上找命令并取 `--version`（v0.32）
   - 响应 `200 { ok, latencyMs?, detail?, error? }`；`channel:*` 的结果落库更新 `status` / `lastProbeAt` / `lastError`，其余不持久化
@@ -1026,7 +1113,8 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
 - **`API-CORE-013` listRevisions** — 实现 `REQ-CORE-007`：`GET /screens/{screenId}/revisions`，倒序，`no-store`；每条另带缩略图地址 `thumbUrl`（v1.03，没生成时为 `null`，面板缩略图用它）；每条含 `parentRevisionId`、`candidateIndex`、`candidateSettledAt`（v0.31），面板据此把同批候选折成一组、标出未选用
 - **`API-CORE-014` getRevision**：`GET /screens/{screenId}/revisions/{revisionId}`；响应含 `htmlUrl`（对象存储签名 URL，5 分钟；v0.75 起以附件下发，浏览器里打开是下载而不是渲染，见 §15「对象下发」）、`screenshotUrl`、`lintReport`；修订不可变，`Cache-Control: private, max-age=300`
 - **`API-CORE-015` restoreRevision** — 实现 `REQ-CORE-007`
-  - `POST /screens/{screenId}/revisions/{revisionId}/restore`，请求 `{ expectedRevisionId }`；以该版内容创建新修订（`source_kind=restore`，`parentRevisionId` = 被回溯到的那一版，v0.87：此前记回溯前的 current，沿父链收历史指令时会经过已放弃的分支，见 `ADR-012` v0.87 修订）并置为当前，截图重拍（v0.66：旧版截图可能是按另一种呈现方式拍的，不复用）；响应 `201 { revision }`
+  - `POST /screens/{screenId}/revisions/{revisionId}/restore`，请求 `{ expectedRevisionId }`；以该版内容创建新修订（`source_kind=restore`，`parentRevisionId` = 被回溯到的那一版，v0.87：此前记回溯前的 current，沿父链收历史指令时会经过已放弃的分支，见 `ADR-012` v0.87 修订）并置为当前；响应 `201 { revision }`
+  - 新修订直接引用源修订的 HTML、截图与缩略图对象（v1.27 `ADR-037`，同一屏、同一前缀），不再存副本；截图只在这三条都成立时沿用：源修订的截图还在、截图键的呈现方式（整屏 / 叠层）与这一屏现在的一致、截图的像素尺寸与这一屏现在的设备或画框应拍的尺寸一致；否则照旧重拍（v0.66：旧版截图可能是按另一种呈现方式拍的）
   - 错误：`409 /errors/revision-conflict`、`409 /errors/screen-busy`
 - **`API-CORE-016` getPreviewDocument** — 实现 `REQ-CORE-005`、`REQ-PROTO-001`、`REQ-PROTO-005`（v0.63：`presentation=overlay` 的屏下发时在 `</head>` 前注入 `<style data-quilt-overlay>html,body{background:transparent}</style>`，运行时协议增 `quilt:overlay { html, route }`（压一层：45% 暗遮罩 + 该 body 的根元素，遮罩点击回 `quilt:overlay-dismiss`）、`quilt:overlay-close`（关最上一层）；`quilt:swap` 先清掉全部叠层）
   - 预览域：`GET https://{preview-host}/p/{projectId}/{screenId}?rev={revisionId}&t={signedToken}`；返回该修订 HTML（已含前置样式与运行时脚本；v0.34 起下发时把存的运行时换成当前版本，见 `ADR-003`）；`t` 为 HMAC 签名（含 projectId、过期 10 分钟；v0.34 起过期时间对齐到 30 分钟窗口，同窗口内 URL 稳定——截图 / 修订 HTML 的对象签名同理，否则画布每次刷新都让全部卡片重新请求截图），由 `API-CORE-004` 随屏幕下发
@@ -1052,6 +1140,9 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
   - 无 cookie、无登录；错误 `403 /errors/preview-token-invalid`、`404 /errors/not-found`
   - 按节截图（P3）：作业 `kind=capture_specimen`（`API-CORE-006`，`input { widths?: [390,1440], modes?: ["light","dark"], contrast?: boolean }`），产出 `output { shots:[{ section, width, mode, media, key, url }], environment:{ os, browser, fonts:{ <section>: string[] } } }`；截图固定 DPR 2，`fonts` 由 CDP `CSS.getPlatformFontsForNode` 按节读出；不计模型额度
 - **`API-CORE-017` getUsage** — 实现 `REQ-CORE-008`：`GET /me/usage`；响应 `{ month, screens, tokensIn, tokensOut, byDriver:[{ driver, model, screens, tokensIn, tokensOut }], inflight:{ calls, screens } }`——`inflight` 由 queued / running 作业的 payload 按 `estimateJob` 派生（`runner=agent` 的作业计 0），不落库；v0.32 起无 `quota`、不拦截；`no-store`
+  - 台账只记 `runner=model` 的作业：交给本机 agent 的作业花的是会话自己的额度，不进台账；v1.24 起设置里的看板改用 `API-CORE-052`，本接口留给脚本与用例
+  - 错误：`403 /errors/forbidden`（来源校验，同全部 `/v1/*`）
+  - `estimateJob` 是发送前动词行的预计调用数、作业超时与 `inflight` 共用的预估函数（v1.03）：造屏 = 屏数 × 版数 + 规划 1 次 + 入口屏补链至多 1 次，钉死路由的懒生成不规划、补链至多 1 次，造变体两样都没有；改屏 = 屏数 × 版数；重生成一块、改组件各 1 次（v0.43 起没有修复轮）
 - **`API-CORE-018` deleteScreen** — 实现 `REQ-CORE-004`：`DELETE /screens/{screenId}`；`204`；进行中作业占用时 `409 /errors/screen-busy`；删除后重新派生应用地图
   - 使用记录开着时（v1.22 `ADR-035`）先归档再删：这一屏（含变体）的行、全部修订行写成清单，连同修订 HTML、截图拷到 `records/archive/<日期>/screen-<id>/`；草稿本里新草稿失败或取消后自动删掉的空草稿同样归档；拷贝失败不挡删除，服务日志记一行
 
@@ -1066,6 +1157,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
   - **项目被删**：删完发 `screen_changed { reason: "project_deleted" }`，事件流写完这一条就结束；EventSource 随后重连拿到 `404`、不再重连，画布重取详情得 `404`，由画布的加载错误态接手（v0.77；此前流一直开着、只有 15 s 一次的 ping，其他标签页停在已删除的项目上，之后每个操作都 404）
   - 草稿本（`REQ-CORE-040`）：`job_changed` 的 `screen_planned` 裁剪版另带 `screenId`，草稿本页据此把本页发出的新草稿摆上看板；本机会话写出的新草稿靠带同一 `jobId` 的 `screen_changed` 认领
 - **`API-CORE-031` deleteProject** — 实现 `REQ-CORE-002`（v0.34）：`DELETE /projects/{projectId}`；行级联删掉屏 / 修订 / 作业 / 消息 / 连线 / 设计系统，对象存储按前缀 `projects/{id}/` 清掉修订 HTML、截图与导出；有 `queued` / `running` 作业时 `409 /errors/project-busy`（worker 还在往里写）；删完给还开着这个项目的画布发 `project_deleted` 并关掉它们的事件流（`API-CORE-030`，v0.77）；响应 `204`
+  - 删之前把用量台账里这个项目的快照名刷成它现在的名字（v1.24 `ADR-036`），删掉后看板照样按最后的名字显示
   - 使用记录开着时（v1.22 `ADR-035`）先归档再删：项目、设计系统、屏、修订、消息、作业与作业事件、组件、素材的行写成清单，连同 `projects/{id}/` 下的全部对象拷到 `records/archive/<日期>/project-<id>/`；拷贝失败不挡删除，服务日志记一行
 
 - **`API-CORE-046` getSketchbook** — 实现 `REQ-CORE-040`（Owner 2026-10-20 签字，`ADR-030`）
@@ -1103,17 +1195,32 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
   - `GET /record`；响应 `200 { enabled, since, events, modelCalls, archived, bytes, dir }`；`no-store`
   - `since` 是最近一次打开的时间，没开过为 `null`；三个计数是全部已记的条数，关掉后不清零
   - `bytes` 是对象存储 `records/` 前缀的合计字节；`dir` 是它在本机的绝对路径，对象存储不是本地 fs 时为 `null`
+  - 带 `brief=1` 时只回 `{ enabled, since }`，不数条数、不统计占用：浏览器每 60 s 重取开关用它
   - 错误：`403 /errors/forbidden`（来源校验，同全部 `/v1/*`）
 - **`API-CORE-050` updateRecording** — 实现 `REQ-CORE-047`
   - `PATCH /record`，请求 `{ enabled: boolean }`；响应 `200`，体同 `API-CORE-049`
   - 从关到开时 `since` 置为当前时间；关掉或重复设同一个值不改 `since`；打开与关掉各写一条 `type=record` 的事件（关掉那条是最后一条）
   - 改完的那个标签页当场开始或停止采集；别的标签页每 60 s 重取一次开关，期间发来的批次由服务端按开关丢弃
   - 错误：`400 /errors/validation`（`enabled` 不是布尔）、`403 /errors/forbidden`
+- **`API-CORE-052` getUsageStats** — 实现 `REQ-CORE-008`（v1.24，`ADR-036`）
+  - `GET /me/usage/stats?range=7d|30d|all&utcOffset=<分钟>`；`no-store`
+  - 响应 `200 { range, from, to, unit, totals, models[], buckets[], projects[], kinds[], activity, inflight }`
+  - 自然日按 `utcOffset` 切（浏览器的 `-getTimezoneOffset()`，−840～840，缺省 0）；`7d` / `30d` 是含今天的 7 / 30 个自然日，`all` 从第一条台账那天到今天
+  - `unit` 是 `day` 或 `week`：`all` 跨度超过 60 天按周（周一起）汇总，其余按天；`buckets` 每项 `{ from, to, jobs, tokens: { <模型键>: n } }`，没有用量的日子也给一项
+  - `totals` 是 `{ jobs, tokensIn, tokensOut, screens, sketchScreens, maxJobTokens }`，`sketchScreens` 是草稿本里出的屏，`maxJobTokens` 是 Token 最多的那一次作业
+  - `models` 列出全部时间里出现过的模型，按全部时间的 Token 降序（界面按这个顺序取颜色，换范围不变色）；每项 `{ key, label, modelId, driver, deleted, tokensIn, tokensOut, jobs, lastAt }`，数是所选范围内的
+  - 模型键：台账有通道 id 时就是它；没有时（作业走的是服务端缺省驱动），恰有一个通道与它同驱动同模型就归到那个通道，否则是 `driver:model`；`label` 优先通道现在的显示名，通道删了用快照，没有快照用模型 ID；`deleted` = 通道表里已没有这个 id（没有通道 id 的，看有没有同驱动同模型的通道）
+  - `projects` 每项 `{ id, name, deleted, sketchbook, tokens, screens, byModel: { <模型键>: n } }`，按 Token 降序；项目还在用现在的名字，删了用快照；没有项目快照的旧记录合成一项 `{ id: null, name: null, deleted: true }`，界面写「已删除的项目」
+  - `kinds` 每项 `{ kind, jobs, byModel: { <模型键>: 次数 } }`，按次数降序；没有快照的旧记录 `kind` 为 `other`
+  - 没调过模型的作业（台账 `driver` 为空；v1.28 之前记成缺省驱动的导出与套用设计系统一样按 `kind` 认出来）计入作业次数、任务类型与活动日历，不归任何模型：不进 `models`、各 `byModel` 与 `topModel`；界面上这类任务类型的条画成中性灰
+  - `activity` 固定是含今天的近 90 天，与 `range` 无关：`{ from, to, days: [{ date, jobs }], topModel, topShare }`，`topModel` 是这 90 天 Token 最多的模型键、`topShare` 是它占这 90 天 Token 的比例（0～1），没有用量时都为 `null`
+  - `inflight` 同 `API-CORE-017`
+  - 错误：`400 /errors/validation`（`range` 不在枚举里、`utcOffset` 不是 −840～840 的整数）、`403 /errors/forbidden`
 - **`API-CORE-051` recordEvents** — 实现 `REQ-CORE-047`
   - `POST /record/events`，请求 `{ sessionId, events: [{ seq, at, page, path?, type, target?, projectId?, screenId?, data? }] }`；1–200 条，单条序列化后 ≤ 16 KB；响应 `204`
   - 开关关着时整批丢弃，照样 `204`（`INV-CORE-007`）；开着时整批写进 `record_events`，服务端补 `source=web` 与 `user_id`，`at` 用浏览器给的
   - `(session_id, seq)` 撞了的行跳过：浏览器重发同一批不会写两遍，所以不要 `Idempotency-Key`
-  - `type` 与各类型的 `data` 见 §9；`sessionId` 每打开一次页面一个，`seq` 在这个页面里从 1 递增
+  - `type` 与各类型的 `data` 见 §9；`path` 存进 `data.path`；`sessionId` 每打开一次页面一个，`seq` 在这个页面里从 1 递增
   - 浏览器端攒满 50 条或过 5 s 发一次，页面隐藏或关闭时用 `keepalive` 发出剩下的；发失败的留在缓冲里下次再发，缓冲最多 2000 条，再多丢最旧的
   - 错误：`400 /errors/validation`（条数、单条大小、`type` 不在枚举里）、`403 /errors/forbidden`
 
@@ -1207,7 +1314,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
 | `quilt.get_revision` / `quilt.restore_revision` / `quilt.adopt_candidate` / `quilt.list_candidates` | 底层 | `API-CORE-014` / `API-CORE-015` / `API-CORE-025`（单屏 / 整组）/ `API-CORE-026` | v0.51。`get_revision { screenId, revisionId }` 直接返回该版 HTML 文本与元数据（不是签名 URL——agent 拿到就能重推）；`restore_revision` 带 `expectedRevisionId`，与 REST 一样重拍截图（v0.77；此前复用源修订的截图，屏在两版之间改过呈现方式时，叠层屏留着整屏不透明的旧截图）；`adopt_candidate { jobId, index, screenId? }`（v0.60 单屏与整批合并）：按作业 + 版号寻址，`screenId` 缺省 = 该作业出过候选的每一屏；逐屏成败，返回 `{ adopted: id[], skipped: [{ screenId, error }] }`，`error` 是 `/errors/not-found`（没有那一版）/ `revision-conflict` / `screen-busy`；`screenId` 不在该作业候选里 `404 /errors/not-found` |
 | `quilt.move_screens` | 底层 | `API-CORE-012`（`x` / `y`）+ `API-EDIT-004 PATCH`（组件只挪位置，不升版不回刷） | v0.51。`{ screens?: [{ id, x, y }], components?: [{ id, x, y }] }` 逐张写、逐张成败，返回 `{ moved: { screens, components }, failed: [{ id, error }] }`；与画布多选批量移动（`REQ-CORE-004` v0.47）落的是同一条路径 |
 | `quilt.edit_element` | 底层 | `API-EDIT-001` | v0.51。零 token 直改：`{ screenId, qid, ops, expectedRevisionId }`，`ops` 同 REST（`text` / `classes` / `style` / `link` / `remove` / `detach`），`409 /errors/component-locked` 同样适用 |
-| `quilt.regenerate_subtree` / `quilt.edit_component` / `quilt.propose_design_system` / `quilt.export_prototype` | 高层 | `API-CORE-006` 对应四种 kind | v0.51。都返回作业句柄。`propose_design_system` 的产出在 `output.proposal`，画布侧的「预览确认」在这里就是 agent 自己的判断，确认后经 `quilt.update_design_system` 的 `conventions` / token 字段写回；`edit_component` 不接 `runner.kind=agent`：调用方本身就是会话，自己用 `quilt.update_component` 写（REST 发消息从 v0.99 起可以把改组件投递到本机会话）；`regenerate_subtree` 与 `edit_component` 收 `attachmentIds`（参考图，同 `quilt.generate_screens`，v1.21）；`export_prototype` 无输入、无模型调用 |
+| `quilt.regenerate_subtree` / `quilt.edit_component` / `quilt.propose_design_system` / `quilt.export_prototype` | 高层 | `API-CORE-006` 对应四种 kind | v0.51。都返回作业句柄。`propose_design_system` 的产出在 `output.proposal`，画布侧的「预览确认」在这里就是 agent 自己的判断，确认后经 `quilt.update_design_system` 的 `conventions` / token 字段写回；`edit_component` 不接 `runner.kind=agent`：调用方本身就是会话，自己用 `quilt.update_component` 写（REST 发消息从 v0.99 起可以把改组件投递到本机会话）；`regenerate_subtree` 收 `qids`（v1.26，一次改几块）；`regenerate_subtree` 与 `edit_component` 收 `attachmentIds`（参考图，同 `quilt.generate_screens`，v1.21）；`export_prototype` 无输入、无模型调用 |
 | `quilt.get_export` | 底层 | `API-PROTO-002` | v0.51。`{ jobId }` → `{ url, bytes }`，`url` 是 5 分钟签名对象地址（curl 即可下载）；作业未完成 `409 /errors/job-not-finished` |
 | `quilt.list_runners` | 高层 | `API-CORE-023` | v0.51。给 `runner` 字段取 id（响应与 REST 同 DTO，不含密钥）；参考图直传见 `quilt.create_upload_url` |
 | `quilt.list_jobs` / `quilt.cancel_job` / `quilt.get_job_events` | 高层 | `API-CORE-029` / `API-CORE-009` / `API-CORE-008` | v0.51。`get_job_events { jobId, after? }` 是拉取式：返回 `seq > after` 的事件列表，不是 SSE |
@@ -1221,7 +1328,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
   - prompts：`quilt.new-screen`、`quilt.sync-from-canvas`、`quilt.audit-drift`
 - **`API-AGENT-003` createUploadUrl** — 实现 `REQ-AGENT-002`：`POST /projects/{projectId}/uploads`；响应 `{ uploadId, putUrl }`（签名 PUT，10 分钟，≤ 2 MB）；签发时建一个空上传位，`quilt.append_upload` 只认签发过的（v0.77）；最后一次写入后闲置 10 分钟没被写入口用掉的上传位由 `upload.gc` 删掉（v0.82）
 - **`API-AGENT-004`～`API-AGENT-009`**（派活任务的创建 / 领取 / 回执 / 取消、deeplink、伴侣 socket）— **v0.32 删除**，编号保留不复用。
-- **`API-AGENT-010` listAgentSessions** — 实现 `REQ-AGENT-003`（v0.34）：`GET /agent/sessions?tool=claude-code|codex`（缺省 `claude-code`，v0.68）；响应 `{ items: [{ tool, sessionId, name, named, cwd, status: "idle"|"busy"|"unknown", open, app?, updatedAt, unverifiedVersion? }] }`，按 `updatedAt` 倒序。
+- **`API-AGENT-010` listAgentSessions** — 实现 `REQ-AGENT-003`（v0.34）：`GET /agent/sessions?tool=claude-code|codex`（缺省 `claude-code`，v0.68）；响应 `{ items: [{ tool, sessionId, name, named, cwd, status: "idle"|"busy"|"unknown", open, app?, updatedAt, unverifiedVersion? }] }`，按 `updatedAt` 倒序；同一 `sessionId` 被多个进程登记时只列 `updatedAt` 最新的那份（v1.28）。
   `tool=codex`：读 `$QUILT_CODEX_HOME`（缺省 `$CODEX_HOME`，再缺省 `~/.codex`）下的 `state_5.sqlite`（只读，`node:sqlite`；Node < 22.13 读不了时返回空数组）——`sessionId` = 线程 UUID，`name` = 用户起的名字，没有就取标题（首条消息），`named` = 有用户起的名字，`status` 恒 `unknown`，`open` = 写锁文件此刻被进程占着（`lsof`；本机没有 `lsof` 时退回「文件在即打开」），`app` = `desktop` / `vscode` / `cli`；登记处不存在时返回空数组。
   `tool=claude-code` 的每项 `open=true`、无 `app`。
   来源是 Claude Code 登记处 `$QUILT_CLAUDE_SESSIONS_DIR`（默认 `~/.claude/sessions`）下的 `*.json`：只取 `kind=interactive` ∧ `peerProtocol=1` ∧ `messagingSocketPath` 250 ms 内可连接的；`named = nameSource === "user"`（派生名不算名字，前端显示 UUID）；`unverifiedVersion`（v1.06）= 登记里的 `version` 不在「用真实会话跑通过 `TC-AGENT-010` 的版本」清单里时给出该版本（登记没写版本给空串），清单在 `apps/api/src/lib/claudeSessions.ts`、与 TEST §7 的登记一致，人工跑通一个版本加一个——这类会话照常列出、照常投递，会话下拉在状态旁标「此版本未验证 · <版本>」；登记处不存在或不可读时返回空数组不报错。
@@ -1289,7 +1396,7 @@ FE 请求超时：普通 15 s，通道验证（`API-CORE-022`）100 s（v0.69：
 | 候选序号 | `candidateIndex` | `candidate_index` | int | 否 | 同作业同屏多版时 0..N−1；单版为空 | — | 否 |
 | 候选结清 | `candidateSettledAt` | `candidate_settled_at` | date-time | 否 | 采用后同批一起写；为空 = 待采用 | UTC | 否 |
 | HTML 对象键 | `htmlUrl`（响应为签名 URL） | `html_key` | string | 是 | 对象存储 key | — | 否 |
-| 截图对象键 | `screenshotUrl` | `screenshot_key` | string | 否 | 截图异步生成，未就绪为空 | — | 否 |
+| 截图对象键 | `screenshotUrl` | `screenshot_key` | string | 否 | 截图异步生成，未就绪为空；v1.27 起是无损 WebP（`ADR-037`）；不是当前版、不是待采用候选、建出来超过 24 小时的修订由 `screenshot.prune` 删掉截图并置空，只留缩略图；回到旧版建的修订可以与源修订共用同一个键 | — | 否 |
 | 缩略图对象键 | `thumbUrl` | `thumb_key` | string | 否 | v1.02（`ADR-029`）：截图缩到 1/4 的 WebP（桌面 640×400、手机 195×422），与截图同一次写回；截图作废时一并清空；存量修订由 `screenshot.retry` 补，各屏的当前修订优先、再补历史修订（v1.03 起修订面板与候选展开也用它） | — | 否 |
 | 修订来源 | `sourceKind` | `source_kind` | enum | 是 | `generate` / `edit` / `subtree` / `manual` / `restore` / `apply_ds` / `agent_ingest` / `component`（v0.46：共享组件的提取、同步到其他屏、改组件后的确定性回刷；`sketch`：草稿写回项目时建的修订，`API-CORE-047`；`fork`：从项目的屏建草稿时草稿的第一版，`API-CORE-048`；记录型枚举，非生命周期，不建状态机） | — | 否 |
 | lint 报告 | `lintReport` | `lint_report` | jsonb | 是 | `{passed, firstTry, violations:[{rule, qid?, message}]}` | — | 否 |
@@ -1314,13 +1421,16 @@ FE 请求超时：普通 15 s，通道验证（`API-CORE-022`）100 s（v0.69：
 | 幂等键 | `Idempotency-Key`（头） | `idempotency_key` | string | 是 | `(project_id, key)` 唯一，24 h | — | 否 |
 | 链接元素 | `qid` | `element_qid` | string | 是 | 注入的 `data-qid` 值 | — | 否 |
 | 链接目标 | `href` / `toScreenId` | `href` / `to_screen_id` | string / uuid | 是 / 否 | `to_screen_id` 空 = 断链（派生态：由 route 匹配算出，不建状态机） | — | 否 |
-| 用量 | `tokensIn` / `tokensOut` / `screens` / `driver` / `model` | 同名 snake | int / int / int / text / text | 是 | 只增；按作业一条；本地版无上限 | token / 屏 | 否 |
+| 用量 | `tokensIn` / `tokensOut` / `screens` / `driver` / `model` | 同名 snake | int / int / int / text / text | 是（`driver` / `model` 否） | 只增；按作业一条；本地版无上限；没调过模型的作业（导出、套用设计系统、第一次调用前就取消或失败的）`driver` / `model` 为空（v1.28） | token / 屏 | 否 |
 | 缓存读写 | —（只在库里，v1.05） | `cache_read_tokens` / `cache_write_tokens` | int / int | 是 | 这一作业各次调用里读缓存、写缓存的输入 token 合计，已含在 `tokens_in` 里；Anthropic 与订阅驱动按响应的 `usage` 填，其余驱动记 0（`ADR-012` v1.05 修订） | `0` | 否 |
+| 台账项目 | —（只在库里，v1.24） | `usage_entries.project_id` / `project_name` | uuid / text | 否 | 记账时作业所在的项目与它当时的名字；不建外键（`ADR-036`）；迁移前就找不到作业的旧记录为空 | — | 否 |
+| 台账任务类型 | —（只在库里，v1.24） | `usage_entries.kind` | text | 否 | 记账时作业的 `kind`（`JOB_KINDS`）；旧记录为空，看板算「其他」 | — | 否 |
+| 台账模型 | —（只在库里，v1.24） | `usage_entries.channel_id` / `channel_label` | uuid / text | 否 | 作业选的通道与它当时的显示名；作业没指定通道（走服务端缺省）时为空；不建外键 | — | 否 |
 | 运行时配置 | `previewOrigin` / `version` / `local` / `home` / `secretsConfigured` | —（`API-CORE-028`，不落库） | string / string / bool / string / bool | 是 | `home` = `$QUILT_HOME`（默认 `~/.quilt`）；`secretsConfigured`（v0.78）= 配了 `QUILT_SECRETS_KEY` | — | 否 |
 | 记录开关 | `enabled` | `users.record_usage` | boolean | 是 | 缺省 `false`（v1.22 `REQ-CORE-047`）；开着时才写事件、模型调用与归档 | — | 否 |
 | 记录起点 | `since` | `users.record_since` | timestamptz | 否 | 最近一次从关到开的时间；没开过为空 | — | 否 |
 | 记录来源 | — | `record_events.source` | enum | 是 | `web`（浏览器发来的事件）/ `mcp`（服务端记的工具调用） | — | 否 |
-| 页面会话 | `sessionId` | `record_events.session_id` | string | 是 | 浏览器每打开一次页面生成一个 uuid；MCP 无状态、没有会话，取这次 HTTP 请求的 `requestId`；与 `seq` 合起来唯一 | — | 否 |
+| 页面会话 | `sessionId` | `record_events.session_id` | string | 是 | 浏览器每打开一次页面生成一个 uuid；MCP 无状态、没有会话，服务端为每个 HTTP 请求另生成一个 `mcp:<uuid>`（不用客户端能指定的 `X-Request-Id`，固定发同一个的客户端会撞键丢记录）；与 `seq` 合起来唯一 | — | 否 |
 | 事件类型 | `type` | `record_events.type` | enum | 是 | `view` 进入页面或换路由 / `click` 按下可点的元素 / `key` 快捷键 / `input` 文本框内容快照 / `change` 下拉、单选、开关取值 / `attach` 参考图加删与上传结果 / `drag` 拖完（停靠、摆放、框选、面板宽度） / `viewport` 画布平移缩放停下 / `select` 画布选中变化 / `preview` 屏与草稿里的点选和跳转 / `toast` 出现的提示条 / `job` 界面上作业出现与结束 / `record` 开关开关 / `tool` MCP 工具调用 | — | 否 |
 | 事件目标 | `target` | `record_events.target` | string | 否 | 元素的 `data-testid`，没有取 `aria-label`，再没有取「标签名:可见文字前 40 字」；`tool` 是工具名 | — | 否 |
 | 事件附加 | `data` | `record_events.data` | jsonb | 否 | 按类型：`input` 是文本框全文（停 1.5 s、失焦、发送时各一次）；`key` 是键名与修饰键；`viewport` 是镜头位置与倍率；`tool` 是参数、成败与耗时；超过 2000 字的字符串只记长度；密码框与通道密钥框的值不记（`INV-CORE-006`） | — | **是** |
@@ -1788,7 +1898,10 @@ v0.32 本地版没有登录页与授权同意页（`PAGE-LOGIN`、`PAGE-AGENT-CO
 **看板**（v1.16，v1.17）：顶部那一行以下的整块区域；输入框、收起后的胶囊与记录栏都浮在看板上面，停在哪、开没开、收没收起都不改看板（可能压住草稿的一角，挪开或收起即可）。打开的草稿是预览域的活 iframe（可点可滚，链接惰性），在看板里居中，按画框放到能放下的最大、最大 1:1——组件按 `quilt:draft-size` 报的大小，手机页 390×844、桌面页 1280×800 的视口；放不下时等比缩小、不裁切，缩小用 `zoom`、不用缩放变换（理由见 `PAGE-CANVAS`「聚焦屏不走缩放变换」，v1.19）；不提供缩放（与预览页一样按真实尺寸看）。打开着的草稿出了新的一版（改一轮、改一块、回到旧版、本机会话回写）时原地换（v1.18）：父页取新版 HTML 经 `quilt:swap`（`keepScroll`）送进 iframe，与画布的聚焦态热更新同一通道，iframe 不重载、不出骨架与「加载中…」，滚动位置留着，组件按新报的大小重排；设计系统变了（`<head>` 不同）时运行时整份重写，父页收到新的 `quilt:ready` 再把选元素的模式发一次。换画框（手机页 ↔ 桌面页）只改视口，不重载。取不到新版 HTML（签名过期）先重取详情再取一次，仍取不到才整页重载。只有换一张草稿、新草稿第一版落地时才加载。
 草稿工具条（v1.16）在顶部那一行：项目切换器与记录栏开关之间，对着看板居中，毛玻璃；不占看板的高度。左端是名字（点了就地改名，`API-CORE-012`），有写回目标时名字下面一行小字「来自「<项目> · <屏>」」；后面是控件：画框（页面草稿在「手机页 / 桌面页」之间二选一，`API-CORE-012` 的 `frame`；组件草稿不显示——组件与页面不能互相换，v1.17）、「参照」（自由风格，或选一个项目，`API-CORE-012` 的 `refProjectId`，`REQ-CORE-042`）、「选元素」图标开关（`REQ-CORE-045`，悬停或键盘聚焦时出说明）、「版本」（按缩略图列出各版，点「回到这一版」走 `API-CORE-015`）、「写回项目…」（窄屏只留图标）、删除（确认后 `API-CORE-018`，不可恢复）、「收起」。放不下一行时折行，看板跟着下移；窄屏（48rem 以下）它单独占顶部那一行下面的一整行、不折行，放不下的在条里横着滚（滚动条不显示）。
 **快捷键**同画布：`⌘E` 开关「选元素」、`⌘/` 收起或展开输入框；焦点在草稿里时由预览运行时转发，照样能按。
+`⌘Z`（Windows 为 `Ctrl+Z`，v1.25）回到看板上这张草稿的上一版：取当前版的父修订，走「版本」里「回到这一版」同一个接口（`API-CORE-015`，以它的内容建新一版，提示「已回到第 N 版」）；当前版本身是回到旧版建出来的（`restore`）时，它的内容就是它的父修订那一版，先退到那一版再取父修订，所以连按会沿着改动的来路一版版往回走。新一版落地、看板刷新之前再按不重复发。焦点在文本框里时 `⌘Z` 留给文本框自己撤销；当前已是第一版时提示「已经是第一版」，这张草稿正在生成或改时提示正在改，都不发请求。
 **选元素**：开着时点草稿里的元素，它被框出、输入框目标区多一枚「「<草稿名>」里的 <标签>「<文字>」」胶囊，动词行写「改这一块」，发送建 `regenerate_subtree`（`API-CORE-006`），输入框里的参考图一起带上（v1.21）；`Esc` 或 × 去掉胶囊回到改整张。
+按住 `Shift` 点是加选或减选（v1.26，规则同画布的「多选」）：每块一枚胶囊、各自能 × 掉，动词行写「改这 N 块」，发送是带 `qids` 的同一种作业；`Esc` 一次清掉全部胶囊。
+点选之后焦点落在输入框里（好接着打字）；输入框还是空的、上面有胶囊时，`Shift+↑` / `Shift+↓` 走层级（同画布的逐级选，移动最后点中的那块），打了字之后照旧是扩选文字。
 看板为空时正中一句提示与三条可点的示例；新草稿生成中时看板正中是骨架（只呼吸）与进度一句话，第一版落库即换成活 iframe；失败时骨架撤掉、提示条写失败原因（`failureText`）。
 在跑的作业同画布，以作业 chip 叠在输入框上方（`PAGE-CANVAS`「作业 chip」）。
 **输入框**（缺省停在底边正中；停靠、拖动与收起同画布，见 `PAGE-CANVAS`「停靠与收起」，记忆单独一份，但浮在看板上、不让位；与画布同一套通道 / 会话选择与参考图）：看板为空时动词行写「新草稿」，多一个画框选择「自动 / 组件 / 手机页 / 桌面页」（缺省自动，记在本机）与一个「参照」下拉（自由风格或选一个项目，缺省自由风格、不记忆；选了就随新草稿发出 `refProjectId`）；看板上有草稿时动词行写「改「<草稿名>」」，画框选择与参照下拉收起（这张草稿的参照在工具条上改）；没有屏数、版数与聊天。
@@ -1808,17 +1921,29 @@ v0.32 本地版没有登录页与授权同意页（`PAGE-LOGIN`、`PAGE-AGENT-CO
 导航（v0.28，标识 v0.30，v0.32 收窄，v0.40 补重命名）：顶栏左上第一个元素就是**项目名 ▾**（画布顶栏不挂品牌标识，见 §13.1），它即**项目切换器**——点开为按更新时间倒序的列表（当前项打勾，每项带设备形态药丸），选一项即切到 `/p/:id`；列表底部固定一条「新建项目…」打开新建弹窗，创建成功跳新项目。
 每行 hover / 键盘高亮时露出垃圾桶（键盘等价物：高亮行按 `Delete`）→ 先关下拉再弹确认（写明项目名、级联范围、不可恢复）→ `API-CORE-031` 删除；删的是当前项目就回 `/`（落到最近更新的其它项目，一个不剩就是 `PAGE-FIRST`）；有进行中作业的项目拒删并说明（v0.34）。
 浏览器标签页标题 = 「<项目名> · Quilt」，多个项目开在不同标签页时靠它分辨，离开画布复位为「Quilt」。
-工具栏最下方的「设置」（齿轮，v0.97 前在顶栏右侧）打开**设置弹层**，关闭后焦点回到这个按钮（经 `?settings=` 直接打开的也一样）：分栏布局——左栏是**五节**导航（本月用量 / 生成通道 / 外观（v1.08）/ 语言（v1.20）/ 使用记录（v1.22）；Radix Tabs 垂直方向，整组在 Tab 序里只占一个停靠点，上下方向键换节并立即切换），右栏只显示当前节（自身滚动）。
-当前节即视图标识，进 URL `?settings=usage|runners|appearance|language|record`（刷新保持；不认识的值回 `usage`），`Esc` / 右上「关闭」关闭并去掉参数。
-通道下拉里的「管理通道…」打开 `runners` 节。
-「本月用量」只展示台账（屏数、token 进出、按驱动 / 模型分列）与「本地版不设上限」的说明；「生成通道」一节顶部给出 MCP 接入命令（`claude mcp add --transport http quilt http://127.0.0.1:3100/mcp`，可复制）。
-「外观」一节（`REQ-CORE-039`）是一组单选：跟随系统（缺省）/ 浅色 / 深色，选中即生效、不用保存；选择记在本机 `localStorage` 的 `quilt:theme`（`light` / `dark`，跟随系统时删掉这一键），对所有项目与 `PAGE-FIRST` 生效。
-「语言」一节（`REQ-CORE-046`）是同样的单选列表：中文 / English（语言名各用自己的文字写、标上 `lang`），选中即生效、不刷新页面；选择记在本机 `localStorage` 的 `quilt:locale`（`zh` / `en`），对所有页面生效，说明写明之后生成的屏也用这种语言、除非要求里另说。
+工具栏最下方的「设置」（齿轮，v0.97 前在顶栏右侧）打开**设置弹层**，关闭后焦点回到这个按钮（经 `?settings=` 直接打开的也一样）：分栏布局——左栏是**三节**导航（用量 / 模型 / 系统，v1.24；Radix Tabs 垂直方向，整组在 Tab 序里只占一个停靠点，上下方向键换节并立即切换），右栏只显示当前节（自身滚动）。
+换节时右栏内容淡入并上移 4 px，150 ms；减弱动态时直接换。
+当前节即视图标识，进 URL `?settings=usage|models|system`（刷新保持）；v1.24 之前的值照旧能开：`runners` 开「模型」，`appearance`、`language`、`record` 开「系统」，开了之后地址换成新值；不认识的值回 `usage`。`Esc` / 右上「关闭」关闭并去掉参数。
+输入框模型下拉里的「管理模型…」打开 `models` 节。
+「用量」一节（v1.24 `FLOW-USAGE`，数据取 `API-CORE-052`）自上而下：
+① 活动卡：近 90 天的日历（列是周、行是周一到周日，按当天作业数分 5 档绿色，悬停出「10 月 18 日 · 12 次」）；右侧是活跃天数、最长连续、作业次数，一排按星期的日均柱（最忙那天加深），底行是 90 天里 Token 最多的模型与占比，删掉的模型带「已删除」。
+② 「统计」标题右侧一个分段控件：近 7 天 / 近 30 天 / 全部，缺省近 7 天，选择记在本机 `quilt:usage-range`；白色滑块 200 ms 滑到选中项。
+③ 四张看板：作业（次，下行日均）、Token（下行输入与输出）、生成屏数（下行草稿本占几屏）、平均每次 Token（下行最多的一次）。正在跑的作业不计入，另起一行写「另有 N 次调用在跑」。
+④ 每日 Token：按模型分段的堆叠柱，段与段之间留 2 px；「全部」跨度超过 60 天时按周，横轴隔一根写日期范围。悬停一根柱出提示：日期、各模型的 Token 与占比、合计。首次显示与换范围时柱子从底部长出，300 ms，逐根错开、错开合计不超过 150 ms。
+⑤ 模型表：每行是模型 logo（不垫底色）、名字与模型 ID；两根 20 px 胶囊——Token 是实心填充，作业次数是浅色填充，字写在胶囊里，填充盖住的那段字反白；右侧一列百分比；状态列写「在用」或「已删除」，次行是最近一次用的日期。
+⑥ 项目表：首字块、名字与这段时间出的屏数；一根 Token 胶囊（颜色取这个项目用得最多的模型）；最后一列是用过的模型色块与「X 为主」；悬停一行出各模型的占比；删掉的项目带「已删除」。
+⑦ 按任务类型：每类一行（造屏、改屏、改一块、改组件、提炼约定、套用设计系统、导出、收录、对话、其他），一根按模型分段的条，右侧次数与占比。
+胶囊与分段条第一次出现时从 0 长到占比，400 ms；悬停提示 120 ms 淡入。减弱动态时这些都直接到位。
+颜色取设计系统的图表系列色，按 `models` 的顺序分配；删掉的模型一律中性灰。图表另有一份读屏用的表格，屏幕上不显示。
+「模型」一节（v1.24，原「生成通道」）顶部是说明与「添加模型」，下面是两张表（见下方「设置弹层的模型」），最后是 MCP 接入命令（`claude mcp add --transport http quilt http://127.0.0.1:3100/mcp` 与 Codex 一条，可复制）。
+「系统」一节（v1.24）把外观、语言、使用记录三组放在一起，各组一个小标题，从上到下排。
+外观组（`REQ-CORE-039`）是一组单选：跟随系统（缺省）/ 浅色 / 深色，选中即生效、不用保存；选择记在本机 `localStorage` 的 `quilt:theme`（`light` / `dark`，跟随系统时删掉这一键），对所有项目与 `PAGE-FIRST` 生效。
+语言组（`REQ-CORE-046`）是同样的单选列表：中文 / English（语言名各用自己的文字写、标上 `lang`），选中即生效、不刷新页面；选择记在本机 `localStorage` 的 `quilt:locale`（`zh` / `en`），对所有页面生效，说明写明之后生成的屏也用这种语言、除非要求里另说。
 没选过时按浏览器：`navigator.languages` 的第一项（没有时 `navigator.language`）以 `zh` 开头为中文，否则英文。
-「使用记录」一节（v1.22 `REQ-CORE-047`）是一个开关「记录我的使用」（缺省关，改了当场生效，`API-CORE-050`）加一段说明：记什么（界面操作、输入过程、每次模型调用的提示词与回复、删掉的东西留归档）、不记什么（密码与密钥）、只存在本机不上传。
+使用记录组（v1.22 `REQ-CORE-047`）是一个开关「记录我的使用」（缺省关，改了当场生效，`API-CORE-050`）加一段说明：记什么（界面操作、输入过程、每次模型调用的提示词与回复、删掉的东西留归档）、不记什么（密码与密钥）、只存在本机不上传。
 下面一行写已记的条数、占用与起始时间，一行写存放位置（绝对路径，可复制；`API-CORE-049`）；关掉之后这两行照样显示。
 切换后 `<html lang>` 跟着变（`zh-CN` / `en`），之后的每个请求带新的 `X-Quilt-Locale`（§8 开头）；界面文字当场换成新语言（屏内修改标记的字见 §13.1「画布标记」）；用户生成的内容不重译，存量屏与已有草稿保持原样。
-设置弹层里可再打开「添加通道」弹层，因此弹层基建的 `inert` 按层栈计数：开一层隔离其下所有层，关一层只放开新的最上层，栈空才解除背景隔离；弹层内的按键不冒泡给画布快捷键。
+设置弹层里可再打开「添加模型」弹层，因此弹层基建的 `inert` 按层栈计数：开一层隔离其下所有层，关一层只放开新的最上层，栈空才解除背景隔离；弹层内的按键不冒泡给画布快捷键。
 画布页进入调 `API-CORE-004`，对话面板调 `API-CORE-010/011` 并订阅 `API-CORE-008`。
 
 `PAGE-CANVAS` 外壳：画布铺满视口，**视口那一层只裁剪、不滚动**（`overflow: clip`，v0.38）——平移缩放全在世界层的 transform 上，视口不需要滚动能力；留成滚动容器的话浏览器自发的 scroll-into-view（点候选格里的输入框、甚至自动化的 `scrollIntoViewIfNeeded`）会把整块画布连同全部卡片横移（实测 `scrollLeft` 一路到 699），而世界层的 transform 对此一无所知，屏幕↔世界换算随之整体偏 `scrollLeft/zoom`：框选、拖卡、放锚点全错位。
@@ -1830,10 +1955,14 @@ chrome 一律浮于其上，四处互不重叠——① **顶栏**（只承担�
 发出直改 / 子树重生成时同样不清选中，只清说明框——面板不该在用户眼皮底下退回空态。
 元素直改也走这条通道，不再换 key 重挂。**变化从哪来都能到**：画布订阅项目级事件流（`API-CORE-030`），本机会话经 MCP 回写、别处建的作业、截图就绪，以及别处的删屏、挪屏、改项目名、改设计系统、增删组件（v0.77）都触发同一个刷新，不必进出交互态或刷新页面；刷新后已删的屏从画布与目标标签里一并消失（目标取的是还在项目里的屏）。
 项目被别处删掉时事件流发完最后一条就关闭，重取详情得 `404`，交给画布的加载错误态。**选中框常驻**（`REQ-EDIT-001`，v0.34）：选择元素态里运行时画两层框——hover 框细虚线跟着鼠标，选中框 2px 实线常驻在选中元素上、左上角挂「tag · qid」标签（与检查器标题一致，看一眼就知道右侧面板改的是谁），随滚动 / 缩放重算；两层框与标签用 §13.1 的标记色并套 halo（v1.08，颜色由父页经 `quilt:mode` 给，此前写死界面蓝）；父页的选中状态是事实源（`quilt:highlight` 同步、热更新后 `quilt:reselect` 接回、退出选择元素态清空）。**逐级选**（v1.00，`REQ-EDIT-001`）：指针下取到的永远是最里层的元素，要选外面的大块就逐级往上走。
+**多选**（v1.26，`REQ-EDIT-002`）：选择元素态里按住 `Shift` 点元素是加选，点已选中的是减选，不按 `Shift` 点仍是只选这一个；同一屏或同一张组件卡里最多 8 块，加选的与已选的互相包含时只留外面那一块并提示「已合并到外层」。
+每个选中的元素都有常驻选中框与「tag · qid」标签（父页经 `quilt:highlight{ qids }` 让运行时画全；运行时的 `quilt:select` 带 `additive` 表示这次是按着 `Shift` 点的，带 `replace: <qid>` 表示这一块是由逐级选、路径点选或热更新后重选换掉了原来那一块——父页据此在列表里替换而不是另加）；`Shift+↑` / `Shift+↓` 只移动最后点中的那一块，在选中里换掉它；移完与别的选中互相包含时同样只留外面那一块。
+选中 2 块以上时检查器标题写「已选 N 个元素」，下面逐行列出（tag · qid 与一段文字摘要，悬停在屏上框出、× 去掉这一块）；零 token 直改、删除元素、记为共享组件、到草稿本里改只在单选时出现，「用 AI 重生成这几块」把一句话一次用在这几块上（一个带 `qids` 的 `regenerate_subtree`）。换一屏或退出选择元素态时多选清空。
 运行时记两样：**锚点**（最近一次悬停或点中的最里层元素）与**当前层**（锚点自身或它的某个带 `data-qid` 的祖先，最高到屏的根元素）。
-`Shift+Enter` 当前层上移一级，`Enter` 沿锚点那条链下移一级、到锚点为止；已有选中时按键移动选中（回 `quilt:select`，检查器跟着刷），还没选中时按键只移动悬停框，点一下选中的是悬停框所在的那层；指针换到另一个最里层元素时锚点与当前层一起重置。
-按键只在焦点不在可编辑元素与按钮、链接这类控件上时生效：焦点在预览文档里由运行时就地处理，在父页（检查器面板、画布）时父页发 `quilt:climb{ dir }` 给当前处于选择元素态的那个 iframe（聚焦的组件卡优先，否则聚焦的屏）；键盘引起的框移动不带过渡。
-`quilt:select` 带 `path`（从屏根到锚点的 `{ qid, tag }` 列表）：检查器标题下排一行祖先路径，每级一个按钮写标签名（`title` 为「tag · qid」），当前层加粗并带 `aria-current`，当前层以下（回锚点的那几级）淡色仍可点；点一级 = `quilt:pick{ qid }` 选中它（锚点不变，还能按 `Enter` 走回去），悬停一级 = `quilt:peek{ qid }` 在屏上画悬停框、移开撤掉；路径按钮不进 Tab 序——键盘走层级用 `Shift+Enter` / `Enter`，`Tab` 照旧从检查器直接进文案框；路径下方一行提示「Shift+Enter 选父级 · Enter 回到子级」。**屏内修改标记**（`REQ-EDIT-002`）：直改保存后该元素打「已更新」；项目里进行中的子树重生成作业（`activeJobs` 里 `kind=regenerate_subtree`）在聚焦屏内把该元素虚线描边并挂「修改中…」角标（`quilt:mark{working}`；元素本身描边随滚动走，角标固定定位、滚动时重算），未聚焦的卡片右上标「局部修改中」（同一张卡还挂着候选角标时药丸下移一档——两者都贴右上角，叠在一起会把角标整块盖住）；作业一收口同一 qid 就换成绿描边 + 「已更新」（热更新换完 DOM 再补一次，运行时每次都重新计 4 s 自撤；失败 / 取消只撤「修改中」）；检查器里选中的元素正在被改时写明并挡住再次发起。**检查器的键盘操作与撤销**（v0.95）：`⌘S`（Windows `Ctrl+S`）= 「保存」，焦点在检查器的文案 / 类名框里或在屏里都生效，并拦掉浏览器的「保存网页」；`Delete` / `Backspace`（macOS 的 delete 键发的是 `Backspace`）= 「删除元素」，只在选择元素态下选中了元素、焦点不在任何输入框里时生效——在文案框里删字不会删掉元素，未聚焦时这两个键仍是删屏。
+`Shift+↑` 当前层上移一级，`Shift+↓` 沿锚点那条链下移一级、到锚点为止（v1.28；此前是 `Shift+Enter` / `Enter`，`Enter` 与输入框的发送撞了，焦点停在按钮上时两个键还会被浏览器拿去按下它，所以不要再把层级放回 `Enter` 上）；已有选中时按键移动选中（回 `quilt:select`，检查器跟着刷），还没选中时按键只移动悬停框，点一下选中的是悬停框所在的那层；指针换到另一个最里层元素时锚点与当前层一起重置。
+按键在焦点不在文本框（输入框、多行文本、下拉、可编辑区）里时生效：焦点在预览文档里由运行时就地处理，在父页（检查器面板、画布）时父页发 `quilt:climb{ dir }` 给当前处于选择元素态的那个 iframe（聚焦的组件卡优先，否则聚焦的屏）；键盘引起的框移动不带过渡。
+焦点停在按钮、链接上时同样生效：`Shift+↑` / `Shift+↓` 不是按钮与链接的激活键，父页与运行时都拦掉浏览器对它们的默认动作（扩选文字、滚动）；只有焦点在文本框里时留给文本框扩选文字。
+`quilt:select` 带 `path`（从屏根到锚点的 `{ qid, tag }` 列表）：检查器标题下排一行祖先路径，每级一个按钮写标签名（`title` 为「tag · qid」），当前层加粗并带 `aria-current`，当前层以下（回锚点的那几级）淡色仍可点；点一级 = `quilt:pick{ qid }` 选中它（锚点不变，还能按 `Shift+↓` 走回去），悬停一级 = `quilt:peek{ qid }` 在屏上画悬停框、移开撤掉；路径按钮不进 Tab 序——键盘走层级用 `Shift+↑` / `Shift+↓`，`Tab` 照旧从检查器直接进文案框；路径下方一行提示「Shift+↑ 选父级 · Shift+↓ 回到子级」。**屏内修改标记**（`REQ-EDIT-002`）：直改保存后该元素打「已更新」；项目里进行中的子树重生成作业（`activeJobs` 里 `kind=regenerate_subtree`）在聚焦屏内把该元素虚线描边并挂「修改中…」角标（`quilt:mark{working}`；元素本身描边随滚动走，角标固定定位、滚动时重算），未聚焦的卡片右上标「局部修改中」（同一张卡还挂着候选角标时药丸下移一档——两者都贴右上角，叠在一起会把角标整块盖住）；作业一收口同一 qid 就换成绿描边 + 「已更新」（热更新换完 DOM 再补一次，运行时每次都重新计 4 s 自撤；失败 / 取消只撤「修改中」）；检查器里选中的元素正在被改时写明并挡住再次发起。**检查器的键盘操作与撤销**（v0.95）：`⌘S`（Windows `Ctrl+S`）= 「保存」，焦点在检查器的文案 / 类名框里或在屏里都生效，并拦掉浏览器的「保存网页」；`Delete` / `Backspace`（macOS 的 delete 键发的是 `Backspace`）= 「删除元素」，只在选择元素态下选中了元素、焦点不在任何输入框里时生效——在文案框里删字不会删掉元素，未聚焦时这两个键仍是删屏。
 两个键与按钮走同一条路：没改动提示「没有改动」，保存中或这一屏有作业时不响应；共享组件实例里的元素没有这两个操作。
 选择元素态下点了屏里的元素，焦点从 iframe 挪到检查器的内容区：这三个键直接可用，`Tab` 一下进文案框——此前焦点留在 iframe 里，要先点一下面板才能按快捷键、进字段；只在焦点确实在画布的 iframe 上（刚点过元素）时挪，保存后的重选、别处回写这类被动更新不抢焦点（`INT-008`）；不直接落进文案框，否则 `Delete` 成了删字。
 焦点仍在屏里时（例如交互态里点过屏里的输入框）由运行时转发（`ADR-003`）。
@@ -1969,11 +2098,14 @@ toast 浮在输入框上方（距底 = 输入框实际高度 + 32px，与 `--chr
 
 CSS-only 覆盖不了的交互（拖拽、异步、跨组件联动）不在组件里做——那是屏的职责，组件只负责它自己那一块的可见状态。
 
-设置弹层的生成通道（M7 `REQ-CORE-013`，v0.32 收窄）：一个管理器，两类行（v0.34 起没有「系统预置」：开源自用，云端通道都是用户自己配的；此前 `.env` 里的 `QUILT_RUNNERS` 预置整层删除）——**本机通道**（本机 Claude Code、本机 Codex 各一条，固定行、不可创建删除，可用 = `claude` / `codex` 在 PATH 上；不可用时每行可展开「如何配置」= 安装命令与登录步骤。
+设置弹层的模型（M7 `REQ-CORE-013`，v0.32 收窄；v1.24 起界面上「通道」都叫「模型」，含输入框下拉、添加弹层、提示与报错，中文「模型」、英文 Models）：一个管理器，两类行（v0.34 起没有「系统预置」：开源自用，云端通道都是用户自己配的；此前 `.env` 里的 `QUILT_RUNNERS` 预置整层删除）——**本机通道**（本机 Claude Code、本机 Codex 各一条，固定行、不可创建删除，可用 = `claude` / `codex` 在 PATH 上；不可用时每行可展开「如何配置」= 安装命令与登录步骤。
 「本机 Claude 订阅」由 `QUILT_RUNNERS` 声明，因此列在系统预置组，同样带「如何配置」= 执行 `claude` 完成登录）、**我的通道**（自建，可增删改）。
-每行：厂商图标、显示名、次行 `类型 · 模型 · 端点主机`、状态药丸（已验证 / 未验证 / 验证失败：原因 / 系统预置 / 缺凭据）、操作（验证；自建的另有编辑、删除）。
-「添加通道」弹出面板：类型（Anthropic / Gemini / OpenAI 兼容 / 本机 Claude 订阅 / 本机 Codex 订阅，后两类只填显示名与模型）→ 若为 OpenAI 兼容再选厂商预设（自动填端点）→ 显示名、Endpoint、模型名、API Key（密码框，编辑时留空 = 不改）→「保存并验证」。
+每行（v1.24）：厂商 logo（不垫底色）、显示名与一枚小胶囊（`API` 或 `订阅`）、次行等宽的模型 ID；状态列是一个色点加文字（已验证 / 未验证 / 验证失败），次行写密钥末 4 位、「Claude CLI 登录」或失败原因；最右是圆形图标按钮（验证；自建的另有编辑、删除，悬停出名字）。
+「本机 agent」表同一套列：Claude Code、Codex 各一行，次行是 CLI 版本，状态是「可用」或「不可用」，次行写「找到 claude 命令」或「如何配置」。两张表各有一行灰色表头（「我的模型 · 状态」「本机 agent · 状态」），行间发丝线。
+「添加模型」弹出面板：类型（Anthropic / Gemini / OpenAI 兼容 / 本机 Claude 订阅 / 本机 Codex 订阅，后两类只填显示名与模型）→ 若为 OpenAI 兼容再选厂商预设（自动填端点）→ 显示名、Endpoint、模型名、API Key（密码框，编辑时留空 = 不改）→「保存并验证」。
 保存后立即探测，结果就地显示；验证失败的通道保留在列表里带原因，但不进输入框下拉。
+两类本机订阅（v0.68）都没有 Key 与端点、只填模型名：「本机 Claude 订阅」（`kind=agent-sdk`）复用本机 `claude` 的登录态，「本机 Codex 订阅」（`kind=codex`）复用本机 `codex` 的 ChatGPT 登录态、经 `codex exec` 调模型。
+API 类通道的密钥加密落库，加密主密钥由首次启动写进 `~/.quilt/config.env`，用户不必手配（v0.32，`ADR-013`）。
 密钥永不回显，只给末 4 位。
 服务端未配置 `QUILT_SECRETS_KEY` 时，面板顶部直接说明并禁用保存（状态取自 `API-CORE-028` 的 `secretsConfigured`，v0.78；本机订阅两类不存密钥，照常可存）。
 添加 / 编辑面板的表单纪律（v0.78，`INT-003`）：首次校验在提交时，字段报错后每次输入即时重验、改对即清掉该字段的错误；提交失败焦点落到第一个出错字段；本机订阅两类不填端点，也就不校验、不提交端点（此前先在 OpenAI 兼容填了不完整端点再切过去，隐藏字段上的错误静默挡住保存）；填过任何内容后点遮罩不关——已填的 API Key 不能被一次误点丢掉，关闭走「取消」或 `Esc`。
@@ -2164,7 +2296,7 @@ v0.32 删除：`/errors/unauthorized`、`/errors/token-expired`（无登录）�
 | 限流 | `API-CORE-006/010` | ≤ 10 次/分钟，超出 `429 /errors/rate-limited`（本地版保留：挡住 agent 失控循环）；`LLM_DRIVER=stub` 时可用 `QUILT_RATE_LIMIT_PER_MIN` 调整（v1.06，e2e 测试栈设 1000：stub 作业几秒一个，一分钟就能建满 10 个，测试只能干等窗口），其余驱动恒为 10 |
 | 配额 | 无硬上限（v0.32） | 台账只记不拦；花的是用户自己的 Key / 订阅 |
 | 安装 | `npx quilt-canvas` 首次启动到浏览器打开 | 依赖已缓存时 < 10 s；首次要下载依赖（含 PGlite WASM ≈ 12 MB），网络决定 |
-| 数据增长 | 修订与截图对象存储 12 个月 | ≈ 55 GB（§2）；保留全部修订（回溯需求）；截图仅保留每屏最近 20 版 + 当前版，其余按月清理（`storage.gc`）；超 200 GB 重估 |
+| 数据增长 | 修订与截图对象存储 12 个月 | ≈ 55 GB（§2）；保留全部修订与它们的 HTML（回溯需求）；整屏截图只留给当前版、待采用候选与 24 小时内建的修订，其余只留缩略图（v1.27 `ADR-037`，`screenshot.prune`）；超 200 GB 重估 |
 | 数据增长 | `generation_jobs`、`usage_entries` | < 100 万行/年；作业 `input/output` 90 天后归档到对象存储 |
 | 兼容性 | 画布浏览器 | Chrome / Edge / Safari 最近 2 个大版本；Firefox 最近 2 版（同文档 View Transitions 已 Baseline） |
 | 安全 | 预览域 | 与主站不同 origin（本地版 `127.0.0.1:3101` vs `localhost:3100`，无 cookie 故 origin 隔离即够）；HTML 响应带 `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline' https:; script-src 'unsafe-inline' 'unsafe-eval' https:; img-src * data: blob:; font-src https: data:; connect-src https:; form-action 'none'; base-uri 'none'; frame-ancestors <画布 origin 名单>`（组件预览 `/c/` 同一份）。`frame-ancestors` 列的是来源名单（下一行「本地服务」）展开出的全部 origin：画布从 `localhost` / `127.0.0.1` / `[::1]` 哪种回环写法打开都要嵌得进预览（v0.82；此前只写 `WEB_ORIGIN`，从 `127.0.0.1:<画布端口>` 打开时 `/v1` 请求全过、交互态的 iframe 却被拦）；`/p/` 的 `Access-Control-Allow-Origin` 同理回显名单内的请求 `Origin`。v0.43 放开到任意 `https:` 源，是为了让屏能用 Chart.js 这类开源库与自写组件库（`REQ-CORE-022`）。**v0.75 补 `form-action 'none'`**：它不继承 `default-src`，缺了它屏里的脚本可以 `form.submit()` 一个 `enctype=text/plain` 的表单往本机 API 发写请求（`submit()` 不触发 submit 事件，运行时拦不到）；运行时本就拦下全部表单提交、改发 `quilt:navigate`，合法路径不受影响。被挡下的 `form.submit()` 在 Chromium 里会中止这张屏自己的加载（没加载完的子资源被取消、`load` 不再触发；解析中途调用时其后的内容也不再解析），后果只落在它自己身上：预览与截图里这张屏停在半截。`base-uri 'none'` 让屏改不了相对地址的解析基准。**截图渲染用同一份 CSP**（去掉 `frame-ancestors`：`<meta>` 里不支持，截图也不嵌套）：截图 worker 以 `page.setContent` 渲染，没有响应头可带，CSP 以 `<meta http-equiv>` 插在文档最前（doctype 之后、prelude 之前），屏的任何内容都在它之后解析；导出时抽 Tailwind 并集 CSS 的那一页（全部屏的 body 拼在一起）同样带它。这里不能改成「拦截请求、在固定地址下发文档」来带响应头：拦截返回的文档没有对端 IP，Chromium 的本地网络访问限制按公网算，屏里引用的预览域素材（`/a/`，回环地址）会整张加载失败。边界：预览域是独立 origin、无 cookie、拿不到主站 storage，也写不了主站 API（CSP 挡住表单与 fetch，API 的来源校验再挡一层），屏里的脚本只能影响自己那张屏 |
@@ -2195,11 +2327,11 @@ v0.32 删除：`/errors/unauthorized`、`/errors/token-expired`（无登录）�
   启动时还结束上次进程留下的截图浏览器（v0.82）：Playwright 拉起的浏览器不随 API 进程退出，进程被 SIGKILL 时它连同子进程一直留着、临时目录也不删；每次拉起后把浏览器主进程 PID 与 Playwright 建的临时 `--user-data-dir` 记进数据目录，一个进程一个文件（`screenshot-browsers/<进程 PID>.json`：种子脚本也拍截图，记在同一个文件里会把 API 的记录冲掉），正常退出时删掉自己那份（Playwright 此时自己结束浏览器）；启动时逐个文件看，浏览器主进程仍挂在记录它的进程名下的（同一数据目录里另一套 API、正在跑的种子脚本）不动，其余对记录里的每个目录，只结束命令行带 `--user-data-dir=<该目录>` 的进程——用户自己开的 Edge / Chrome 不带它——再删掉该目录与这份记录；Windows 没有 `ps`，跳过这一步。
 - PGlite 是单连接：`db.transaction` 之间自然串行，`for update` 仍写着（外部 Postgres 时才真正起作用）。
 - 幂等键 `(project_id, idempotency_key)` 唯一索引，命中返回首次响应体。建作业前的幂等查询在事务外，同键并发的第二个请求查不到、随后撞上首个作业（屏锁预检或唯一索引）——这时首个已经提交，按键重查一次返回它（v0.77）。
-- 截图写回与呈现方式（v1.03）：对象键带上呈现方式——整屏是 `<修订 id>.png` / `.thumb.webp`，叠层是 `<修订 id>.overlay.png` / `.overlay.thumb.webp`，切换呈现方式后重拍的图换了地址，浏览器不会再拿内存里的旧图顶替；回填是条件更新（`screenshot_key` 为空且屏的呈现方式仍等于拍摄时的那个），回填 0 行而行还在时删掉刚写的对象（它们是按过期的呈现方式拍的），除非行里记的正是这两个键。
+- 截图写回与呈现方式（v1.03）：对象键带上呈现方式——整屏是 `<修订 id>.webp` / `.thumb.webp`，叠层是 `<修订 id>.overlay.webp` / `.overlay.thumb.webp`（v1.27 前截图是 `.png`），切换呈现方式后重拍的图换了地址，浏览器不会再拿内存里的旧图顶替；回填是条件更新（`screenshot_key` 为空且屏的呈现方式仍等于拍摄时的那个），回填 0 行而行还在时删掉刚写的对象（它们是按过期的呈现方式拍的），除非行里记的正是这两个键。
   截图队列对在途的同一修订再入队时记一笔，这一轮跑完再跑一次，不丢掉切换后的重拍请求。
-  草稿（v1.13 `REQ-CORE-040`）的键再带画框：`<修订 id>.component.png` / `.mobile.png` / `.desktop.png`（缩略图同理），回填条件同时核对画框——改画框（`API-CORE-012`）作废截图时恰有一张按旧画框在拍，不核对的话它会落库，随后的重拍见已有截图就退出，留下旧尺寸的图；普通屏的 `frame` 恒为空，键不变，存量截图不失效。
+  草稿（v1.13 `REQ-CORE-040`）的键再带画框：`<修订 id>.component.webp` / `.mobile.webp` / `.desktop.webp`（v1.27 前是 `.png`；缩略图同理），回填条件同时核对画框——改画框（`API-CORE-012`）作废截图时恰有一张按旧画框在拍，不核对的话它会落库，随后的重拍见已有截图就退出，留下旧尺寸的图；普通屏的 `frame` 恒为空，键不变，存量截图不失效。
 - 截图写回（v0.77）：渲染要几秒，期间屏或整个项目可能已被删、对象前缀已清过。
-  写回顺序是「写对象 → 按修订行条件回填 `screenshot_key`」（v1.02 起截图与缩略图两个对象都写完，再在同一条 `UPDATE` 里回填 `screenshot_key` 与 `thumb_key`；缩略图做不出来时只回填截图，留给 `screenshot.retry` 补），回填影响 0 行说明行已不在，删掉那一屏的对象前缀（项目也不在了就删整个项目前缀）；否则刚写的 PNG 没有任何行指向它，`screenshot.retry` 与删屏 / 删项目的前缀清理都不会再碰它。
+  写回顺序是「写对象 → 按修订行条件回填 `screenshot_key`」（v1.02 起截图与缩略图两个对象都写完，再在同一条 `UPDATE` 里回填 `screenshot_key` 与 `thumb_key`；缩略图做不出来时只回填截图，留给 `screenshot.retry` 补），回填影响 0 行说明行已不在，删掉那一屏的对象前缀（项目也不在了就删整个项目前缀）；否则刚写的截图没有任何行指向它，`screenshot.retry` 与删屏 / 删项目的前缀清理都不会再碰它。
 - `quilt.append_upload` 按 `uploadId` 在进程内串行（v0.77）：offset 守卫是「读长度 → 比较 → 整体写回」三步，不串行就会让同 offset 的两段都「成功」。本地版单进程，进程内的链足够。
 - **浏览器连接预算**（v0.37）：画布与 API 同源（打包形态同端口，开发时 Vite 代理 `/v1`），浏览器对 HTTP/1.1 每个源只给 6 条并发连接且**跨标签页共用**。
   因此一个标签页**恒定只开一条** SSE（项目事件流），作业进度走它的 `job_changed` 投影，不随在跑作业数增长——否则多开几个项目再各跑一个作业就会占满额度，普通请求全部排队。
@@ -2275,6 +2407,7 @@ v0.32 删除：`/errors/unauthorized`、`/errors/token-expired`（无登录）�
 | PGlite（`@electric-sql/pglite`，进程内 Postgres）— v0.32 默认 | 业务数据，文件在 `$QUILT_HOME/db` | 本地 | 单连接、无超时；缓冲区压低（`shared_buffers` 16MB、`work_mem` 2MB，v1.17）：本机实测整个 API 进程日常启动约 410 → 320 MB、首次建库约 910 → 820 MB（WASM 初始内存下限 128MB，再往下压不动） | 进程不可用 | 设 `DATABASE_URL` 可换外部 Postgres（开发 docker / 将来 SaaS） |
 | 对象存储：本地 fs（`$QUILT_HOME/objects`）— v0.32 默认 | 修订 HTML / 截图 / 导出 | 本地 | — | 落库失败 → 作业失败 | `STORAGE_DRIVER=s3` 留给 SaaS |
 | Chromium / Playwright（同进程） | 截图 | 本机 | 单张截图分段设上限：建上下文 ≤ 5 s，载入到拍完 ≤ 30 s（其中载入等 `networkidle` ≤ 15 s），关上下文 ≤ 5 s；任何一段超时即抛错交给重试，建或关上下文超时说明浏览器本身卡住，结束它、下一张重起（v0.82：此前图标 / 字体就绪的 `evaluate` 与关上下文不设上限，浏览器等不到一帧时整条链一直挂着，回刷作业跟着停在 `running`）。浏览器启动单飞、≤ 30 s：还没起来时并发进来的截图共用同一次启动（此前各起一个、只记住最后一个，其余泄漏到进程退出）。失败重试 2 次。就绪判定：Tailwind 样式生效是硬条件、等 ≤ 5 s（没有 preflight 的半成品存下去就是永久的假图）；图标只要求 lucide 脚本已加载，拍之前再执行一次 `createIcons`——lucide 不认识的名字会原样留下 `<i data-lucide>`，把「页面里不剩 `<i>`」当条件，模型编出一个不存在的图标名这屏就永远拍不成（v0.79）；字体（v0.82）与视口内图片是软条件，各等 ≤ 4 s。外网缓存（v0.93）：外网 https 上的脚本、样式与字体（Tailwind Play CDN、lucide、Google Fonts、屏自己引的库）按地址缓存在进程内，命中的直接回给页面，同一进程里只有第一张截图走网络——每张截图是新上下文、没有 HTTP 缓存，不缓存时每张重下一遍。只存 200 的响应，跳转前的地址一并记上；没取到的不存，下一张照常走网络；进程重启后清空 | 截图缺失 | 优先本机 Chrome → Edge → Playwright 自带 Chromium；都没有时启动日志给 `npx playwright install chromium`，画布用骨架占位，`screenshot.retry` 装好后补扫。缩略图（v1.02，`ADR-029`）同样由这个浏览器做：开一个空白上下文，`createImageBitmap` 按 1/4 尺寸高质量缩放，`OffscreenCanvas.convertToBlob` 出 WebP（质量 0.8）；单张 ≤ 5 s，失败不影响截图本身 |
+| sharp（libvips，随 npm 装各平台的预编译包，v1.27 `ADR-037`） | 截图编码成无损 WebP | 本机 | 单张 ≤ 10 s；编码失败重试 2 次 | 这张截图缺失，`screenshot.retry` 补 | 装不上 sharp 时启动日志说明，截图改用浏览器自带的无损 WebP 编码，只为截图照常可用：它压得很弱，简单的屏上甚至比 PNG 还大 |
 | Tailwind Play CDN、lucide、Google Fonts | 预览 HTML 内联依赖 | 第三方，无 SLA | 浏览器默认；截图浏览器在进程内缓存取到过的（v0.93，见上一行）。v1.06：Tailwind Play（钉 3.4.17）与 lucide（钉 1.55.0，此前是 `@latest`）的副本放在仓库 `packages/core/vendor`（来源与 sha256 见同目录 README）：预览域经 `/vendor/<带版本的文件名>` 下发并在 `/p/`、`/c/` 下发时把这两个 `<script src>` 换过去（存量修订里没钉版本的写法也换），截图直接用副本应答，导出内联副本；修订 HTML 里仍写钉死版本的外网地址，导出件与单独打开的屏照样能用。Google Fonts 与屏自带的库仍走外网 | 预览样式退化 | M2 起 prelude 内联预编译 Tailwind 子集（见 §28 风险）。v0.85：样例页文档不用 Tailwind；样例页单文件导出（P3）按 Google Fonts css2 接口的 `text=` 参数取实际用到的字符子集、base64 内联，取不到时回落 `system-ui` 并在导出件里标注 |
 | Claude Code CLI / Codex CLI（用户本机） | `runner=agent` 作业的执行者（Codex 自 v0.68：`codex queue` 投递、Codex 线程库只读列线程）；也可作为 MCP 客户端主动接入；`codex exec --json --ephemeral` 是「本机 Codex 订阅」通道的驱动（不在用户的 Codex 历史里留会话） | 用户环境 | agent 作业 30 min | 通道不可用（标出、给安装步骤） | 云端模型通道始终可用 |
 | Claude Agent SDK（`@anthropic-ai/claude-agent-sdk`，拉起 SDK 自带的 Claude Code 子进程，不是用户本机装的 `claude`；登录态与本机共用） | `kind=chat` 作业的 agent 回路（v0.45）：工具调用循环、会话记忆（`~/.claude/projects/` 下的会话文件）、自动压缩；同时是「本机 Claude 订阅」通道的驱动。作模型通道时（v1.05）每次调用在空的临时目录里跑、`persistSession: false`、`autoMemoryEnabled: false`：不注入任何仓库的 auto-memory、用户邮箱与 git 环境，也不在 `~/.claude/projects/` 留会话（此前继承 API 进程的工作目录 `apps/api`，每次出屏都带上这个仓库的开发笔记，该目录下积了 464 个会话文件） | 本机；自带的 Claude Code 版本跟 SDK 版本走（SDK 0.3.283 带 2.1.283），随 Quilt 的依赖升级，用户 `claude update` 改变不了它——新模型会要求更高的 Claude Code（Opus 5.5 要 ≥ 2.1.280，v0.71 起依赖 ≥ 0.3.283） | 聊天单轮按 `estimateJob(chat)` 伸缩（11 min）、不重试；作模型通道时同上一行（429 / 5xx 重试 2 次） | 作业失败 `errorClass=provider` / `timeout`，消息为 API 原文；API 报错（模型不受支持、额度用完、过载）时 SDK 的 result 仍是 `subtype=success`、只在 `is_error` / `api_error_status` 上标出，驱动与聊天回路都按失败处理（v0.71），通道验证同样报失败；`resume` 失败静默新开会话。作模型通道时，输出超过单次上限由 SDK 自带的 Claude Code 发「接着写」续上（最多 3 次），`result` 只装最后一段，驱动取这一轮所有回答的文字按序拼接（v0.90），接缝处偶尔丢一个空白字符；续写用尽仍超限时 SDK 报 `is_error`，按失败处理 | 无：聊天只有这一条路（Gemini / OpenAI 兼容通道不能聊，`REQ-CORE-023`） |
@@ -2289,8 +2422,9 @@ v0.32 删除的依赖：Resend（无登录邮件）、pg-boss（进程内队列�
 | `job.timeout` | 每分钟定时器 | 批 100 | 1 min | 下轮补扫（条件更新幂等）；`runner=agent` 的 `running` 作业不扫（`agentDelivery` 自己计时）；排队超过 1 分钟的 agent 作业在这里补投（v0.79）；排队超过 1 分钟的 model 作业在这里重新入队（v1.03，领取是条件更新，重复入队无害）；扫到的超时作业走统一失败收尾（§16） | 超时率 5 min > 10% → `RB-002` |
 | `agent.run`（见状态机 GenerationJob 末三行） | 建 `runner=agent` 作业即拉起 | 每作业一个子进程；同屏互斥靠作业锁 | 30 min | 超时杀进程 → failed(timeout) | 无 |
 | `screenshot.render` | 修订落库后入队（进程内）；作业里行内拍失败的修订也入队（v0.79） | 并发 4 / 按 revisionId 去重 | 单张 ≤ 40 s（分段上限见上表 Chromium 一行，v0.82） | 重试 2 次后交给 `screenshot.retry`；拍成后推 `screen_changed{screenshot:true}` | 积压 > 200 → `RB-004` |
-| `screenshot.retry` | 每 5 分钟定时器（启动 3 s 后先扫一轮） | 批 50，各屏当前版先扫、其余按新到旧 | 5 min | 同一修订失败第 n 次后 5 min × 2^(n−1) 内不再扫（封顶 6 h，进程内计数、重启清零），永久拍不成的修订不再占满每批 50 条、挤掉别的修订；补上后推 `screen_changed{screenshot:true}`（v0.79） | 同上 |
+| `screenshot.retry` | 每 5 分钟定时器（启动 3 s 后先扫一轮） | 批 50，只补当前版与待采用候选的截图（v1.27：被 `screenshot.prune` 清掉截图的旧版不补）；历史修订只补缺的缩略图 | 5 min | 同一修订失败第 n 次后 5 min × 2^(n−1) 内不再扫（封顶 6 h，进程内计数、重启清零），永久拍不成的修订不再占满每批 50 条、挤掉别的修订；补上后推 `screen_changed{screenshot:true}`（v0.79） | 同上 |
 | `upload.gc` | 每分钟定时器（v0.82） | 全量扫 `uploads/` | — | 最后一次写入早于 10 分钟（签名 PUT 地址的有效期）的上传位删掉：签发后没用的空位、写了一半被丢下的都在这里收；删失败的下一轮再扫 | 无 |
+| `screenshot.prune` | 每小时定时器（v1.27 `ADR-037`，启动 2 分钟后先扫一轮） | 批 200 | — | 不是当前版、不是待采用候选、建出来超过 24 小时、已有缩略图的修订：删掉整屏截图对象并把 `screenshot_key` 置空；同一个键还被要保留截图的修订引用时只置空、不删对象；还没有缩略图的先补缩略图再清；使用记录开着时不归档（缩略图与 HTML 都还在） |
 | `storage.gc` | 每小时定时器（v1.03 落地，启动 1 分钟后先扫一轮） | 按项目扫 `exports/` 与 `attachments/` | — | 删超过 24 小时的导出产物（画布导出成功即下载，MCP 的 `get_export` 地址 5 分钟过期）；删上传超过 24 小时、没被任何消息引用的参考图附件（使用记录开着时改为移到 `records/archive/<日期>/attachments/`，v1.22）；不扫 `records/`；删失败的下一轮再扫 | 无 |
 | `job.archive` | 每日定时器 | 批 1000 | 30 min | 下轮补扫 | 无 |
 
@@ -2323,7 +2457,7 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
     导出为单文件 + hash 路由，与预览态同构。
   - Alternatives：Service Worker 虚拟源（推迟：srcdoc 不受 SW 控制、需独立 origin 基础设施，触发条件写入 §28）；blob URL 互链（被否：相对路径断、生命周期难管）；Sandpack / WebContainers（被否：前者停更且 Nodebox 许可雷，后者单页单实例）。
   - Consequences：运行时脚本成为契约的一部分（prelude）；需处理 `<head>` 样式合并；深链接刷新不保持播放位置（可接受）。
-    M0 实证补充：换 DOM + `startViewTransition` + 表单状态快照/恢复在 Edge 152 全部按预期工作；**焦点在预览文档内时画布级快捷键（Esc、Alt+←，v0.34 起加 ⌘E、⌘/，v0.66 加 ⌘K，v0.80 加 ⌥ + 字母，v0.95 加 ⌘S、焦点不在可编辑元素上时的 ⌘Z、选择元素态下焦点不在可编辑元素上时的 Delete / Backspace；⌘S 在预览文档里一律拦掉浏览器的保存）必须由运行时转发给父页**（v1.00 的 `Enter` / `Shift+Enter` 逐级选不转发：层级状态在运行时里，就地处理）（`quilt:key` 消息带 `code` 与修饰键，父页按自己的键位表处理），否则父页收不到——角标承诺的「选元素按 ⌘E」在 v0.34 之前只有焦点落在父页时才有效；⌥ + 字母（`⌥N` 批注、`⌥D` 设计系统、`⌥T` 本机 agent、`⌥G` 新建屏幕……）只在焦点不在可编辑元素上时转发：macOS 下它们在输入框里是打特殊字符的；运行时对 iframe 内 `<a href="/…">` 的劫持对真实点击与合成事件均有效。
+    M0 实证补充：换 DOM + `startViewTransition` + 表单状态快照/恢复在 Edge 152 全部按预期工作；**焦点在预览文档内时画布级快捷键（Esc、Alt+←，v0.34 起加 ⌘E、⌘/，v0.66 加 ⌘K，v0.80 加 ⌥ + 字母，v0.95 加 ⌘S、焦点不在可编辑元素上时的 ⌘Z、选择元素态下焦点不在可编辑元素上时的 Delete / Backspace；⌘S 在预览文档里一律拦掉浏览器的保存）必须由运行时转发给父页**（逐级选的 `Shift+↑` / `Shift+↓` 不转发：层级状态在运行时里，就地处理）（`quilt:key` 消息带 `code` 与修饰键，父页按自己的键位表处理），否则父页收不到——角标承诺的「选元素按 ⌘E」在 v0.34 之前只有焦点落在父页时才有效；⌥ + 字母（`⌥N` 批注、`⌥D` 设计系统、`⌥T` 本机 agent、`⌥G` 新建屏幕……）只在焦点不在可编辑元素上时转发：macOS 下它们在输入框里是打特殊字符的；运行时对 iframe 内 `<a href="/…">` 的劫持对真实点击与合成事件均有效。
     v0.6 补充：模型把「Log In / Create account」这类主动作生成为 `<button type="button">`，链接劫持覆盖不到，用户感知为「按钮点不动」——运行时（预览与导出同构）额外劫持 `form[action^="/"]` 的 `submit` 与 `[data-href^="/"]` 的点击，统一发 `quilt:navigate`；契约要求表单写 `action` + `type="submit"`，非表单的跳转按钮写 `<a href>` 或 `data-href`。
     v0.13 补充（M6 `REQ-EDIT-004`）：批注气泡画在**父页画布层**，但元素在跨域文档里、父页碰不到 `contentDocument`，量不到几何。**不引入实时订阅协议**：卡片未聚焦时本就是该修订的静态截图，所以只需在**批注那一刻**把元素矩形记一次——现有 `quilt:select` 消息增一个 `rect { x, y, w, h }` 字段（屏文档坐标，含滚动偏移），批注随实体存下它；之后气泡完全由画布层按存下的坐标 × 画布缩放绘制，不需要 `ResizeObserver`、不需要常驻观察、不拖慢原型播放，导出产物也无需任何改动。
     代价：屏被重生成后旧矩形可能失准——批注此时已是「已处理」并收起，未处理的批注按 `anchorText` 兜底，且矩形超出卡片可见区时气泡贴边显示并标注「元素在折叠区域内」。
@@ -2674,7 +2808,7 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
   - Alternatives：全部文案按中文原文查英文词典（被否：带插值的句子与同字不同义的词对不上；只有 schema 里 zod 的自定义 message 必须是字符串，它们的英文按原文登记在 API 的 `ISSUE_EN` 表里）；语言放 cookie（被否：MCP 与脚本没有 cookie，还得区分谁是浏览器）；所有请求都按 `Accept-Language` 判（被否：界面里选了中文的人，浏览器头可能是英文，选择会失效）；生成内容总跟界面语言（被否：MCP 与脚本没有界面语言，它们的屏一直跟着提示词的语言走）。
   - Consequences：同一个概念在两种语言里各只有一个说法，英文按术语表定（造 → Generate、屏 → screen、草稿本 → Sketchbook…）；新增界面文字要同时写中英两边，缺一边编译不过。
     英文界面下生成的屏缺省是英文，用户写中文要求也一样，除非要求里点名语言；已有的屏与草稿不重译。
-- **`ADR-035` 本机使用记录：浏览器全局采集，事件与模型调用分两张表，正文与归档进对象存储，缺省关** — Status: Proposed（用户 2026-10-21 定：覆盖整个 Quilt；记界面操作、输入过程、完整提示词与原始回复；删除时留归档；设置里一个开关，缺省关）
+- **`ADR-035` 本机使用记录：浏览器全局采集，事件与模型调用分两张表，正文与归档进对象存储，缺省关** — Status: Accepted（2026-10-21 Owner 确认设计与表结构；开关放在设置「系统」一节，v1.24。用户 2026-10-21 定：覆盖整个 Quilt；记界面操作、输入过程、完整提示词与原始回复；删除时留归档；设置里一个开关，缺省关）
   - Context：用户要分析自己用 Quilt 的过程来改进流程。库里已有作业输入、修订与消息，但没有界面操作、发出前的输入过程、拼好的提示词与模型原始回复；删掉草稿或项目时它的修订也一并删掉。
   - Decision：浏览器在文档上挂被动的点击、按键、输入与变更监听，按 §9 的规则取元素名，不逐个组件埋点；画布镜头、拖动、作业、提示条、预览消息这些没有点击的地方在各自的结束点各记一条。事件攒批写进 `record_events`。
     worker 的 `llmCall` 是所有模型调用的唯一出口，在那里记 `model_calls`，正文进对象存储；MCP 在工具包装层记 `source=mcp` 的事件。删屏、删项目与 `storage.gc` 在动手前把行写成清单、对象拷进 `records/archive/`。
@@ -2682,6 +2816,17 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
   - Alternatives：逐个组件手写埋点（被否：漏得多，新加的按钮默认不记）；记进 JSONL 文件（被否：PGlite 与外部 Postgres 都能直接 SQL 查，文件还要另写解析）；开关放 `localStorage`（被否：worker 与清理任务读不到）；删除改成软删（被否：每条读路径都要加过滤，界面上删除的含义也变了）。
   - Consequences：记录里有用户写的全部文字与生成的全部内容，只在本机、不上传；密码框、通道密钥与签名地址不记（`INV-CORE-006`）。磁盘随使用一直涨，清理策略见 `Q-RECORD-1`。
     新加的界面元素带 `data-testid` 就会被叫出名字，不用另外埋点；记录的写入失败一律不挡用户的操作。
+- **`ADR-036` 用量台账记账时写下项目、任务类型与模型名** — Status: Accepted（2026-10-21 Owner 选定，v1.24）
+  - Context：用量看板要按项目、任务类型与模型归类，删掉的项目与模型也要照样显示。台账原来只有驱动与模型 ID，项目与任务类型要联作业表，而删项目会级联删掉它的作业；通道删掉后显示名也没了。本机库 228 条台账里已有 41 条找不到项目。
+  - Decision：`usage_entries` 加 `project_id`、`project_name`、`kind`、`channel_id`、`channel_label` 五列，都不建外键；`recordUsage` 从作业取值一起写。读的时候项目与通道还在就用现在的名字，删了用快照；删项目、删通道时先把台账里它的快照名刷成删除前的名字，改过名再删的也显示最后的名字。迁移 `0022` 按现存的作业、项目与通道回填。
+  - Alternatives：读时联表（被否：删掉的项目与通道永远归不了类）；项目改软删（被否：每条读路径都要加过滤）；只记 id 不记名字（被否：删了之后只剩一串 id）。
+  - Consequences：改名后看板显示新名字，删掉的显示删除前的名字；迁移前就找不到作业的 41 条只能归「已删除的项目」、任务类型算「其他」。
+
+- **`ADR-037` 截图存储瘦身：无损 WebP、旧版本只留缩略图、回到旧版共用对象** — Status: Accepted（2026-10-22 Owner 选定三项与 sharp，v1.27）
+  - Context：2026-10-22 本机实测对象存储 516 MB：整屏截图 PNG 406 MB（其中不是当前版的 335 MB、当前版 38 MB），HTML 103 MB，缩略图 19 MB；1085 个修订只有 116 个是当前版，版本列表只用缩略图。回到旧版逐字节拷一份 HTML 再重拍截图，现有重复副本截图 109 MB、HTML 14 MB。
+  - Decision：① 整屏截图用 sharp 编码成无损 WebP（压缩档最高），画面逐像素不变；8 张样本 PNG 3173 KB → 1344 KB。进程里同时最多 2 张在编码：sharp 每张占一个 libuv 线程，线程池默认 4 个，2026-10-22 本机实测 4 张 2560 宽截图同时编码时同进程读一个 66 KB 文件要等 4.1 s（3 张时 0–3 ms），预览与对象读取会被卡住。② `screenshot.prune` 每小时把不是当前版、不是待采用候选、建出来超过 24 小时的修订的整屏截图删掉，只留缩略图；需要整屏图而它已被清掉的地方当场从 HTML 重拍一张写回（之后照旧会被清）：MCP `quilt.get_revision` 当场重拍；采用一张截图已清的旧候选时入队重拍；画布卡片、聚焦态与 `quilt.get_screenshot` 只用当前版，修订面板、候选展开、草稿版本与记录栏只用缩略图。③ 回到旧版的新修订直接引用源修订的 HTML、截图与缩略图对象，截图满足 `API-CORE-015` 的三个条件才沿用。④ 存量：启动后后台把要保留截图的修订（当前版、待采用候选、24 小时内的）从 PNG 转成 WebP，其余交给 `screenshot.prune`；换键之后、删 PNG 之前被打断时，那张 PNG 会留在屏目录里，直到删屏。
+  - Alternatives：只存相邻版本的 HTML diff（被否：HTML 只占 20%，gzip 就能省掉它的 75%，diff 还要处理版本树、回到旧版与删除时的重建链）；浏览器自带的无损 WebP（被否：样本上只省 17%，作为装不上 sharp 时的退路）；有损 WebP（被否：同样大小下无损已足够，截图还要给本机 agent 看细节）。
+  - Consequences：按现有数据估算整屏截图从 406 MB 降到约 16 MB；多一个原生依赖（2026-10-22 实测 macOS arm64 的预编译包装上后 18 MB）；旧版本的整屏截图要用时多一次约 1–3 s 的重拍；共用对象的修订都在同一屏前缀下，删屏、删项目照旧按前缀删，`storage.gc` 与归档按键去重。
 
 ## 19. 验收 / 测试
 
@@ -3075,7 +3220,18 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
   Given 本月台账已有 300 屏
   When 调用 API-CORE-006 kind=generate
   Then 返回 202（本地版无硬上限）
-  And 设置弹层「本月用量」显示 ≥ 300 屏、token 进出与按驱动分列，且写明不设上限
+  And 设置「用量」的看板显示 ≥ 300 屏、Token 与按模型的排行，且写明不设上限
+
+场景: 删掉的项目与模型照样计入用量 (REQ-CORE-008 / 边界, v1.24)
+  Given 台账里有项目「Demo」用通道「Sonnet 5.5」记的 1000 token
+  When 删掉项目「Demo」与通道「Sonnet 5.5」后调用 API-CORE-052 range=all
+  Then projects 里有 name=Demo、deleted=true、tokens=1000 的一项
+  And models 里有 label=Sonnet 5.5、deleted=true 的一项
+
+场景: 全部范围跨度长时按周汇总 (REQ-CORE-008, v1.24)
+  Given 第一条台账在 90 天前
+  When 调用 API-CORE-052 range=all
+  Then unit=week，buckets 每项从周一开始，最后一项含今天
 
 场景: 取消作业仍记台账 (REQ-CORE-008 / 边界)
   Given 作业 running 且已消耗 3000 token
@@ -3518,6 +3674,8 @@ v0.32 本地版没有 feature flag 与灰度——发布 = 发 npm 版本（SemV
 
 迁移用 Drizzle Kit，正向迁移在进程启动时自动应用（`$QUILT_HOME/db` 的 PGlite 与 `DATABASE_URL` 的外部 Postgres 走同一组 SQL）。
 `0020`（v1.23）：删 `annotations` 表，已有的批注随之删除；旧作业 `input` 里的 `annotations` 键留在 jsonb 里、不再读。
+v1.27（`ADR-037`）没有表结构迁移：存量截图由启动后的后台任务转成 WebP（只转要保留截图的修订，转完换键、删 PNG），其余由 `screenshot.prune` 清掉；中途重启从没转完的接着转。
+`0022`（v1.24 `ADR-036`）：`usage_entries` 加 `project_id`、`project_name`、`kind`、`channel_id`、`channel_label`（都可空、不建外键），并按 `job_id` 联现存的作业、项目与通道回填（`channel_id` 取作业 `input.runner.channelId`）；作业已删的旧记录留空。
 `0021`（v1.22 `REQ-CORE-047`）：`users` 加 `record_usage`（boolean not null default false）与 `record_since`（timestamptz，可空）；新建 `record_events`（`(session_id, seq)` 唯一、`(user_id, at)` 索引）与 `model_calls`（`(job_id, seq)` 索引）；两表的项目、屏、作业 id 都不建外键。存量用户开关是关的，不需要回填。
 v0.85（P1 落地；迁移编号取落地时的下一个号，本文写作时最新为 `0015`）：`projects` 加 `language`（text not null default `en`，存量行因此是 `en`，不需要单独的 update）；`design_systems` 与 `design_presets` 各加 `token_ext`（jsonb，可空，空 = 全部默认）；`tokens` 的新字段**由启动时的回填补齐**，与 v0.38 语义色回填同一套做法：扫 `tokens->'typography'->'scale'->0` 仍是字符串（或缺 `state`）的行，按行里存着的输入重算 tokens、只写 `tokens` 不动 `version`，幂等、失败只记一行日志不挡启动；重算用的 `normalizeTokens` 是纯函数，旧 `scale` 升成 7 档后数值等于 Tailwind 默认表，因此回填前后 prelude 输出的计算样式不变。
 已有修订里烤进去的 prelude 要靠 `apply_design_system` 回刷才带上新变量与 `lang`（回刷是用户动作，不自动触发）；不回刷也不影响存量屏——新变量只被新写的屏引用。

@@ -32,7 +32,7 @@ function alive(socketPath: string): Promise<boolean> {
 }
 
 let cache: { at: number; items: LiveSession[] } | null = null;
-/** 活着的交互式会话，最近活跃在前；结果缓存 2 s（下拉打开与建作业校验共用） */
+/** 活着的交互式会话，最近活跃在前；同一会话被两个活进程登记时只留最近活跃的那份。结果缓存 2 s（下拉打开与建作业校验共用） */
 export async function listSessions(): Promise<LiveSession[]> {
   if (cache && Date.now() - cache.at < 2000) return cache.items;
   let names: string[] = [];
@@ -48,7 +48,8 @@ export async function listSessions(): Promise<LiveSession[]> {
       updatedAt: new Date(rec.updatedAt ?? 0).toISOString(), socketPath: rec.messagingSocketPath,
       ...(VERIFIED_CLAUDE_VERSIONS.has(rec.version ?? '') ? {} : { unverifiedVersion: rec.version ?? '' }),
     };
-  }))).filter((x): x is LiveSession => !!x).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }))).filter((x): x is LiveSession => !!x).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .filter((s, i, a) => a.findIndex((x) => x.sessionId === s.sessionId) === i);
   cache = { at: Date.now(), items };
   return items;
 }

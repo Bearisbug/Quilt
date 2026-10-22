@@ -11,7 +11,7 @@ import { findCodexThread } from '../lib/codexSessions.ts';
 import { runnerCatalog, listChannels } from './channels.ts';
 import { driverSupportsVision } from '../lib/llm.ts';
 import { hasActiveJob } from './screens.ts';
-import { estimateJob, createJobSchema, L, type CreateJobInput, type JobRunner, type Locale, type Runner } from '@quilt/core';
+import { estimateJob, createJobSchema, L, subtreeBlockIssues, extractBody, type CreateJobInput, type JobRunner, type Locale, type Runner } from '@quilt/core';
 import { requestUiLocale, tr } from '../lib/locale.ts';
 import type { UserRow } from './user.ts';
 import type { JobRow } from './projects.ts';
@@ -60,14 +60,20 @@ export function timeoutFor(input: CreateJobInput, repaintScreens = 0, outputChar
 }
 
 // regenerate_subtree 创建前校验：目标屏得在这个项目里（草稿本里即目标是草稿，REQ-CORE-045），qid 必须在当前修订里（TC-EDIT-004 → 404），
-// expectedRevisionId 必须是当前版
-async function assertSubtreeTarget(projectId: string, input: { screenId: string; qid: string; expectedRevisionId: string }) {
+// expectedRevisionId 必须是当前版；带 qids（v1.26）时这几块都要在这一版里、互不包含，否则 400
+async function assertSubtreeTarget(projectId: string, input: { screenId: string; qid: string; qids?: string[]; expectedRevisionId: string }) {
   const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, input.screenId));
   if (screen && screen.projectId !== projectId) throw problems.notFound();
   if (!screen?.currentRevisionId) throw problems.elementNotFound();
   if (screen.currentRevisionId !== input.expectedRevisionId) throw problems.revisionConflict();
   const [rev] = await db.select().from(schema.screenRevisions).where(eq(schema.screenRevisions.id, screen.currentRevisionId));
   const html = (await storage.get(rev.htmlKey)).toString('utf8');
+  if (input.qids) {
+    const { missing, nested } = subtreeBlockIssues(extractBody(html), input.qids);
+    if (missing.length) throw problems.validation([{ path: 'input.qids', message: L(`这几块不在这一版里：${missing.join('、')}`, `Not in this revision: ${missing.join(', ')}`) }]);
+    if (nested.length) throw problems.validation(nested.map(([outer, inner]) => ({ path: 'input.qids', message: L(`${outer} 包住了 ${inner}，只留外面那一块`, `${outer} contains ${inner}; keep only the outer one`) })));
+    return;
+  }
   if (!html.includes(`data-qid="${input.qid}"`)) throw problems.elementNotFound();
 }
 
@@ -102,7 +108,7 @@ async function assertInput(user: UserRow, projectId: string, input: CreateJobInp
   const { runner, imageKeys } = input.input as { runner?: Runner; imageKeys?: string[] };
   if (runner?.kind === 'channel' && !(await listChannels(user.id)).some((c) => c.id === runner.channelId)) throw problems.notFound();
   if (imageKeys?.length && runner?.kind === 'model' && !driverSupportsVision(runner.driver)) {
-    throw problems.validation([{ path: 'runner', message: L(`「${runner.driver}」通道不支持参考图，换一个支持视觉的通道再发`, `The “${runner.driver}” channel does not support reference images; switch to a channel with vision and send again`) }]);
+    throw problems.validation([{ path: 'runner', message: L(`「${runner.driver}」模型不支持参考图，换一个支持视觉的模型再发`, `The “${runner.driver}” model does not support reference images; switch to a model with vision and send again`) }]);
   }
 }
 
@@ -141,7 +147,7 @@ export async function createJob(args: { user: UserRow; projectId: string; input:
     const exists = !!r?.sessionId && !!(r.tool === 'codex' ? await findCodexThread(r.sessionId) : await findSession(r.sessionId));
     if (!exists) throw problems.validation([{ path: 'runner.sessionId', message: L('会话已关闭或不存在，重新选一个', 'The session is closed or gone; pick another') }]);
     // 本机会话拿到的是一段文字指令，钉死路由的懒生成、造变体、叠层屏这三种它没有对应的写法，与其静默当普通造屏做，不如当场拒
-    if (input.kind === 'generate' && (input.input.route || input.input.variantOf || input.input.presentation)) throw problems.validation([{ path: 'runner', message: L('懒生成、出变体、叠层屏请换一个模型通道，本机会话不接这类作业', 'Local sessions do not take missing pages, state variants or overlay screens; switch to a model channel') }]);
+    if (input.kind === 'generate' && (input.input.route || input.input.variantOf || input.input.presentation)) throw problems.validation([{ path: 'runner', message: L('懒生成、出变体、叠层屏请换成一个模型，本机会话不接这类作业', 'Local sessions do not take missing pages, state variants or overlay screens; switch to a model') }]);
   }
   if (input.kind === 'regenerate_subtree') await assertSubtreeTarget(projectId, input.input);
   const targetScreenId = targetScreenOf(input);

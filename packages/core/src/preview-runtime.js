@@ -123,8 +123,8 @@
     var t = /** @type {Element | null} */ (e.target);
     var editable = t && t.closest && t.closest('input, textarea, select, [contenteditable]');
     var del = (e.key === 'Delete' || e.key === 'Backspace') && !mod && !e.altKey && mode === 'inspect' && !editable;
-    // 逐级选（v1.00）：层级状态在这里，就地处理、不转发
-    if (e.key === 'Enter' && mode === 'inspect' && !mod && !e.altKey && !editable && !e.isComposing) { e.preventDefault(); climb(e.shiftKey ? 'up' : 'down'); return; }
+    // 逐级选（v1.00；v1.28 起 Shift+↑ 选父级、Shift+↓ 回到子级）：层级状态在这里，就地处理、不转发；拦掉浏览器扩选文字、滚动的默认动作
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.shiftKey && mode === 'inspect' && !mod && !e.altKey && !editable) { e.preventDefault(); climb(e.key === 'ArrowUp' ? 'up' : 'down'); return; }
     if (e.key === 'Escape' || (e.altKey && e.key === 'ArrowLeft') || (mod && (e.code === 'KeyE' || e.code === 'Slash' || e.code === 'KeyK' || e.code === 'KeyS')) || (mod && e.code === 'KeyZ' && !e.shiftKey && !editable) || (e.altKey && !mod && /^Key[A-Z]$/.test(e.code) && !editable) || del) {
       e.preventDefault();
       send({ type: 'quilt:key', key: e.key, code: e.code, altKey: e.altKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey });
@@ -154,7 +154,7 @@
     if (on && !pierce) {
       pierce = document.createElement('style');
       pierce.setAttribute('data-quilt-ui', '');
-      // 必须排除运行时自己画的那几层：选中框为了和检查器对号也带 data-qid（setSelection），
+      // 必须排除运行时自己画的那几层：选中框为了和检查器对号也带 data-qid（addSel），
       // 它是 fixed、z-index 顶格、罩住选中元素外扩 4px 的一块板子。被这条规则强制成可命中之后，
       // 它盖住的一切都点不动了——targetOf 遇到 data-quilt-ui 返回 null，于是 hover 不亮、点击不上报；
       // 选中的要是根元素，整屏都选不动。带 !important 的作者样式压得过它行内那句普通的 pointer-events:none。
@@ -173,54 +173,69 @@
   }
   // 压在设计稿上的标记外面套一圈 halo，橙红色的设计稿上也看得见
   function paintBox() { if (box) { box.style.borderColor = color('line'); box.style.boxShadow = '0 0 0 1px ' + color('halo'); } }
-  // instant：键盘引起的移动（逐级选、路径预览）不带过渡，跟手的只有指针
-  /** @param {Element | null} el @param {boolean} [instant] */
-  function highlight(el, instant) {
+  // instant：键盘引起的移动（逐级选、路径预览）不带过渡，跟手的只有指针。
+  // 指针停在选中的元素上不再叠一层悬停框；选中两块以上时检查器里悬停某一块（peek）照样框出它，往外多让 3px、套在它的选中框外面
+  /** @param {Element | null} el @param {boolean} [instant] @param {boolean} [peek] */
+  function highlight(el, instant, peek) {
     var b = ensureBox();
     b.style.transition = instant ? 'none' : 'left 60ms ease-out,top 60ms ease-out,width 60ms ease-out,height 60ms ease-out';
-    if (!el || el === selEl) { b.style.display = 'none'; return; }
+    var on = !!selOf(el);
+    if (!el || (on && !(peek && sels.length > 1))) { b.style.display = 'none'; return; }
+    var pad = on ? 5 : 2;
     var r = el.getBoundingClientRect();
-    b.style.display = 'block'; b.style.left = r.left - 2 + 'px'; b.style.top = r.top - 2 + 'px'; b.style.width = r.width + 4 + 'px'; b.style.height = r.height + 4 + 'px';
+    b.style.display = 'block'; b.style.left = r.left - pad + 'px'; b.style.top = r.top - pad + 'px'; b.style.width = r.width + 2 * pad + 'px'; b.style.height = r.height + 2 * pad + 'px';
   }
-  /** @type {HTMLElement | null} */
-  var selBox = null;
-  /** @type {HTMLElement | null} */
-  var selTag = null;
+  // 选中框（v1.26 多选）：每个选中的元素一个常驻框，左上角挂「tag · qid」标签；selEl 是最后点中的那一块，逐级选只移动它
+  /** @typedef {{ el: Element, box: HTMLElement, tag: HTMLElement }} Sel */
+  /** @type {Sel[]} */
+  var sels = [];
   /** @type {Element | null} */
   var selEl = null;
-  function ensureSel() {
-    if (selBox) return selBox;
-    selBox = document.createElement('div');
-    selBox.setAttribute('data-quilt-ui', ''); selBox.setAttribute('data-quilt-selection', '');
-    selBox.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;border:2px solid;border-radius:4px;display:none';
-    selTag = document.createElement('span');
-    selTag.style.cssText = 'position:absolute;left:-2px;font:600 11px/16px system-ui,sans-serif;padding:1px 7px;border-radius:999px;white-space:nowrap';
-    selBox.appendChild(selTag);
-    paintSel();
-    document.body.appendChild(selBox);
-    return selBox;
-  }
-  function paintSel() {
-    if (!selBox || !selTag) return;
-    selBox.style.borderColor = color('line'); selBox.style.boxShadow = '0 0 0 1px ' + color('halo') + ',inset 0 0 0 1px ' + color('halo');
-    selTag.style.background = color('line'); selTag.style.color = color('onLine'); selTag.style.boxShadow = '0 0 0 1px ' + color('halo');
-  }
-  function placeSel() {
-    if (!selEl || !selBox || !selTag) return;
-    if (!selEl.isConnected) { setSelection(null); return; }
-    var r = selEl.getBoundingClientRect();
-    selBox.style.display = 'block'; selBox.style.left = r.left - 2 + 'px'; selBox.style.top = r.top - 2 + 'px'; selBox.style.width = r.width + 4 + 'px'; selBox.style.height = r.height + 4 + 'px';
-    selTag.style.top = r.top < 24 ? '2px' : '-20px';
-  }
   /** @param {Element | null} el */
-  function setSelection(el) {
-    selEl = el;
-    var b = ensureSel();
-    if (!el) { b.style.display = 'none'; return; }
-    /** @type {HTMLElement} */ (selTag).textContent = el.tagName.toLowerCase() + ' · ' + (el.getAttribute('data-qid') || '');
-    b.setAttribute('data-qid', el.getAttribute('data-qid') || '');
-    placeSel();
+  function selOf(el) { for (var i = 0; i < sels.length; i++) if (sels[i].el === el) return sels[i]; return null; }
+  /** @param {Sel} s */
+  function paintSel(s) {
+    s.box.style.borderColor = color('line'); s.box.style.boxShadow = '0 0 0 1px ' + color('halo') + ',inset 0 0 0 1px ' + color('halo');
+    s.tag.style.background = color('line'); s.tag.style.color = color('onLine'); s.tag.style.boxShadow = '0 0 0 1px ' + color('halo');
   }
+  /** @param {Sel} s */
+  function placeSel(s) {
+    var r = s.el.getBoundingClientRect();
+    s.box.style.left = r.left - 2 + 'px'; s.box.style.top = r.top - 2 + 'px'; s.box.style.width = r.width + 4 + 'px'; s.box.style.height = r.height + 4 + 'px';
+    s.tag.style.top = r.top < 24 ? '2px' : '-20px';
+  }
+  /** @param {Element} el */
+  function addSel(el) {
+    if (selOf(el)) return;
+    var q = el.getAttribute('data-qid') || '';
+    var box = document.createElement('div');
+    box.setAttribute('data-quilt-ui', ''); box.setAttribute('data-quilt-selection', ''); box.setAttribute('data-qid', q);
+    box.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;border:2px solid;border-radius:4px';
+    var tag = document.createElement('span');
+    tag.style.cssText = 'position:absolute;left:-2px;font:600 11px/16px system-ui,sans-serif;padding:1px 7px;border-radius:999px;white-space:nowrap';
+    tag.textContent = el.tagName.toLowerCase() + ' · ' + q;
+    box.appendChild(tag);
+    /** @type {Sel} */
+    var s = { el: el, box: box, tag: tag };
+    sels.push(s); paintSel(s); placeSel(s);
+    document.body.appendChild(box);
+  }
+  /** @param {Element} el */
+  function dropSel(el) { var s = selOf(el); if (!s) return; s.box.remove(); sels.splice(sels.indexOf(s), 1); if (selEl === el) selEl = null; }
+  // 选中这几块（父页的 quilt:highlight），primary 是最后点中的那一块
+  /** @param {Element[]} els @param {Element | null} primary */
+  function setSelections(els, primary) {
+    sels.slice().forEach(function (s) { if (els.indexOf(s.el) < 0) dropSel(s.el); });
+    els.forEach(addSel);
+    selEl = primary;
+  }
+  // 只选这一个（不按 Shift 点）；null 全部清空
+  /** @param {Element | null} el */
+  function setSelection(el) { setSelections(el ? [el] : [], el); }
+  // 逐级选换掉最后点中的那一块，其余的框原样
+  /** @param {Element} el */
+  function movePrimary(el) { if (selEl && selEl !== el) dropSel(selEl); addSel(el); selEl = el; }
+  function placeSels() { sels.slice().forEach(function (s) { if (s.el.isConnected) placeSel(s); else dropSel(s.el); }); }
   // 修改中 / 已更新标记（REQ-EDIT-002）：父页按 qid 下发。元素本身描边（随滚动走），角标 fixed 定位、滚动 / 缩放时重算；
   // 换 body 时这些节点连同角标一起消失，父页换完会重发
   /** @type {Record<string, Mark>} */
@@ -270,7 +285,7 @@
     working.forEach(function (q) { mark(q, 'working'); });
     done.forEach(function (q) { mark(q, 'done'); });
   }
-  function replaceBadges() { Object.keys(marks).forEach(function (q) { placeBadge(marks[q]); }); placeSel(); }
+  function replaceBadges() { Object.keys(marks).forEach(function (q) { placeBadge(marks[q]); }); placeSels(); }
   window.addEventListener('scroll', replaceBadges, true);
   window.addEventListener('resize', replaceBadges);
   /** @param {Event} e */
@@ -279,8 +294,9 @@
   // 带 data-qid 的祖先（最高到屏根）。上一级 = 最近的带 data-qid 的祖先；下一级 = 沿锚点那条链往下一步。选中与悬停各记一份
   /** @type {{ anchor: Element | null, cur: Element | null }} */
   var hov = { anchor: null, cur: null };
-  /** @type {string | null} */
-  var anchorQid = null;
+  // 选中的每一块各记自己的锚点（qid → 锚点 qid，v1.26 多选）：逐级选与检查器路径只看最后点中的那一块的
+  /** @type {Record<string, string>} */
+  var anchors = {};
   /** @param {string | null} q */
   function byQid(q) { return q ? scope().querySelector('[data-qid="' + q + '"]') : null; }
   /** @param {Element} el @returns {Element | null} */
@@ -289,15 +305,24 @@
   function down(el, anchor) { if (!anchor || anchor === el || !el.contains(anchor)) return null; /** @type {Element} */ var c = anchor; while (up(c) && up(c) !== el) c = /** @type {Element} */ (up(c)); return up(c) === el ? c : null; }
   // 选中的锚点：还在、且仍在当前层之内就沿用，否则当前层自己就是锚点
   /** @param {Element} el */
-  function selAnchor(el) { var a = byQid(anchorQid); if (!a || !el.contains(a)) { a = el; anchorQid = el.getAttribute('data-qid'); } return a; }
+  function selAnchor(el) { var q = qidOf(el); var a = byQid(anchors[q] || null); if (!a || !el.contains(a)) { a = el; anchors[q] = q; } return a; }
+  // 点选：不按 Shift 是只选这一个，当场框上（父页随后的 quilt:highlight 再对一次）；按着 Shift 是加选或减选，由父页定、经 quilt:highlight 画出来
+  /** @param {Element} el @param {boolean} additive */
+  function clickSelect(el, additive) { if (!additive) setSelection(el); highlight(null); send(selection(el, selAnchor(el), additive ? { additive: true } : null)); }
+  // 逐级选、路径点选：换掉最后点中的那一块，锚点跟着它走；select 带 replace 说清换掉的是哪一块
   /** @param {Element} el */
-  function selectEl(el) { setSelection(el); highlight(null); send(selection(el, selAnchor(el))); }
+  function stepSelect(el) {
+    var old = selEl && selEl.isConnected ? selEl : null;
+    if (old) anchors[qidOf(el)] = qidOf(selAnchor(old));
+    movePrimary(el); highlight(null);
+    send(selection(el, selAnchor(el), old ? { replace: qidOf(old) } : null));
+  }
   /** @param {'up' | 'down'} dir */
   function climb(dir) {
     if (selEl && selEl.isConnected) {
       var a = selAnchor(selEl);
       var next = dir === 'up' ? up(selEl) : down(selEl, a);
-      if (next) selectEl(next);
+      if (next) stepSelect(next);
       return;
     }
     if (!hov.cur || !hov.cur.isConnected) return;
@@ -307,15 +332,19 @@
   // 调用方只传带 data-qid 的元素（targetOf / up / byQid 都按 [data-qid] 取）
   /** @param {Element} el */
   function qidOf(el) { return /** @type {string} */ (el.getAttribute('data-qid')); }
-  /** @param {Element} t @param {Element | null} anchor @returns {Outgoing} */
-  function selection(t, anchor) {
+  /** @param {Element} t @param {Element | null} anchor @param {{ additive?: boolean, replace?: string } | null} [how] @returns {Outgoing} */
+  function selection(t, anchor, how) {
     var text = Array.prototype.filter.call(t.childNodes, function (n) { return n.nodeType === 3; }).map(function (n) { return n.textContent; }).join('').trim();
     var comp = t.closest('[data-component]');
     // path：从屏根到锚点，检查器据此画祖先路径
     /** @type {{ qid: string, tag: string }[]} */
     var path = [];
     for (var p = /** @type {Element | null} */ (anchor || t); p; p = up(p)) path.unshift({ qid: qidOf(p), tag: p.tagName.toLowerCase() });
-    return { type: 'quilt:select', qid: qidOf(t), tag: t.tagName.toLowerCase(), text: text, classes: t.getAttribute('class') || '', href: t.getAttribute('href') || t.getAttribute('data-href') || t.getAttribute('action') || null, component: comp ? comp.getAttribute('data-component') : null, path: path };
+    /** @type {Extract<Outgoing, { type: 'quilt:select' }>} */
+    var m = { type: 'quilt:select', qid: qidOf(t), tag: t.tagName.toLowerCase(), text: text, classes: t.getAttribute('class') || '', href: t.getAttribute('href') || t.getAttribute('data-href') || t.getAttribute('action') || null, component: comp ? comp.getAttribute('data-component') : null, path: path };
+    if (how && how.additive) m.additive = true;
+    if (how && how.replace) m.replace = how.replace;
+    return m;
   }
   // 指针换到另一个最里层元素时悬停的层级重置；还在同一个元素上时保留按键走到的那一层
   document.addEventListener('mousemove', function (e) {
@@ -330,9 +359,11 @@
     var t = targetOf(e); if (!t) return;
     // 点中的是悬停框所在的那层（按键往上走过就是祖先），锚点仍是指针下的最里层元素
     var el = t === hov.anchor && hov.cur && hov.cur.isConnected ? hov.cur : t;
-    anchorQid = t.getAttribute('data-qid');
-    selectEl(el);
+    anchors[qidOf(el)] = qidOf(t);
+    clickSelect(el, e.shiftKey);
   }, true);
+  // 按着 Shift 点会把上一次点击处到这里的文字整段划选（选择元素态里设计稿上一片蓝底）：按下时拦掉默认动作
+  document.addEventListener('mousedown', function (e) { if (mode === 'inspect' && e.shiftKey) e.preventDefault(); }, true);
 
   // 设计系统落在 <head> 里的三样：token 变量块、字体链接、Tailwind 配置。Tailwind CDN 运行时追加的 <style> 排在它们之后，不参与比较
   /** @param {HTMLHeadElement} h */
@@ -345,19 +376,27 @@
   /** @param {MessageEvent} e */
   function onMessage(e) {
     var msg = /** @type {Incoming} */ (e.data || {});
-    if (msg.type === 'quilt:mode') { if (msg.marks) { pal = msg.marks; paintBox(); paintSel(); Object.keys(marks).forEach(function (q) { paintMark(marks[q]); }); } mode = msg.mode === 'inspect' ? 'inspect' : 'interact'; if (mode !== 'inspect') { highlight(null); setSelection(null); hov = { anchor: null, cur: null }; anchorQid = null; } setPierce(mode === 'inspect'); document.body.style.cursor = mode === 'inspect' ? 'crosshair' : ''; return; }
-    // 父页的选中状态是事实源：选中 / 清空都同步到常驻框
-    if (msg.type === 'quilt:highlight') { setSelection(msg.qid ? scope().querySelector('[data-qid="' + msg.qid + '"]') : null); return; }
-    // 热更新后重选：同一 qid 还在就回一份新值（检查器字段跟着刷）并把常驻框接回去，不在了让父页清空
-    if (msg.type === 'quilt:reselect') {
-      var el = scope().querySelector('[data-qid="' + msg.qid + '"]');
-      if (el) { if (mode === 'inspect') setSelection(el); send(selection(el, selAnchor(el))); } else send({ type: 'quilt:deselect', qid: msg.qid });
+    if (msg.type === 'quilt:mode') { if (msg.marks) { pal = msg.marks; paintBox(); sels.forEach(paintSel); Object.keys(marks).forEach(function (q) { paintMark(marks[q]); }); } mode = msg.mode === 'inspect' ? 'inspect' : 'interact'; if (mode !== 'inspect') { highlight(null); setSelection(null); hov = { anchor: null, cur: null }; anchors = {}; } setPierce(mode === 'inspect'); document.body.style.cursor = mode === 'inspect' ? 'crosshair' : ''; return; }
+    // 父页的选中状态是事实源：选中 / 清空都同步到常驻框。qids（v1.26 多选）是选中的全部几块，qid 是其中最后点中的那一块；不带 qids 就只有 qid 这一块
+    if (msg.type === 'quilt:highlight') {
+      var qs = msg.qids && msg.qids.length ? msg.qids : msg.qid ? [msg.qid] : [];
+      /** @type {Element[]} */
+      var els = [];
+      qs.forEach(function (q) { var x = byQid(q); if (x) els.push(x); });
+      setSelections(els, byQid(msg.qid));
       return;
     }
-    // 逐级选（v1.00）：焦点在父页时的 Enter / Shift+Enter、检查器祖先路径的点选与悬停预览
+    // 热更新后重选：同一 qid 还在就回一份新值（replace 是它自己，检查器原地刷新）并把常驻框接回去，不在了让父页去掉它。
+    // 选中几块时父页逐块发、最后点中的那块排最后，框一块块接回，不清掉已接回的
+    if (msg.type === 'quilt:reselect') {
+      var el = byQid(msg.qid);
+      if (el) { if (mode === 'inspect') { addSel(el); selEl = el; } send(selection(el, selAnchor(el), { replace: msg.qid })); } else send({ type: 'quilt:deselect', qid: msg.qid });
+      return;
+    }
+    // 逐级选（v1.00）：焦点在父页时的 Shift+↑ / Shift+↓、检查器祖先路径的点选与悬停预览
     if (msg.type === 'quilt:climb') { if (mode === 'inspect') climb(msg.dir === 'up' ? 'up' : 'down'); return; }
-    if (msg.type === 'quilt:pick') { var picked = byQid(msg.qid); if (picked && mode === 'inspect') selectEl(picked); return; }
-    if (msg.type === 'quilt:peek') { if (mode === 'inspect') highlight(byQid(msg.qid), true); return; }
+    if (msg.type === 'quilt:pick') { var picked = byQid(msg.qid); if (picked && mode === 'inspect') stepSelect(picked); return; }
+    if (msg.type === 'quilt:peek') { if (mode === 'inspect') highlight(byQid(msg.qid), true, true); return; }
     if (msg.type === 'quilt:mark') { applyMarks(msg); return; }
     if (msg.type === 'quilt:overlay') { if (swapping) queued.push({ html: msg.html, route: msg.route }); else openOverlay(msg.html, msg.route); return; }
     if (msg.type === 'quilt:overlay-close') { closeOverlay(); return; }
@@ -379,7 +418,7 @@
       document.title = doc.title;
       document.body.replaceWith(doc.body);
       runScripts(document.body);
-      box = null; selBox = null; selTag = null; selEl = null; marks = {}; if (mode === 'inspect') document.body.style.cursor = 'crosshair';
+      box = null; sels = []; selEl = null; marks = {}; if (mode === 'inspect') document.body.style.cursor = 'crosshair';
       restoreForms(); icons(); window.scrollTo(0, y);
       flushOverlays();
     };
