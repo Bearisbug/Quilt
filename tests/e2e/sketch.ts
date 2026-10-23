@@ -58,6 +58,10 @@ const DRAWER = `<div data-frame="mobile" class="min-h-dvh bg-stone-100 text-ston
 <button type="button" class="h-10 px-4 rounded-full bg-stone-900 text-white">筛选</button>
 <div class="fixed inset-0 z-50 pointer-events-none"><div class="absolute inset-0 bg-black/40 opacity-0"></div><div class="absolute inset-x-0 bottom-0 translate-y-full rounded-t-3xl bg-white p-6"><p>筛选条件</p></div></div>
 </div>`;
+// 一屏放不下的长列表（TC-CORE-160）：30 行，选元素时滚动草稿
+const LONGLIST = `<div data-frame="mobile" class="min-h-dvh bg-white text-zinc-900 p-6"><h1 class="text-2xl font-semibold">全部账单</h1>
+${Array.from({ length: 30 }, (_, i) => `<p class="py-3 border-b border-zinc-100 text-sm">第 ${i + 1} 笔 · ¥${(i + 1) * 12}.00</p>`).join('\n')}
+</div>`;
 // 交给本机会话时，脚本扮演会话写的草稿：写死的色值、没有设计系统
 const WEATHER = '<div data-frame="mobile" class="min-h-dvh bg-[#0b1020] text-white p-6 space-y-2"><h1 class="text-2xl font-semibold">东京</h1><p class="text-6xl font-light">18°</p><p class="text-sm text-[#9fb3ff]">多云 · 体感 16°</p></div>';
 const LOGIN = '<form data-frame="component" style="width:320px" class="rounded-xl bg-white p-6 space-y-3 shadow-lg"><h1 class="text-lg font-semibold">登录</h1><input class="w-full h-10 px-3 rounded-md border border-[#d4d4d8]" placeholder="邮箱"><button type="button" class="w-full h-10 rounded-md bg-[#18181b] text-white">继续</button></form>';
@@ -79,6 +83,7 @@ function draftReply(hit: StubHit): string {
   if (instr.includes('记账')) return LEDGER;
   if (instr.includes('官网')) return LANDING;
   if (instr.includes('抽屉')) return DRAWER;
+  if (instr.includes('长列表')) return LONGLIST;
   const size = /\[size:(\d+)x(\d+)\]/.exec(instr);
   if (size) return `<div style="width:${size[1]}px;height:${size[2]}px;background:#0b1020"></div>`;
   const current = hit.user.split('\nCURRENT HTML:\n')[1];
@@ -1446,6 +1451,10 @@ await step('TC-CORE-122', async () => {
   await page.keyboard.press('Escape');
   await eventually(async () => expect((await chip.count()) === 0, 'Esc 应去掉胶囊'), 3000);
   expect((await stageState()) === 'draft', 'Esc 去胶囊时不该收起看板');
+  // 一块也没选时再按 Esc：关掉选元素，同 ⌘E，看板还在（v1.38）
+  await page.keyboard.press('Escape');
+  await eventually(async () => expect(!(await pressed('draft-pick')), '没选中任何块时 Esc 应关掉选元素'), 3000);
+  expect((await stageState()) === 'draft', 'Esc 关掉选元素时不该收起看板');
   // 4 快捷键同画布：页面上 ⌘E 开关选元素，⌥N 什么也不开；焦点在草稿里按 ⌘E 由运行时转发上来
   if (await pressed('draft-pick')) await page.getByTestId('draft-pick').click();
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -2035,6 +2044,40 @@ await step('TC-CORE-158', async () => {
   const hit = await fl.locator('body').evaluate((_b, q) => { const el = document.querySelector(`[data-qid="${q}"]`)!.getBoundingClientRect(); return document.elementFromPoint(el.x + el.width / 2, el.y + el.height / 2)?.closest('[data-qid]')?.getAttribute('data-qid'); }, btn);
   expect(hit === btn, `③ 交互态下按钮上方的命中应是按钮本身：${hit}`);
   return `标题与按钮都选得中（${h1}、${btn}），全透明的抽屉遮罩不挡；关掉选元素后命中照旧`;
+});
+
+// ---------- TC-CORE-160 选元素时悬停框跟着滚动（源自缺陷 2026-10-22） ----------
+await step('TC-CORE-160', async () => {
+  await ensureChannel();
+  const sb = await sketchbook();
+  const d = await newDraft(sb, '一个长列表的账单页', { runner: CHANNEL() });
+  await openSketch(d.id);
+  await waitStage('draft', 10000);
+  const fl = page.frameLocator('[data-testid="draft-iframe"]');
+  const row = fl.locator('p', { hasText: '第 3 笔' });
+  await row.waitFor({ timeout: 10000 });
+  await sleep(800);
+  await page.getByTestId('draft-pick').click();
+  // 指针停在第 3 行中间（画框缩放过，按显示框换算）
+  const frame = page.getByTestId('draft-iframe');
+  const shown = (await frame.boundingBox())!;
+  const laid = await frame.evaluate((el) => ({ w: (el as HTMLElement).offsetWidth, h: (el as HTMLElement).offsetHeight }));
+  const c = await row.evaluate((el) => { const b = el.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; });
+  await page.mouse.move(shown.x + c.x * (shown.width / laid.w), shown.y + c.y * (shown.height / laid.h), { steps: 4 });
+  // 悬停框（1px 虚线的固定层）与指针下那个元素的框：草稿坐标
+  const boxes = () => fl.locator('body').evaluate((_b, at) => {
+    const hover = [...document.querySelectorAll('[data-quilt-ui]')].find((e) => getComputedStyle(e).borderTopStyle === 'dashed' && (e as HTMLElement).style.display !== 'none') as HTMLElement | undefined;
+    const under = document.elementFromPoint(at.x, at.y)?.closest('[data-qid]');
+    const h = hover?.getBoundingClientRect(); const u = under?.getBoundingClientRect();
+    return { hover: h ? Math.round(h.top) : null, under: u ? Math.round(u.top) : null, text: (under?.textContent ?? '').trim().slice(0, 12) };
+  }, c);
+  await eventually(async () => { const b = await boxes(); expect(b.hover !== null && b.under !== null && Math.abs(b.hover - (b.under - 2)) <= 1, `① 悬停框应框住第 3 行：${JSON.stringify(b)}`); }, 3000);
+  // 草稿往下滚 160 px（约 3.5 行，不是行高的整数倍），指针不动：悬停框应落在此刻指针下的那一行上
+  await fl.locator('html').evaluate(() => window.scrollBy(0, 160));
+  await eventually(async () => { const b = await boxes(); expect(b.hover !== null && b.under !== null && Math.abs(b.hover - (b.under - 2)) <= 1 && b.text !== '第 3 笔', `② 滚动后悬停框应跟到指针下那一行：${JSON.stringify(b)}`); }, 3000);
+  const after = await boxes();
+  await page.getByTestId('draft-pick').click();
+  return `滚动 160 px 后悬停框跟到「${after.text}」`;
 });
 
 await browser.close();

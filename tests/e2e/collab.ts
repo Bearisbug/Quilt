@@ -289,16 +289,24 @@ await step('TC-CORE-157', async () => {
     const chip = page.locator(`[data-testid="job-chip"][data-job-id="${j1}"]`);
     await chip.waitFor({ timeout: 10000 });
     await S.check(async () => expect((await chip.getAttribute('data-state')) === 'running', `① 应先是在跑态：${await chip.getAttribute('data-state')}`));
+    const runBox = (await chip.boundingBox())!;
     // 2 作业成功：chip 原地转成完成态，圆形对勾弹出、写「任务完成 · 改「Screen 1」」；× 平时看不见
     await chip.and(page.locator('[data-state="succeeded"]')).waitFor({ timeout: 30000 });
     const t0 = Date.now();
     await S.check(async () => expect((await chip.locator('[role="status"]').innerText()).replace(/\s+/g, ' ').trim() === '任务完成 · 改「Screen 1」', `② 文案不对：${await chip.locator('[role="status"]').innerText()}`));
     await S.check(async () => expect((await chip.locator('.job-done-icon').evaluate((el) => getComputedStyle(el).animationName)) === 'job-done-pop', '② 对勾应有弹出动效'));
     await S.check(async () => expect((await chip.getByTestId('dismiss-job').evaluate((el) => getComputedStyle(el).opacity)) === '0', '② 没悬停时 × 应看不见'));
+    // 宽度收窄到正好包住对勾与文字、左缘不动（v1.36）：等收窄的过渡走完再量
+    await chip.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    const doneBox = (await chip.boundingBox())!;
+    const textRight = await chip.locator('.job-done-text').evaluate((el) => el.getBoundingClientRect().right);
+    await S.check(() => expect(doneBox.width < runBox.width - 40 && Math.abs(doneBox.x - runBox.x) <= 1 && doneBox.x + doneBox.width - textRight <= 16,
+      `② 完成态应收窄到文字宽、左缘不动：在跑 ${Math.round(runBox.x)}+${Math.round(runBox.width)}，完成 ${Math.round(doneBox.x)}+${Math.round(doneBox.width)}，文字右缘 ${Math.round(textRight)}`));
     await shot(page, 'tc-core-157-done');
     // 3 悬停：× 显出来，停表——悬停 11 s 后它还在
     await chip.hover();
     await S.check(() => eventually(async () => expect((await chip.getByTestId('dismiss-job').evaluate((el) => getComputedStyle(el).opacity)) === '1', '③ 悬停时 × 应显出来'), 2000));
+    await S.check(() => eventually(async () => { const b = (await chip.boundingBox())!; expect(b.width >= doneBox.width + 28 && Math.abs(b.x - doneBox.x) <= 1, `③ 悬停时 chip 应向右展开：${Math.round(doneBox.width)} → ${Math.round(b.width)}，左缘 ${Math.round(doneBox.x)} → ${Math.round(b.x)}`); }, 2000));
     await shot(page, 'tc-core-157-hover');
     await sleep(Math.max(0, 11_000 - (Date.now() - t0)));
     await S.check(async () => expect((await chip.count()) === 1, '③ 悬停期间 chip 不该淡出'));

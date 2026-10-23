@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Hono } from 'hono';
 
-// 请求日志（§21 v1.29）：慢请求与 5xx 逐条写、只写路由模板；5 分钟汇总带 4xx / 5xx 与 p50 / p95。reqlog 加载时读 config，先把数据目录指到临时目录
+// 请求日志（§21 v1.29）：慢请求与 5xx 逐条写、只写路由模板；5 分钟汇总带 4xx / 5xx、p50 / p95，v1.35 起带各路由的请求数与 4xx 的路由加状态。reqlog 加载时读 config，先把数据目录指到临时目录
 let dir: string;
 let log: typeof import('../../../apps/api/src/lib/reqlog.ts');
 before(async () => {
@@ -34,8 +34,11 @@ test('慢请求与 5xx 逐条写，只写路由模板不写地址与查询串；
   const slow = lines[0].match(/\[req\] preview GET \/p\/:projectId\/:screenId 200 (\d+) -$/);
   assert.ok(slow && Number(slow[1]) >= 200, lines[0]);
   assert.match(lines[1], /\[req\] preview GET \/boom 500 \d+ -$/);
-  const sum = lines[2].match(/\[req\] 5m preview n=4 4xx=1 5xx=1 p50=\d+ p95=(\d+)$/);
+  const sum = lines[2].match(/\[req\] 5m preview n=4 4xx=1 5xx=1 p50=\d+ p95=(\d+) top=(.+) 4xx-by=(.+)$/);
   assert.ok(sum && Number(sum[1]) >= 200, lines[2]);
+  // 各路由的请求数（多的在前）与 4xx 的路由加状态：没匹配上路由的请求写 /*
+  assert.equal(sum![2], 'GET /p/:projectId/:screenId 2; GET /boom 1; GET /* 1', lines[2]);
+  assert.equal(sum![3], 'GET /* 404 1', lines[2]);
   assert.ok(!text.includes('secret-token') && !text.includes('proj-1'), '日志里不该有实际地址与签名');
 });
 

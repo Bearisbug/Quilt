@@ -117,7 +117,7 @@
     if (queued) return;
     requestAnimationFrame(function () { if (pointerAt) send({ type: 'quilt:pointer', x: pointerAt.x, y: pointerAt.y }); pointerAt = null; });
   }, { passive: true });
-  document.addEventListener('pointerout', function (e) { if (e.relatedTarget) return; pointerAt = null; send({ type: 'quilt:pointer', left: true }); });
+  document.addEventListener('pointerout', function (e) { if (e.relatedTarget) return; pointerAt = null; pointer = null; send({ type: 'quilt:pointer', left: true }); });
   document.addEventListener('submit', function (e) {
     e.preventDefault();
     if (win.__quiltComponent) return;
@@ -327,7 +327,7 @@
     });
   }
   function placePeers() { peerBoxes.forEach(function (p) { if (p.el.isConnected) placePeer(p); else p.box.remove(); }); peerBoxes = peerBoxes.filter(function (p) { return p.el.isConnected; }); }
-  function replaceBadges() { Object.keys(marks).forEach(function (q) { placeBadge(marks[q]); }); placeSels(); placePeers(); }
+  function replaceBadges() { Object.keys(marks).forEach(function (q) { placeBadge(marks[q]); }); placeSels(); placePeers(); rehover(); }
   window.addEventListener('scroll', replaceBadges, true);
   window.addEventListener('resize', replaceBadges);
   // 选元素态下每个元素都可命中（setPierce），连设计里本来不可点的透明层也是：常见的是收起时全透明的全屏遮罩（底部抽屉、弹窗的底板）
@@ -350,9 +350,9 @@
     for (var n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 3 && /\S/.test(n.nodeValue || '')) return true;
     return false;
   }
-  /** @param {MouseEvent} e */
-  function targetOf(e) {
-    var hits = document.elementsFromPoint ? document.elementsFromPoint(e.clientX, e.clientY) : [/** @type {Element} */ (e.target)];
+  /** @param {number} x @param {number} y @param {Element | null} [fallback] 没有 elementsFromPoint 时用事件目标 */
+  function targetAt(x, y, fallback) {
+    var hits = document.elementsFromPoint ? document.elementsFromPoint(x, y) : fallback ? [fallback] : [];
     // 关掉穿透规则读一次各层本来的 pointer-events，再打开
     var inert = hits.map(function () { return false; });
     if (pierce) { var on = pierce; on.remove(); inert = hits.map(function (h) { return getComputedStyle(h).pointerEvents === 'none'; }); document.head.appendChild(on); }
@@ -421,13 +421,29 @@
     if (how && how.replace) m.replace = how.replace;
     return m;
   }
+  // 没有指针位置的点击（脚本调 click()、键盘在聚焦元素上触发，detail 为 0，坐标是 0, 0）按事件目标取，不按坐标找
+  /** @param {MouseEvent} e */
+  function targetOf(e) {
+    if (e.type === 'click' && e.detail === 0) { var el = /** @type {Element | null} */ (e.target); var t = el && el.closest && el.closest('[data-qid]'); return t && !t.hasAttribute('data-quilt-ui') ? t : null; }
+    return targetAt(e.clientX, e.clientY, /** @type {Element | null} */ (e.target));
+  }
   // 指针换到另一个最里层元素时悬停的层级重置；还在同一个元素上时保留按键走到的那一层
+  /** @type {{ x: number, y: number } | null} */
+  var pointer = null;
+  /** @param {Element | null} t */
+  function hoverTo(t) { if (t !== hov.anchor) { hov.anchor = t; hov.cur = t; } }
   document.addEventListener('mousemove', function (e) {
     if (mode !== 'inspect') return;
-    var t = targetOf(e);
-    if (t !== hov.anchor) { hov.anchor = t; hov.cur = t; }
+    pointer = { x: e.clientX, y: e.clientY };
+    hoverTo(targetOf(e));
     highlight(hov.cur);
   }, true);
+  // 滚动时指针没动、底下的元素换了，浏览器不发 mousemove：按上次的指针位置重新取一次，悬停框不带过渡跟上去（v1.37）
+  function rehover() {
+    if (mode !== 'inspect' || !pointer) return;
+    hoverTo(targetAt(pointer.x, pointer.y, null));
+    highlight(hov.cur, true);
+  }
   document.addEventListener('click', function (e) {
     if (mode !== 'inspect') return;
     e.preventDefault(); e.stopPropagation();
@@ -451,7 +467,7 @@
   /** @param {MessageEvent} e */
   function onMessage(e) {
     var msg = /** @type {Incoming} */ (e.data || {});
-    if (msg.type === 'quilt:mode') { if (msg.marks) { pal = msg.marks; paintBox(); sels.forEach(paintSel); Object.keys(marks).forEach(function (q) { paintMark(marks[q]); }); } mode = msg.mode === 'inspect' ? 'inspect' : 'interact'; if (mode !== 'inspect') { highlight(null); setSelection(null); hov = { anchor: null, cur: null }; anchors = {}; } setPierce(mode === 'inspect'); document.body.style.cursor = mode === 'inspect' ? 'crosshair' : ''; return; }
+    if (msg.type === 'quilt:mode') { if (msg.marks) { pal = msg.marks; paintBox(); sels.forEach(paintSel); Object.keys(marks).forEach(function (q) { paintMark(marks[q]); }); } mode = msg.mode === 'inspect' ? 'inspect' : 'interact'; if (mode !== 'inspect') { highlight(null); setSelection(null); hov = { anchor: null, cur: null }; anchors = {}; pointer = null; } setPierce(mode === 'inspect'); document.body.style.cursor = mode === 'inspect' ? 'crosshair' : ''; return; }
     // 父页的选中状态是事实源：选中 / 清空都同步到常驻框。qids（v1.26 多选）是选中的全部几块，qid 是其中最后点中的那一块；不带 qids 就只有 qid 这一块
     if (msg.type === 'quilt:peers') { setPeers(msg.blocks || []); return; }
     if (msg.type === 'quilt:highlight') {

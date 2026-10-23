@@ -280,6 +280,13 @@
 | RUN-290 | 2026-10-22 | 同 RUN-289 的构建；`tests/e2e/sketch.ts` 的 `TC-EDIT-041` 用桩通道前先确认它在 | AI(Claude Code) | 复测(RUN-289:TC-EDIT-028、TC-CORE-058、TC-CORE-100、TC-EDIT-041 + 冒烟级至 TC-CORE-151、TC-PROTO-013、TC-EDIT-042、TC-AGENT-024) | 通过 11/14 · 失败 1 · 跳过 2 |
 | RUN-291 | 2026-10-22 | 未提交工作树（设计文档 v1.28：逐级选改用 Shift+↑ / Shift+↓） | AI(Claude Code) | 局部(TC-EDIT-031、TC-EDIT-040、TC-EDIT-041、TC-EDIT-042、TC-CORE-122、TC-CORE-059 + 冒烟级至 TC-CORE-151、TC-PROTO-013、TC-EDIT-042、TC-AGENT-024) | 通过 12/14 · 跳过 2 |
 | RUN-292 | 2026-10-22 | 未提交工作树（设计文档 v1.28：用量看板不把导出算给模型、截图编码限 2 路、会话列表去重） | AI(Claude Code) | 局部(TC-CORE-140、TC-CORE-141、TC-CORE-142、TC-CORE-143、TC-CORE-151、TC-CORE-041、TC-CORE-085、TC-AGENT-009 + 冒烟级至 TC-CORE-151、TC-PROTO-013、TC-EDIT-042、TC-AGENT-024) | 通过 14/16 · 跳过 2 |
+| RUN-293 | 2026-10-22 | 未提交工作树（设计文档 v1.29：连线只在交互时画、彩色端口画法；连线与组件引用差量写；截图编码压缩档 4；请求日志） | AI(Claude Code) | 全量至 TC-CORE-151、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024 | 通过 186/198 · 失败 4 · 待人工 2 · 跳过 6 |
+| RUN-294 | 2026-10-22 | 同 RUN-293 的构建 | AI(Claude Code) | 复测(RUN-293:TC-CORE-058、TC-CORE-100、TC-EDIT-001 + 冒烟级至 TC-CORE-151、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024) | 通过 9/11 · 跳过 2 |
+| RUN-295 | 2026-10-22 | 7ad78fc（设计文档 v1.29；修复前：从局域网 IP 用 http 打开画布白屏） | AI(Claude Code) | 局部(TC-CORE-152) | 通过 0/1 · 失败 1 |
+| RUN-296 | 2026-10-22 | 未提交工作树（设计文档 v1.30：前端不再依赖只在安全上下文里有的接口） | AI(Claude Code) | 复测(RUN-295:TC-CORE-152 + 冒烟级至 TC-CORE-152、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024) | 通过 5/8 · 失败 1 · 跳过 2 |
+| RUN-297 | 2026-10-22 | 同 RUN-296 的构建；`tests/e2e/canvas.ts` 的 `TC-CORE-152` 读作业列表改用 `items` | AI(Claude Code) | 复测(RUN-296:TC-CORE-152 + 冒烟级至 TC-CORE-152、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024) | 通过 7/9 · 跳过 2 |
+| RUN-298 | 2026-10-22 | 未提交工作树（设计文档 v1.31：画布缩放调慢一半，连线改成苹果式细线） | AI(Claude Code) | 局部(整套 CANVAS、整套 PROTO、TC-CORE-080、TC-CORE-081、TC-CORE-086 + 冒烟级至 TC-CORE-152、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024) | 通过 27/33 · 失败 2 · 跳过 4 |
+| RUN-299 | 2026-10-22 | 同 RUN-298 的构建；`tests/e2e/proto.ts` 的 `TC-PROTO-014` 页面里不再声明具名函数，`tests/e2e/core/generate.ts` 的 `TC-CORE-086` 第 5、6 步按缩放比例停 | AI(Claude Code) | 复测(RUN-298:TC-PROTO-014、TC-CORE-086 + 冒烟级至 TC-CORE-152、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024) | 通过 9/11 · 跳过 2 |
 
 ## 明细（仅登非「通过」项）
 
@@ -835,6 +842,34 @@
 | RUN-291 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-292 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-292 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-293 | TC-CORE-023 | 失败 | 预期失败（§7 登记项）：「叫回后安全区底部没复原」（证据：`.e2e/l1/run-293.log`，本机） | §7 跟进 |
+| RUN-293 | TC-CORE-058 | 失败 | 第 5、6 步等组件卡量完（`data-ready`）超过 20 s；三栈并行、负载均值 40 以上（证据：`.e2e/l2/run-293.log`，本机） | 判为负载下等待超时；RUN-294 单栈复测通过 |
+| RUN-293 | TC-CORE-100 | 失败 | 「记录栏应多出这一张」：三栈并行满载（证据：`.e2e/l3/run-293.log`，本机） | 判为偶发；RUN-294 复测通过 |
+| RUN-293 | TC-EDIT-001 | 失败 | 等直改后的角标 8 s 超时：三栈并行满载（证据：`.e2e/l2/run-293.log`，本机） | 判为负载下偶发；RUN-294 复测通过 |
+| RUN-293 | TC-CORE-020 | 待人工 | 对标 Stitch 盲评 | 待人工 |
+| RUN-293 | TC-AGENT-010 | 待人工 | 投递到真实 Claude Code 会话要在终端确认接收 | 待人工 |
+| RUN-293 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-293 | TC-CORE-006 | 跳过 | 需 `LLM_STUB=503` 重启 worker，由 `core-stub.ts` 单独执行 | 基线 |
+| RUN-293 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-293 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-293 | TC-PROTO-004 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-293 | TC-PROTO-009 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-294 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-294 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-295 | TC-CORE-152 | 失败 | 第 1 步「画布没出来：crypto.randomUUID is not a function」，与用户场景一致（证据：`.e2e/l5/run-295.log`，本机） | 修复后 RUN-296 第 1 步通过，RUN-297 全部通过 |
+| RUN-296 | TC-CORE-152 | 失败 | 第 1 步通过；第 2 步「Cannot read properties of undefined (reading 'filter')」：脚本把作业列表的响应读成 `jobs`，接口返回的是 `items`（`API-CORE-029` listJobs）（证据：`.e2e/l5/run-296.log`，本机） | 脚本问题，不是产品缺陷：改正后 RUN-297 通过 |
+| RUN-296 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-296 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-297 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-297 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-298 | TC-PROTO-014 | 失败 | 「locator.evaluate: ReferenceError: __name is not defined」：脚本在页面里执行的函数中声明了具名函数，tsx 会给它包 `__name`，页面里没有（证据：`.e2e/l5/run-298.log`，本机） | 脚本问题：改成不声明具名函数，RUN-299 通过 |
+| RUN-298 | TC-CORE-086 | 失败 | 第 5 步「放大后应只有视口里的卡用原图：视口里 20 张，档位不对 10 张」：脚本写死放大 30 步，v1.31 每步的缩放减半，30 步只到约 0.25，还没过换原图的门槛（证据：`.e2e/l5/run-298.log`，本机） | 脚本更正：放大到 0.9 以上停住、按同样步数缩回；RUN-299 通过 |
+| RUN-298 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-298 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-298 | TC-PROTO-004 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-298 | TC-PROTO-009 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-299 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-299 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 
 
 RUN-267 证据：地基变更（界面视觉换成苹果风方向 E，跨全部界面）的全量轮。构建前端后跑 `scripts/e2e-all.sh` 前九套（CORE、LOAD、CANVAS、PROTO、EDIT、COMPONENTS、AGENT、MCP、CHAT）；单测轮 144/144，构建产物 `check-tokens --lint` 通过。SKETCH 与 install 两套没跑：本轮中途 `tests/e2e/sketch.ts` 已按 v1.14 写回前端改写，与被测构建对不上，SKETCH 开跑即停，改在 RUN-268 随新构建再跑全量。`TC-CORE-008` 在毛玻璃开着时 100 屏 2 倍屏 60 fps、每帧 GPU 主线程 1.4 ms（门槛 4 ms）。完整日志 `.e2e/main/run-267.log`（本机，不进仓库）。
@@ -889,3 +924,17 @@ RUN-290 证据：RUN-289 之后的复测轮，同一构建，只开 l5 一条隔
 RUN-291 证据：v1.28 的局部轮。用户反映 `Enter` 换层与输入框的发送冲突，要求改成 `Shift+↑` 选父级、`Shift+↓` 回到子级并覆盖浏览器的默认动作。改到逐级选的按键，按 §5 跑用到这两个键的用例（画布、多选、草稿本、键盘可达）加冒烟级，l5 一条隔离栈，停栈后跑 install。单测 220/220，`gen:runtime --check` 通过。`TC-EDIT-031` 第 3 步新增「`Enter` 不换层」通过。日志 `.e2e/l5/run-291.log`、`.e2e/main/run-291-install.log`（本机，不进仓库）。
 
 RUN-292 证据：v1.28 提交前的本机体检查出三处这几版带出来的问题，修完后的局部轮：用量看板把不调模型的导出记到缺省模型名下（改为调过模型才记驱动与模型，统计时把没有驱动的、导出与套用设计系统的存量行认作不归任何模型）；本机会话列表里同一会话被两个进程登记时出两条（按 sessionId 去重、留最新的）；sharp 同时编码不设上限会占满 libuv 线程池（限 2 路，超时只计编码）。按 §5 跑设置一套、截图相关的 `TC-CORE-041`、`085`、`151`、会话下拉的 `TC-AGENT-009` 加冒烟级，l2 一条隔离栈；install 与 l2 端口不冲突，栈开着时跑。单测 223/223（新增编码限并发、会话去重、不调模型的作业三条），五个包类型检查、web lint、`gen:runtime --check`、前端构建通过。`TC-CORE-140`、`141` 新加的第 9 步通过。编码限流的本机对比：6 张 2560×4716 截图同时编码，期间每 100 ms 读一次 66 KB 文件，读文件最长等待 4785 ms → 64 ms（p95 19.3 → 5.7 ms），6 张总耗时 10.2 s → 11.0 s。`TC-CORE-031` 冷启动 14.9 s、二次 7.2 s（复跑 19.0 s / 10.8 s），RUN-285 时是 3.5 s / 1.0 s：两次都在本机负载均值 35～58 时测得（Android 模拟器等别的进程占着 CPU），本轮改动不在启动路径上，未据此判失败，下一轮负载正常时复看。输出未落盘。
+
+RUN-293 证据：v1.29 的全量轮。改到连线与组件引用的写入路径（每次写屏都经过它）、截图编码、请求日志与连线的显示，按 §5 跑全量。构建前端，单测 232/232，五个包类型检查、web lint、`gen:runtime --check` 通过。十三套分三条隔离栈并行跑（13:04～13:49）：l1 跑 CORE、LOAD，l2 跑 CANVAS、PROTO、EDIT、COMPONENTS，l3 跑 AGENT、MCP、CHAT、SKETCH、I18N、SETTINGS、RECORD；install 放到 RUN-294。新用例 `TC-PROTO-014` 通过：/s1 进交互画 4 条，`data-state` 先 growing 再 done，两种颜色；屏内跳到 /s2 换成 2 条。`TC-CORE-086` 第 7 步进 /s41 交互画 24 条，长任务 0，拖卡 290 帧里 1 帧超过 33 ms；`TC-CORE-097` 深色下连线有 2177 个深色 series-2 像素。四条失败：`TC-CORE-023` 是 §7 登记项；`TC-CORE-058` 第 5、6 步、`TC-CORE-100`、`TC-EDIT-001` 与 RUN-284、286、289 同类，都只在多栈并行、负载均值 40 以上时出现（本轮开跑时 42）。另在测试库上量了两组改前改后（不计用例）：540 条连线的项目重派生 100 次，改前插入、删除各 49140 行，`links` 表 120 KB → 5464 KB，耗时 6685 ms；改后 0 行、表不变，1178 ms。开发实例全部 116 张当前版截图离线编码，压缩档 4 比 6 体积大 0.69%、耗时少 22.7%。连线截图在 `docs/test-runs/run-293-links/`（本机）。日志 `.e2e/{l1,l2,l3}/run-293.log`（本机，不进仓库）。
+
+RUN-294 证据：RUN-293 之后的复测轮，同一构建，只开 l5 一条隔离栈（13:49～13:56，负载均值 9），复测上一轮除 `TC-CORE-023` 外的三条失败加冒烟级，停栈后跑 install。三条都通过，`TC-CORE-058` 第 8 步也通过。`TC-CORE-031` 冷启动 5.0 s、二次 1.0 s；RUN-292 在负载均值 35～58 时是 14.9 s / 7.2 s，这次回到正常范围。日志 `.e2e/l5/run-294.log`（本机，不进仓库）。
+
+RUN-295 证据：用户问能否让局域网里的人直接用本机 Quilt。按 §15「局域网访问」的配置在 l4 测试库上起一套服务（绑 `0.0.0.0`，三个地址设成局域网 IP），从 `http://192.168.1.22:3450` 打开整页白屏，页面异常「crypto.randomUUID is not a function」：浏览器只在 HTTPS 与 localhost 下提供它，前端 4 处用到，使用记录模块一加载就调用。补写源自缺陷用例 `TC-CORE-152`（浏览器上下文里删掉 `crypto.randomUUID` 与 `navigator.clipboard`，与非安全上下文一致），在修复前的构建 7ad78fc 上单跑：第 1 步画布没出来，与现象一致。日志 `.e2e/l5/run-295.log`（本机，不进仓库）。
+
+RUN-296 证据：v1.30 修复后的复测轮：前端的 id 改用 `crypto.getRandomValues` 拼 v4 UUID，复制在没有 clipboard 接口时退回 `execCommand`。单测 233/233，五个包类型检查与 web lint 通过，重新构建前端，l5 一条隔离栈。`TC-CORE-152` 第 1 步通过（画布出来、没有异常），第 2 步是脚本问题（见明细）；冒烟级里的 install 放到 RUN-297。日志 `.e2e/l5/run-296.log`（本机，不进仓库）。
+
+RUN-297 证据：改正脚本后的复测轮，同一构建、l5 一条隔离栈，停栈后跑 install。`TC-CORE-152` 四步都通过。另在 l4 测试库上按 §15 的配置起一套服务，用真实局域网地址 `http://192.168.1.22:3450` 打开、不做任何模拟（不计用例）：`isSecureContext=false`，两个接口都不存在；3 张截图加载，进交互正常，「接上跳转」建出作业，MCP 接入命令显示局域网地址，复制提示「已复制」，没有页面异常，截图 `docs/test-runs/run-297-lan.png`（本机）。`TC-CORE-031` 冷启动 5.0 s、二次 1.0 s。日志 `.e2e/l5/run-297.log`（本机，不进仓库）。
+
+RUN-298 证据：v1.31 的局部轮。用户嫌画布缩放太快、v1.29 的彩色柔光连线难看：捏合与 `Ctrl`+滚轮改由画布自己接住，灵敏度减半、单个事件最多 ±25%；连线改成苹果式细线（链去的标记色、链进来的三级文字色，起点圆点、终点箭头，上下叠着的卡连上下边）。改到画布手势与连线，按 §5 跑整套 CANVAS 与 PROTO、用到缩放的 `TC-CORE-080`、`081`、`086` 加冒烟级，l5 一条隔离栈，停栈后跑 install。单测 234/234（请求日志那条单测的耗时断言放宽：机器忙时 230 ms 的请求量到 329 ms），五个包类型检查与 web lint 通过。新步骤 `TC-CORE-058` 第 13 步：`deltaY −20` 一次缩放 ×1.149、`−300` 一次 ×1.250；`TC-CORE-097` 深色下连线按深色标记色画。两条失败都是脚本问题（见明细）。连线截图在 `docs/test-runs/run-298-links/`（本机）。日志 `.e2e/l5/run-298.log`（本机，不进仓库）。
+
+RUN-299 证据：改正两处脚本后的复测轮，同一构建，l5 一条隔离栈，停栈后跑 install。`TC-PROTO-014` 链去与链进来两种颜色各 41 像素；`TC-CORE-086` 放大到 0.9 以上停住后视口里 3 张换原图，缩放一个来回没有长任务，拖卡 89 帧、点选 94 帧都没有超过 33 ms 的。`TC-CORE-031` 冷启动 4.5 s、二次 1.0 s。日志 `.e2e/l5/run-299.log`（本机，不进仓库）。

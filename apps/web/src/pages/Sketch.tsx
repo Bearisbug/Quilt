@@ -340,7 +340,8 @@ export function SketchRoute() {
   }, [openDraft]);
   // Esc 的先后（PAGE-SKETCH）：下拉与弹层自己先拦下；然后一次去掉全部胶囊回到改整张；最后才按 Q-SKETCH-3 收起看板
   // 跟随中先停止跟随（v1.32），再撤选中的块，最后收起看板
-  const escape = () => { if (following) follow.stop(); else if (activePick) setPick(null); else collapse(); };
+  // Esc 一下只退一层：停止跟随 → 去掉胶囊 → 关掉选元素（同 ⌘E，v1.38）→ 收起看板
+  const escape = () => { if (following) follow.stop(); else if (activePick) setPick(null); else if (picking) changePicking(false); else collapse(); };
 
   const [copyFor, setCopyFor] = useState<ScreenDto | null>(null);
   const [deleting, setDeleting] = useState<ScreenDto | null>(null);

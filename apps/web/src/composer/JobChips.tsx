@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CircleCheck, TriangleAlert, X } from 'lucide-react';
 import type { JobKind } from '@quilt/core/browser';
 import { cn, IconButton } from '@/ui/ui';
 import { useT } from '@/i18n';
 import composerMessages from '@/i18n/locales/composer';
 import commonMessages from '@/i18n/locales/common';
+import { cssMs } from '@/canvas/edges';
 
 /** 作业 chip（PAGE-CANVAS「作业 chip」v1.17，REQ-CORE-020 / REQ-CORE-026）：在跑的写在做什么与进度；失败的写原因、可重试；成功的原地转成「任务完成」，10 s 后淡出（v1.33） */
 export type JobChip = { id: string; createdAt: string; label: string } & (
@@ -91,11 +92,13 @@ function Chip({ chip: c, esc, onCancel, onRetry, onDismiss }: { chip: JobChip; e
     try { await onRetry(c.id); } finally { inflight.current = false; setRetrying(false); }
   };
   const leaving = useDoneTimer(c.state === 'succeeded', () => onDismiss(c.id));
+  const ref = useRef<HTMLLIElement>(null);
+  useShrinkOnDone(ref, c.state);
   const shape = c.state === 'failed'
     ? 'tint-warning items-start rounded-lg py-0.5 pl-3 pr-0.5 shadow-(--semantic-elevation-panel)'
-    : cn('chrome h-9 items-center rounded-pill pl-3 pr-0.5', c.state === 'succeeded' && 'job-chip-done', leaving.on && 'job-chip-leaving');
+    : cn('chrome h-9 items-center rounded-pill pl-3 pr-0.5', c.state === 'succeeded' && 'job-chip-done max-w-full self-start', leaving.on && 'job-chip-leaving');
   return (
-    <li data-testid="job-chip" data-job-id={c.id} data-state={c.state} className={cn('fade-up pointer-events-auto flex gap-2 type-label', shape)} {...leaving.hold}>
+    <li ref={ref} data-testid="job-chip" data-job-id={c.id} data-state={c.state} className={cn('fade-up pointer-events-auto flex gap-2 type-label', shape)} {...leaving.hold}>
       {c.state === 'running' ? <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" aria-hidden="true" />
         : c.state === 'failed' ? <TriangleAlert size={14} className="mt-[9px] shrink-0" aria-hidden="true" />
         : <CircleCheck size={16} className="job-done-icon shrink-0 text-success" aria-hidden="true" />}
@@ -105,7 +108,7 @@ function Chip({ chip: c, esc, onCancel, onRetry, onDismiss }: { chip: JobChip; e
           <span className="text-text-secondary"> · {c.progress}</span>
         </span>
       )}
-      <span role="status" className={c.state === 'running' ? 'sr-only' : c.state === 'failed' ? 'min-w-0 flex-1 py-1.5 [overflow-wrap:anywhere]' : 'min-w-0 flex-1 truncate pr-1'}>
+      <span role="status" className={c.state === 'running' ? 'sr-only' : c.state === 'failed' ? 'min-w-0 flex-1 py-1.5 [overflow-wrap:anywhere]' : 'min-w-0 flex-1 truncate pr-0.5'}>
         {c.state === 'failed' && <><span className="font-medium">{c.label}</span> · {c.retryable ? dropNext(c.reason) : c.reason}</>}
         {c.state === 'succeeded' && <span className="job-done-text"><span className="font-medium text-text-primary">{t('jobs.done')}</span><span className="text-text-secondary"> · {c.label}</span></span>}
       </span>
@@ -129,13 +132,36 @@ function Chip({ chip: c, esc, onCancel, onRetry, onDismiss }: { chip: JobChip; e
         </span>
       )}
       {c.state === 'succeeded' && (
-        // 完成态的 ×：悬停或键盘获焦时才显出来（.job-done-close），一直占着位置，显出来时 chip 不变宽
-        <IconButton size="xs" tip="top-end" label={t('jobs.dismissDone', { label: c.label })} className="job-done-close rounded-pill" data-testid="dismiss-job" onClick={() => onDismiss(c.id)}>
-          <X size={14} aria-hidden="true" />
-        </IconButton>
+        // 完成态的 ×：平时不占位，悬停或键盘获焦时槽位展开、chip 向右长出它（.job-done-slot / .job-done-close）
+        <span className="job-done-slot">
+          <IconButton size="xs" tip="top-end" label={t('jobs.dismissDone', { label: c.label })} className="job-done-close rounded-pill" data-testid="dismiss-job" onClick={() => onDismiss(c.id)}>
+            <X size={14} aria-hidden="true" />
+          </IconButton>
+        </span>
       )}
     </li>
   );
+}
+
+// 转成完成态时收窄（v1.36）：完成态的 chip 宽度只包住对勾与文字，左缘不动；转的那一帧量出在跑时的宽度，
+// 用 motion.duration.slow 与 motion.easing.emphasized 从旧宽度过渡到新宽度（只动这一枚浮层的宽度，保住圆角、描边与阴影）。减弱动态时直接到位
+function useShrinkOnDone(ref: React.RefObject<HTMLLIElement | null>, state: JobChip['state']) {
+  const running = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (state === 'running') { running.current = el.getBoundingClientRect().width; return; }
+    const from = running.current;
+    running.current = null;
+    if (state !== 'succeeded' || from === null || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const to = el.getBoundingClientRect().width;
+    if (from <= to + 1) return;
+    const root = getComputedStyle(document.documentElement);
+    el.animate([{ width: `${from}px` }, { width: `${to}px` }], {
+      duration: cssMs(root.getPropertyValue('--semantic-motion-duration-slow'), 320),
+      easing: root.getPropertyValue('--semantic-motion-easing-emphasized').trim() || 'ease-out',
+    });
+  });
 }
 
 // 完成态的计时（v1.33）：开始时算出截止时刻，悬停、获焦、页面在后台时停表、折回剩余时长，恢复时按新的此刻重算（COMP-009）；

@@ -203,13 +203,43 @@ test('选元素：指针下最上面是全透明的遮罩、不画东西的空�
   p.post({ type: 'quilt:mode', mode: 'inspect', marks: LIGHT });
   const at = (...qids: string[]) => { (p.win.document as unknown as { elementsFromPoint: () => unknown[] }).elementsFromPoint = () => qids.map((q) => p.$(`[data-qid="${q}"]`)); };
   // 遮罩（全透明）→ 空容器（本来不可点、不画东西）→ 标题：选中标题
+  // 真实的指针点击：detail 1、带坐标
+  const tap = (q: string) => p.$(`[data-qid="${q}"]`).dispatchEvent(new p.win.MouseEvent('click', { bubbles: true, cancelable: true, detail: 1, clientX: 20, clientY: 20 }));
   at('q4', 'q3', 'q2', 'q1');
-  p.$('[data-qid="q4"]').click();
+  tap('q4');
   assert.deepEqual(boxes(p), ['q2=h1 · q2']);
   // 渐变装饰层（本来不可点，但画了东西）盖在标题上：选中装饰层
   at('q5', 'q2', 'q1');
-  p.$('[data-qid="q5"]').click();
+  tap('q5');
   assert.deepEqual(boxes(p), ['q5=div · q5']);
+  await p.close();
+});
+
+test('选元素：没有指针位置的点击（脚本 click()、键盘触发，detail 为 0）按事件目标取，不按坐标找', async () => {
+  const p = preview('<div data-qid="q1"><h1 data-qid="q2">标题</h1><p data-qid="q3">正文</p></div>');
+  p.post({ type: 'quilt:mode', mode: 'inspect', marks: LIGHT });
+  // (0, 0) 处最上面是根：按坐标找就会选成它
+  (p.win.document as unknown as { elementsFromPoint: () => unknown[] }).elementsFromPoint = () => [p.$('[data-qid="q1"]')];
+  p.$('[data-qid="q2"]').click();
+  assert.deepEqual(boxes(p), ['q2=h1 · q2']);
+  await p.close();
+});
+
+test('选元素：只悬停不点时滚动，悬停框跟到指针下此刻的元素（源自缺陷 TC-CORE-160）', async () => {
+  const p = preview('<div data-qid="q1"><p data-qid="q2">第 1 行</p><p data-qid="q3">第 2 行</p></div>');
+  p.post({ type: 'quilt:mode', mode: 'inspect', marks: LIGHT });
+  const at = (q: string, top: number) => {
+    (p.win.document as unknown as { elementsFromPoint: () => unknown[] }).elementsFromPoint = () => [p.$(`[data-qid="${q}"]`), p.$('[data-qid="q1"]')];
+    (p.$(`[data-qid="${q}"]`) as unknown as HTMLElement).getBoundingClientRect = () => ({ top, left: 10, width: 200, height: 40, right: 210, bottom: top + 40, x: 10, y: top, toJSON: () => ({}) }) as DOMRect;
+  };
+  const hover = () => [...p.win.document.querySelectorAll('[data-quilt-ui]')].find((e) => (e as unknown as HTMLElement).style.borderStyle === 'dashed' || (e as unknown as HTMLElement).style.border.includes('dashed')) as unknown as HTMLElement;
+  at('q2', 100);
+  p.win.document.body.dispatchEvent(new p.win.MouseEvent('mousemove', { bubbles: true, clientX: 50, clientY: 120 }));
+  assert.equal(hover().style.top, '98px');
+  // 滚动之后指针下换成了 q3（在 70 处），浏览器不发 mousemove
+  at('q3', 70);
+  p.win.dispatchEvent(new p.win.Event('scroll'));
+  assert.equal(hover().style.top, '68px');
   await p.close();
 });
 

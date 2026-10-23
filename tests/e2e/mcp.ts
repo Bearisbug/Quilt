@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { seed, seedJson, apiJson, EVIDENCE, API } from './lib.ts';
 import { connectMcp, callTool, resourceText } from './mcp-client.ts';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { suite, expect, sleep } from './harness.ts';
 
 // docs/TEST.md TC-AGENT-011（MCP 与画布同面，REQ-AGENT-002 v0.51）AI 执行脚本。纯 MCP / REST，不开浏览器。
@@ -380,6 +382,28 @@ await step('TC-AGENT-022', async () => {
   const made = await call<{ screenId: string }>('quilt.create_screen', { projectId: pid, name: 'From upload', route: '/from-upload', uploadId: c });
   expect(!!made.screenId && !(await exists(c)), '续写的上传位没被 create_screen 用掉');
   return `空位 / 写了一半的 / REST 签发的三个上传位在 ${Math.round((Date.now() - t0) / 1000)} s 内被回收，追加 404；刚写过的照常续写并建屏`;
+});
+
+// ---------- TC-AGENT-025 无状态 MCP 不开 GET 流（源自缺陷 2026-10-22） ----------
+await step('TC-AGENT-025', async () => {
+  // 1 GET 与 DELETE 直接回 405、带 Allow: POST
+  for (const method of ['GET', 'DELETE']) {
+    const r = await fetch(`${API}/mcp`, { method, headers: { Accept: 'text/event-stream' } });
+    await r.body?.cancel();
+    expect(r.status === 405 && r.headers.get('allow') === 'POST', `① ${method} /mcp 应 405 且 Allow: POST，实际 ${r.status} ${r.headers.get('allow')}`);
+  }
+  // 2 SDK 客户端连上后闲置 10 s：只试一次 GET（拿到 405 就不再开流），工具照常能调
+  let gets = 0;
+  const counting: typeof fetch = async (input, init) => { if ((init?.method ?? 'GET').toUpperCase() === 'GET') gets++; return fetch(input, init); };
+  const client = new Client({ name: 'tc-agent-025', version: '0' });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${API}/mcp`), { fetch: counting }));
+  try {
+    const tools = await client.listTools();
+    expect(tools.tools.length > 0, '② 连上后应能列出工具');
+    await sleep(10_000);
+    expect(gets <= 1, `② 闲置 10 s 里客户端发了 ${gets} 次 GET /mcp（修复前约每秒一次）`);
+  } finally { await client.close(); }
+  return `GET / DELETE 回 405；SDK 客户端闲置 10 s 只发 ${gets} 次 GET`;
 });
 
 await mcp.close();

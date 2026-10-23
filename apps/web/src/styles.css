@@ -443,8 +443,9 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
   .phrase-in, .menu[data-state="open"] { animation: tip-in var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
   .menu[data-state="closed"] { animation: none; }
 }
-/* 作业完成（PAGE-CANVAS「作业 chip」v1.33）：在跑的 chip 原地转成「任务完成」——圆形对勾放大弹出、文字从下方淡入、底下一层成功色闪一下；
-   悬停或键盘获焦时右端的 × 才显出来（一直占着位置，chip 不变宽）；10 s 后 JobChips 标 .job-chip-leaving 淡出 200 ms 再撤掉。
+/* 作业完成（PAGE-CANVAS「作业 chip」v1.33）：在跑的 chip 原地转成「任务完成」——圆形对勾放大弹出、文字从下方淡入、底下一层成功色闪一下，
+   宽度同一拍收窄到正好包住对勾与文字（v1.36，JobChips 的 useShrinkOnDone）；× 平时不占位，悬停或键盘获焦时槽位从 0fr 展开到 1fr、chip 向右长出它。
+   槽位不裁切：× 的提示气泡画在按钮外面，overflow 会把它切掉；收起时 × 透明、不接指针，Tab 照样能聚焦；10 s 后 JobChips 标 .job-chip-leaving 淡出 200 ms 再撤掉。
    减弱动态时不弹不移，只留透明度（MOTION-004 的「少而柔」）；写在上面那段之后，盖过 .fade-up 在减弱动态下的 animation: none */
 @keyframes job-done-pop { 0% { transform: scale(0.4); opacity: 0; } 60% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(1); } }
 @keyframes job-done-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -454,11 +455,15 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
 .job-chip-done::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: color-mix(in srgb, var(--semantic-color-feedback-success) 16%, transparent); opacity: 0; animation: job-done-flash var(--semantic-motion-duration-slow) var(--semantic-motion-easing-standard) var(--semantic-motion-duration-fast) both; }
 .job-done-icon { animation: job-done-pop var(--semantic-motion-duration-slow) var(--semantic-motion-easing-emphasized) both; }
 .job-done-text { display: inline-block; animation: job-done-in var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard) both; }
-.job-chip-done .job-done-close { opacity: 0; transition: opacity var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
-.job-chip-done:hover .job-done-close, .job-chip-done:focus-within .job-done-close { opacity: 1; }
+.job-done-slot { display: grid; grid-template-columns: 0fr; transition: grid-template-columns var(--semantic-motion-duration-base) var(--semantic-motion-easing-emphasized); }
+.job-done-slot > * { min-width: 0; }
+.job-chip-done:hover .job-done-slot, .job-chip-done:focus-within .job-done-slot { grid-template-columns: 1fr; }
+.job-chip-done .job-done-close { opacity: 0; pointer-events: none; transition: opacity var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
+.job-chip-done:hover .job-done-close, .job-chip-done:focus-within .job-done-close { opacity: 1; pointer-events: auto; }
 .job-chip-leaving { animation: job-chip-leave var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard) forwards; }
 @media (prefers-reduced-motion: reduce) {
   .job-done-icon, .job-done-text, .job-chip-done::before { animation: none; }
+  .job-done-slot { transition: none; }
   @keyframes job-chip-leave-fade { to { opacity: 0; } }
   .job-chip-leaving { animation: job-chip-leave-fade var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard) forwards; }
 }
