@@ -10,13 +10,19 @@ const SYSTEM_STACK = ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', '"Pin
 const WEB_STACK = ['system-ui', 'sans-serif'];
 const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-export type FontFace = { link: string; families: string[]; stack: string };
+// lazyLink 给导出件（v1.41 `API-PROTO-002`）：样式表先按 print 加载、到了再切成 all，不阻塞后面的脚本与渲染——
+// 连不上字体服务又不报错时（被墙、弱网），阻塞写法会让页面停在这张样式表上整屏空白；不跑脚本的环境走 <noscript> 里的普通写法
+export type FontFace = { link: string; lazyLink: string; families: string[]; stack: string };
 export function fontFace(typography: Tokens['typography']): FontFace {
   const source = typography.fontSource ?? 'google';
   const head = quote(typography.fontFamily);
   const families = [head, ...(source === 'system' ? SYSTEM_STACK : WEB_STACK).filter((f) => f !== head)];
-  const link = source === 'google'
-    ? `<link rel="preconnect" href="https://fonts.googleapis.com">\n<link href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(typography.fontFamily)}:wght@400;500;600;700&display=swap" rel="stylesheet">`
-    : source === 'url' && typography.fontUrl ? `<link href="${escapeAttr(typography.fontUrl)}" rel="stylesheet">` : '';
-  return { link, families, stack: families.join(',') };
+  const href = source === 'google'
+    ? `https://fonts.googleapis.com/css2?family=${encodeURIComponent(typography.fontFamily)}:wght@400;500;600;700&display=swap`
+    : source === 'url' && typography.fontUrl ? escapeAttr(typography.fontUrl) : '';
+  const preconnect = source === 'google' ? '<link rel="preconnect" href="https://fonts.googleapis.com">\n' : '';
+  const sheet = `<link href="${href}" rel="stylesheet">`;
+  const link = href ? `${preconnect}${sheet}` : '';
+  const lazyLink = href ? `${preconnect}<link href="${href}" rel="stylesheet" media="print" onload="this.media='all'">\n<noscript>${sheet}</noscript>` : '';
+  return { link, lazyLink, families, stack: families.join(',') };
 }

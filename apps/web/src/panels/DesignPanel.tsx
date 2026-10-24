@@ -128,7 +128,7 @@ export function DesignPanel({ ds, project, screens, assets, busyReason, onClose,
             <div className="flex items-center gap-2">
               {/* 浏览器自绘的色块默认带一圈灰框：去掉框、内圆角取小件档，外面是填充底 */}
               <input id="ds-seed" type="color" value={/^#[0-9A-Fa-f]{6}$/.test(seed) ? seed : '#000000'} onChange={(e) => set({ seed: e.target.value.toUpperCase() })} aria-label={t('design.seed.pick')}
-                className="fill h-9 w-10 shrink-0 cursor-pointer focus-ring rounded-md p-1 [&::-moz-color-swatch]:rounded-sm [&::-moz-color-swatch]:border-0 [&::-webkit-color-swatch]:rounded-sm [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:p-0" />
+                className="fill h-7.5 w-10 shrink-0 cursor-pointer focus-ring rounded-md p-1 [&::-moz-color-swatch]:rounded-sm [&::-moz-color-swatch]:border-0 [&::-webkit-color-swatch]:rounded-sm [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:p-0" />
               <Input aria-label={t('design.seed.hex')} value={seed} onChange={(e) => set({ seed: e.target.value })} className="font-mono" />
             </div>
           </div>

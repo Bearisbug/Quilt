@@ -920,10 +920,11 @@ await step('TC-CORE-026', async () => {
   }
   await page.evaluate(`document.documentElement.removeAttribute('data-theme')`);
 
-  // 4 favicon 指向品牌资产且真的取得到
-  const icon = await page.locator('link[rel="icon"]').getAttribute('href');
-  expect(icon?.startsWith('/brand/'), `favicon 未指向品牌资产：${icon}`);
-  expect((await page.request.get(`${WEB}${icon}`)).status() === 200, 'favicon 资产 404');
+  // 4 favicon 是品牌的网站图标（SVG 加 16、32 px PNG），都在品牌资产下、真的取得到
+  const icons = await page.locator('link[rel="icon"]').evaluateAll((ls) => ls.map((l) => ({ href: l.getAttribute('href') ?? '', type: l.getAttribute('type'), sizes: l.getAttribute('sizes') })));
+  const expected = [['/brand/favicon.svg', 'image/svg+xml', null], ['/brand/favicon-32.png', 'image/png', '32x32'], ['/brand/favicon-16.png', 'image/png', '16x16']];
+  for (const [href, type, sizes] of expected) expect(icons.some((i) => i.href === href && i.type === type && i.sizes === sizes), `没有 ${href}（${type}${sizes ? `，${sizes}` : ''}）；实际 ${JSON.stringify(icons)}`);
+  for (const i of icons) expect((await page.request.get(`${WEB}${i.href}`)).status() === 200, `favicon 资产 ${i.href} 404`);
 
   // 5 用户项目的设计系统不被工具品牌污染：风格指南卡报的是项目自己的字体，不是工具外壳的
   const guide = await page.locator('[data-testid="style-guide"]').innerText();
@@ -933,7 +934,22 @@ await step('TC-CORE-026', async () => {
   expect(projFont !== shellFont, `项目字体与工具外壳字体同为 ${shellFont}，这条断言失去区分力，请换一个字体建种子项目`);
   expect(!guide.includes(shellFont), `工具外壳字体 ${shellFont} 串进了用户项目的风格指南`);
   await shot(page, 'CORE-026');
-  return `${brandFirstRun} / -0.03em · 浅深两套 token 与 brand/ 一致 · 对比度 ${JSON.stringify(contrast)}`;
+
+  // 6 控件尺寸（v1.40，brand/DESIGN.md「控件形态」「图标」）：设置「模型」与「添加模型」对话框里的按钮（大小两档）、输入框、下拉触发器都高 30，
+  // 按钮里图标与文字的间距 8
+  await page.goto(`${WEB}/p/${projectId}?settings=models`);
+  await page.getByTestId('add-channel').click();
+  await page.getByTestId('channel-dialog').waitFor();
+  const controls = ['[data-testid="add-channel"]', '[data-testid="ch-save"]', '#ch-kind', '#ch-label', '#ch-endpoint', '#ch-model', '#ch-key'];
+  const sizes: Record<string, number> = {};
+  for (const sel of controls) sizes[sel] = (await page.locator(sel).boundingBox())?.height ?? -1;
+  for (const [sel, h] of Object.entries(sizes)) expect(Math.abs(h - 30) < 0.5, `${sel} 高 ${h}，应为 30：${JSON.stringify(sizes)}`);
+  for (const sel of ['[data-testid="add-channel"]', '[data-testid="ch-save"]']) {
+    const gap = await page.locator(sel).evaluate((b) => getComputedStyle(b).columnGap);
+    expect(gap === '8px', `${sel} 图标与文字间距 ${gap}，应为 8px`);
+  }
+  await page.keyboard.press('Escape');
+  return `${brandFirstRun} / -0.03em · 浅深两套 token 与 brand/ 一致 · 对比度 ${JSON.stringify(contrast)} · 按钮、输入框、下拉触发器 7 个都高 30、按钮间距 8`;
 });
 
 await step('TC-CORE-027', async () => {

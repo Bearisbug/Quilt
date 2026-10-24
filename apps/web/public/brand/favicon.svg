@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><title>Quilt</title><style>.p{fill:#56616E}.c{fill:#FFFFFF}.l{fill:#142033}.s{stroke:#FFFFFF}@media (prefers-color-scheme:dark){.p{fill:#FFFFFF}.c{fill:#142033}.l{fill:#FFFFFF}.s{stroke:#142033}}</style>
+<rect class="p" x="0.5" y="3" width="15" height="12.5" rx="4"/>
+<rect class="p" x="3" y="0.25" width="10" height="10" rx="1.8"/>
+<rect class="c" x="3.75" y="1" width="8.5" height="9" rx="1.2"/>
+<rect class="l" x="5.25" y="2.6" width="5.5" height="1.2" rx="0.6"/>
+<rect class="l" x="5.25" y="4.7" width="4.25" height="1.2" rx="0.6"/>
+<rect class="l" x="5.25" y="6.8" width="3" height="1.2" rx="0.6"/>
+<path class="p" d="M0.5 8.2 Q3.5 9.3 6.4 10 V15.5 H4.5 A4 4 0 0 1 0.5 11.5 Z"/>
+<path class="p" d="M6.4 10 Q10.2 7.4 15.5 6.3 V11.5 A4 4 0 0 1 11.5 15.5 H11 Q8.4 13.6 6.4 10 Z"/>
+<path class="s" d="M15.2 6.4 Q10.2 7.4 6.4 10 Q8.4 13.6 10.8 15.3" fill="none" stroke-width="0.85" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

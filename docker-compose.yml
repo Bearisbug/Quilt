@@ -4,8 +4,9 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: quilt-pg
-    # 慢查询排查（§21 v1.29）：pg_stat_statements 记每类语句的累计耗时，≥ 200 ms 的语句进容器日志；扩展要在库里建一次
-    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "log_min_duration_statement=200"]
+    # 慢查询排查（§21 v1.29）：pg_stat_statements 记每类语句的累计耗时，≥ 200 ms 的语句进容器日志；扩展要在库里建一次。
+    # 日志行带时间、进程号与库名（§21 v1.42）：开发库与各条测试库共用这一个容器，没有库名分不清是谁的慢查询
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "log_min_duration_statement=200", "-c", "log_line_prefix=%m [%p] %d "]
     ports:
       - "127.0.0.1:5439:5432"
     environment:

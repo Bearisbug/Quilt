@@ -559,6 +559,8 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
 
 /* 用量的悬停提示：反色实底气泡，120 ms 淡入；只给精确指针（INT-006），读屏走图表旁的表格。
    藏起来时 visibility:hidden，淡出结束才藏，免得半透明的气泡挡住旁边的悬停 */
+/* 图表的填充标记：底色取图表填充色，四周一圈同号系列色描边（brand/DESIGN.md「图表」：浅色填充对表面不到 3:1，边界靠描边） */
+.usage-mark { background: var(--mark-fill); box-shadow: inset 0 0 0 var(--semantic-layout-hairline) var(--mark-line); }
 .usage-tip { position: absolute; bottom: calc(100% + 8px); z-index: 20; width: max-content; min-width: 10rem; max-width: 18rem; padding: 8px 12px; border-radius: var(--semantic-radius-md); background: var(--semantic-color-surface-inverse); color: var(--semantic-color-text-on-inverse); box-shadow: var(--semantic-elevation-overlay); pointer-events: none; opacity: 0; visibility: hidden; transition: opacity var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard), visibility 0s linear var(--semantic-motion-duration-fast); }
 @media (hover: hover) and (pointer: fine) {
   .usage-hover:hover > .usage-tip { opacity: 1; visibility: visible; transition-delay: 0s; }

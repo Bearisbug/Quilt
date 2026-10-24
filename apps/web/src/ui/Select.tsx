@@ -8,7 +8,7 @@ import uiMessages from '@/i18n/locales/shellUi';
 // 表单下拉（shadcn 的 Select 同一底座：Radix Select）。
 // 原生 <select> 的选项列表由操作系统渲染，暗色主题下在部分平台会画成系统亮色面板、也接不了图标与分组说明；
 // 这个组件让列表进我们自己的 .menu 材质，键盘导航 / 焦点归还 / 定位仍由 Radix 负责。
-// 触发器的外观与 Input 对齐（h-9、圆角、同一焦点环），放进 <Field> 里不用再调。
+// 触发器的外观与 Input 对齐（高 30、圆角、同一焦点环），放进 <Field> 里不用再调。
 
 type SelectOption = { value: string; label: string; hint?: string; icon?: ReactNode; disabled?: boolean };
 
@@ -30,7 +30,7 @@ export function Select({ id, value, onChange, options, placeholder, disabled, cl
       <RxSelect.Trigger
         id={id} aria-label={ariaLabel} data-testid={testId} data-value={value}
         className={cn(
-          'state-layer focus-ring fill group flex h-9 w-full items-center justify-between gap-2 rounded-md border border-transparent px-3 type-body text-text-primary',
+          'state-layer focus-ring fill group flex h-7.5 w-full items-center justify-between gap-2 rounded-md border border-transparent px-3 type-body text-text-primary',
           'disabled:cursor-not-allowed aria-invalid:border-error',
           className,
         )}

@@ -34,14 +34,21 @@ export const fmtPct = (part: number, total: number) => {
 export const sumValues = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0);
 export const tokensOf = (m: UsageModel) => m.tokensIn + m.tokensOut;
 
-// ---- 颜色：设计系统的图表系列色按 models 的顺序分配（全部时间的 Token 降序，换范围不变色），删掉的模型一律中性灰 ----
+// ---- 颜色：设计系统的图表色号按 models 的顺序分配（全部时间的 Token 降序，换范围不变色），删掉的模型一律中性灰 ----
+// 每号两档：line 是系列色（描边），fill 是填充色（柱段、分段条、胶囊、色块）
 const SERIES = 6;
+export type SeriesColor = { line: string; fill: string };
 export const NEUTRAL = 'var(--semantic-color-data-viz-axis)';
+export const NEUTRAL_COLOR: SeriesColor = { line: NEUTRAL, fill: NEUTRAL };
 export function modelColors(models: UsageModel[]) {
-  const map = new Map<string, string>();
+  const map = new Map<string, SeriesColor>();
   let i = 0;
-  for (const m of models) map.set(m.key, m.deleted ? NEUTRAL : `var(--semantic-color-data-viz-series-${(i++ % SERIES) + 1})`);
-  return (key: string) => map.get(key) ?? NEUTRAL;
+  for (const m of models) {
+    if (m.deleted) { map.set(m.key, NEUTRAL_COLOR); continue; }
+    const n = (i++ % SERIES) + 1;
+    map.set(m.key, { line: `var(--semantic-color-data-viz-series-${n})`, fill: `var(--semantic-color-data-viz-series-fill-${n})` });
+  }
+  return (key: string) => map.get(key) ?? NEUTRAL_COLOR;
 }
 
 // 台账只有 driver，没有厂商：按 driver 取 logo；OpenAI 兼容端点可能是任何一家，用通用图标

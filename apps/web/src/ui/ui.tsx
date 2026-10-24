@@ -15,9 +15,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       className={cn(
         // 交互态只经状态层（brand/state-layer.css）：悬停、按下、禁用都不改底色，焦点环由 focus-ring 画（THEME-006）
         // 形态（brand/DESIGN.md「控件形态」）：主按钮与危险按钮是胶囊，次按钮是填充底、圆角 10、不描边；
-        // 列表行里的删除 / 取消用 danger-ghost（次按钮形态 + 错误色字），成排出现时不抢眼，确认框里的危险动作才用实心红胶囊
-        'state-layer focus-ring inline-flex items-center justify-center gap-1.5 font-medium whitespace-nowrap disabled:cursor-not-allowed',
-        size === 'sm' ? 'h-8 type-label' : 'h-9 type-body',
+        // 列表行里的删除 / 取消用 danger-ghost（次按钮形态 + 错误色字），成排出现时不抢眼，确认框里的危险动作才用实心红胶囊；
+        // 两档都高 30、图标与文字间距 8（brand/DESIGN.md「控件形态」「图标」），sm 只是字小一档、内边距窄一点
+        'state-layer focus-ring inline-flex h-7.5 items-center justify-center gap-2 font-medium whitespace-nowrap disabled:cursor-not-allowed',
+        size === 'sm' ? 'type-label' : 'type-body',
         variant === 'ghost' || variant === 'danger-ghost' ? cn('fill rounded-md', variant === 'ghost' ? 'text-text-primary' : 'text-error', size === 'sm' ? 'px-3' : 'px-3.5') : cn('rounded-pill', size === 'sm' ? 'px-3.5' : 'px-4'),
         variant === 'primary' && 'bg-primary text-on-primary',
         variant === 'danger' && 'bg-error text-on-primary',
@@ -88,7 +89,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
 });
 
 export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={cn('focus-ring fill h-9 w-full rounded-md border border-transparent px-3 type-body text-text-primary placeholder:text-(--semantic-color-text-tertiary)', className)} {...rest} />;
+  return <input className={cn('focus-ring fill h-7.5 w-full rounded-md border border-transparent px-3 type-body text-text-primary placeholder:text-(--semantic-color-text-tertiary)', className)} {...rest} />;
 }
 
 export function Textarea({ className, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {

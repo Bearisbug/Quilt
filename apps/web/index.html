@@ -4,7 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <link rel="icon" type="image/svg+xml" href="/brand/symbol-graphite.svg" />
+    <!-- 网站图标（brand/DESIGN.md「资产映射」）：小尺寸符号的 SVG，系统深色时自动换反白；PNG 给不读 SVG 图标的环境 -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/brand/favicon-16.png" />
+    <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg" />
     <!-- 外观（REQ-CORE-039，INT-021）：样式表之前把选过的模式写到 <html data-theme>，第一帧就是这个模式；
          跟随系统时不写，由 tokens.css 的 prefers-color-scheme 层接管。键名与写法同 src/lib/theme.ts -->
     <script>try { var t = localStorage.getItem('quilt:theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>

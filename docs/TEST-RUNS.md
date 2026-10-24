@@ -287,6 +287,13 @@
 | RUN-297 | 2026-10-22 | 同 RUN-296 的构建；`tests/e2e/canvas.ts` 的 `TC-CORE-152` 读作业列表改用 `items` | AI(Claude Code) | 复测(RUN-296:TC-CORE-152 + 冒烟级至 TC-CORE-152、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024) | 通过 7/9 · 跳过 2 |
 | RUN-298 | 2026-10-22 | 未提交工作树（设计文档 v1.31：画布缩放调慢一半，连线改成苹果式细线） | AI(Claude Code) | 局部(整套 CANVAS、整套 PROTO、TC-CORE-080、TC-CORE-081、TC-CORE-086 + 冒烟级至 TC-CORE-152、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024) | 通过 27/33 · 失败 2 · 跳过 4 |
 | RUN-299 | 2026-10-22 | 同 RUN-298 的构建；`tests/e2e/proto.ts` 的 `TC-PROTO-014` 页面里不再声明具名函数，`tests/e2e/core/generate.ts` 的 `TC-CORE-086` 第 5、6 步按缩放比例停 | AI(Claude Code) | 复测(RUN-298:TC-PROTO-014、TC-CORE-086 + 冒烟级至 TC-CORE-152、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024) | 通过 9/11 · 跳过 2 |
+| RUN-300 | 2026-10-22 | 未提交工作树（设计文档 v1.32 协作显示、v1.33 作业完成 chip） | AI(Claude Code) | 全量至 TC-CORE-157、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024 | 通过 187/204 · 失败 8 · 待人工 2 · 阻塞 1 · 跳过 6 |
+| RUN-301 | 2026-10-22 | 未提交工作树（修复前：选元素被全透明的遮罩挡住） | AI(Claude Code) | 局部(TC-CORE-158) | 通过 0/1 · 失败 1 |
+| RUN-302 | 2026-10-22 | 未提交工作树（设计文档 v1.32～v1.34：代码审查的 10 处修改、链式跟随与互相跟随、选元素跳过全透明的遮罩） | AI(Claude Code) | 复测(RUN-300:TC-CORE-010、TC-CORE-040、TC-CORE-100、TC-CORE-105、TC-EDIT-041、TC-CORE-130、TC-CORE-142、TC-CORE-039 + RUN-301:TC-CORE-158 + 整套 COLLAB、LOAD、CANVAS、I18N、SETTINGS + 冒烟级至 TC-CORE-159、TC-PROTO-014、TC-EDIT-042、TC-AGENT-024) | 通过 50/54 · 失败 2 · 跳过 2 |
+| RUN-303 | 2026-10-22 | 未提交工作树（修复前：`GET /mcp` 回 200 的 SSE 流随即关掉） | AI(Claude Code) | 局部(TC-AGENT-025) | 通过 0/1 · 失败 1 |
+| RUN-304 | 2026-10-22 | 未提交工作树（设计文档 v1.35：MCP 的 GET 与 DELETE 回 405，请求日志汇总带各路由的数） | AI(Claude Code) | 局部(整套 MCP、整套 AGENT) | 通过 11/12 · 待人工 1 |
+| RUN-305 | 2026-10-22 | 未提交工作树（修复前：选元素时滚动，悬停框停在原处） | AI(Claude Code) | 局部(TC-CORE-160) | 通过 0/1 · 失败 1 |
+| RUN-306 | 2026-10-22 | 未提交工作树（设计文档 v1.35～v1.37：MCP 回 405、完成的 chip 收窄、悬停框跟着滚动） | AI(Claude Code) | 局部(整套 EDIT、SKETCH、CANVAS、COLLAB + 冒烟级至 TC-CORE-160、TC-PROTO-014、TC-EDIT-042、TC-AGENT-025) | 通过 82/88 · 失败 3 · 跳过 3 |
 
 ## 明细（仅登非「通过」项）
 
@@ -870,6 +877,37 @@
 | RUN-298 | TC-PROTO-009 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-299 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-299 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-300 | TC-CORE-010 | 失败 | 单步超过 10 min：第二次在 iframe 里按 `⌘E` 退出交互后脚本不再返回，页面停在退出后的状态（证据：`docs/test-runs/run-300-tc-core-010-fail.png`、`.e2e/l1/run-300.log`，本机） | 既有问题，HEAD 上同现，见 §7 |
+| RUN-300 | TC-CORE-040 | 失败 | 第 3c 步双击 /s1 超时：3a 点小地图右侧空白后 /s1 移出视口（证据：`docs/test-runs/run-300-tc-core-040-fail.png`） | 既有问题，v1.29、v1.31 上同现，见 §7 |
+| RUN-300 | TC-CORE-100 | 失败 | 「记录栏应多出这一张」：三栈并行满载（证据：`.e2e/l3/run-300.log`，本机） | 单独重跑通过；RUN-302 复测通过 |
+| RUN-300 | TC-CORE-105 | 失败 | 「看板应为 empty，实际 generating」：三栈并行满载（证据：`.e2e/l3/run-300.log`，本机） | 单独重跑通过；RUN-302 复测通过 |
+| RUN-300 | TC-EDIT-041 | 失败 | 第 4 步 Shift+↑ 后层级不对、取框超时：三栈并行满载（证据：`.e2e/l3/run-300.log`，本机） | 单独重跑通过；RUN-302 复测通过 |
+| RUN-300 | TC-CORE-130 | 失败 | 「/v1 请求应都带 X-Quilt-Locale」：协作上报 `POST …/presence` 没带语言头（证据：`.e2e/l3/run-300.log`，本机） | 修复：上报与 `left` 都带语言头；RUN-302 通过 |
+| RUN-300 | TC-CORE-142 | 失败 | 「三组小标题应依次是 外观 / 语言 / 使用记录」：v1.32 多了「协作」组，用例没跟着改 | 设计文档 §13 与用例改成四组；RUN-302 通过 |
+| RUN-300 | TC-CORE-039 | 阻塞 | CHAT 套件开头 `pnpm seed` 删对象目录时撞上 API 还在写截图（`ENOTEMPTY`），整套没跑（证据：`.e2e/l3/run-300.log`，本机） | RUN-302 通过 |
+| RUN-300 | TC-CORE-023 | 失败 | 预期失败（§7 登记项）：让位过度，输入框右缘与面板之间空出 84.5px | §7 跟进 |
+| RUN-300 | TC-CORE-020 | 待人工 | 对标 Stitch 盲评 | 待人工 |
+| RUN-300 | TC-AGENT-010 | 待人工 | 投递到真实 Claude Code 会话要在终端确认接收 | 待人工 |
+| RUN-300 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-300 | TC-CORE-006 | 跳过 | 需 `LLM_STUB=503` 重启 worker，由 `core-stub.ts` 单独执行 | 基线 |
+| RUN-300 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-300 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-300 | TC-PROTO-004 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-300 | TC-PROTO-009 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-301 | TC-CORE-158 | 失败 | 第 1 步「应选中标题 h1 · q2」，实际选中 `div · q6`（全透明的遮罩），与用户在 moneynote 上看到的一致（证据：`docs/test-runs/run-301-tc-core-158-fail.png`） | 修复后 RUN-302 通过 |
+| RUN-302 | TC-CORE-010 | 失败 | 同 RUN-300：单步超过 10 min（证据：`.e2e/l1/run-302.log`，本机） | 既有问题，见 §7 |
+| RUN-302 | TC-CORE-040 | 失败 | 同 RUN-300：第 3c 步双击 /s1 超时（证据：`.e2e/l1/run-302.log`，本机） | 既有问题，见 §7 |
+| RUN-302 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-302 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-303 | TC-AGENT-025 | 失败 | 第 1 步「GET /mcp 应 405 且 Allow: POST，实际 200 null」，与开发实例上看到的重连一致 | 修复后 RUN-304 通过 |
+| RUN-304 | TC-AGENT-010 | 待人工 | 投递到真实 Claude Code 会话要在终端确认接收 | 待人工 |
+| RUN-305 | TC-CORE-160 | 失败 | 第 2 步「滚动后悬停框应跟到指针下那一行」：悬停框上沿停在 144，指针下的第 7 笔在 166（证据：`docs/test-runs/run-305-tc-core-160-fail.png`） | 修复后 RUN-306 通过 |
+| RUN-306 | TC-CORE-119 | 失败 | 第 3 步检查器里带一块建的草稿不是组件画框（证据：`docs/test-runs/run-306-tc-core-119-fail.png`、`.e2e/l2/run-306.log`，本机） | v1.34 带出的回归：脚本 `click()` 的坐标是 0, 0，选成了页面根；v1.39 修复，RUN-308 通过 |
+| RUN-306 | TC-EDIT-001 | 失败 | 等直改后的角标 8 s 超时（证据：`docs/test-runs/run-306-tc-edit-001-fail.png`） | 同上 |
+| RUN-306 | TC-EDIT-032 | 失败 | 等组件里的元素选中 15 s 超时（证据：`docs/test-runs/run-306-tc-edit-032-fail.png`） | 同上 |
+| RUN-306 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-306 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-306 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 
 
 RUN-267 证据：地基变更（界面视觉换成苹果风方向 E，跨全部界面）的全量轮。构建前端后跑 `scripts/e2e-all.sh` 前九套（CORE、LOAD、CANVAS、PROTO、EDIT、COMPONENTS、AGENT、MCP、CHAT）；单测轮 144/144，构建产物 `check-tokens --lint` 通过。SKETCH 与 install 两套没跑：本轮中途 `tests/e2e/sketch.ts` 已按 v1.14 写回前端改写，与被测构建对不上，SKETCH 开跑即停，改在 RUN-268 随新构建再跑全量。`TC-CORE-008` 在毛玻璃开着时 100 屏 2 倍屏 60 fps、每帧 GPU 主线程 1.4 ms（门槛 4 ms）。完整日志 `.e2e/main/run-267.log`（本机，不进仓库）。
@@ -938,3 +976,17 @@ RUN-297 证据：改正脚本后的复测轮，同一构建、l5 一条隔离栈
 RUN-298 证据：v1.31 的局部轮。用户嫌画布缩放太快、v1.29 的彩色柔光连线难看：捏合与 `Ctrl`+滚轮改由画布自己接住，灵敏度减半、单个事件最多 ±25%；连线改成苹果式细线（链去的标记色、链进来的三级文字色，起点圆点、终点箭头，上下叠着的卡连上下边）。改到画布手势与连线，按 §5 跑整套 CANVAS 与 PROTO、用到缩放的 `TC-CORE-080`、`081`、`086` 加冒烟级，l5 一条隔离栈，停栈后跑 install。单测 234/234（请求日志那条单测的耗时断言放宽：机器忙时 230 ms 的请求量到 329 ms），五个包类型检查与 web lint 通过。新步骤 `TC-CORE-058` 第 13 步：`deltaY −20` 一次缩放 ×1.149、`−300` 一次 ×1.250；`TC-CORE-097` 深色下连线按深色标记色画。两条失败都是脚本问题（见明细）。连线截图在 `docs/test-runs/run-298-links/`（本机）。日志 `.e2e/l5/run-298.log`（本机，不进仓库）。
 
 RUN-299 证据：改正两处脚本后的复测轮，同一构建，l5 一条隔离栈，停栈后跑 install。`TC-PROTO-014` 链去与链进来两种颜色各 41 像素；`TC-CORE-086` 放大到 0.9 以上停住后视口里 3 张换原图，缩放一个来回没有长任务，拖卡 89 帧、点选 94 帧都没有超过 33 ms 的。`TC-CORE-031` 冷启动 4.5 s、二次 1.0 s。日志 `.e2e/l5/run-299.log`（本机，不进仓库）。
+
+RUN-300 证据：v1.32 协作显示与 v1.33 作业完成 chip 的全量轮。改到项目事件流（有事件就写，presence 走进程内广播）、预览运行时与 e2e 共用的 `tests/e2e/lib.ts`（每个浏览器上下文预置协作者身份），按 §5 跑全量。构建前端，单测 238/238，四个包类型检查、web lint、`gen:runtime --check` 通过。十四套分三条隔离栈并行跑（16:14～17:03，负载均值 30～45）：l1 跑 CORE、LOAD，l2 跑 CANVAS、PROTO、EDIT、COMPONENTS，l3 跑 AGENT、MCP、CHAT、SKETCH、I18N、SETTINGS、RECORD、COLLAB；install 放到 RUN-302。新用例 `TC-CORE-153`～`157` 全部通过：另一个上下文的光标 2 s 内出现，拖卡松手后两边与库里位置一致，跟随中乙关页时甲收到「乙 已离开」；完成的作业 chip 悬停 11 s 不淡出，移开后按剩余时间淡出。8 条失败分三类：`TC-CORE-130`、`142` 是本轮带出来的（presence 上报没带语言头；设置多了「协作」组、用例没跟着改）；`TC-CORE-100`、`105`、`TC-EDIT-041` 在 l3 上单独重跑都通过，与 RUN-289、293 同类，是多栈满载下的超时；`TC-CORE-010`、`040` 在本轮之前的版本上同样失败（见 RUN-302 证据与 §7）；另有 `TC-CORE-023` 是 §7 登记的预期失败。CHAT 套件开头的种子删对象目录时撞上 API 还在写截图（`ENOTEMPTY`），`TC-CORE-039` 没跑成。
+
+RUN-301 证据：用户反映草稿本里 moneynote 选元素只能选中最大的一块。从开发库只读取这张草稿的 HTML，放进 l2 测试库的草稿本复现：选元素态的穿透规则（v0.57，把带 qid 的元素一律设成可点）把收起的底部抽屉里那层全屏、全透明的遮罩也变成可点，它盖在最上面，点哪都选中它。新增源自缺陷用例 `TC-CORE-158`（草稿桩回一张带同样抽屉的账单页），在修复前的运行时上第 1 步失败，选中的是 `div · q6`（遮罩）。
+
+RUN-302 证据：RUN-300、RUN-301 之后的复测轮。两轮之间改了三块：代码审查的 10 处（presence 带语言头、事件流重连宽限 2 s、按 `F`／双击卡片／小地图／找屏也停止跟随、标签页转到后台发 `left`、跟随按人算、新来的人光标立即显示、跨标签页同步身份、名字为空时不提示已保存、事件流队列里同一标签页的 presence 只留最新一条）；v1.34 选元素从指针下自上而下跳过看不见的、以及本来不可点又不画东西的层；链式跟随与互相跟随（状态里带 `following { id, since }`，跟随链看领头人的视野，连成一圈时最后开始跟随的人留下）。单测 243/243，四个包类型检查、web lint、`gen:runtime --check` 通过；构建前端后三条隔离栈并行（17:12～17:28，COLLAB 在这之前单独在 l3 跑；l3 那一路的截图带 `run-302b-` 前缀），停栈后跑 install。`TC-CORE-158` 修复后通过，同一份 moneynote HTML 放进测试库复测，四个点选中了指针下的不同元素。新用例 `TC-CORE-159` 通过：链式跟随时甲、乙的世界层完全一致；乙改跟甲后甲停下并收到提示，之后 2 s 内两边镜头不动；同时互点只留一个在跟随。`TC-CORE-010`、`040` 仍失败，查明都是本轮之前就有的问题：在临时 worktree 里检出 HEAD（v1.31）起 l4 栈，`TC-CORE-040` 单独跑同样失败，检出 v1.29（7ad78fc）也失败；`TC-CORE-010` 拆成每步带 20 s 超时的脚本、三栈并发各跑 3 次，本轮代码卡 1 次、HEAD 卡 3 次。临时 worktree 与调试截图已删。install `TC-CORE-031` 通过：包 970 KB，冷启动 7579 ms、二次 2531 ms。
+
+RUN-303 证据：`/prod-tune` 体检时看开发实例的请求日志：慢请求里 `GET /mcp` 有 264 条，API 每 5 分钟稳定 870 个请求。读 MCP SDK 1.30.0 的客户端源码确认：GET 流正常结束时它按重试次数 0 安排重连，而 Quilt 无状态，每个 GET 都回 `200` 的 SSE 流再立刻关掉，于是每个连着的客户端每秒重连一次、服务端每次现建一个 MCP server。在 l1 测试库上量：一个 SDK 客户端闲置 10 s 发了 9 次 GET。新增源自缺陷用例 `TC-AGENT-025`，修复前第 1 步失败。
+
+RUN-304 证据：v1.35 修复后的局部轮：`GET` / `DELETE /mcp` 不建 server、直接回 `405` 带 `Allow: POST`；请求日志的 5 分钟汇总加上请求最多的 5 个路由与 4xx 最多的 3 组（单测改了断言）。同一个 SDK 客户端闲置 10 s 只发 1 次 GET（拿到 405 即停）。整套 MCP 与 AGENT 在 l1 上通过，`TC-AGENT-010` 待人工。重启开发实例后，API 每 5 分钟的请求从约 870 降到 66，`GET /mcp` 只出现过 3 次 `405`（同期局域网里的人是否离开没核实，这部分降幅分不开）。
+
+RUN-305 证据：用户反映选元素时只悬停不点、滚动页面后悬停框停在原处。运行时滚动时重排了修改标记、选中框与协作者的框，唯独没管悬停框，而指针不动时浏览器不发 mousemove。新增源自缺陷用例 `TC-CORE-160`（草稿桩回一张 30 行的长列表），修复前第 2 步失败。第一次写的滚动量 137 px 恰好约等于 3 行，悬停框与新的一行几乎重合，改成 160 px 后差距明显。
+
+RUN-306 证据：v1.35～v1.37 的局部轮：v1.36 完成的作业 chip 收窄到正好包住对勾与文字（转态时量出在跑时的宽度，用 brand 的 `motion.duration.slow` 与 `motion.easing.emphasized` 过渡；× 平时不占位、悬停或获焦时槽位从 0fr 展开），v1.37 选元素时滚动按上次的指针位置重新取目标、悬停框不带过渡跟上。构建前端，单测 244/244，四个包类型检查、web lint、`gen:runtime --check` 通过，三条隔离栈并行。`TC-CORE-160` 修复后通过；`TC-CORE-157` 新加的宽度断言通过；另在 l3 上逐帧记下转态时的宽度：0 ms 480 px、50 ms 343、100 ms 235、200 ms 201、约 320 ms 停在 195，单调、不回弹。三条失败在 RUN-307 查明是 v1.34 带出的回归。

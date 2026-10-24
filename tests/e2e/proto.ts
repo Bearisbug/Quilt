@@ -472,5 +472,100 @@ await step('TC-PROTO-013', async () => {
   return `两个作业 ${sizes.join(' + ')} 屏，覆盖全部 25 屏`;
 });
 
+// TC-PROTO-015～017 导出原型嵌进别的页面（v1.41）：文档工具用 iframe srcdoc（sandbox="allow-scripts allow-forms"）嵌导出件。
+// 三条共用一份导出：Embed 项目 3 屏（/s1 → /s2 → /s3 → /s1），/s3 设为叠层
+let embedHtml: string | null = null;
+const embedExport = async () => {
+  if (embedHtml) return embedHtml;
+  const r = seedJson<{ projectId: string; screens: { id: string; route: string }[] }>('seed:project', '--name', 'Embed', '--device', 'mobile', '--screens', '3', '--no-shot');
+  const s3 = r.screens.find((s) => s.route === '/s3')!;
+  expect((await apiJson(`/v1/screens/${s3.id}`, { method: 'PATCH', body: JSON.stringify({ presentation: 'overlay' }) })).status === 200, '把 /s3 设为叠层失败');
+  const { body } = await apiJson<{ job: { id: string } }>(`/v1/projects/${r.projectId}/jobs`, { method: 'POST', headers: { 'Idempotency-Key': `e2e-embed-${Date.now()}` }, body: JSON.stringify({ kind: 'export_prototype', input: {} }) });
+  await waitJob(body.job.id, 90);
+  embedHtml = await (await fetch(`${API}/v1/jobs/${body.job.id}/export`)).text();
+  return embedHtml;
+};
+// 宿主页：iframe 在最上面（390×700），下面垫 3000 px 空白好把它滚出视口；init 脚本也进 srcdoc 文档，先挂好未处理拒绝的计数
+type Rej = { __rej: string[] };
+const embedHost = async () => {
+  const html = await embedExport();
+  const file = path.join(EVIDENCE, `run-${RUN}-embed-host.html`);
+  await writeFile(file, `<!doctype html><title>host</title><iframe sandbox="allow-scripts allow-forms" style="width:390px;height:700px;border:0" srcdoc="${html.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></iframe><div style="height:3000px"></div>`);
+  const c = await browser.newContext({ viewport: { width: 1200, height: 900 } });
+  await c.addInitScript(() => { (window as unknown as Rej).__rej = []; addEventListener('unhandledrejection', (e) => (window as unknown as Rej).__rej.push(String(e.reason))); });
+  const p = await c.newPage();
+  const errors: string[] = [];
+  p.on('pageerror', (e) => errors.push(e.message));
+  await p.goto(`file://${file}`);
+  const f = p.frames().find((x) => x !== p.mainFrame())!;
+  await f.locator('#quilt-root h1', { hasText: 'Screen 1' }).waitFor({ timeout: 10000 });
+  return { p, f, errors, close: async () => { await c.close(); await rm(file, { force: true }); } };
+};
+
+// TC-PROTO-015 原型不在视口里时换屏：浏览器不给它出帧，转场排着等，下一次换屏把它挤掉；被跳过的转场不能变成页面报错。
+// 两下要去不同的屏（同一个 hash 不触发第二次换屏）：先「Go to /s2」，再点底栏的 /s3（叠层，压在 /s2 上）
+await step('TC-PROTO-015', async () => {
+  const { p, f, errors, close } = await embedHost();
+  try {
+    await p.evaluate(() => window.scrollTo(0, 2500));
+    await p.waitForTimeout(300);
+    for (const sel of ['#quilt-root main a[href="/s2"]', '#quilt-root nav a[href="/s3"]']) { await f.evaluate((s) => (document.querySelector(s) as HTMLElement).click(), sel); await p.waitForTimeout(300); }
+    await p.waitForTimeout(500);
+    const rej = await f.evaluate(() => (window as unknown as Rej).__rej);
+    expect(rej.length === 0 && errors.length === 0, `视口外连着换两屏不应有未处理的拒绝：${JSON.stringify({ rej, errors })}`);
+    await p.evaluate(() => window.scrollTo(0, 0));
+    await eventually(async () => {
+      const s = await f.evaluate(() => ({ h1: document.querySelector('#quilt-root h1')?.textContent ?? '', layers: [...document.querySelectorAll('[data-quilt-overlay-layer]')].map((l) => l.getAttribute('data-quilt-overlay-layer')) }));
+      expect(s.h1.startsWith('Screen 2') && s.layers.join() === '/s3', `滚回视口应是 Screen 2 上压一层 /s3：${JSON.stringify(s)}`);
+    });
+    return '视口外连着换两屏：未处理的拒绝 0、页面错误 0；滚回视口是 Screen 2 上压一层 /s3';
+  } finally { await close(); }
+});
+
+// TC-PROTO-016 嵌着时换屏不写宿主页的历史：跳转、开叠层、点遮罩关叠层，宿主页 history.length 与地址都不变
+await step('TC-PROTO-016', async () => {
+  const { p, f, close } = await embedHost();
+  try {
+    const h0 = await p.evaluate(() => history.length);
+    const url0 = p.url();
+    const host = async (what: string) => { const h = await p.evaluate(() => history.length); expect(h === h0 && p.url() === url0, `${what}后宿主页历史应仍是 ${h0} 条、地址不变：${h} 条，${p.url()}`); };
+    const layers = () => f.evaluate(() => document.querySelectorAll('[data-quilt-overlay-layer]').length);
+    await f.locator('#quilt-root a', { hasText: 'Go to /s2' }).click();
+    await f.locator('#quilt-root h1', { hasText: 'Screen 2' }).waitFor({ timeout: 5000 });
+    await host('跳到 /s2 ');
+    await f.locator('#quilt-root a', { hasText: 'Go to /s3' }).click();
+    await eventually(async () => expect((await layers()) === 1, '/s3 应压成一层叠层'));
+    await host('开 /s3 叠层');
+    await f.evaluate(() => (document.querySelector('[data-quilt-overlay-layer]') as HTMLElement).click());
+    await eventually(async () => expect((await layers()) === 0, '点遮罩应关掉叠层'));
+    expect((await f.locator('#quilt-root h1').innerText()).startsWith('Screen 2'), '关叠层后底下应仍是 Screen 2');
+    await host('点遮罩');
+    return `跳转、开叠层、点遮罩关叠层后宿主页历史仍是 ${h0} 条，地址不变`;
+  } finally { await close(); }
+});
+
+// TC-PROTO-017 字体服务连不上时原型照常显示：字体样式表的请求挂着不返回，原型先用回退字体；样式表到了再用上
+await step('TC-PROTO-017', async () => {
+  const html = await embedExport();
+  expect(html.includes('fonts.googleapis.com/css2'), '导出件应引 Google Fonts 样式表');
+  const file = path.join(EVIDENCE, `run-${RUN}-tc-proto-017.html`);
+  await writeFile(file, html);
+  const c = await browser.newContext();
+  let hang = true;
+  await c.route(/fonts\.googleapis\.com/, (r) => { if (!hang) void r.fulfill({ contentType: 'text/css', body: ':root{--quilt-font-probe:1}' }); });
+  try {
+    const p1 = await c.newPage();
+    await p1.goto(`file://${file}`, { waitUntil: 'commit' });
+    await p1.waitForTimeout(3000);
+    const s = await p1.evaluate(() => ({ readyState: document.readyState, h1: document.querySelector('#quilt-root h1')?.textContent ?? null }));
+    expect(!!s.h1?.startsWith('Screen 1'), `字体样式表挂着时应照常显示 Screen 1：${JSON.stringify(s)}`);
+    hang = false;
+    const p2 = await c.newPage();
+    await p2.goto(`file://${file}`);
+    await eventually(async () => expect((await p2.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--quilt-font-probe').trim())) === '1', '字体样式表到了应生效'));
+    return `样式表挂着 3 s：显示 Screen 1（readyState ${s.readyState}）；样式表到了即生效`;
+  } finally { await c.close(); await rm(file, { force: true }); }
+});
+
 await browser.close();
 summary();

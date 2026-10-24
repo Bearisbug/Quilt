@@ -5,19 +5,22 @@ import { cn } from '@/ui/ui';
 import { useResolvedMode } from '@/lib/theme';
 import { useT } from '@/i18n';
 import settingsMessages from '@/i18n/locales/settings';
-import { NEUTRAL, fmtInt, fmtPct, fmtTokens, niceMax, parseDay, shortDay, sumValues, tokensOf, vendorOfDriver, weekdayName, weekdayOf, type UsageModel } from '@/settings/usageModel';
+import { NEUTRAL, NEUTRAL_COLOR, fmtInt, fmtPct, fmtTokens, niceMax, parseDay, shortDay, sumValues, tokensOf, vendorOfDriver, weekdayName, weekdayOf, type SeriesColor, type UsageModel } from '@/settings/usageModel';
 
 // 用量看板的图与表（§13 设置弹层「用量」④–⑦）：每日 Token 堆叠柱、模型表、项目表、按任务类型。
 // 颜色由调用方按 models 的顺序算好传进来（colorOf），这里只画；悬停提示 aria-hidden，读屏走每张图旁边的表格。
 
 type Stats = UsageStatsDto;
-type ColorOf = (key: string) => string;
+type ColorOf = (key: string) => SeriesColor;
 type Labeled = { key: string; label: string; deleted: boolean };
 export type DayLabel = (d: Date) => string;
 
 // ---- 小件 ----
-export function Dot({ color, className }: { color: string; className?: string }) {
-  return <i aria-hidden="true" className={cn('inline-block size-2.5 shrink-0 rounded-inner-min', className)} style={{ background: color }} />;
+/** 填充标记（柱段、分段条、胶囊、色块）：底色取填充色，四周一圈系列色描边（.usage-mark） */
+const mark = (c: SeriesColor) => ({ '--mark-fill': c.fill, '--mark-line': c.line }) as CSSProperties;
+
+export function Dot({ color, className }: { color: SeriesColor; className?: string }) {
+  return <i aria-hidden="true" className={cn('usage-mark inline-block size-2.5 shrink-0 rounded-inner-min', className)} style={mark(color)} />;
 }
 
 export function DeletedTag() {
@@ -39,7 +42,7 @@ export function Tip({ align = 'left', children }: { align?: 'left' | 'right' | '
   );
 }
 /** 提示里的一行：色块 · 名字 · 数 */
-function TipRow({ color, label, deleted, value }: { color?: string; label: ReactNode; deleted?: boolean; value: string }) {
+function TipRow({ color, label, deleted, value }: { color?: SeriesColor; label: ReactNode; deleted?: boolean; value: string }) {
   const t = useT(settingsMessages);
   return (
     <p className="flex items-center gap-2 leading-[18px]">
@@ -82,7 +85,7 @@ function Share({ pct, label, strong }: { pct: string; label: string; strong?: bo
 
 /** 20 px 胶囊：底是正文色 7% 的填充（brand 的图表轨道色在深色弹层上与底同色，看不出胶囊），填充按占比（不到 20 px 也画成一粒圆点）；strong 是实心填充、盖住的那段字反白，否则是 18% 的浅填充。
  *  第一次出现时从 0 长到占比（400 ms，减弱动态时直接到位） */
-// 盖住的那段字要对填充有 4.5:1：几种系列色上「主按钮上的字」不够（浅色的系列 1、3，深色的 1、2、6），这时换成正文字色；两者取对比度高的那个
+// 盖住的那段字要对填充有 4.5:1：「主按钮上的字」在有的填充色上不够，这时换成正文字色；两者取对比度高的那个
 const ON_FILL = ['--semantic-color-text-on-action', '--semantic-color-text-primary'] as const;
 const rgbOf = (c: string): number[] | null => {
   const hex = c.trim().match(/^#([0-9a-f]{6})$/i)?.[1];
@@ -105,13 +108,13 @@ function useReadableOn(fill: React.RefObject<HTMLElement | null>, color: string)
   return `var(${on})`;
 }
 
-function Capsule({ pct, color, text, strong }: { pct: number; color: string; text: string; strong?: boolean }) {
+function Capsule({ pct, color, text, strong }: { pct: number; color: SeriesColor; text: string; strong?: boolean }) {
   const w = 'max(1.25rem, var(--w))';
   const fill = useRef<HTMLElement>(null);
-  const on = useReadableOn(fill, color);
+  const on = useReadableOn(fill, color.fill);
   return (
-    <div className="fill relative h-5 min-w-0 flex-1 overflow-hidden rounded-pill type-caption font-medium tabular-nums" style={{ '--w': `${pct}%`, '--c': color } as CSSProperties}>
-      <i ref={fill} aria-hidden="true" className={cn('usage-fill absolute inset-y-0 left-0 rounded-pill', strong ? 'bg-(--c)' : 'bg-[color-mix(in_srgb,var(--c)_18%,transparent)]')} style={{ width: w }} />
+    <div className="fill relative h-5 min-w-0 flex-1 overflow-hidden rounded-pill type-caption font-medium tabular-nums" style={{ '--w': `${pct}%`, '--c': color.line } as CSSProperties}>
+      <i ref={fill} aria-hidden="true" className={cn('usage-fill absolute inset-y-0 left-0 rounded-pill', strong ? 'usage-mark' : 'bg-[color-mix(in_srgb,var(--c)_18%,transparent)]')} style={{ width: w, ...(strong && mark(color)) }} />
       <span className={cn('absolute inset-0 flex items-center justify-center whitespace-nowrap text-text-secondary', strong && 'usage-fill-rest')} style={strong ? { clipPath: `inset(0 0 0 ${w})` } : undefined}>{text}</span>
       {strong && <span aria-hidden="true" className="usage-fill-on absolute inset-0 flex items-center justify-center whitespace-nowrap" style={{ clipPath: `inset(0 calc(100% - ${w}) 0 0)`, color: on }}>{text}</span>}
     </div>
@@ -128,7 +131,7 @@ function StackBar({ parts, width, colorOf }: { parts: [string, number][]; width:
   const show = drawn.length ? drawn : parts.slice(0, 1);
   return (
     <div className="usage-fill flex h-2 gap-[2px]" style={{ width: `${width}%` }}>
-      {show.map(([k, v]) => <i key={k} aria-hidden="true" className="block h-full min-w-1 basis-0 rounded-pill" style={{ flexGrow: v, background: colorOf(k) }} />)}
+      {show.map(([k, v]) => <i key={k} aria-hidden="true" className="usage-mark block h-full min-w-1 basis-0 rounded-pill" style={{ flexGrow: v, ...mark(colorOf(k)) }} />)}
     </div>
   );
 }
@@ -188,7 +191,7 @@ export function DailyChart({ data, colorOf, labelOf, dayLabel }: { data: Stats; 
                 <div key={b.from} data-testid="usage-bar" className="usage-hover relative flex h-full flex-1 flex-col justify-end rounded-inner-min state-layer">
                   {tot > 0 ? (
                     <div className="usage-rise flex w-full flex-col-reverse gap-[2px]" style={{ height: `${(tot / ymax) * 100}%`, '--delay': `${Math.round(i * stagger)}ms` } as CSSProperties}>
-                      {show.map(([k, v]) => <i key={k} className="block min-h-px basis-0 rounded-inner-min" style={{ flexGrow: v, background: colorOf(k) }} />)}
+                      {show.map(([k, v]) => <i key={k} className="usage-mark block min-h-px basis-0 rounded-inner-min" style={{ flexGrow: v, ...mark(colorOf(k)) }} />)}
                     </div>
                   ) : <div className="h-px w-full bg-chart-gridline" />}
                   <span className="absolute left-1/2 top-full mt-1.5 -translate-x-1/2 whitespace-nowrap tabular-nums">{axisLabel(b, i)}</span>
@@ -305,7 +308,7 @@ export function ProjectTable({ data, colorOf, labelOf }: { data: Stats; colorOf:
                   </div>
                 </div>
                 <div className="flex min-w-0 items-center gap-3">
-                  <Capsule pct={T ? (p.tokens / T) * 100 : 0} color={lead ? colorOf(lead) : 'var(--semantic-color-data-viz-axis)'} text={t('usage.models.tokens', { n: fmtTokens(p.tokens) })} strong />
+                  <Capsule pct={T ? (p.tokens / T) * 100 : 0} color={lead ? colorOf(lead) : NEUTRAL_COLOR} text={t('usage.models.tokens', { n: fmtTokens(p.tokens) })} strong />
                   <Share pct={fmtPct(p.tokens, T)} label={t('usage.models.tokenShare', { pct: fmtPct(p.tokens, T) })} strong />
                 </div>
                 <div className="min-w-0">

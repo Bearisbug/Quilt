@@ -27,6 +27,13 @@ test('fontFace：google 发 fonts.googleapis；system 不发外链带本机栈�
   assert.equal(fontFace({ fontFamily: 'system-ui', fontSource: 'system', scale: [] }).families[0], 'system-ui');
 });
 
+test('fontFace.lazyLink（导出件）：同一张样式表先按 print 加载、到了切成 all，另附 noscript 版；不发外链时为空', () => {
+  const g = fontFace({ fontFamily: 'DM Sans', scale: [] });
+  const href = g.link.match(/<link href="([^"]+)" rel="stylesheet">/)![1];
+  assert.equal(g.lazyLink, `<link rel="preconnect" href="https://fonts.googleapis.com">\n<link href="${href}" rel="stylesheet" media="print" onload="this.media='all'">\n<noscript><link href="${href}" rel="stylesheet"></noscript>`);
+  assert.equal(fontFace({ fontFamily: 'PingFang SC', fontSource: 'system', scale: [] }).lazyLink, '');
+});
+
 test('buildPrelude 带 token 变量、Tailwind 映射与运行时；withCurrentRuntime 只换运行时块', () => {
   const pre = buildPrelude(tokensFromSeed('#3B5BDB'));
   assert.ok(pre.includes('--color-on-primary:') && pre.includes("'on-primary':'rgb(var(--color-on-primary-rgb) / <alpha-value>)'") && pre.includes('<script data-quilt-runtime>'));

@@ -12,6 +12,11 @@ const EXPORT_RUNTIME = String.raw`(function () {
   // 栈里最靠上的整屏换进 #quilt-root，它上面的叠层逐层压回去。只看 hashchange 的目标判断的话，
   // 从叠层跳到整屏再后退，叠层会压在错的那一屏上，层数也会越积越多
   var start = document.body.getAttribute('data-start');
+  // 嵌在别的页面里（iframe）时不碰地址栏：iframe 与宿主页共用一条会话历史，写进去的每一屏都要读者在宿主页多按一次后退。
+  // 这时跳转直接按路由换屏，点遮罩的后退走自己的路由栈
+  var embedded = window.top !== window;
+  function go(r) { if (embedded) render(r); else location.hash = '#' + r; }
+  function back() { if (!embedded) history.back(); else if (stack.length > 1) render(stack[stack.length - 2]); }
   var state = {};
   function snapshot() { document.querySelectorAll('input[name],textarea[name],select[name]').forEach(function (el) { state[el.name] = el.type === 'checkbox' ? el.checked : el.value; }); }
   function restore() { document.querySelectorAll('input[name],textarea[name],select[name]').forEach(function (el) { if (!(el.name in state)) return; if (el.type === 'checkbox') el.checked = !!state[el.name]; else el.value = state[el.name]; }); }
@@ -27,7 +32,7 @@ const EXPORT_RUNTIME = String.raw`(function () {
     var layer = document.createElement('div'); layer.setAttribute('data-quilt-overlay-layer', r);
     layer.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,0.45);overflow:auto;';
     layer.appendChild(screen(r));
-    layer.addEventListener('click', function (e) { if (e.target === layer || e.target === layer.firstElementChild) history.back(); });
+    layer.addEventListener('click', function (e) { if (e.target === layer || e.target === layer.firstElementChild) back(); });
     document.body.appendChild(layer); layers.push({ route: r, el: layer });
   }
   function show() {
@@ -41,13 +46,14 @@ const EXPORT_RUNTIME = String.raw`(function () {
     };
     if (base === shown) { sync(); return; }
     var apply = function () { while (layers.length) layers.pop().el.remove(); document.getElementById('quilt-root').replaceChildren(screen(base)); shown = base; window.scrollTo(0, 0); sync(); };
-    if (document.startViewTransition) document.startViewTransition(apply); else apply();
+    // 原型不在视口里时浏览器不给它出帧，转场排着等，下一次换屏把它挤掉，ready 以 AbortError 拒绝；屏照常换，接住它不当错误报
+    if (document.startViewTransition) document.startViewTransition(apply).ready.catch(function () {}); else apply();
   }
   function render(route) {
     var r = tpls[route] ? route : start; if (!tpls[r]) return;
     // 直接打开叠层的链接（分享、叠层开着时刷新）：先把起始屏垫在底下，叠层照常压在它上面；
     // 历史里也补一条起始屏，点遮罩的 history.back() 才回到它而不是离开这个文件
-    if (!stack.length && pres[r] === 'overlay' && r !== start) { stack.push(start); history.replaceState(null, '', '#' + start); history.pushState(null, '', '#' + r); }
+    if (!stack.length && pres[r] === 'overlay' && r !== start) { stack.push(start); if (!embedded) { history.replaceState(null, '', '#' + start); history.pushState(null, '', '#' + r); } }
     if (stack.length >= 2 && stack[stack.length - 2] === r) stack.pop();
     else if (stack[stack.length - 1] !== r) stack.push(r);
     show();
@@ -56,13 +62,13 @@ const EXPORT_RUNTIME = String.raw`(function () {
   document.addEventListener('click', function (e) {
     var a = e.target && e.target.closest && e.target.closest('a[href],[data-href]'); if (!a) return;
     var href = a.hasAttribute('href') ? (a.getAttribute('href') || '') : (a.getAttribute('data-href') || '');
-    if (href.charAt(0) === '/') { e.preventDefault(); snapshot(); if (tpls[href]) location.hash = '#' + href; }
+    if (href.charAt(0) === '/') { e.preventDefault(); snapshot(); if (tpls[href]) go(href); }
     else if (href === '#') e.preventDefault();
   });
   document.addEventListener('submit', function (e) {
     e.preventDefault();
     var action = e.target && e.target.getAttribute ? (e.target.getAttribute('action') || '') : '';
-    if (action.charAt(0) === '/') { snapshot(); if (tpls[action]) location.hash = '#' + action; }
+    if (action.charAt(0) === '/') { snapshot(); if (tpls[action]) go(action); }
   }, true);
   window.addEventListener('hashchange', function () { render(location.hash.slice(1) || start); });
   render(location.hash.slice(1) || start);
@@ -82,7 +88,7 @@ export function buildPrototypeDocument(args: { title: string; tokens: Tokens; sc
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(args.title)}</title>
-${font.link}
+${font.lazyLink}
 <style>:root{${colorVars};${radiusVars}}html,body{margin:0;min-height:100%;background:var(--color-background);color:var(--color-on-background);font-family:${font.stack};-webkit-font-smoothing:antialiased}::view-transition-old(root),::view-transition-new(root){animation-duration:220ms}</style>
 <style data-quilt="tailwind">${args.tailwindCss}</style>
 <script>${args.lucideJs}</script>

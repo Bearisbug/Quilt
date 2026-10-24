@@ -350,6 +350,28 @@ await step('TC-CORE-141', async () => {
     expect(!/Stub A|Old Model/.test(text) && text.includes('合计'), `⑨ 提示里只该有合计、不列模型：${text}`);
     page = g;
   });
+  // 10 图表色两档（v1.40）：「Stub A」在图例色块、今天那根柱、模型表 Token 胶囊里，底色是同一号的填充色，四周 1 px 同号系列色描边；浅色模式两档不同色
+  await S.check(async () => {
+    const { pg: c } = await openContext();
+    await openSettings(c, projectId, 'usage');
+    await c.getByTestId('usage-totals').waitFor({ timeout: 15000 });
+    const tiers = await c.evaluate(() => [1, 2, 3, 4, 5, 6].map((n) => {
+      const i = document.createElement('i'); document.body.append(i);
+      i.style.background = `var(--semantic-color-data-viz-series-fill-${n})`; const fill = getComputedStyle(i).backgroundColor;
+      i.style.background = `var(--semantic-color-data-viz-series-${n})`; const line = getComputedStyle(i).backgroundColor;
+      i.remove(); return { fill, line };
+    }));
+    const legend = await c.getByTestId('usage-daily').locator('li', { hasText: 'Stub A' }).locator('i').evaluate((el) => ({ bg: getComputedStyle(el).backgroundColor, shadow: getComputedStyle(el).boxShadow }));
+    const n = tiers.findIndex((x) => x.fill === legend.bg);
+    expect(n >= 0 && tiers[n].fill !== tiers[n].line, `⑩ 图例里「Stub A」的色块应是某一号填充色、且与同号系列色不同：${JSON.stringify(legend)} ${JSON.stringify(tiers)}`);
+    const outlined = (x: { bg: string; shadow: string }) => x.bg === tiers[n].fill && x.shadow.includes(tiers[n].line) && x.shadow.includes('1px inset');
+    expect(outlined(legend), `⑩ 图例色块应带 1 px 系列色描边 ${tiers[n].line}：${JSON.stringify(legend)}`);
+    const segs = await c.getByTestId('usage-bar').last().locator('.usage-rise i').evaluateAll((els) => els.map((el) => ({ bg: getComputedStyle(el).backgroundColor, shadow: getComputedStyle(el).boxShadow })));
+    expect(segs.some(outlined), `⑩ 今天那根柱里「Stub A」那段应是填充色 ${tiers[n].fill} 加描边 ${tiers[n].line}：${JSON.stringify(segs)}`);
+    const cap = await c.getByTestId('usage-model-row').filter({ hasText: 'Stub A' }).locator('.usage-fill').first().evaluate((el) => ({ bg: getComputedStyle(el).backgroundColor, shadow: getComputedStyle(el).boxShadow }));
+    expect(outlined(cap), `⑩ 模型表里「Stub A」的 Token 胶囊应是填充色加描边：${JSON.stringify(cap)}`);
+    page = c;
+  });
   S.done();
   return `日历 ${cols}×${rows}、今天 ${act.days.find((d) => d.date === today)?.jobs} 次；7 天 ${t.jobs} 次 ${fmtTokens(tokens)} Token；悬停、范围记忆、减弱动态、空态与失败重试都对`;
 });
