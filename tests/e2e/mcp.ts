@@ -78,10 +78,10 @@ await step('TC-AGENT-011', async () => {
   expect(sAgent.name === 'Agent 屏' && sAgent.route === '/agent' && sAgent.currentRevisionId === up.revisionId, 'update_screen 不传 name / route 应沿用当前值并推进 current');
   const old = await call<{ revision: { seq: number }; html: string }>('quilt.get_revision', { screenId: agent, revisionId: rev1 });
   expect(old.revision.seq === 1 && old.html.includes('Agent screen') && !old.html.includes('v2'), 'get_revision 应给第 1 版 HTML');
-  const restored = await call<{ revision: { id: string; sourceKind: string } }>('quilt.restore_revision', { screenId: agent, revisionId: rev1, expectedRevisionId: up.revisionId });
-  expect(restored.revision.sourceKind === 'restore', `回溯应产生 restore 修订：${restored.revision.sourceKind}`);
-  expect((await detail(pid)).screens.find((s) => s.id === agent)!.currentRevisionId === restored.revision.id, '回溯后 current 未变');
-  await fail('quilt.restore_revision', { screenId: agent, revisionId: rev1, expectedRevisionId: rev1 }, '/errors/revision-conflict', '旧基线回溯');
+  const restored = await call<{ revision: { id: string } }>('quilt.restore_revision', { screenId: agent, revisionId: rev1, expectedRevisionId: up.revisionId });
+  expect(restored.revision.id === rev1 && (await revisionsOf(agent)).length === 2, `回溯应把 current 指回第 1 版、不建修订：${restored.revision.id}`);
+  expect((await detail(pid)).screens.find((s) => s.id === agent)!.currentRevisionId === rev1, '回溯后 current 不是第 1 版');
+  await fail('quilt.restore_revision', { screenId: agent, revisionId: rev1, expectedRevisionId: up.revisionId }, '/errors/revision-conflict', '旧基线回溯');
   notes.push('修订取 / 回溯 / 旧基线 409');
 
   // 4 候选：edit_screens × 2 版 → list_candidates → adopt_candidate 带 screenId 采用第 2 版 → 不带 screenId、不存在的 index 全部 skipped（v0.60 单屏与整批合并为一个工具）
@@ -314,7 +314,7 @@ await step('TC-AGENT-018', async () => {
   const route2 = (await detail(pid)).screens.find((s) => s.id === s2)!.route;
   check(badRoute.isError && route2 === '/s2', `update_screen 传 route="Not A Route!" 应被拒、路由不变：isError=${badRoute.isError}，现在是 ${route2}`);
 
-  // 2 restore_revision 重拍截图：rev1 按整屏拍过；再写一版、把屏改成叠层；回溯到 rev1 的新修订要有自己的截图
+  // 2 restore_revision 重拍截图：rev1 按整屏拍过；再写一版、把屏改成叠层；回溯到 rev1 后它的截图按叠层重拍
   const c1 = await call<{ screenId: string; revisionId: string }>('quilt.create_screen', { projectId: pid, name: 'Shot', route: '/shot', html: OK_HTML });
   let ready = false;
   for (let i = 0; i < 40 && !ready; i++) { await sleep(500); ready = !!(await callTool(mcp, 'quilt.get_screenshot', { screenId: c1.screenId })).image; }
@@ -323,9 +323,10 @@ await step('TC-AGENT-018', async () => {
   expect((await apiJson(`/v1/screens/${c1.screenId}`, { method: 'PATCH', body: JSON.stringify({ presentation: 'overlay' }) })).status === 200, '改呈现方式失败');
   const rest = await call<{ revision: { id: string } }>('quilt.restore_revision', { screenId: c1.screenId, revisionId: c1.revisionId, expectedRevisionId: up2.revisionId });
   let shotUrl: string | null = null;
-  for (let i = 0; i < 40 && !shotUrl; i++) { shotUrl = (await revisionsOf(c1.screenId) as unknown as { id: string; screenshotUrl: string | null }[]).find((x) => x.id === rest.revision.id)?.screenshotUrl ?? null; if (!shotUrl) await sleep(500); }
+  check(rest.revision.id === c1.revisionId, `回溯应把 current 指回 rev1：${rest.revision.id}`);
+  for (let i = 0; i < 40 && !shotUrl; i++) { shotUrl = (await revisionsOf(c1.screenId) as unknown as { id: string; screenshotUrl: string | null }[]).find((x) => x.id === c1.revisionId)?.screenshotUrl ?? null; if (!shotUrl) await sleep(500); }
   // 屏此刻是叠层：按叠层拍，键带 .overlay（§16 v1.03）
-  check(shotUrl?.includes(`${rest.revision.id}.overlay.webp`), `回溯出的修订应按叠层重拍、截图是它自己的：${shotUrl ? (shotUrl.includes(c1.revisionId) ? '复用了 rev1 的截图' : shotUrl.slice(0, 120)) : '20 s 内没有截图'}`);
+  check(shotUrl?.includes(`${c1.revisionId}.overlay.webp`), `回溯后 rev1 应按叠层重拍：${shotUrl ? shotUrl.slice(0, 120) : '20 s 内没有截图'}`);
 
   // 3 append_upload：没签发过的上传位 404；同 offset 并发 5 段只成一段；写入口用掉之后再追加 404
   // 每次换一个 id：修复前的服务端会把这个 id 当成新上传位写下去，固定 id 会被上一轮留下的文件顶成「已存在」

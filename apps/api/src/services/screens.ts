@@ -28,25 +28,22 @@ export async function hasActiveJob(tx: Tx, projectId: string, screenId: string):
 }
 
 // 新修订（ADR-014 修订树）：先锁屏行再取号——并行落候选时两笔事务会算出同一 seq 撞唯一键（RUN-059）。
-// parentRevisionId 默认取此刻的 current；候选批要显式传同一个父版（第 1 版落库后 current 已变），回溯传被回溯到的那一版（v0.87）。
+// parentRevisionId 默认取此刻的 current；候选批要显式传同一个父版（第 1 版落库后 current 已变）。
 // advanceCurrent=false 只落修订不推进 current（候选批由调用方在全部落完后统一指向第 1 版）。
-// reuse：回到旧版（v1.27 ADR-037）直接引用源修订的对象，不另存 HTML；html 仍要传，链接与组件名照常从它解析。
 // 返回 null 表示 expectedRevisionId 已过期。
 export async function createRevision(tx: Tx, args: {
   projectId: string; screenId: string; html: string; sourceKind: SourceKind; jobId?: string | null; lintReport: unknown;
   expectedRevisionId?: string | null; parentRevisionId?: string | null; candidateIndex?: number | null; advanceCurrent?: boolean;
-  reuse?: { htmlKey: string; thumbKey: string | null; screenshotKey: string | null };
 }): Promise<RevisionRow | null> {
   const [screen] = await tx.select().from(schema.screens).where(eq(schema.screens.id, args.screenId)).for('update');
   if (!screen) return null;
   if (args.expectedRevisionId !== undefined && (screen.currentRevisionId ?? null) !== args.expectedRevisionId) return null;
   const [{ seq }] = await tx.select({ seq: sql<number>`coalesce(max(${schema.screenRevisions.seq}), 0) + 1` }).from(schema.screenRevisions).where(eq(schema.screenRevisions.screenId, args.screenId));
   const id = crypto.randomUUID();
-  const htmlKey = args.reuse?.htmlKey ?? objectKeys.revisionHtml(args.projectId, args.screenId, id);
-  if (!args.reuse) await storage.put(htmlKey, args.html, 'text/html; charset=utf-8');
+  const htmlKey = objectKeys.revisionHtml(args.projectId, args.screenId, id);
+  await storage.put(htmlKey, args.html, 'text/html; charset=utf-8');
   const [rev] = await tx.insert(schema.screenRevisions).values({
     id, screenId: args.screenId, seq, htmlKey, sourceKind: args.sourceKind, jobId: args.jobId ?? null, lintReport: args.lintReport as object,
-    screenshotKey: args.reuse?.screenshotKey ?? null, thumbKey: args.reuse?.thumbKey ?? null,
     parentRevisionId: args.parentRevisionId === undefined ? screen.currentRevisionId : args.parentRevisionId,
     candidateIndex: args.candidateIndex ?? null,
   }).returning();
@@ -55,27 +52,25 @@ export async function createRevision(tx: Tx, args: {
   return rev;
 }
 
-// 回到旧版（API-CORE-015 / quilt.restore_revision 共用）：以源修订的内容建新修订并置为当前，父修订是源修订（v0.87）。
-// 新修订直接引用源修订的 HTML 与缩略图对象（v1.27 ADR-037，同一屏、同一前缀）；截图三条都成立才沿用（shots.ts canReuseShot），
-// 否则留空、由调用方入队重拍。读对象头在事务外，锁住屏行后再核一遍源修订的键、屏的呈现方式与画框：
-// screenshot.prune 在同一把锁下清键，这里沿用的键不会在之后被它当成没人引用而删掉
-export async function restoreRevision(project: ProjectRow, screen: ScreenRow, source: RevisionRow, expectedRevisionId: string): Promise<RevisionRow> {
-  const html = (await storage.get(source.htmlKey)).toString('utf8');
+// 回到旧版（API-CORE-015 / quilt.restore_revision 共用，v1.43 ADR-039）：只把 current 指回那一版，不建新修订，同采用候选。
+// 那一版的整屏截图三条都成立才直接用（shots.ts canReuseShot）；已被 screenshot.prune 清掉的由调用方入队重拍，
+// 按别的呈现方式或画框拍的先作废截图与缩略图（同 setDraftFrame），也由调用方重拍。读对象头在事务外，锁住屏行后再核一遍截图键：
+// screenshot.prune 在同一把锁下清键
+export async function restoreRevision(project: ProjectRow, screen: ScreenRow, target: RevisionRow, expectedRevisionId: string): Promise<RevisionRow> {
   const spec = shotSpecFor(project, screen);
-  const head = source.screenshotKey ? await storage.get(source.screenshotKey).then(imageHead, () => null) : null;
-  const reusable = source.screenshotKey && canReuseShot({ key: source.screenshotKey, head }, screen.presentation, { ...spec.size, rootOnly: spec.rootOnly }) ? source.screenshotKey : null;
+  const head = target.screenshotKey ? await storage.get(target.screenshotKey).then(imageHead, () => null) : null;
+  const usable = !!target.screenshotKey && canReuseShot({ key: target.screenshotKey, head }, screen.presentation, { ...spec.size, rootOnly: spec.rootOnly });
   return db.transaction(async (tx) => {
     if (await hasActiveJob(tx, project.id, screen.id)) throw problems.screenBusy();
-    const [locked] = await tx.select({ presentation: schema.screens.presentation, frame: schema.screens.frame }).from(schema.screens).where(eq(schema.screens.id, screen.id)).for('update');
-    const [src] = await tx.select({ screenshotKey: schema.screenRevisions.screenshotKey, thumbKey: schema.screenRevisions.thumbKey }).from(schema.screenRevisions).where(eq(schema.screenRevisions.id, source.id));
-    const same = !!locked && locked.presentation === screen.presentation && locked.frame === screen.frame && src?.screenshotKey === reusable;
-    const r = await createRevision(tx, {
-      projectId: project.id, screenId: screen.id, html, sourceKind: 'restore', lintReport: source.lintReport, expectedRevisionId, parentRevisionId: source.id,
-      reuse: { htmlKey: source.htmlKey, thumbKey: src?.thumbKey ?? null, screenshotKey: same ? reusable : null },
-    });
-    if (!r) throw problems.revisionConflict();
+    const [locked] = await tx.select({ currentRevisionId: schema.screens.currentRevisionId, presentation: schema.screens.presentation, frame: schema.screens.frame })
+      .from(schema.screens).where(eq(schema.screens.id, screen.id)).for('update');
+    if (!locked || (locked.currentRevisionId ?? null) !== expectedRevisionId) throw problems.revisionConflict();
+    let [rev] = await tx.select().from(schema.screenRevisions).where(eq(schema.screenRevisions.id, target.id));
+    const keep = usable && locked.presentation === screen.presentation && locked.frame === screen.frame && rev.screenshotKey === target.screenshotKey;
+    if (!keep && rev.screenshotKey) [rev] = await tx.update(schema.screenRevisions).set({ screenshotKey: null, thumbKey: null }).where(eq(schema.screenRevisions.id, rev.id)).returning();
+    await tx.update(schema.screens).set({ currentRevisionId: rev.id, updatedAt: new Date() }).where(eq(schema.screens.id, screen.id));
     await deriveLinks(tx, project.id);
-    return r;
+    return rev;
   });
 }
 
@@ -268,7 +263,7 @@ export async function storeRevisionShot(projectId: string, screenId: string, rev
   const [rev] = await db.select({ screenshotKey: schema.screenRevisions.screenshotKey }).from(schema.screenRevisions).where(eq(schema.screenRevisions.id, revisionId));
   if (rev) {
     // 行还在：别处已按同一呈现方式（与画框）写过同一个键就算成了；否则刚写的是按过期的呈现方式或画框拍的。
-    // 同名的对象可能正被回到旧版建的修订共用（重拍被清掉截图的旧版时键不变），还有修订引用就不删
+    // 同名的对象可能正被 v1.43 之前回到旧版建的修订共用（重拍被清掉截图的旧版时键不变），还有修订引用就不删
     if (rev.screenshotKey === key) return key;
     await deleteUnreferenced([key, thumbKey]);
     return null;
@@ -278,7 +273,7 @@ export async function storeRevisionShot(projectId: string, screenId: string, rev
   return null;
 }
 
-// 没有任何修订再引用（截图或缩略图）的对象才删：回到旧版建的修订与源修订共用对象（v1.27 ADR-037）
+// 没有任何修订再引用（截图或缩略图）的对象才删：v1.43 之前回到旧版建的修订与源修订共用对象（v1.27 ADR-037）
 export async function deleteUnreferenced(keys: (string | null)[]): Promise<void> {
   for (const key of keys) {
     if (!key) continue;

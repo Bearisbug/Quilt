@@ -506,20 +506,21 @@ await step('TC-CORE-063', async () => {
   const [s1, s2] = screens.map((s) => s.id);
   const currentOf = async (sid: string) => (await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${pid}`)).body.screens.find((s) => s.id === sid)!.currentRevisionId;
 
-  // 1 采用候选 vs 回溯：每轮先出两版候选，再同时发「回溯到第 1 版」与「采用第 2 版」（采用晚 d ms）；两边不能都成功，回溯成功时它必须是 current
+  // 1 采用候选 vs 回溯：每轮先出两版候选，再同时发「回溯到出候选前那一版」与「采用第 2 版」（采用晚 d ms）；两边不能都成功，回溯成功时那一版必须是 current
   for (const d of [0, 10, 20, 30]) {
+    const base = await currentOf(s1);
     const r = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/messages`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ content: `two versions ${d}`, targetScreenIds: [s1], versions: 2, runner: STUB }) });
     expect(r.status === 202, `出候选 ${r.status}`);
     expect((await waitJob(r.body.job.id, 60)).status === 'succeeded', '出候选的作业没成功');
     const cands = (await apiJson<{ screens: { revisions: { id: string; index: number }[] }[] }>(`/v1/jobs/${r.body.job.id}/candidates`)).body.screens[0].revisions;
     const [c0, c1] = [cands.find((x) => x.index === 0)!.id, cands.find((x) => x.index === 1)!.id];
     const [restore, adopt] = await Promise.all([
-      apiJson<{ revision?: { id: string } }>(`/v1/screens/${s1}/revisions/${c0}/restore`, { method: 'POST', body: JSON.stringify({ expectedRevisionId: c0 }) }),
+      apiJson(`/v1/screens/${s1}/revisions/${base}/restore`, { method: 'POST', body: JSON.stringify({ expectedRevisionId: c0 }) }),
       sleep(d).then(() => apiJson(`/v1/screens/${s1}/revisions/${c1}/adopt`, { method: 'POST', body: '{}' })),
     ]);
     const now = await currentOf(s1);
-    check(!(restore.status === 201 && adopt.status === 200), `采用晚 ${d} ms：回溯 ${restore.status} 与采用 ${adopt.status} 都成功`);
-    if (restore.status === 201) check(now === restore.body.revision!.id, `采用晚 ${d} ms：回溯成功了但 current 不是它（被候选顶掉）`);
+    check(!(restore.status === 200 && adopt.status === 200), `采用晚 ${d} ms：回溯 ${restore.status} 与采用 ${adopt.status} 都成功`);
+    if (restore.status === 200) check(now === base, `采用晚 ${d} ms：回溯成功了但 current 不是回到的那一版（被候选顶掉）`);
   }
 
   // 2 设计系统：同一 expectedVersion 并发 6 个保存，只能成一个

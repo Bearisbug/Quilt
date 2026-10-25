@@ -480,10 +480,9 @@ await step('TC-CORE-151', async () => {
     await restartApi({ QUILT_SCREENSHOT_PRUNE_FIRST_MS: '3000' });
     await eventually(() => expect(done(), label), 90_000, 1000).catch(() => { throw new Error(`${label}：重启 90 s 内 screenshot.prune 没清掉`); });
   };
-  const restore = async (rev: string) => {
+  const restore = async (rev: string): Promise<void> => {
     const r = await apiJson<{ revision: { id: string } }>(`/v1/screens/${s1}/revisions/${rev}/restore`, { method: 'POST', body: JSON.stringify({ expectedRevisionId: await currentOf(s1) }) });
-    expect(r.status === 201, `回到旧版 ${r.status}`);
-    return r.body.revision.id;
+    expect(r.status === 200 && r.body.revision.id === rev && (await currentOf(s1)) === rev, `回到旧版 ${r.status}：应把当前版指回 ${rev}`);
   };
   const setPresentation = async (p: 'push' | 'overlay') => {
     expect((await apiJson(`/v1/screens/${s1}`, { method: 'PATCH', body: JSON.stringify({ presentation: p }) })).status === 200, `改呈现方式 ${p}`);
@@ -550,37 +549,40 @@ await step('TC-CORE-151', async () => {
       expect(row(v1).shot, '④ v1 的 screenshot_key 应又有值');
     } finally { await mcp.close(); }
 
-    // 5 回到 v2：v4 与 v2 共用 html / 截图 / 缩略图三个键，屏的目录里不多文件，也不为 v4 重拍
+    // 5 回到 v2：当前版指回 v2、不多出修订，v2 的三个键不变，屏的目录里不多文件，也不重拍
     const before = (await readdir(screenDir)).sort();
-    const v4 = await restore(v2);
+    const count = () => Number(psql(`select count(*) from screen_revisions where screen_id = ${sq(s1)}`));
+    const n0 = count();
+    await restore(v2);
     await new Promise((r) => setTimeout(r, 5000));
-    const r4 = row(v4);
-    expect(r4.html === r2.html && r4.shot === r2.shot && r4.thumb === r2.thumb, `⑤ v4 应与 v2 共用三个键：${JSON.stringify(r4)} vs ${JSON.stringify(r2)}`);
+    expect(count() === n0, `⑤ 回到旧版多出了修订：${n0} → ${count()}`);
+    expect(JSON.stringify(row(v2)) === JSON.stringify(r2), `⑤ v2 的三个键不该动：${JSON.stringify(row(v2))} vs ${JSON.stringify(r2)}`);
     const after = (await readdir(screenDir)).sort();
     expect(after.join() === before.join(), `⑤ 屏的目录多出文件：${after.filter((f) => !before.includes(f)).join(' ')}`);
 
-    // 6 再把 v1 的截图清掉，回到 v1：v5 共用 v1 的 HTML，截图新拍（新的键），缩略图跟着新拍
+    // 6 再把 v1 的截图清掉，回到 v1：当前版指回 v1，截图重拍、对象又在，缩略图还是原来那张的键
     await pruneRound(() => row(v1).shot === '', '⑥ v1 的截图');
-    const v5 = await restore(v1);
-    const r5 = await shotOf(v5, '⑥ v5');
-    expect(r5.html === r1.html, `⑥ v5 应共用 v1 的 HTML：${r5.html}`);
-    expect(r5.shot.endsWith(`${v5}.webp`) && r5.shot !== r1.shot, `⑥ v5 的截图应是新拍的：${r5.shot}`);
-    await eventually(() => expect(row(v5).thumb.endsWith(`${v5}.thumb.webp`), 'thumb'), 10_000).catch(() => { throw new Error(`⑥ v5 的缩略图应跟着新拍：${row(v5).thumb}`); });
+    await restore(v1);
+    const r1b = await shotOf(v1, '⑥ v1');
+    expect(r1b.html === r1.html && r1b.thumb === r1.thumb && (await exists(r1b.shot)), `⑥ v1 应重拍截图、HTML 与缩略图键不变：${JSON.stringify(r1b)}`);
 
-    // 7 /s1 改成叠层，回到 v2：呈现方式不一致，重拍，键是 .overlay.webp
+    // 7 /s1 改成叠层，回到 v2：v2 的截图是整屏拍的，作废重拍，键是 .overlay.webp
     await setPresentation('overlay');
-    const v6 = await restore(v2);
-    const r6 = await shotOf(v6, '⑦ v6');
-    expect(r6.shot.endsWith(`${v6}.overlay.webp`), `⑦ 叠层下回到 v2 应重拍成 .overlay.webp：${r6.shot}`);
+    await restore(v2);
+    const r2b = await shotOf(v2, '⑦ v2');
+    expect(r2b.shot.endsWith(`${v2}.overlay.webp`), `⑦ 叠层下回到 v2 应重拍成 .overlay.webp：${r2b.shot}`);
 
-    // 8 切回整屏；v2（连同共用它截图的 v4）拨到 25 小时前，回到 v2 让 v7 共用它的截图，再跑一轮 prune：v2 置空、对象还在（v7 是当前版）
+    // 8 切回整屏；把 v3 改成 v1.43 之前回到 v2 建出的那种修订（restore、与 v2 共用三个键），回到 v3 直接用共用的截图；
+    // v2 拨到 25 小时前跑一轮 prune：v2 置空、对象还在（v3 是当前版、还在用它）
     await setPresentation('push');
-    backdate(v2, v4);
-    const v7 = await restore(v2);
-    expect(row(v7).shot === r2.shot, `⑧ v7 应共用 v2 的截图：${row(v7).shot}`);
+    const k2 = row(v2);
+    psql(`update screen_revisions set source_kind = 'restore', parent_revision_id = ${sq(v2)}, html_key = ${sq(k2.html)}, screenshot_key = ${sq(k2.shot)}, thumb_key = ${sq(k2.thumb)} where id = ${sq(v3)}`);
+    await restore(v3);
+    expect(row(v3).shot === k2.shot, `⑧ 回到 v3 应直接用共用的截图：${row(v3).shot}`);
+    backdate(v2);
     await pruneRound(() => row(v2).shot === '', '⑧ v2 的截图');
-    expect(await exists(r2.shot), `⑧ v7 还在用的截图对象被删了：${r2.shot}`);
-    expect(row(v7).shot === r2.shot, `⑧ v7 的截图键不该动：${row(v7).shot}`);
+    expect(await exists(k2.shot), `⑧ v3 还在用的截图对象被删了：${k2.shot}`);
+    expect(row(v3).shot === k2.shot, `⑧ v3 的截图键不该动：${row(v3).shot}`);
 
     // 9 /s2 的当前版换成 PNG 键（对象目录里只放 PNG），重启：后台转回无损 WebP、PNG 删掉、逐像素相同
     const c2 = await currentOf(s2);
@@ -603,8 +605,8 @@ await step('TC-CORE-151', async () => {
     psql(`update screen_revisions set screenshot_key = null where id = ${sq(c2)}`);
     await restartApi({});
     await shotOf(c2, '⑩ 哨兵（/s2 当前版）');
-    expect(row(v1).shot === '' && row(v2).shot === '' && row(v4).shot === '', `⑩ 被清掉的旧版截图又被补回来了：v1=${row(v1).shot} v2=${row(v2).shot} v4=${row(v4).shot}`);
-    return `10 步通过：${notes.join('；')}；v4/v7 共用 v2 的截图，v5、v6 重拍`;
+    expect(row(v1).shot === '' && row(v2).shot === '', `⑩ 被清掉的旧版截图又被补回来了：v1=${row(v1).shot} v2=${row(v2).shot}`);
+    return `10 步通过：${notes.join('；')}；回到 v2 不重拍、不多出修订，回到被清掉截图的 v1 与叠层下的 v2 重拍，旧式 restore 的 v3 共用 v2 的截图`;
   } finally {
     if (knob) await restartApi({}).catch(() => {});
     await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});

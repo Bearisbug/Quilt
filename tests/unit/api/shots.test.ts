@@ -83,14 +83,14 @@ test('screenshot.prune 的处置：引用一个键的修订都清掉时才删对
   assert.deepEqual(prunePlan([{ id: 'a', key: 'k', keep: false, hasThumb: true }, { id: 'b', key: 'k', keep: false, hasThumb: false }]), { clear: ['a'], deleteKeys: [] });
 });
 
-test('回到旧版沿用截图：源截图还在、呈现方式一致、尺寸是现在应拍的，三条都成立才沿用', () => {
+test('回到旧版时那一版的截图能否直接用：截图还在、呈现方式一致、尺寸是现在应拍的，三条都成立才直接用', () => {
   const key = 'projects/p/screens/s/r.webp';
   const mobile = { w: 390, h: 844, rootOnly: false };
   const head = { format: 'webp' as const, width: 780, height: 1688, lossless: true };
   assert.equal(canReuseShot({ key, head }, 'push', mobile), true);
-  assert.equal(canReuseShot(null, 'push', mobile), false, '源截图已被清掉');
+  assert.equal(canReuseShot(null, 'push', mobile), false, '截图已被清掉');
   assert.equal(canReuseShot({ key, head: null }, 'push', mobile), false, '键还在、对象读不到');
-  assert.equal(canReuseShot({ key, head }, 'overlay', mobile), false, '这一屏现在是叠层，源截图是整屏拍的');
+  assert.equal(canReuseShot({ key, head }, 'overlay', mobile), false, '这一屏现在是叠层，截图是整屏拍的');
   assert.equal(canReuseShot({ key: 'projects/p/screens/s/r.overlay.webp', head }, 'overlay', mobile), true);
   assert.equal(canReuseShot({ key, head }, 'push', { w: 1280, h: 800, rootOnly: false }), false, '尺寸与现在的设备或画框不符');
   assert.equal(canReuseShot({ key: 'projects/p/screens/s/r.component.webp', head: { ...head, width: 333, height: 120 } }, 'push', { w: 1280, h: 800, rootOnly: true }), true, '组件画框不限尺寸');

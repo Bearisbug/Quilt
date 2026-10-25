@@ -558,17 +558,14 @@ function CanvasPage() {
   useEffect(() => { const t = setTimeout(() => { void loadSettings(); void loadDesign(); void loadInspector(); void loadProposal(); }, 2000); return () => clearTimeout(t); }, []);
   const { onMove, arrange } = usePositionUndo({ drafts, screensRef, components, setDetail, refresh, toast, pushStep: undoStack.push, undo: () => void undoStack.undo() });
   // 检查器直改的撤销（v0.95）：回溯到改前那一版，expectedRevisionId 是这次直改落下的修订——之后被别的写入改过就不撤，免得把后来的改动一起冲掉。
-  // 回溯会新建一版（内容同改前那一版）：记下「改前那一版现在由哪一版接替」，连按 ⌘Z 时下一步按接替的那一版比，否则第二下必定判成冲突。
+  // 回溯只把当前版指回改前那一版（v1.43），连按 ⌘Z 时下一步比对的正是它。
   // 组件里的直改撤不了（会同步到所有用它的屏），也压一步：撤到它时说明，不越过它去撤更早的一步
-  const succeeded = useRef(new Map<string, string>());
-  const latest = (rev: string) => { let r = rev; while (succeeded.current.has(r)) r = succeeded.current.get(r)!; return r; };
   // 撤销步晚于直改才跑，提示文案按撤销那一刻的界面语言取（tNow / tInspect），不用压栈时那一帧的 t
   const onDirectEdit = (e: DirectEdit) => undoStack.push('componentName' in e
     ? { label: '改组件', run: async () => { toast(tNow('undo.componentEdit', { name: e.componentName }), 'error'); return 'drop'; } }
     : { label: e.op, run: async () => {
       try {
-        const { revision } = await api.screens.restore(e.screenId, e.before, latest(e.after));
-        succeeded.current.set(e.before, revision.id);
+        await api.screens.restore(e.screenId, e.before, e.after);
         toast(tNow('undo.done', { label: tInspect(DIRECT_EDIT_LABEL[e.op]) })); refresh(); return 'done';
       }
       catch (err) {

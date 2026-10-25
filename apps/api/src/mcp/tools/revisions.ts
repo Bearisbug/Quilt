@@ -40,14 +40,14 @@ export function registerRevisionTools(c: ToolCtx) {
   }));
 
   server.registerTool('quilt.restore_revision', {
-    description: 'Roll a screen back to an earlier revision: creates a new revision (source_kind=restore) with that content and makes it current. expectedRevisionId must be the screen\'s current revision (409 revision-conflict otherwise); 409 screen-busy while a job runs on it.',
+    description: 'Roll a screen back to an earlier revision: makes that revision current again (no new revision; later revisions stay in the history). expectedRevisionId must be the screen\'s current revision (409 revision-conflict otherwise); 409 screen-busy while a job runs on it.',
     inputSchema: { screenId: z.string().uuid(), revisionId: z.string().uuid(), expectedRevisionId: z.string().uuid() },
   }, wrap(async (a) => {
     write();
     const { screen, project } = await ownedScreen(user.id, a.screenId as string);
-    const source = await getRevision(screen.id, a.revisionId as string);
-    const rev = await restoreRevision(project, screen, source, a.expectedRevisionId as string);
-    // 与 REST 一样（API-CORE-015）：共用源修订的对象，截图沿用不了时重拍
+    const target = await getRevision(screen.id, a.revisionId as string);
+    const rev = await restoreRevision(project, screen, target, a.expectedRevisionId as string);
+    // 与 REST 一样（API-CORE-015）：只把 current 指回那一版，截图用不了时重拍
     if (!rev.screenshotKey) await enqueueScreenshot(rev.id);
     await notifyCanvas(project.id, { reason: 'revision', screenId: screen.id, revisionId: rev.id });
     return { revision: await revisionDto(rev) };

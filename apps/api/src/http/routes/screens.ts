@@ -107,15 +107,15 @@ screenRoutes.get('/v1/screens/:screenId/revisions/:revisionId', async (c) => {
   return c.json({ revision: await revisionDto(rev) });
 });
 
-// API-CORE-015：以旧版内容建新修订（source_kind=restore），父修订是被回溯到的那一版——沿父链取历史指令时不经过已放弃的分支（ADR-012 v0.87）。
-// 共用源修订的对象（v1.27 ADR-037）；截图沿用不了时重拍：旧版的截图可能是按另一种呈现方式或另一个尺寸拍的，也可能已被 screenshot.prune 清掉
+// API-CORE-015：只把 current 指回那一版，不建新修订（v1.43 ADR-039）。那一版的截图用不了时重拍：
+// 可能已被 screenshot.prune 清掉，也可能是按另一种呈现方式或另一个尺寸拍的（restoreRevision 已把它作废）
 screenRoutes.post('/v1/screens/:screenId/revisions/:revisionId/restore', async (c) => {
   const user = requireUser(c);
   const { screen, project } = await ownedScreen(user.id, c.req.param('screenId'));
-  const source = await getRevision(screen.id, c.req.param('revisionId'));
+  const target = await getRevision(screen.id, c.req.param('revisionId'));
   const { expectedRevisionId } = await parseBody(c, restoreRevisionSchema);
-  const rev = await restoreRevision(project, screen, source, expectedRevisionId);
+  const rev = await restoreRevision(project, screen, target, expectedRevisionId);
   if (!rev.screenshotKey) await enqueueScreenshot(rev.id);
   await notifyCanvas(project.id, { reason: 'revision', screenId: screen.id, revisionId: rev.id });
-  return c.json({ revision: await revisionDto(rev) }, 201);
+  return c.json({ revision: await revisionDto(rev) });
 });

@@ -6,11 +6,11 @@
 
 | 字段 | 值 |
 | --- | --- |
-| 状态 | 生效（设计文档 v1.41：导出原型的三处缺陷修复后 RUN-316 复测轮全过，需真实模型的 4 条跳过；v1.40 图表色换成两档后 RUN-313 局部轮全过；全量轮 RUN-310 除 `TC-EDIT-001` 外都过，这条是既有偶发，RUN-311 复测两次一过一挂，登 §7；§7 登记的 `TC-CORE-023` 仍在，`TC-CORE-010`、`040` 本轮通过；需真实模型的 5 条与 `006`（单独执行）跳过；`TC-CORE-020` / `TC-AGENT-010` 待人工） |
+| 状态 | 生效（设计文档 v1.43：回到旧版只换当前版后 RUN-317 局部轮除两条外都过，`TC-CORE-114` 是脚本问题、改后 RUN-318 通过，`TC-CORE-151` 紧跟 `TC-CORE-063` 时偶尔断连、HEAD 同现，登 §7；v1.41 导出原型的三处缺陷修复后 RUN-316 复测轮全过，需真实模型的 4 条跳过；v1.40 图表色换成两档后 RUN-313 局部轮全过；全量轮 RUN-310 除 `TC-EDIT-001` 外都过，这条是既有偶发，RUN-311 复测两次一过一挂，登 §7；§7 登记的 `TC-CORE-023` 仍在，`TC-CORE-010`、`040` 本轮通过；需真实模型的 5 条与 `006`（单独执行）跳过；`TC-CORE-020` / `TC-AGENT-010` 待人工） |
 | Owner | @bug |
 | 关联设计文档 | `docs/DESIGN.md` |
 | 被测系统 | `~/Documents/Projects/Quilt`（Web 画布 + API/MCP 服务 + Worker + 预览域服务） |
-| 最后更新 | 2026-10-24（设计文档 v1.41，登记 RUN-310～316） |
+| 最后更新 | 2026-10-25（设计文档 v1.43，登记 RUN-317～319） |
 
 变更记录（登用例增改，不登执行轮次）：
 
@@ -18,6 +18,7 @@
 
 | 日期 | 改动 | 作者 |
 | --- | --- | --- |
+| 2026-10-25 | 设计文档 v1.43（回到旧版只把当前版指回那一版，不再多出一个新版本）：`TC-CORE-014`、`TC-CORE-015`、`TC-CORE-063`、`TC-CORE-100`、`TC-CORE-114`、`TC-CORE-128`、`TC-CORE-150`、`TC-CORE-151`、`TC-EDIT-026`、`TC-EDIT-029`、`TC-AGENT-011`、`TC-AGENT-018` 里回到旧版的预期改成「当前版指回那一版、修订数不变、返回 200」；`TC-CORE-151` 第 8 步改成核对 v1.43 之前建出的 restore 修订共用截图 | @bug |
 | 2026-10-24 | 设计文档 v1.41（导出原型嵌在别的页面里不写宿主页的历史、换屏转场被跳过不报错、字体样式表不阻塞渲染）：新增源自缺陷用例 `TC-PROTO-015`～`017`（在 `tests/e2e/proto.ts`） | @bug |
 | 2026-10-24 | 设计文档 v1.40（图表色换成预置色板「柔和」的描边加填充两档，按钮、输入框与下拉触发器高 30，网站图标换成小尺寸版）：`TC-CORE-026` 第 4 步改成核对三条网站图标链接，加第 6 步量控件高度与按钮里的图标间距；`TC-CORE-141` 加第 10 步核对用量图表的填充色与描边 | @bug |
 | 2026-10-22 | 设计文档 v1.38（草稿本选元素开着、一块没选时 Esc 关掉选元素）：`TC-CORE-122` 第 3 步加第二下 `Esc` | @bug |
@@ -930,8 +931,8 @@
 | # | 操作 | 预期 |
 | --- | --- | --- |
 | 1 | 选中该屏，打开修订面板 | 列出 6 个修订，倒序，当前为 seq 6；每条标出「派生自第 n 版」（修订树，`REQ-CORE-007`） |
-| 2 | 点 seq 2 的「回溯到此版」并确认 | 面板新增 seq 7 并标为当前、标「派生自第 2 版」；卡片截图在 10 s 内更新为版本 2 的画面；API 返回 201，`revision.sourceKind` 为 `restore`、`parentRevisionId` 为 seq 2（v0.87：回溯修订的父修订是被回溯到的那一版） |
-| 3 | curl `GET /v1/screens/<id>/revisions` | 共 7 条，seq 1..7 全在，seq 7 的 HTML 与 seq 2 相同 |
+| 2 | 点 seq 2 的「回溯到此版」并确认 | 「当前」标记移到 seq 2，面板仍是 6 行、只有一行标当前；卡片截图在 10 s 内更新为版本 2 的画面；API 返回 200，`revision.id` 是 seq 2（v1.43：回溯只换当前版，不建新修订） |
+| 3 | curl `GET /v1/screens/<id>/revisions`；`GET /v1/projects/<pid>` | 仍是 6 条，seq 1..6 全在；该屏的 `currentRevisionId` 是 seq 2 |
 
 后置：无。
 
@@ -943,7 +944,7 @@
 | --- | --- | --- |
 | 1 | curl `POST /v1/screens/<id>/revisions/<seq2>/restore`，body `{"expectedRevisionId":"<seq5>"}` | HTTP 409，`type` 为 `/errors/revision-conflict` |
 | 2 | curl `GET /v1/screens/<id>/revisions` | 仍为 6 条，未创建新修订 |
-| 3 | 同请求改用 `expectedRevisionId=<seq6>` | HTTP 201 |
+| 3 | 同请求改用 `expectedRevisionId=<seq6>` | HTTP 200，`revision.id` 是 seq 2；修订仍为 6 条（v1.43） |
 
 后置：无。
 
@@ -985,7 +986,7 @@
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
-| 1 | 4 轮，每轮：对 `/s1` 发 `versions:2` 的改屏、等它成功、取两版候选 `c0` / `c1`（current = `c0`）；同时发 `POST …/revisions/<c0>/restore {expectedRevisionId:c0}` 与 `POST …/revisions/<c1>/adopt`（采用依次晚 0 / 10 / 20 / 30 ms） | 每轮回溯 `201` 与采用 `200` 不同时出现；回溯成功的那几轮 current 就是回溯出的修订（没被候选顶掉） |
+| 1 | 4 轮，每轮：记下改屏前的当前版 `base`；对 `/s1` 发 `versions:2` 的改屏、等它成功、取两版候选 `c0` / `c1`（current = `c0`）；同时发 `POST …/revisions/<base>/restore {expectedRevisionId:c0}` 与 `POST …/revisions/<c1>/adopt`（采用依次晚 0 / 10 / 20 / 30 ms） | 每轮回溯 `200` 与采用 `200` 不同时出现；回溯成功的那几轮 current 就是 `base`（没被候选顶掉，v1.43 回溯只换当前版） |
 | 2 | 3 轮，每轮读设计系统 `version = v`，用 6 种种子色并发 `PUT …/design-system {seedColor, expectedVersion:v}` | 每轮恰好 1 个 `200`、5 个 `409 /errors/version-conflict`，之后版本 `v+1` |
 | 3 | 2 轮，每轮：同一个 `Idempotency-Key` 并发 3 个 `POST …/jobs {kind:"export_prototype"}`；另一个键并发 2 个 `POST …/messages`（目标 `/s2`），等它结束 | 状态只有 `202` / `200`、没有 `409`；同一组拿到的是同一个作业 id |
 | 4 | MCP 在本项目建 `/stall`、在新项目 `Orphan` 建 `/stall`（都带 `<img src="http://10.255.255.1/x.png">`），本项目再建对照屏 `/control`；2 s 后确认 `/stall` 截图还没就绪，`DELETE` 这张屏与 `Orphan` 项目；等对照屏截图就绪（≤ 90 s）再等 3 s，看对象目录（§3） | 其下的 `projects/<项目>/screens/</stall 的 id>/` 与 `projects/<Orphan>/` 都不存在 |
@@ -1551,7 +1552,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | 1 | 看动词行与画框选择；输入「一个音乐播放器的迷你控制条，深色毛玻璃」，点发送 | 发送前动词行写「新草稿」、画框选择是「自动」；发送后看板先是 `data-state=generating`（骨架），作业完成后变 `draft`，地址的 `d` 是新草稿的 id |
 | 2 | 量看板上的草稿 | `draft-view` 的 `data-frame=component`；iframe 的宽高等于草稿根元素的宽高（宽 360 px）四周各加 64 px 的透明边，中心与看板中心相差不超过 2 px；记录栏多出这一项；动词行写「改「<草稿名>」」，画框选择收起 |
 | 3 | 输入「按钮换成圆形，加一个音量滑块」，发送，等作业完成 | 这张草稿的修订数为 2；看板里的草稿换成有音量滑块的新版 |
-| 4 | 点「版本」，在弹层里对第 1 版点「回到这一版」 | 弹层列 2 版；之后修订数为 3，最新一版 `sourceKind=restore`、正文与第 1 版相同；看板里没有音量滑块、写着「夜航星」 |
+| 4 | 点「版本」，在弹层里对第 1 版点「回到这一版」 | 弹层列 2 版；之后修订数仍为 2，这张草稿的 `currentRevisionId` 是第 1 版（v1.43）；看板里没有音量滑块、写着「夜航星」 |
 
 后置：无。
 
@@ -1770,7 +1771,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | --- | --- | --- |
 | 1 | `POST /v1/sketchbook/drafts/<D>/copy {projectId:P, as:"overwrite"}`；再带上 `screenId:S`、`expectedRevisionId:N`、`restyle:true` 发一次 | 第一次 `400`，`errors` 点名 `screenId` 与 `expectedRevisionId`；第二次 `400`，点名 `restyle` |
 | 2 | `{projectId:P, as:"overwrite", screenId:S, expectedRevisionId:N}` | `201`：`screen.id=S`、带 `revisionId`、`previousRevisionId=N`、没有 `job`；S 多 1 版：`sourceKind=sketch`、`seq=N.seq+1`、父修订是 N，正文与 D 当前版相同、带 P 的 prelude；原有修订不变；D 的写回目标是 S、`targetQid=null`；D 的修订数不变 |
-| 3 | `POST /v1/screens/<S>/revisions/<N>/restore {expectedRevisionId:<第 2 步的新版>}` | `201`，S 的最新一版正文回到 N 的正文 |
+| 3 | `POST /v1/screens/<S>/revisions/<N>/restore {expectedRevisionId:<第 2 步的新版>}` | `200`，`revision.id` 是 N；S 的 `currentRevisionId` 是 N（v1.43） |
 | 4 | D 没有参照时 `as:"screen"` 写进 P；给 D 设参照 P 后再写一次新屏；新建桌面项目 OtherApp，把 D 写成它的新屏；最后 `as:"component"` 写进 P | 第一次 `201` 带 `edit_screens` 改写作业，D 的写回目标变成这张新屏；第二次没有 `job`；第三次带 `edit_screens` 作业；落成组件 `201` 带 `component`、没有 `job`，D 的写回目标不变 |
 | 5 | MCP `quilt.copy_draft {screenId:D, projectId:P, as:"overwrite", targetScreenId:S, expectedRevisionId:<S 当前版>}`；再不带 `targetScreenId` 调一次 | 第一次不报错，`screen.id=S`、`previousRevisionId` 是调用前的当前版；第二次报错并点名 `targetScreenId` |
 
@@ -1919,7 +1920,7 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | # | 操作 | 预期 |
 | --- | --- | --- |
 | 1 | 经接口改 D 一轮「标题改一下」，第二行 `[stub-patch]`（stub），等草稿里的 `<h1>` 变成「Patched title」 | 15 s 内变；草稿 window 上的标记还在、`draft-iframe` 一直是同一个元素；骨架与「加载中…」0 帧；滚动位置仍是 400（差 ≤ 2） |
-| 2 | 经接口回到第 1 版（`POST /v1/screens/<D>/revisions/<第 1 版>/restore`） | `201`；`<h1>` 变回「十月账单」，标记还在、同一个元素，骨架与「加载中…」0 帧 |
+| 2 | 经接口回到第 1 版（`POST /v1/screens/<D>/revisions/<第 1 版>/restore`） | `200`；`<h1>` 变回「十月账单」，标记还在、同一个元素，骨架与「加载中…」0 帧 |
 | 3 | `PATCH /v1/screens/<D> {frame:"desktop"}` | `200`；10 s 内 iframe 的布局宽变成 1280；标记还在、同一个元素，骨架与「加载中…」0 帧 |
 | 4 | 用 stub 出组件草稿 C（「一张播放卡片」，第二行 `[stub-frame:component]`），打开它、等框稳住后打标记；改 C 一轮「标题改一下」加 `[stub-patch]` | `<h1>` 变成「Patched title」；标记还在、同一个元素，骨架与「加载中…」0 帧；全程 iframe 最宽不到 1000（没有退回 1280×800 的占位框） |
 
@@ -1962,8 +1963,8 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
-| 1 | 点一下看板空白处（焦点不在文本框里），按 `⌘Z` | 提示「已回到第 2 版」；多出第 4 版，`sourceKind=restore`、父修订是第 2 版、内容与第 2 版相同；看板换成这一版 |
-| 2 | 点进草稿 iframe 里不是输入框的地方，按 `⌘Z` | 由预览运行时转发，同样生效：多出第 5 版，内容与第 1 版相同 |
+| 1 | 点一下看板空白处（焦点不在文本框里），按 `⌘Z` | 提示「已回到第 2 版」；当前版是第 2 版，版本仍是 3 版（v1.43）；看板换成这一版 |
+| 2 | 点进草稿 iframe 里不是输入框的地方，按 `⌘Z` | 由预览运行时转发，同样生效：当前版是第 1 版，版本仍是 3 版 |
 | 3 | 再按 `⌘Z` | 提示「已经是第一版」；版本数不变 |
 | 4 | 在输入框里打「abc」，按 `⌘Z` | 输入框里的字被撤销；版本数不变 |
 | 5 | 经接口再改一轮并拖住它（`[stub-hold:5000]`），趁它在跑按 `⌘Z` | 提示这张草稿正在改；版本数只因这一轮多 1，`⌘Z` 没有再建版本 |
@@ -1981,10 +1982,10 @@ v0.80 起，执行脚本 `tests/e2e/canvas.ts`（`pnpm --filter @quilt/tests e2e
 | 2 | 经测试库把 v1 的 `created_at` 改到 25 小时前，用短首轮间隔重启 API，等 `screenshot.prune` 跑完一轮 | v1 的 `screenshot_key` 为空、对象文件已删，缩略图与 HTML 还在；v2（24 小时内）与 v3（当前版）的截图不动 |
 | 3 | `GET` v1 的修订；打开画布的修订面板 | `screenshotUrl` 为空、`thumbUrl` 可用；面板里 v1 照常显示缩略图 |
 | 4 | MCP `quilt.get_revision` 取 v1 | 返回的截图地址取得到图（当场从 HTML 重拍）；v1 的 `screenshot_key` 又有值 |
-| 5 | 回到 v2（`API-CORE-015`） | 新的 v4 与 v2 的 `html_key`、`screenshot_key`、`thumb_key` 相同；屏的对象目录里没有多出文件；没有为 v4 重拍 |
-| 6 | 再按第 2 步把 v1 的截图清掉，然后回到 v1 | v5 与 v1 共用 `html_key`，截图是新拍的（新的键），缩略图跟着新拍 |
-| 7 | 把 /s1 改成叠层呈现，回到 v2 | 新一版重拍截图，键是 `.overlay.webp` |
-| 8 | 把 v2 的 `created_at` 改到 25 小时前，回到 v2 让新一版 v7 共用它的截图，再让 `screenshot.prune` 跑一轮 | v2 的 `screenshot_key` 置空，但对象还在（v7 是当前版、还在用它） |
+| 5 | 回到 v2（`API-CORE-015`） | 当前版是 v2，/s1 的修订数不变（v1.43）；v2 的 `html_key`、`screenshot_key`、`thumb_key` 不变；屏的对象目录里没有多出文件；没有重拍 |
+| 6 | 再按第 2 步把 v1 的截图清掉，然后回到 v1 | 当前版是 v1；v1 的截图重拍、对象又在，`html_key` 与 `thumb_key` 不变 |
+| 7 | 把 /s1 改成叠层呈现，回到 v2 | v2 原来那张整屏截图作废，重拍成 `.overlay.webp` |
+| 8 | 切回整屏；经测试库把 v3 改成 v1.43 之前回到 v2 建出的那种修订（`source_kind=restore`、父修订 v2、三个键与 v2 相同），回到 v3；再把 v2 的 `created_at` 改到 25 小时前，让 `screenshot.prune` 跑一轮 | 回到 v3 时直接用共用的截图；prune 后 v2 的 `screenshot_key` 置空，但对象还在（v3 是当前版、还在用它），v3 的键不动 |
 | 9 | 往测试库写一版 `screenshot_key` 以 `.png` 结尾的当前版（拷一张 PNG 进对象目录），重启 API，等后台转换 | 键换成 `.webp`、PNG 文件已删、WebP 与原 PNG 逐像素相同 |
 | 10 | 等 `screenshot.retry` 再跑一轮 | 第 2 步清掉的旧版截图没有被补回来 |
 
@@ -2902,7 +2903,7 @@ v1.32 协作显示与 v1.33 作业完成 chip 的用例都在 `tests/e2e/collab.
 | 2 | MCP `quilt.edit_screens`：`S3 底部加一行版权说明`（带桩通道） | `succeeded` |
 | 3 | `POST …/jobs` 建 `apply_design_system { screenIds: "all" }`；再发接上跳转（`preset=link_repair`，正文留空） | 两个都 `succeeded`，Screen 1 各多一版 |
 | 4 | 发 `S4 列表项加分隔线` | 历史块依次是 `1. S3 底部加一行版权说明`、`2. S1 标题改成「我的订单」`，共 2 条；块里没有 `data-qid`、`回刷`、`接上跳转`、`Apply the following` |
-| 5 | 发 `S5 顶部加一条促销横幅`；然后把 Screen 1 回溯到第 4 步那一版（`API-CORE-015`，`expectedRevisionId` = 第 5 步那一版） | 回溯 `201`；新修订的 `parentRevisionId` 是第 4 步那一版 |
+| 5 | 发 `S5 顶部加一条促销横幅`；然后把 Screen 1 回溯到第 4 步那一版（`API-CORE-015`，`expectedRevisionId` = 第 5 步那一版） | 回溯 `200`；Screen 1 的当前版是第 4 步那一版（v1.43） |
 | 6 | 发 `S6 标题居中` | 历史块第 1 条是 `S4 列表项加分隔线`，整段用户提示里没有 `S5` |
 | 7 | 对当前版的 `<h1>` 建 `regenerate_subtree`（`API-CORE-006`，带桩通道）：`S7 标题字号加大` | 桩收到的用户提示（`Within the screen …`）有历史块，第 1 条是 `S6 标题居中`，没有 `S5` |
 
@@ -2943,7 +2944,7 @@ v1.32 协作显示与 v1.33 作业完成 chip 的用例都在 `tests/e2e/collab.
 | 2 | 文案框改成「快捷二」，再点屏里的 `#toggle`，不点面板直接按 `⌘S`；之后焦点放到检查器内容区按 `Tab` | 点完元素焦点在检查器内容区（`data-testid=inspector-body`），不在 iframe 里；`⌘S` 保存出「快捷二」、被拦；`Tab` 后焦点在文案框 |
 | 3 | 光标放到文案框末尾按 `Backspace`；再把文案改回「快捷二」 | 文案框变成「快捷」，当前修订不变（元素没被删） |
 | 4 | 点屏里的 `#toggle`，把焦点放进 iframe（模拟焦点仍在屏里），按 `⌘S`，再按 `Delete` | `⌘S` 经运行时转发，提示「没有改动」，预览文档里这次 `⌘S` 被拦；`Delete` 后新修订里没有 `#toggle`，iframe 里也没有 |
-| 5 | 焦点仍在 iframe，按 `⌘Z` | toast「已撤销删除元素」；新修订里 `#toggle` 回来、文案「快捷二」，iframe 热更新出来 |
+| 5 | 焦点仍在 iframe，按 `⌘Z` | toast「已撤销删除元素」；当前版指回删除前那一版（v1.43 不建新修订），`#toggle` 回来、文案「快捷二」，iframe 热更新出来 |
 | 6 | 再按 `⌘Z` | toast「已撤销修改元素」（连按不判成冲突）；文案回到「快捷一」 |
 | 7 | 直接调直改接口（不经检查器）把文案改成「外部改」，再按 `⌘Z` | toast「这一屏之后又改过了，撤销不了这一步，去修订面板找回」；当前修订仍是「外部改」那一版 |
 | 8 | 用 header 建共享组件 `AppBar`（不同步其他屏），挪到屏右侧，重开项目；双击组件卡进交互态、`⌘E`，选组件里的 `h1`，文案改成「组件改」按 `⌘S`，再按 `⌘Z` | toast「已更新组件「AppBar」」；`⌘Z` 提示「组件「AppBar」里的改动撤销不了，要改回去就再改一次组件」 |
@@ -3260,7 +3261,7 @@ AI 轮次登记「待人工」——投递进真实会话要在那个终端里�
 | --- | --- | --- |
 | 1 | `--list`；`quilt.list_runners` | 53 个工具（v0.51 新增 32 个、v0.60 合并两对、v0.64 增 `patch_screen` / `append_upload`、v1.13 增 `get_sketchbook` / `copy_draft`、v1.23 删 4 个批注工具），名字里都没有 `annotation`；7 类资源；通道目录 `{ items, default }`，响应文本不含 `apiKey` |
 | 2 | `validate_screen` OK_HTML → `create_screen /agent` → `get_screen` → `get_screenshot`（20 s 内）；违规 HTML `create_screen /bad` → `delete_screen` | 无违规；注入 qid + prelude；返回 image；违规屏照常写入且 `lintReport.violations` 非空；删后项目 4 屏、`/bad` 不在 |
-| 3 | `update_screen` 只传 `html` + `expectedRevisionId`；`get_revision` 取第 1 版；`restore_revision`（expectedRevisionId = 当前）；再用第 1 版 id 作 expectedRevisionId 回溯 | name / route 沿用、current 推进；返回第 1 版 HTML 文本（`seq=1`、无 v2）；产生 `sourceKind=restore` 修订并成为 current；`409 /errors/revision-conflict` |
+| 3 | `update_screen` 只传 `html` + `expectedRevisionId`；`get_revision` 取第 1 版；`restore_revision`（expectedRevisionId = 当前）；再用第 2 版 id（已不是当前）作 expectedRevisionId 回溯 | name / route 沿用、current 推进；返回第 1 版 HTML 文本（`seq=1`、无 v2）；返回的修订是第 1 版、current 指回它、修订仍是 2 条（v1.43）；`409 /errors/revision-conflict` |
 | 4 | `edit_screens` 对 `/agent` `versions=2` → `list_candidates` → `adopt_candidate { jobId, index=1, screenId=/agent }` → `adopt_candidate { jobId, index=3 }`（不带 screenId）→ `adopt_candidate` 的 `screenId` 给一个该作业没出过候选的 id | 作业 succeeded；1 屏 × 2 版未结清；`adopted=[/agent]`、`skipped=[]` 且 current 指向第 2 版、该批结清；`adopted=[]`、`skipped=[{ /agent, /errors/not-found }]`；`404 /errors/not-found` |
 | 5 | `move_screens`：s1 (100, 200)、s2 (600, 200)、`Footer` (−300, 0)、一个假组件 id | `moved.screens` 2、`moved.components` 1、`failed=[{ 假 id, /errors/not-found }]`；详情里位置落库、`Footer.version` 不变 |
 | 6 | `edit_element` q1 `text`；再用旧 expectedRevisionId 直改 | `sourceKind=manual`、`get_screen` 含新文案；`409 /errors/revision-conflict` |
@@ -3281,7 +3282,7 @@ AI 轮次登记「待人工」——投递进真实会话要在那个终端里�
 | # | 操作 | 预期 |
 | --- | --- | --- |
 | 1 | `update_screen` 对 `/s2` 传 `route:"Not A Route!"`（带原 body） | 调用失败（协议层参数错误）；`/s2` 的路由仍是 `/s2` |
-| 2 | `create_screen /shot`（整屏）等截图就绪 = rev1；`update_screen` 出 rev2；`PATCH` 把它改成叠层；`restore_revision` 回到 rev1（`expectedRevisionId` = rev2） | 回溯出的修订 20 s 内有截图，且截图地址里是它自己的修订 id、按叠层拍（`<新修订 id>.overlay.webp`，v1.03 起键带呈现方式，v1.27 起是 WebP），不是 rev1 的 |
+| 2 | `create_screen /shot`（整屏）等截图就绪 = rev1；`update_screen` 出 rev2；`PATCH` 把它改成叠层；`restore_revision` 回到 rev1（`expectedRevisionId` = rev2） | 返回的修订是 rev1；rev1 原来那张整屏截图作废，20 s 内按叠层重拍（`<rev1 id>.overlay.webp`，v1.03 起键带呈现方式，v1.27 起是 WebP，v1.43 起回溯不建新修订） |
 | 3 | `append_upload` 用没签发过的 `uploadId`；`create_upload_url` 后对它并发 5 段 `offset:0`（内容各带 `chunk-0`…`chunk-4`）；`create_screen uploadId` 读回；再对这个已用掉的 `uploadId` 追加 | 没签发过的 `404 /errors/not-found`；5 段里 1 段成功、4 段 `409 /errors/upload-offset`；建出的屏里恰好有成功那一段的标记；用掉的 `404 /errors/not-found` |
 | 4 | `list_messages` 带 `cursor:"abc"` | 调用失败，但不是 `/errors/internal` |
 
@@ -3372,15 +3373,12 @@ AI 轮次登记「待人工」——投递进真实会话要在那个终端里�
 
 ## 6. 执行记录
 
-本节只留最近 10 轮；更早的轮次（RUN-001～RUN-306）原样移到 `docs/TEST-RUNS.md`（v1.07 归档，行序不变），按轮次号 grep 即可定位。
+本节只留最近 10 轮；更早的轮次（RUN-001～RUN-309）原样移到 `docs/TEST-RUNS.md`（v1.07 归档，行序不变），按轮次号 grep 即可定位。
 
 轮次汇总：
 
 | 轮次 | 日期 | 被测版本 | 执行者 | 范围 | 结果 |
 | --- | --- | --- | --- | --- | --- |
-| RUN-307 | 2026-10-22 | 未提交工作树（设计文档 v1.38：草稿本选元素一块没选时 Esc 关掉选元素） | AI(Claude Code) | 复测(RUN-306:TC-CORE-119、TC-EDIT-001、TC-EDIT-032) + 局部(TC-CORE-122) | 通过 1/4 · 失败 3 |
-| RUN-308 | 2026-10-22 | 未提交工作树（设计文档 v1.39：选元素时没有指针位置的点击按落点元素取） | AI(Claude Code) | 复测(RUN-307:TC-CORE-119、TC-EDIT-001、TC-EDIT-032 + 整套 EDIT、SKETCH、CANVAS + 冒烟级至 TC-CORE-160、TC-PROTO-014、TC-EDIT-042、TC-AGENT-025) | 通过 74/82 · 失败 5 · 跳过 3 |
-| RUN-309 | 2026-10-22 | 同 RUN-308 的构建 | AI(Claude Code) | 复测(RUN-308:TC-EDIT-028、TC-EDIT-033、TC-CORE-100、TC-CORE-010、TC-CORE-018 + TC-CORE-003、TC-CORE-031) | 通过 7/7 |
 | RUN-310 | 2026-10-24 | 未提交工作树（设计文档 v1.40：图表系列色重新派生，按钮、输入框与下拉触发器高 30，网站图标换成小尺寸版） | AI(Claude Code) | 全量至 TC-CORE-160、TC-PROTO-014、TC-EDIT-042、TC-AGENT-025 | 通过 227/237 · 失败 2 · 待人工 2 · 跳过 6 |
 | RUN-311 | 2026-10-24 | 同 RUN-310 的构建 | AI(Claude Code) | 复测(RUN-310:TC-EDIT-001) + 局部(TC-CORE-026) | 通过 1/2 · 失败 1 |
 | RUN-312 | 2026-10-24 | 未提交工作树（设计文档 v1.40：图表系列色换成预置色板「柔和」） | AI(Claude Code) | 局部(TC-CORE-026、TC-CORE-140、TC-CORE-141、TC-CORE-142、TC-CORE-143) | 通过 5/5 |
@@ -3388,12 +3386,9 @@ AI 轮次登记「待人工」——投递进真实会话要在那个终端里�
 | RUN-314 | 2026-10-24 | 未提交工作树（修复前：导出件嵌在别的页面里换屏写宿主页的历史、转场被跳过留下未处理的拒绝、字体样式表阻塞渲染） | AI(Claude Code) | 局部(TC-PROTO-015、TC-PROTO-016、TC-PROTO-017) | 通过 1/3 · 失败 2 |
 | RUN-315 | 2026-10-24 | 同 RUN-314 的构建 | AI(Claude Code) | 局部(TC-PROTO-015) | 通过 0/1 · 失败 1 |
 | RUN-316 | 2026-10-24 | 未提交工作树（设计文档 v1.41：导出原型嵌在别的页面里不写宿主页的历史、转场被跳过不报错、字体样式表不阻塞渲染） | AI(Claude Code) | 复测(RUN-314:TC-PROTO-016、TC-PROTO-017 + RUN-315:TC-PROTO-015 + 整套 PROTO + 冒烟级至 TC-CORE-160、TC-PROTO-017、TC-EDIT-042、TC-AGENT-025) | 通过 19/23 · 跳过 4 |
-
-RUN-307 证据：v1.38 草稿本 Esc 的改动（选元素开着、一块没选时 Esc 关掉选元素）加上 RUN-306 三条失败的单栈复测。`TC-CORE-122` 新加的第二下 Esc 通过；三条失败在单栈、低负载下照样失败，排除负载。原因：v1.34 把选元素的取目标改成按指针坐标逐层找，脚本 `click()` 与键盘在聚焦元素上触发的点击没有指针位置、坐标是 0, 0，于是选成了页面左上角的根。这三条在 RUN-302 里没有跑到，回归随 `f08c44f` 推上去了。
-
-RUN-308 证据：v1.39 修复后的复测轮：`click` 事件的 `detail` 为 0（没有指针位置）时按事件目标取，真实的指针点击与悬停仍按坐标逐层跳过透明层；运行时单测加一条，修复前失败、修复后通过，`TC-CORE-158` 的单测改用带坐标的真实点击。单测 245/245。先在 l2 单独跑 `TC-CORE-119`、`122`、`158`、`160`、`TC-EDIT-001`、`032`，6 条通过；再三条隔离栈并行整套 EDIT、SKETCH、CANVAS 加冒烟级。五条失败都发生在负载均值 111～172 的时段（我这边三条栈，加上机器上别的进程），与选元素无关，RUN-309 单独复测全过。
-
-RUN-309 证据：RUN-308 之后的复测轮，同一构建，只开 l1 一条隔离栈，停栈后跑 install。五条失败全部通过：`TC-EDIT-028` 改元素后的截图 2295 / 2471 / 2850 ms，`TC-EDIT-033` 时限 5 s、截图约 21 s 后作业 succeeded；install `TC-CORE-031` 通过，包 971 KB，冷启动 8086 ms、二次 2020 ms。
+| RUN-317 | 2026-10-25 | 未提交工作树（设计文档 v1.43：回到旧版只把当前版指回那一版，不再多出一个新版本） | AI(Claude Code) | 局部(TC-CORE-014、TC-CORE-015、TC-CORE-063、TC-CORE-100、TC-CORE-104、TC-CORE-114、TC-CORE-128、TC-CORE-150、TC-CORE-151、TC-EDIT-026、TC-EDIT-029、TC-AGENT-011、TC-AGENT-018 + 冒烟级至 TC-CORE-160、TC-PROTO-017、TC-EDIT-042、TC-AGENT-025) | 通过 17/21 · 失败 2 · 跳过 2 |
+| RUN-318 | 2026-10-25 | 同 RUN-317 的构建（`TC-CORE-114` 第 5 步脚本改为取屏的当前版） | AI(Claude Code) | 复测(RUN-317:TC-CORE-114、TC-CORE-151) | 通过 2/2 |
+| RUN-319 | 2026-10-25 | 同 RUN-318 | AI(Claude Code) | 局部(TC-CORE-014、TC-CORE-015、TC-CORE-063、TC-CORE-151) | 通过 3/4 · 失败 1 |
 
 RUN-310 证据：v1.40 的全量轮：图表系列色按黑白品牌的规则重新派生，按钮、输入框与下拉触发器高 30，按钮里图标与文字间距 8，网站图标换成小尺寸版。单测 245/245，`pnpm -r typecheck`、web lint、`gen:runtime --check` 通过，构建产物 `check-tokens --lint` 0 处违规。机器上 swap 已用过半，十四套只开 l1 一条隔离栈串行跑（12:36～13:31，负载均值 8～9），停栈后跑 install。12:53 按 visual-system 新给的 `derive-dataviz.mjs` 重新派生图表色、同步并重新构建前端，CORE 在此之前跑完的 56 条用的是上一版构建，两版只差图表色的色值；其中 `TC-CORE-026` 在 RUN-311 用最终构建重跑。`TC-CORE-026` 改过的第 4、6 步通过：三条网站图标链接都回 200，模型设置里新增通道对话框的 7 个按钮、输入框与下拉触发器都高 30，两个按钮里图标与文字间距 8。§7 的 `TC-CORE-010`、`040` 本轮通过。install `TC-CORE-031` 通过，包 973 KB，冷启动 4027 ms、二次 1010 ms。
 
@@ -3409,21 +3404,16 @@ RUN-315 证据：`TC-PROTO-015` 改成先点「Go to /s2」、再点底栏的 /s
 
 RUN-316 证据：v1.41 修复后的复测轮：导出运行时接住转场 `ready` 的拒绝；`window.top` 不是自己时跳转直接换屏、点遮罩按自己的路由栈后退，不写历史；导出件的字体样式表先按 print 加载、到了切成 all，另附 noscript 版，屏文档的写法不变（`fontFace` 单测加一条）。单测 246/246，`pnpm -r typecheck` 与 tests 的类型检查通过。在 l1 一条隔离栈上跑整套 PROTO 与冒烟级，停栈后跑 install。三条源自缺陷用例通过，`TC-PROTO-017` 第 1 步时 `readyState` 是 `interactive`（样式表还挂着，页面照常显示）；单独打开导出件的 hash 路由与叠层后退（`TC-PROTO-005`，`TC-PROTO-012` 第 6b、6c 步）照旧通过。install `TC-CORE-031` 通过，包 974 KB，冷启动 5027 ms、二次 1011 ms。
 
+RUN-317 证据：v1.43 的局部轮：回到旧版（`API-CORE-015`、MCP `quilt.restore_revision`，画布修订面板、草稿本「版本」、草稿本 `⌘Z` 与检查器直改撤销都走它）只把屏的当前版指回那一版，返回 200，不建修订；那一版的截图被清掉时重拍，按别的呈现方式或尺寸拍的先作废再重拍。单测 246/246，`pnpm typecheck` 通过，前端重新构建。swap 已用 3.6/5.1 GB，只开 l1 一条隔离栈串行跑（17:22～17:29），停栈后跑 install。`TC-CORE-014` 回溯后面板仍是 6 行、「当前」移到 seq 2；`TC-CORE-100`、`TC-CORE-150` 回到旧版与 `⌘Z` 后版本数不变、当前版指到对的那一版；`TC-EDIT-029` 连按 `⌘Z` 先撤删除、再撤保存，没有判成冲突；`TC-AGENT-018` 回溯后 rev1 按叠层重拍。install `TC-CORE-031` 通过，包 978 KB，冷启动 5540 ms、二次 1516 ms。两条失败：`TC-CORE-114` 是脚本把最新一版当成当前版，回溯不再建版本后两者不同；`TC-CORE-151` 在第 1 步之前就断了，见 RUN-319。
+
+RUN-318 证据：RUN-317 之后的复测轮，l1 隔离栈。`TC-CORE-114` 第 5 步改为取屏的 `currentRevisionId` 后通过。`TC-CORE-151` 单独跑 10 步全过：回到 v2 后修订数不变、三个键不动、屏的目录没多文件；回到截图被清掉的 v1 重拍，HTML 与缩略图的键不变；叠层下回到 v2 重拍成 `.overlay.webp`；测试库里改成旧式 restore 的 v3 回到它时直接用共用的截图，prune 后 v2 置空、对象还在。
+
+RUN-319 证据：照 RUN-317 的顺序把 `TC-CORE-063` 与 `TC-CORE-151` 连着跑，`TC-CORE-151` 又在第 1 步之前失败。临时给测试进程的 `fetch` 套一层记录，失败的是取对象目录的 `GET /v1/config`，底层错误 `ECONNRESET`；API 日志没有报错，进程一直在。之后同样的组合又跑 3 次挂 1 次；把客户端连接空闲保留压到 1 s 再跑 4 次挂 2 次，排除复用空闲连接。在 `e46e9c0`（改动前的 HEAD）的临时 worktree 上起 l2 栈跑同样的组合 6 次挂 4 次，判为既有偶发、与 v1.43 无关，登 §7；对照用的 worktree 与 l2 栈已删、已停。全量轮里两条之间隔着别的用例，RUN-310 通过。
+
 明细（仅登非「通过」项）：
 
 | 轮次 | 用例 | 结果 | 现象 / 证据 | 跟进 |
 | --- | --- | --- | --- | --- |
-| RUN-307 | TC-CORE-119 | 失败 | 同 RUN-306；单栈、低负载下照样失败，排除负载（证据：`docs/test-runs/run-307-tc-core-119-fail.png`） | v1.39 修复，RUN-308 通过 |
-| RUN-307 | TC-EDIT-001 | 失败 | 同 RUN-306（证据：`docs/test-runs/run-307-tc-edit-001-fail.png`） | 同上 |
-| RUN-307 | TC-EDIT-032 | 失败 | 同 RUN-306（证据：`docs/test-runs/run-307-tc-edit-032-fail.png`） | 同上 |
-| RUN-308 | TC-EDIT-028 | 失败 | ② 改元素后的截图 4040 / 3593 / 3262 ms，超过 3 s；三栈并行、负载均值 111～172（证据：`docs/test-runs/run-308-tc-edit-028-fail.png`） | RUN-309 单独复测通过（2295 / 2471 / 2850 ms） |
-| RUN-308 | TC-EDIT-033 | 失败 | 「重启命令退出码 1」：同一满载时段（证据：`.e2e/l1/run-308.log`，本机） | RUN-309 单独复测通过 |
-| RUN-308 | TC-CORE-100 | 失败 | 「记录栏应多出这一张」：同一满载时段（证据：`.e2e/l2/run-308.log`，本机） | RUN-309 单独复测通过 |
-| RUN-308 | TC-CORE-010 | 失败 | 单步超过 10 min，§7 登记的既有问题（证据：`docs/test-runs/run-308-tc-core-010-fail.png`） | RUN-309 单独复测通过；仍见 §7 |
-| RUN-308 | TC-CORE-018 | 失败 | 等待 30 s 超时，排在 `TC-CORE-010` 挂满 10 min、换页之后（证据：`docs/test-runs/run-308-tc-core-018-fail.png`） | RUN-309 单独复测通过 |
-| RUN-308 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-308 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
-| RUN-308 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-310 | TC-EDIT-001 | 失败 | 第 8 步等直改后的「已更新」角标 8 s 超时：按钮 q8 已选中、文案已换成「立即登录」，角标不在（证据：`docs/test-runs/run-310-tc-edit-001-fail.png`） | 既有偶发（RUN-269、284、293 同现），见 §7 |
 | RUN-310 | TC-CORE-023 | 失败 | 预期失败（§7 登记项）：叫回后安全区底部没复原 | §7 跟进 |
 | RUN-310 | TC-CORE-020 | 待人工 | 对标 Stitch 盲评 | 待人工 |
@@ -3442,9 +3432,16 @@ RUN-316 证据：v1.41 修复后的复测轮：导出运行时接住转场 `read
 | RUN-316 | TC-PROTO-009 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-316 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-316 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-317 | TC-CORE-114 | 失败 | 第 5 步 `quilt.copy_draft` 覆盖回 `409 /errors/revision-conflict`：脚本把最新一版当成 S 的当前版，第 3 步回溯后两者不再相同（证据：`.e2e/l1/run-317.log`，本机） | 脚本改为取屏的 `currentRevisionId`，RUN-318 通过 |
+| RUN-317 | TC-CORE-151 | 失败 | 第 1 步之前取对象目录的 `GET /v1/config` 报 `fetch failed`（证据同上） | 既有偶发，见 RUN-319 与 §7；单跑 RUN-318 通过 |
+| RUN-317 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-317 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-319 | TC-CORE-151 | 失败 | 同 RUN-317：`GET /v1/config` 收到 `ECONNRESET`（证据：本机终端输出，未落盘） | 既有偶发，HEAD 同现，见 §7 |
 
 ## 7. 遗留问题
 
+- **`TC-CORE-151` 紧跟 `TC-CORE-063` 跑时，开头取对象目录偶尔连接被重置**（RUN-317、RUN-319；`e46e9c0` 上同现，6 次挂 4 次）：`ONLY=TC-CORE-063,TC-CORE-151` 时，`TC-CORE-151` 第 1 步之前的 `GET /v1/config` 收到 `ECONNRESET`，约一半的次数；单跑、全量顺序（中间隔着别的用例）都通过。
+  客户端连接空闲保留压到 1 s 照样出现，排除复用空闲连接；API 日志没有报错。原因未查明，没有修。
 - **`TC-CORE-010` 焦点在 iframe 里按键让 iframe 卸载时，脚本偶尔不再返回**（RUN-300、RUN-302，HEAD 同现）：第二次在聚焦屏的 iframe 里按 `⌘E` 退出交互（或按 `Esc`），页面照常退出、停在退出后的状态，但 Playwright 的按键调用一直不返回，单步 10 min 超时。
   拆成每步带 20 s 超时的脚本、三栈并发各跑 3 次：本轮代码卡 1 次，HEAD（v1.31）卡 3 次，都卡在这一下；单独跑不卡。推测是按键回执要等的那个 iframe 已经拆掉，负载高时更容易撞上，未证实。真实用户按键不受影响。
   修法方向：脚本里这两次按键加超时，超时后换一个新页面接着跑后面的用例。

@@ -294,6 +294,9 @@
 | RUN-304 | 2026-10-22 | 未提交工作树（设计文档 v1.35：MCP 的 GET 与 DELETE 回 405，请求日志汇总带各路由的数） | AI(Claude Code) | 局部(整套 MCP、整套 AGENT) | 通过 11/12 · 待人工 1 |
 | RUN-305 | 2026-10-22 | 未提交工作树（修复前：选元素时滚动，悬停框停在原处） | AI(Claude Code) | 局部(TC-CORE-160) | 通过 0/1 · 失败 1 |
 | RUN-306 | 2026-10-22 | 未提交工作树（设计文档 v1.35～v1.37：MCP 回 405、完成的 chip 收窄、悬停框跟着滚动） | AI(Claude Code) | 局部(整套 EDIT、SKETCH、CANVAS、COLLAB + 冒烟级至 TC-CORE-160、TC-PROTO-014、TC-EDIT-042、TC-AGENT-025) | 通过 82/88 · 失败 3 · 跳过 3 |
+| RUN-307 | 2026-10-22 | 未提交工作树（设计文档 v1.38：草稿本选元素一块没选时 Esc 关掉选元素） | AI(Claude Code) | 复测(RUN-306:TC-CORE-119、TC-EDIT-001、TC-EDIT-032) + 局部(TC-CORE-122) | 通过 1/4 · 失败 3 |
+| RUN-308 | 2026-10-22 | 未提交工作树（设计文档 v1.39：选元素时没有指针位置的点击按落点元素取） | AI(Claude Code) | 复测(RUN-307:TC-CORE-119、TC-EDIT-001、TC-EDIT-032 + 整套 EDIT、SKETCH、CANVAS + 冒烟级至 TC-CORE-160、TC-PROTO-014、TC-EDIT-042、TC-AGENT-025) | 通过 74/82 · 失败 5 · 跳过 3 |
+| RUN-309 | 2026-10-22 | 同 RUN-308 的构建 | AI(Claude Code) | 复测(RUN-308:TC-EDIT-028、TC-EDIT-033、TC-CORE-100、TC-CORE-010、TC-CORE-018 + TC-CORE-003、TC-CORE-031) | 通过 7/7 |
 
 ## 明细（仅登非「通过」项）
 
@@ -908,6 +911,17 @@
 | RUN-306 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-306 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 | RUN-306 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-307 | TC-CORE-119 | 失败 | 同 RUN-306；单栈、低负载下照样失败，排除负载（证据：`docs/test-runs/run-307-tc-core-119-fail.png`） | v1.39 修复，RUN-308 通过 |
+| RUN-307 | TC-EDIT-001 | 失败 | 同 RUN-306（证据：`docs/test-runs/run-307-tc-edit-001-fail.png`） | 同上 |
+| RUN-307 | TC-EDIT-032 | 失败 | 同 RUN-306（证据：`docs/test-runs/run-307-tc-edit-032-fail.png`） | 同上 |
+| RUN-308 | TC-EDIT-028 | 失败 | ② 改元素后的截图 4040 / 3593 / 3262 ms，超过 3 s；三栈并行、负载均值 111～172（证据：`docs/test-runs/run-308-tc-edit-028-fail.png`） | RUN-309 单独复测通过（2295 / 2471 / 2850 ms） |
+| RUN-308 | TC-EDIT-033 | 失败 | 「重启命令退出码 1」：同一满载时段（证据：`.e2e/l1/run-308.log`，本机） | RUN-309 单独复测通过 |
+| RUN-308 | TC-CORE-100 | 失败 | 「记录栏应多出这一张」：同一满载时段（证据：`.e2e/l2/run-308.log`，本机） | RUN-309 单独复测通过 |
+| RUN-308 | TC-CORE-010 | 失败 | 单步超过 10 min，§7 登记的既有问题（证据：`docs/test-runs/run-308-tc-core-010-fail.png`） | RUN-309 单独复测通过；仍见 §7 |
+| RUN-308 | TC-CORE-018 | 失败 | 等待 30 s 超时，排在 `TC-CORE-010` 挂满 10 min、换页之后（证据：`docs/test-runs/run-308-tc-core-018-fail.png`） | RUN-309 单独复测通过 |
+| RUN-308 | TC-CORE-005 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-308 | TC-CORE-012 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
+| RUN-308 | TC-EDIT-003 | 跳过 | `LIVE_LLM=0`，需真实模型 | 基线 |
 
 
 RUN-267 证据：地基变更（界面视觉换成苹果风方向 E，跨全部界面）的全量轮。构建前端后跑 `scripts/e2e-all.sh` 前九套（CORE、LOAD、CANVAS、PROTO、EDIT、COMPONENTS、AGENT、MCP、CHAT）；单测轮 144/144，构建产物 `check-tokens --lint` 通过。SKETCH 与 install 两套没跑：本轮中途 `tests/e2e/sketch.ts` 已按 v1.14 写回前端改写，与被测构建对不上，SKETCH 开跑即停，改在 RUN-268 随新构建再跑全量。`TC-CORE-008` 在毛玻璃开着时 100 屏 2 倍屏 60 fps、每帧 GPU 主线程 1.4 ms（门槛 4 ms）。完整日志 `.e2e/main/run-267.log`（本机，不进仓库）。
@@ -990,3 +1004,9 @@ RUN-304 证据：v1.35 修复后的局部轮：`GET` / `DELETE /mcp` 不建 serv
 RUN-305 证据：用户反映选元素时只悬停不点、滚动页面后悬停框停在原处。运行时滚动时重排了修改标记、选中框与协作者的框，唯独没管悬停框，而指针不动时浏览器不发 mousemove。新增源自缺陷用例 `TC-CORE-160`（草稿桩回一张 30 行的长列表），修复前第 2 步失败。第一次写的滚动量 137 px 恰好约等于 3 行，悬停框与新的一行几乎重合，改成 160 px 后差距明显。
 
 RUN-306 证据：v1.35～v1.37 的局部轮：v1.36 完成的作业 chip 收窄到正好包住对勾与文字（转态时量出在跑时的宽度，用 brand 的 `motion.duration.slow` 与 `motion.easing.emphasized` 过渡；× 平时不占位、悬停或获焦时槽位从 0fr 展开），v1.37 选元素时滚动按上次的指针位置重新取目标、悬停框不带过渡跟上。构建前端，单测 244/244，四个包类型检查、web lint、`gen:runtime --check` 通过，三条隔离栈并行。`TC-CORE-160` 修复后通过；`TC-CORE-157` 新加的宽度断言通过；另在 l3 上逐帧记下转态时的宽度：0 ms 480 px、50 ms 343、100 ms 235、200 ms 201、约 320 ms 停在 195，单调、不回弹。三条失败在 RUN-307 查明是 v1.34 带出的回归。
+
+RUN-307 证据：v1.38 草稿本 Esc 的改动（选元素开着、一块没选时 Esc 关掉选元素）加上 RUN-306 三条失败的单栈复测。`TC-CORE-122` 新加的第二下 Esc 通过；三条失败在单栈、低负载下照样失败，排除负载。原因：v1.34 把选元素的取目标改成按指针坐标逐层找，脚本 `click()` 与键盘在聚焦元素上触发的点击没有指针位置、坐标是 0, 0，于是选成了页面左上角的根。这三条在 RUN-302 里没有跑到，回归随 `f08c44f` 推上去了。
+
+RUN-308 证据：v1.39 修复后的复测轮：`click` 事件的 `detail` 为 0（没有指针位置）时按事件目标取，真实的指针点击与悬停仍按坐标逐层跳过透明层；运行时单测加一条，修复前失败、修复后通过，`TC-CORE-158` 的单测改用带坐标的真实点击。单测 245/245。先在 l2 单独跑 `TC-CORE-119`、`122`、`158`、`160`、`TC-EDIT-001`、`032`，6 条通过；再三条隔离栈并行整套 EDIT、SKETCH、CANVAS 加冒烟级。五条失败都发生在负载均值 111～172 的时段（我这边三条栈，加上机器上别的进程），与选元素无关，RUN-309 单独复测全过。
+
+RUN-309 证据：RUN-308 之后的复测轮，同一构建，只开 l1 一条隔离栈，停栈后跑 install。五条失败全部通过：`TC-EDIT-028` 改元素后的截图 2295 / 2471 / 2850 ms，`TC-EDIT-033` 时限 5 s、截图约 21 s 后作业 succeeded；install `TC-CORE-031` 通过，包 971 KB，冷启动 8086 ms、二次 2020 ms。

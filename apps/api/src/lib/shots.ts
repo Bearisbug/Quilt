@@ -1,5 +1,5 @@
 // 整屏截图存储的纯逻辑（v1.27 ADR-037）：图片头、截图键里的呈现方式、哪些修订要留整屏截图、screenshot.prune 的处置、
-// 回到旧版时能否沿用源修订的截图。不碰库与对象存储，单测直接引
+// 回到旧版时那一版的截图能不能直接用。不碰库与对象存储，单测直接引
 
 /** 截图按 2 倍设备像素拍（screenshotHtml 的 deviceScaleFactor） */
 export const SHOT_SCALE = 2;
@@ -49,7 +49,7 @@ export function keepsScreenshot(r: { isCurrent: boolean; candidateIndex: number 
 
 /**
  * screenshot.prune 的处置：refs 是这一轮要清的键被哪些修订引用（全部引用，不只这一轮挑中的）。
- * 不用留截图、已有缩略图的置空；一个键只有在引用它的修订全被置空时才删对象——回到旧版建的修订共用源修订的键，
+ * 不用留截图、已有缩略图的置空；一个键只有在引用它的修订全被置空时才删对象——v1.43 之前回到旧版建的修订共用源修订的键，
  * 还被要保留截图的修订引用时只置空、不删
  */
 export type ShotRef = { id: string; key: string; keep: boolean; hasThumb: boolean };
@@ -60,7 +60,7 @@ export function prunePlan(refs: ShotRef[]): { clear: string[]; deleteKeys: strin
 }
 
 /**
- * 回到旧版时沿用源修订的截图（API-CORE-015 v1.27）要三条都成立：源截图还在（head 读得出）、键里的呈现方式与这一屏现在的一致、
+ * 回到旧版时那一版的截图能直接用（API-CORE-015）要三条都成立：截图还在（head 读得出）、键里的呈现方式与这一屏现在的一致、
  * 像素尺寸是这一屏现在的设备或画框应拍的尺寸（组件画框按根元素的框拍，不限尺寸）
  */
 export function canReuseShot(source: { key: string; head: ImageHead | null } | null, presentation: string, expected: { w: number; h: number; rootOnly: boolean }): boolean {

@@ -653,7 +653,7 @@ await step('TC-CORE-100', async () => {
   const revs2 = await revisions(id);
   expect(revs2.length === 2 && (await detail(sb)).screens.filter((s) => s.id === id).length === 1, `改一轮后应 2 版：${revs2.length}`);
   await eventually(async () => expect(await (await draftFrame()).locator('input[aria-label="音量"]').count() === 1, '看板没换成新版（没有音量滑块）'), 15000, 300);
-  // 4 「版本」里回到第 1 版：多出第 3 版、内容与第 1 版相同
+  // 4 「版本」里回到第 1 版：当前版指回第 1 版，不多出新版本
   await page.getByTestId('draft-versions').click();
   await page.getByTestId('versions-popover').waitFor({ timeout: 5000 });
   // 弹层先出、版本列表随后取到（API-CORE-013）
@@ -662,11 +662,10 @@ await step('TC-CORE-100', async () => {
   const item = page.locator(`[data-testid="version-item"][data-revision-id="${v1.id}"]`);
   if (await item.getByTestId('version-restore').count()) await item.getByTestId('version-restore').click();
   else { await item.click(); await page.getByTestId('version-restore').click(); }
-  await eventually(async () => expect((await revisions(id)).length === 3, '回到旧版后应有第 3 版'), 10000, 300);
-  const revs3 = await revisions(id);
-  expect(revs3[0].sourceKind === 'restore' && (await revBody(revs3[0])) === (await revBody(v1)), '第 3 版应是 restore 且内容与第 1 版相同');
+  await eventually(async () => expect((await detail(sb)).screens.find((s) => s.id === id)!.currentRevisionId === v1.id, '回到旧版后当前版应是第 1 版'), 10000, 300);
+  expect((await revisions(id)).length === 2, `回到旧版不该多出新版本：${(await revisions(id)).length}`);
   await eventually(async () => { const fr = await draftFrame(); expect((await fr.locator('input[aria-label="音量"]').count()) === 0 && (await fr.locator('body').innerText()).includes('夜航星'), '看板应显示第 1 版的内容'); }, 15000, 300);
-  return `组件草稿「${name}」居中 ${ifr.width}×${ifr.height}；改一轮 2 版；回到第 1 版得第 3 版`;
+  return `组件草稿「${name}」居中 ${ifr.width}×${ifr.height}；改一轮 2 版；回到第 1 版仍是 2 版、当前是第 1 版`;
 });
 
 // ---------- TC-CORE-101 收起后接着出下一张手机页，再重开（浏览器） ----------
@@ -1083,7 +1082,7 @@ await step('TC-CORE-114', async () => {
   expect((await revisions(d.id)).length === dRevs.length, '覆盖不该给草稿加修订');
   // 3 回到覆盖前那一版
   const back = await post<{ revision: Rev }>(`/v1/screens/${S}/revisions/${n.id}/restore`, { expectedRevisionId: r.body.revisionId });
-  expect(back.status === 201 && (await revBody((await revisions(S))[0])) === nBody, `回溯到第 ${n.seq} 版：${back.status}`);
+  expect(back.status === 200 && back.body.revision.id === n.id && (await detail(P.projectId)).screens.find((x) => x.id === S)!.currentRevisionId === n.id, `回溯到第 ${n.seq} 版：${back.status}`);
   // 4 restyle 缺省：草稿没参照目标项目 → 新屏建改写作业；参照的就是目标项目 → 不建；落成组件不改写回目标
   const s1 = await copy(d.id, { projectId: P.projectId, as: 'screen', name: 'Fresh Home', runner: STUB });
   expect(s1.status === 201 && s1.body.job?.kind === 'edit_screens', `没参照时新屏应缺省改写：${s1.status} ${JSON.stringify(s1.body.job ?? null).slice(0, 120)}`);
@@ -1104,7 +1103,7 @@ await step('TC-CORE-114', async () => {
   // 5 MCP：screenId 是草稿、targetScreenId 是目标屏
   const mcp = await connectMcp();
   cleanups.push(() => mcp.close());
-  const cur = (await revisions(S))[0].id;
+  const cur = (await detail(P.projectId)).screens.find((x) => x.id === S)!.currentRevisionId!;
   const viaMcp = await callTool(mcp, 'quilt.copy_draft', { screenId: d.id, projectId: P.projectId, as: 'overwrite', targetScreenId: S, expectedRevisionId: cur });
   const mj = viaMcp.json as CopyResult;
   expect(!viaMcp.isError && mj.screen?.id === S && mj.previousRevisionId === cur, `quilt.copy_draft 覆盖：${viaMcp.text.slice(0, 200)}`);
@@ -1625,7 +1624,7 @@ await step('TC-CORE-128', async () => {
   const revs = await revisions(d);
   await watchBoard();
   const back = await post(`/v1/screens/${d}/revisions/${revs[1].id}/restore`, { expectedRevisionId: revs[0].id });
-  expect(back.status === 201, `回到旧版 ${back.status}`);
+  expect(back.status === 200, `回到旧版 ${back.status}`);
   await h1Is(f, '十月账单', '回到旧版');
   inPlace('回到旧版', await boardSeen(), await markOf(f), 1);
   // 3 换画框（手机页 → 桌面页）：只改视口
@@ -1853,34 +1852,30 @@ await step('TC-CORE-150', async () => {
   await page.mouse.click(stage.x + 8, stage.y + stage.height - 8);
   await page.keyboard.press('ControlOrMeta+z');
   await toastHas('已回到第 2 版');
-  await eventually(async () => expect((await revisions(a.id)).length === 4, '① ⌘Z 后应有第 4 版'), 10000, 200);
-  const r4 = await revisions(a.id);
-  const v4 = bySeq(r4, 4);
-  expect(v4.sourceKind === 'restore' && v4.parentRevisionId === bySeq(r4, 2).id && (await revBody(v4)) === (await revBody(bySeq(r4, 2))), '① 第 4 版应是 restore、父修订是第 2 版、内容同第 2 版');
+  const currentIs = (seq: number, what: string) => eventually(async () => expect((await detail(sb)).screens.find((s) => s.id === a.id)?.currentRevisionId === bySeq(r3, seq).id, what), 10000, 200);
+  await currentIs(2, '① ⌘Z 后当前版应是第 2 版');
+  expect((await revisions(a.id)).length === 3, '① ⌘Z 不该多出版本');
   // 2 焦点在草稿 iframe 里：运行时转发 ⌘Z
-  await eventually(async () => expect((await detail(sb)).screens.find((s) => s.id === a.id)?.currentRevisionId === v4.id, '① 看板还没换到第 4 版'), 10000, 200);
   await page.waitForTimeout(800);
   const f = await draftFrame();
   await f.locator('body').click({ position: { x: 4, y: 4 } });
   await page.keyboard.press('ControlOrMeta+z');
-  await eventually(async () => expect((await revisions(a.id)).length === 5, '② iframe 里按 ⌘Z 后应有第 5 版'), 10000, 200);
-  const r5 = await revisions(a.id);
-  expect((await revBody(bySeq(r5, 5))) === (await revBody(bySeq(r5, 1))), '② 第 5 版内容应同第 1 版');
+  await currentIs(1, '② iframe 里按 ⌘Z 后当前版应是第 1 版');
+  expect((await revisions(a.id)).length === 3, '② ⌘Z 不该多出版本');
   // 3 已是第一版
-  await eventually(async () => expect((await detail(sb)).screens.find((s) => s.id === a.id)?.currentRevisionId === bySeq(r5, 5).id, '② 看板还没换到第 5 版'), 10000, 200);
   await page.waitForTimeout(800);
   await page.mouse.click(stage.x + 8, stage.y + stage.height - 8);
   await page.keyboard.press('ControlOrMeta+z');
   await toastHas('已经是第一版');
   await page.waitForTimeout(800);
-  expect((await revisions(a.id)).length === 5, '③ 第一版上按 ⌘Z 不该建版本');
+  expect((await revisions(a.id)).length === 3, '③ 第一版上按 ⌘Z 不该建版本');
   // 4 输入框里的 ⌘Z 留给输入框
   const input = page.getByTestId('composer-input');
   await input.click(); await input.fill(''); await page.keyboard.type('abc');
   await page.keyboard.press('ControlOrMeta+z');
   await page.waitForTimeout(600);
   expect((await input.inputValue()) !== 'abc', `④ 输入框里的字应被撤销：${await input.inputValue()}`);
-  expect((await revisions(a.id)).length === 5, '④ 输入框里按 ⌘Z 不该建版本');
+  expect((await revisions(a.id)).length === 3, '④ 输入框里按 ⌘Z 不该建版本');
   await input.fill('');
   // 5 生成中按 ⌘Z：提示正在改，不建版本
   const held = await post<{ job: JobView }>(`/v1/projects/${sb}/messages`, { content: '标题改大\n[stub-hold:5000]', targetScreenIds: [a.id], runner: STUB });
@@ -1891,8 +1886,8 @@ await step('TC-CORE-150', async () => {
   await toastHas('这张草稿正在改');
   await waitJob(held.body.job.id, 60);
   await page.waitForTimeout(500);
-  expect((await revisions(a.id)).length === 6, `⑤ 只应多出这一轮的 1 版：${(await revisions(a.id)).length}`);
-  return '⌘Z 回到第 2 版（restore、父修订第 2 版）；iframe 里转发同样生效；第一版上提示；输入框里留给输入框；生成中提示正在改';
+  expect((await revisions(a.id)).length === 4, `⑤ 只应多出这一轮的 1 版：${(await revisions(a.id)).length}`);
+  return '⌘Z 当前版指回第 2 版、不多出版本；iframe 里转发同样生效；第一版上提示；输入框里留给输入框；生成中提示正在改';
 });
 
 // ---------- TC-EDIT-041 草稿本里按住 Shift 选几块、一次改完（v1.26） ----------

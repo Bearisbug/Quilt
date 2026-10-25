@@ -12,21 +12,21 @@
 | 项目画像 | 生产产品（全部核心节生效） |
 | Owner | @bug |
 | 评审人 | @bug（产品 / 架构） |
-| 最后更新 | 2026-10-24（v1.42 开发用 Postgres 的日志行带上时间、进程号与库名；v1.41 导出原型嵌在别的页面里时不写宿主页的历史、原型不在视口里时换屏不报错、字体服务连不上时不再整屏空白；v1.40 图表色换成预置色板「柔和」的描边加填充两档，按钮与输入框高 30、图标与文字间距 8，网站图标换成小尺寸版；v1.39 选元素时没有指针位置的点击按落点元素取；v1.38 草稿本选元素开着、一块没选时 Esc 关掉选元素；v1.37 选元素时滚动，悬停框跟到指针下的元素；v1.36 作业完成的 chip 收窄到正好包住文字；v1.35 MCP 的 GET 回 405、请求日志汇总带各路由的数；v1.34 选元素不再被全透明的遮罩挡住；v1.33 作业完成时 chip 转成「任务完成」，停 10 秒再淡出，可提前关掉；v1.32 同一项目或草稿本里的人互相看到光标、选中、视野与在改的东西；v1.31 画布缩放调慢一半，连线改成苹果式细线；v1.30 局域网 IP 用 http 打开不再白屏，复制退回旧接口；v1.29 连线只在一屏进入交互时画这一屏的、换成彩色端口画法，连线与组件引用按差量写，截图编码压缩档取 4，请求与慢查询记进本机日志；v1.28 逐级选改用 Shift+↑ / Shift+↓，用量看板不把导出算给模型，截图编码限 2 路，会话列表去重；v1.27 截图存无损 WebP、旧版本只留缩略图、回到旧版复用原版的文件；v1.27 的 sharp 依赖由 Owner 选定；v1.26 选元素时按住 Shift 多选、几块一次改完；v1.25 草稿本按 ⌘Z 回到上一版、逐级选不再被焦点按钮吃掉；v1.24 设置改成用量、模型、系统三节，用量看板，台账记下项目、任务类型与模型名，界面上「通道」改叫「模型」；v1.24 的台账快照列与 v1.22 的数据模型、接口与 ADR-035 已由 Owner 签字；v1.23 撤下批注、双击组件卡把镜头摆过去；v1.22 本机使用记录；v1.21 草稿里只改一块也能带参考图；v1.20 界面支持中文与英文；v1.19 缩小显示的屏改用 zoom；v1.18 草稿出新版原地换；v1.17 去掉对话记录、作业 chip、记录栏浮层、画框不能跨组件与页面；v1.16 输入框停靠与收起、草稿放大；v1.15 界面视觉换成苹果风；v1.14 草稿写回与参照；v1.13 与 v1.14 的数据模型、接口与 ADR-030～033 已由 Owner 签字） |
+| 最后更新 | 2026-10-25（v1.43 回到旧版只把当前版指回那一版，不再多出一个新版本；v1.42 开发用 Postgres 的日志行带上时间、进程号与库名；v1.41 导出原型嵌在别的页面里时不写宿主页的历史、原型不在视口里时换屏不报错、字体服务连不上时不再整屏空白；v1.40 图表色换成预置色板「柔和」的描边加填充两档，按钮与输入框高 30、图标与文字间距 8，网站图标换成小尺寸版；v1.39 选元素时没有指针位置的点击按落点元素取；v1.38 草稿本选元素开着、一块没选时 Esc 关掉选元素；v1.37 选元素时滚动，悬停框跟到指针下的元素；v1.36 作业完成的 chip 收窄到正好包住文字；v1.35 MCP 的 GET 回 405、请求日志汇总带各路由的数；v1.34 选元素不再被全透明的遮罩挡住；v1.33 作业完成时 chip 转成「任务完成」，停 10 秒再淡出，可提前关掉；v1.32 同一项目或草稿本里的人互相看到光标、选中、视野与在改的东西；v1.31 画布缩放调慢一半，连线改成苹果式细线；v1.30 局域网 IP 用 http 打开不再白屏，复制退回旧接口；v1.29 连线只在一屏进入交互时画这一屏的、换成彩色端口画法，连线与组件引用按差量写，截图编码压缩档取 4，请求与慢查询记进本机日志；v1.28 逐级选改用 Shift+↑ / Shift+↓，用量看板不把导出算给模型，截图编码限 2 路，会话列表去重；v1.27 截图存无损 WebP、旧版本只留缩略图、回到旧版复用原版的文件；v1.27 的 sharp 依赖由 Owner 选定；v1.26 选元素时按住 Shift 多选、几块一次改完；v1.25 草稿本按 ⌘Z 回到上一版、逐级选不再被焦点按钮吃掉；v1.24 设置改成用量、模型、系统三节，用量看板，台账记下项目、任务类型与模型名，界面上「通道」改叫「模型」；v1.24 的台账快照列与 v1.22 的数据模型、接口与 ADR-035 已由 Owner 签字；v1.23 撤下批注、双击组件卡把镜头摆过去；v1.22 本机使用记录；v1.21 草稿里只改一块也能带参考图；v1.20 界面支持中文与英文；v1.19 缩小显示的屏改用 zoom；v1.18 草稿出新版原地换；v1.17 去掉对话记录、作业 chip、记录栏浮层、画框不能跨组件与页面；v1.16 输入框停靠与收起、草稿放大；v1.15 界面视觉换成苹果风；v1.14 草稿写回与参照；v1.13 与 v1.14 的数据模型、接口与 ADR-030～033 已由 Owner 签字） |
 | 关联 | 契约 `api/openapi.yaml`（实现期建立） · 仓库 `github.com/Bearisbug/Quilt` · 安装 `npx quilt-canvas`（包 `apps/cli`） · 调研结论见会话记录 2026-09-07/08/09 |
 | 链路层 | 部分 |
 
-更早的版本（v0.4–v1.37）在 `docs/CHANGELOG.md`；下方两张表合计只留 v0.1–v0.3 与最近 5 版，再往前的随每次出版移过去。
+更早的版本（v0.4–v1.38）在 `docs/CHANGELOG.md`；下方两张表合计只留 v0.1–v0.3 与最近 5 版，再往前的随每次出版移过去。
 
 变更记录：
 
 | 日期 | 版本 | 涉及 ID | 一句话 | 类型 |
 | --- | --- | --- | --- | --- |
+| 2026-10-25 | v1.43 | REQ-CORE-007、API-CORE-015、ADR-039、FLOW-SKETCH、PAGE-SKETCH、PAGE-CANVAS | 回到旧版只把当前版指回那一版，不再多出一个新版本 | 功能 |
 | 2026-10-24 | v1.42 | ADR-010 | 开发用 Postgres 的日志行带上时间、进程号与库名，分得清是哪个库的慢查询 | 功能 |
 | 2026-10-24 | v1.41 | REQ-PROTO-004、API-PROTO-002 | 导出原型嵌在别的页面里时不写宿主页的历史，不在视口里换屏不报错，字体服务连不上也不再整屏空白 | 缺陷修复 |
 | 2026-10-24 | v1.40 | REQ-CORE-008、PAGE-CANVAS、PAGE-FIRST、PAGE-SKETCH | 图表色换成预置色板「柔和」的描边加填充两档，按钮与输入框高 30，网站图标换成小尺寸版 | 界面 |
 | 2026-10-22 | v1.39 | REQ-EDIT-001、PAGE-CANVAS | 选元素时键盘触发或脚本发出的点击按落点元素取，不再选成页面左上角 | 缺陷修复 |
-| 2026-10-22 | v1.38 | PAGE-SKETCH | 草稿本选元素开着、一块没选时按 Esc 关掉选元素，同 ⌘E，看板不收起 | 界面 |
 
 变更记录（旧格式）：
 
@@ -159,10 +159,10 @@
 | 类型 | 分支 | 结果 | 依据 | 测试 |
 | --- | --- | --- | --- | --- |
 | 边界 | 补丁对不上当前内容 | 退回整张重写，仍只出一版 | ADR-007 | TC-CORE-102 |
-| 边界 | 用户要回到之前某一版 | 在「版本」里点它，以它的内容建新一版 | API-CORE-015 | TC-CORE-100 |
+| 边界 | 用户要回到之前某一版 | 在「版本」里点它，当前版指回它，不多出新版本 | API-CORE-015 | TC-CORE-100 |
 | 失败 | 生成中点了回到旧版 | 409 /errors/screen-busy | 竞态「用户在生成中回溯旧版」 | TC-CORE-104 |
 | 失败 | 版本列表过期时回到旧版 | 409 /errors/revision-conflict，刷新版本后重试 | /errors/revision-conflict；API-CORE-015 | TC-CORE-104 |
-| 边界 | 用户按 ⌘Z | 回到当前版的上一版，以它的内容建新一版；连按一版版往回走 | API-CORE-015；PAGE-SKETCH | TC-CORE-150 |
+| 边界 | 用户按 ⌘Z | 当前版指回它的上一版，不多出新版本；连按一版版往回走 | API-CORE-015；PAGE-SKETCH | TC-CORE-150 |
 | 边界 | 已是第一版时按 ⌘Z | 提示已经是第一版，不发请求 | PAGE-SKETCH | TC-CORE-150 |
 | 失败 | 生成中按 ⌘Z | 提示正在改，不发请求 | 竞态「用户在生成中回溯旧版」 | TC-CORE-150 |
 
@@ -650,7 +650,7 @@
 | REQ-CORE-004 | 无限画布：截图平铺、平移缩放、拖动摆放、位置持久化；**多选批量移动**（v0.47）：按住已选中的任一卡片拖动，选中的屏与共享组件整组等量位移，松手逐张落库，`⌘Z` 整组还原；**键盘可达**（v0.80）：卡片可用键盘逐张到达、选中与进入交互，`Esc` 由近及远逐层关闭；**大项目不掉帧**（v1.02，`ADR-029`）：卡片截图按缩放分级取图、连线画在视口 canvas 上，68 屏桌面截图加 700 条连线时缩放与拖卡的阈值见 §15 | 目标 ① | P0 / M1 · v0.47 / v0.80 补充 |
 | REQ-CORE-005 | 聚焦交互：双击某屏切换为活 iframe（独立预览域），可点按滚动输入，Esc 退出 | 目标 ② | P0 / M1 |
 | REQ-CORE-006 | **改**：输入框有目标标签 + 发送即改（`edit_screens`；v1.05 起模型只回改动的补丁，对不上当前 HTML 时退回整屏重写，`ADR-007` v1.05 修订），版数 > 1 时每个目标各得 N 版候选；目标标签只被「点屏（替换 / 加选）/ 标签 × / 目标区「清空」」改变，点空白只清画布高亮不清标签，输入框内 `Esc` 有草稿清草稿（`⌘Z` 可撤销，v0.74）、无草稿失焦、都不清标签；目标区始终显示动词行「造 1 屏 × 3 版 · 此处」/「改 3 屏」/「改全部 12 屏 × 2 版 = 24 次调用」；`⌘A` + 发送 = 普通改全部；消息记录受影响屏；模型看得到每个目标屏此前已生效的用户指令（最近 18 条，取法见 `ADR-012` v0.87 修订） | 目标 ③ | P0 / M1 · M9 改写 · v0.87 补充 |
-| REQ-CORE-007 | 屏幕修订树：每次生成/编辑产生新修订并记父修订；可回溯到任意一版（回溯 = 以旧版内容建新修订，父修订记被回溯到的那一版，v0.87）；修订面板按分支折叠、候选组内标「未选用」并可随时采用 | 目标 ③ | P0 / M1 · M9 改写 · v0.87 补充 |
+| REQ-CORE-007 | 屏幕修订树：每次生成或编辑记一版，可回到任意一版 | 目标 ③ | P0 / M1 · M9 改写 |
 | REQ-CORE-008 | 每个作业结束记一条用量，设置「用量」按天、模型、项目与任务类型展开 | 非目标 ④ 的最小替代 | P0 / M1 · M10 · v1.24 改写 |
 | REQ-CORE-015 | **选（候选）**：候选 = 同一作业产出的兄弟修订（`jobId` + `candidateIndex`），current 默认第 1 版、不选也不阻塞连线 / 导出 / agent 读屏；卡片挂「N 版 · 展开」角标、后面叠错位底板；点角标**在画布上就地展开**（v0.34）：第 1 版留在卡片原位，其余版横向排成一行铺到右边，每格与卡片同尺寸、随画布缩放，里面是该版的**活 iframe**（可滚动 / 悬停 / 填表）；动作收进每格上方右缘对齐的浮层胶囊（屏幕尺寸的图标按钮）：「第 k 版 / 当前」标签、「就用这一版」、「采用这一组（N 屏）」，第 1 格带「收起」，`Esc` 收起（焦点在候选 iframe 里时也算）；采用即结清该批并自动收起。整组采用按服务端逐屏的成败分三种反馈：全采用、部分跳过、全跳过；**一屏都没采用时不刷新也不收起**，展开层留给用户重试或逐屏采用 | 目标 ③ | P0 / M9 · v0.34 改写 |
 | REQ-CORE-016 | **持久记忆**：应用简介（首轮规划器把用户那句话扩写成 3–5 句落到 `projects.brief`，设计系统面板可编辑，每次调用都带）；样板屏（`projects.exemplarScreenId`，工具栏「设为样板」，默认首轮第 1 屏，永远取其 current 作参考屏）；屏注册表（`screens.purpose` 由规划器落库，进每次调用的稳定前缀） | 目标 ①④ | P0 / M9 |
@@ -969,7 +969,7 @@ erDiagram
 v0.32 删除的实体：`ENT-AgentTask`、`ENT-OAuthGrant`、`ENT-OAuthClient`、`ENT-OAuthCode`、`ENT-DeviceToken`、magic link 与会话（都是鉴权与远程派活的机制，不是领域模型；SaaS 阶段按当时的方案重建，不保留空表）。
 v1.23 删除的实体：`ENT-Annotation`（元素批注；批注整体撤下，迁移 `0020` 删表）。
 字段权威定义见 §9。
-修订链为树（v0.31）：`SCREEN_REVISION.seq` 在同一屏内单调递增（创建时对屏行 `select … for update` 再取号，并行落候选不撞唯一键），`parent_revision_id` 记录它由哪一版派生（生成时的 current，首版为空），`SCREEN.current_revision_id` 指向当前版；同一作业为同一屏产出的多版是**候选**：同 `job_id`、`candidate_index` 0..N−1，`candidate_settled_at` 为空表示尚待采用；回溯 = 以旧版内容创建新修订（不改历史，见 `API-CORE-015`），采用候选 = 只改 current 指针、不建新修订（`API-CORE-025`）。
+修订链为树（v0.31）：`SCREEN_REVISION.seq` 在同一屏内单调递增（创建时对屏行 `select … for update` 再取号，并行落候选不撞唯一键），`parent_revision_id` 记录它由哪一版派生（生成时的 current，首版为空），`SCREEN.current_revision_id` 指向当前版；同一作业为同一屏产出的多版是**候选**：同 `job_id`、`candidate_index` 0..N−1，`candidate_settled_at` 为空表示尚待采用；回溯与采用候选都只改 current 指针、不建新修订（`API-CORE-015` v1.43、`API-CORE-025`）；v1.43 之前回溯建出的修订（`source_kind=restore`）照旧留在树里。
 `PROJECT.exemplar_screen_id` 是样板屏（不建外键，屏删除时由服务层清空并回落）。
 `PROJECT.language` 是项目语言（v0.85 `REQ-CORE-037`）。
 `DESIGN_SYSTEM.token_ext` 与 `DESIGN_PRESET.token_ext` 是 token 扩展的**输入**（v0.85 `ADR-025`：字阶逐档参数、间距三级、圆角精确值、层级阴影、状态层、动效、发丝线、「本系统不用」清单），与 `palette` 同一个道理——`tokens` 每次改设计系统都由种子色重算，只写进 `tokens` 的字段下一次保存就丢，所以输入单独落列、贯穿 `tokensFromSeed`；`null` = 全部取默认。
@@ -1115,8 +1115,8 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
 - **`API-CORE-013` listRevisions** — 实现 `REQ-CORE-007`：`GET /screens/{screenId}/revisions`，倒序，`no-store`；每条另带缩略图地址 `thumbUrl`（v1.03，没生成时为 `null`，面板缩略图用它）；每条含 `parentRevisionId`、`candidateIndex`、`candidateSettledAt`（v0.31），面板据此把同批候选折成一组、标出未选用
 - **`API-CORE-014` getRevision**：`GET /screens/{screenId}/revisions/{revisionId}`；响应含 `htmlUrl`（对象存储签名 URL，5 分钟；v0.75 起以附件下发，浏览器里打开是下载而不是渲染，见 §15「对象下发」）、`screenshotUrl`、`lintReport`；修订不可变，`Cache-Control: private, max-age=300`
 - **`API-CORE-015` restoreRevision** — 实现 `REQ-CORE-007`
-  - `POST /screens/{screenId}/revisions/{revisionId}/restore`，请求 `{ expectedRevisionId }`；以该版内容创建新修订（`source_kind=restore`，`parentRevisionId` = 被回溯到的那一版，v0.87：此前记回溯前的 current，沿父链收历史指令时会经过已放弃的分支，见 `ADR-012` v0.87 修订）并置为当前；响应 `201 { revision }`
-  - 新修订直接引用源修订的 HTML、截图与缩略图对象（v1.27 `ADR-037`，同一屏、同一前缀），不再存副本；截图只在这三条都成立时沿用：源修订的截图还在、截图键的呈现方式（整屏 / 叠层）与这一屏现在的一致、截图的像素尺寸与这一屏现在的设备或画框应拍的尺寸一致；否则照旧重拍（v0.66：旧版截图可能是按另一种呈现方式拍的）
+  - `POST /screens/{screenId}/revisions/{revisionId}/restore`，请求 `{ expectedRevisionId }`；把屏的 current 指回该版，不建新修订（v1.43 `ADR-039`）；该版就是 current 时什么都不改；重派生应用地图；响应 `200 { revision }`（就是该版）
+  - 该版的整屏截图三条都成立才直接用：截图还在（没被 `screenshot.prune` 清掉）、截图键的呈现方式（整屏 / 叠层）与这一屏现在的一致、像素尺寸是这一屏现在的设备或画框应拍的尺寸；截图已清掉的入队重拍；按别的呈现方式或画框拍的，先作废这一版的截图与缩略图（同改画框，`API-CORE-012`）再重拍
   - 错误：`409 /errors/revision-conflict`、`409 /errors/screen-busy`
 - **`API-CORE-016` getPreviewDocument** — 实现 `REQ-CORE-005`、`REQ-PROTO-001`、`REQ-PROTO-005`（v0.63：`presentation=overlay` 的屏下发时在 `</head>` 前注入 `<style data-quilt-overlay>html,body{background:transparent}</style>`，运行时协议增 `quilt:overlay { html, route }`（压一层：45% 暗遮罩 + 该 body 的根元素，遮罩点击回 `quilt:overlay-dismiss`）、`quilt:overlay-close`（关最上一层）；`quilt:swap` 先清掉全部叠层）
   - 预览域：`GET https://{preview-host}/p/{projectId}/{screenId}?rev={revisionId}&t={signedToken}`；返回该修订 HTML（已含前置样式与运行时脚本；v0.34 起下发时把存的运行时换成当前版本，见 `ADR-003`）；`t` 为 HMAC 签名（含 projectId、过期 10 分钟；v0.34 起过期时间对齐到 30 分钟窗口，同窗口内 URL 稳定——截图 / 修订 HTML 的对象签名同理，否则画布每次刷新都让全部卡片重新请求截图），由 `API-CORE-004` 随屏幕下发
@@ -1329,7 +1329,7 @@ SaaS 阶段的会话 cookie 与 MCP Bearer 推迟。
 | `quilt.get_app_map` | 底层 | `API-PROTO-001` | |
 | `quilt.finish_job` | 底层 | 服务层 `finishAgentJob`（v0.34） | 投递到本机会话的作业由会话自己收口：`{ jobId, status?: "succeeded"|"failed" = succeeded, summary? }`；`output.screenIds` = 该作业名下修订所在屏，`summary` 进 `output.summary` 与助手回执（改组件作业写「本机 agent 已更新组件「X」，同步 N 屏」，会话没写组件时写「没有改组件」，v0.99）；作业不是 `running` 的 `runner=agent` 作业时 `409 /errors/job-finished` |
 | `quilt.delete_screen` / `quilt.delete_component` / `quilt.delete_project` | 底层 | `API-CORE-018` / `API-EDIT-004 DELETE` / `API-CORE-031` | v0.51。删屏有在跑作业 `409 /errors/screen-busy`，删后重派生应用地图、样板屏指针跟着清；删组件屏不动（已展开的 HTML 留在屏里、不再跟着变）；删项目级联且不可逆、有在跑作业 `409 /errors/project-busy`——MCP 侧没有二次确认，工具说明里写明 |
-| `quilt.get_revision` / `quilt.restore_revision` / `quilt.adopt_candidate` / `quilt.list_candidates` | 底层 | `API-CORE-014` / `API-CORE-015` / `API-CORE-025`（单屏 / 整组）/ `API-CORE-026` | v0.51。`get_revision { screenId, revisionId }` 直接返回该版 HTML 文本与元数据（不是签名 URL——agent 拿到就能重推）；`restore_revision` 带 `expectedRevisionId`，与 REST 一样重拍截图（v0.77；此前复用源修订的截图，屏在两版之间改过呈现方式时，叠层屏留着整屏不透明的旧截图）；`adopt_candidate { jobId, index, screenId? }`（v0.60 单屏与整批合并）：按作业 + 版号寻址，`screenId` 缺省 = 该作业出过候选的每一屏；逐屏成败，返回 `{ adopted: id[], skipped: [{ screenId, error }] }`，`error` 是 `/errors/not-found`（没有那一版）/ `revision-conflict` / `screen-busy`；`screenId` 不在该作业候选里 `404 /errors/not-found` |
+| `quilt.get_revision` / `quilt.restore_revision` / `quilt.adopt_candidate` / `quilt.list_candidates` | 底层 | `API-CORE-014` / `API-CORE-015` / `API-CORE-025`（单屏 / 整组）/ `API-CORE-026` | v0.51。`get_revision { screenId, revisionId }` 直接返回该版 HTML 文本与元数据（不是签名 URL——agent 拿到就能重推）；`restore_revision` 带 `expectedRevisionId`，与 REST 一样只把 current 指回那一版、截图用不了时重拍（v1.43）；`adopt_candidate { jobId, index, screenId? }`（v0.60 单屏与整批合并）：按作业 + 版号寻址，`screenId` 缺省 = 该作业出过候选的每一屏；逐屏成败，返回 `{ adopted: id[], skipped: [{ screenId, error }] }`，`error` 是 `/errors/not-found`（没有那一版）/ `revision-conflict` / `screen-busy`；`screenId` 不在该作业候选里 `404 /errors/not-found` |
 | `quilt.move_screens` | 底层 | `API-CORE-012`（`x` / `y`）+ `API-EDIT-004 PATCH`（组件只挪位置，不升版不回刷） | v0.51。`{ screens?: [{ id, x, y }], components?: [{ id, x, y }] }` 逐张写、逐张成败，返回 `{ moved: { screens, components }, failed: [{ id, error }] }`；与画布多选批量移动（`REQ-CORE-004` v0.47）落的是同一条路径 |
 | `quilt.edit_element` | 底层 | `API-EDIT-001` | v0.51。零 token 直改：`{ screenId, qid, ops, expectedRevisionId }`，`ops` 同 REST（`text` / `classes` / `style` / `link` / `remove` / `detach`），`409 /errors/component-locked` 同样适用 |
 | `quilt.regenerate_subtree` / `quilt.edit_component` / `quilt.propose_design_system` / `quilt.export_prototype` | 高层 | `API-CORE-006` 对应四种 kind | v0.51。都返回作业句柄。`propose_design_system` 的产出在 `output.proposal`，画布侧的「预览确认」在这里就是 agent 自己的判断，确认后经 `quilt.update_design_system` 的 `conventions` / token 字段写回；`edit_component` 不接 `runner.kind=agent`：调用方本身就是会话，自己用 `quilt.update_component` 写（REST 发消息从 v0.99 起可以把改组件投递到本机会话）；`regenerate_subtree` 收 `qids`（v1.26，一次改几块）；`regenerate_subtree` 与 `edit_component` 收 `attachmentIds`（参考图，同 `quilt.generate_screens`，v1.21）；`export_prototype` 无输入、无模型调用 |
@@ -1937,7 +1937,7 @@ v0.32 本地版没有登录页与授权同意页（`PAGE-LOGIN`、`PAGE-AGENT-CO
 **看板**（v1.16，v1.17）：顶部那一行以下的整块区域；输入框、收起后的胶囊与记录栏都浮在看板上面，停在哪、开没开、收没收起都不改看板（可能压住草稿的一角，挪开或收起即可）。打开的草稿是预览域的活 iframe（可点可滚，链接惰性），在看板里居中，按画框放到能放下的最大、最大 1:1——组件按 `quilt:draft-size` 报的大小，手机页 390×844、桌面页 1280×800 的视口；放不下时等比缩小、不裁切，缩小用 `zoom`、不用缩放变换（理由见 `PAGE-CANVAS`「聚焦屏不走缩放变换」，v1.19）；不提供缩放（与预览页一样按真实尺寸看）。打开着的草稿出了新的一版（改一轮、改一块、回到旧版、本机会话回写）时原地换（v1.18）：父页取新版 HTML 经 `quilt:swap`（`keepScroll`）送进 iframe，与画布的聚焦态热更新同一通道，iframe 不重载、不出骨架与「加载中…」，滚动位置留着，组件按新报的大小重排；设计系统变了（`<head>` 不同）时运行时整份重写，父页收到新的 `quilt:ready` 再把选元素的模式发一次。换画框（手机页 ↔ 桌面页）只改视口，不重载。取不到新版 HTML（签名过期）先重取详情再取一次，仍取不到才整页重载。只有换一张草稿、新草稿第一版落地时才加载。
 草稿工具条（v1.16）在顶部那一行：项目切换器与记录栏开关之间，对着看板居中，毛玻璃；不占看板的高度。左端是名字（点了就地改名，`API-CORE-012`），有写回目标时名字下面一行小字「来自「<项目> · <屏>」」；后面是控件：画框（页面草稿在「手机页 / 桌面页」之间二选一，`API-CORE-012` 的 `frame`；组件草稿不显示——组件与页面不能互相换，v1.17）、「参照」（自由风格，或选一个项目，`API-CORE-012` 的 `refProjectId`，`REQ-CORE-042`）、「选元素」图标开关（`REQ-CORE-045`，悬停或键盘聚焦时出说明）、「版本」（按缩略图列出各版，点「回到这一版」走 `API-CORE-015`）、「写回项目…」（窄屏只留图标）、删除（确认后 `API-CORE-018`，不可恢复）、「收起」。放不下一行时折行，看板跟着下移；窄屏（48rem 以下）它单独占顶部那一行下面的一整行、不折行，放不下的在条里横着滚（滚动条不显示）。
 **快捷键**同画布：`⌘E` 开关「选元素」、`⌘/` 收起或展开输入框；焦点在草稿里时由预览运行时转发，照样能按。
-`⌘Z`（Windows 为 `Ctrl+Z`，v1.25）回到看板上这张草稿的上一版：取当前版的父修订，走「版本」里「回到这一版」同一个接口（`API-CORE-015`，以它的内容建新一版，提示「已回到第 N 版」）；当前版本身是回到旧版建出来的（`restore`）时，它的内容就是它的父修订那一版，先退到那一版再取父修订，所以连按会沿着改动的来路一版版往回走。新一版落地、看板刷新之前再按不重复发。焦点在文本框里时 `⌘Z` 留给文本框自己撤销；当前已是第一版时提示「已经是第一版」，这张草稿正在生成或改时提示正在改，都不发请求。
+`⌘Z`（Windows 为 `Ctrl+Z`，v1.25）回到看板上这张草稿的上一版：取当前版的父修订，走「版本」里「回到这一版」同一个接口（`API-CORE-015`，当前版指回它、不多出新版本，提示「已回到第 N 版」），所以连按会沿着改动的来路一版版往回走；当前版是 v1.43 之前回到旧版建出来的（`restore`）时，它的内容就是它的父修订那一版，先退到那一版再取父修订。看板换成上一版之前再按不重复发。焦点在文本框里时 `⌘Z` 留给文本框自己撤销；当前已是第一版时提示「已经是第一版」，这张草稿正在生成或改时提示正在改，都不发请求。
 **选元素**：开着时点草稿里的元素，它被框出、输入框目标区多一枚「「<草稿名>」里的 <标签>「<文字>」」胶囊，动词行写「改这一块」，发送建 `regenerate_subtree`（`API-CORE-006`），输入框里的参考图一起带上（v1.21）；`Esc` 或 × 去掉胶囊回到改整张。
 按住 `Shift` 点是加选或减选（v1.26，规则同画布的「多选」）：每块一枚胶囊、各自能 × 掉，动词行写「改这 N 块」，发送是带 `qids` 的同一种作业；`Esc` 一次清掉全部胶囊。
 选元素开着、一块也没选时按 `Esc` 关掉选元素，同再按一次 `⌘E`，看板不收起（v1.38 用户定：此前这一下直接收起了看板，选元素其实还开着）。
@@ -2011,7 +2011,7 @@ chrome 一律浮于其上，四处互不重叠——① **顶栏**（只承担�
 选择元素态下点了屏里的元素，焦点从 iframe 挪到检查器的内容区：这三个键直接可用，`Tab` 一下进文案框——此前焦点留在 iframe 里，要先点一下面板才能按快捷键、进字段；只在焦点确实在画布的 iframe 上（刚点过元素）时挪，保存后的重选、别处回写这类被动更新不抢焦点（`INT-008`）；不直接落进文案框，否则 `Delete` 成了删字。
 焦点仍在屏里时（例如交互态里点过屏里的输入框）由运行时转发（`ADR-003`）。
 `⌘Z` 撤销上一步直改（保存、删除、脱离共享）：以改之前那一版调 `API-CORE-015` 回溯，`expectedRevisionId` 是这次直改落下的修订——这一屏之后又被别的写入改过（对话、MCP、回刷）就 409，提示「这一屏之后又改过了，撤销不了这一步，去修订面板找回」，这一步出栈；这一屏有作业在跑时提示稍后再撤，这一步留在栈里。
-回溯本身会新建一版（内容同改前那一版）：连按 `⌘Z` 时，下一步比对的是接替了改前那一版的这一版，而不是原来的修订 id——否则第二下必定判成冲突。
+回溯只把当前版指回改前那一版（v1.43），连按 `⌘Z` 时下一步比对的正是这一版，不用另记接替关系。
 直改与位置改动共用一个撤销栈（至多 20 步），按时间先后撤；组件里的直改撤不了（它会同步到所有用这个组件的屏，没有组件版本回退），撤到这一步时提示「改组件撤销不了」并出栈，不越过它去撤更早的一步。**删组件里的元素先确认**（v1.03）：目标是共享组件时，「删除元素」按钮与 `Delete` / `Backspace` 都先弹确认框（`alertdialog`，标题「删除组件「X」里的这个元素？」，正文「会同步到用它的 N 屏，撤销不了。」），确认后才删，成功提示「已删除组件「X」里的元素，同步 N 屏」；屏上的元素照旧直接删、可 `⌘Z`。
 设计系统面板删约定同样先确认——它也撤不了。
 撤成后 toast「已撤销删除元素 / 修改元素 / 脱离共享」。**类名编辑**（v0.96）：检查器的「类名」是一行一个类的列表，按元素上原来的书写顺序排。
@@ -2080,7 +2080,7 @@ toast 浮在输入框上方（距底 = 输入框实际高度 + 32px，与 `--chr
 
 修订面板（M9 改）：每行的 44 px 缩略图用修订的 `thumbUrl`（v1.03，没有时退回原图）。
 从线性列表改为**按分支折叠**——同批候选折成一组（组头「候选 · 3 版 · 待采用」，组里各行叫「候选 1」「候选 2」…，不显示 seq 与作业 id（v1.04），「第 n 版」只指修订序号；未采用的标「未选用」并给「采用」按钮，走 `API-CORE-025`；已结清的组头写「已采用」、被采用的那行标「已采用」），其余修订按 `seq` 倒序、每条标出「派生自第 n 版」。
-回溯（`API-CORE-015`）仍是建新修订，它的「派生自」是被回溯到的那一版（v0.87）。
+回溯（`API-CORE-015`）只把「当前」标记移到那一版，不多出一行（v1.43）；v1.43 之前回溯建出的行照旧列出，「派生自」是被回溯到的那一版。
 
 设计系统面板（M9 改，`REQ-EDIT-003` / `REQ-CORE-016`）：总则——设计系统面板：改色板/字体/圆角 → 一键回刷所有屏；v0.31 起设计系统是唯一的持久记忆且**只显式改**——面板的指令输入走作业 `propose_design_system`（v1.17 起改屏回执上的「记为约定」随对话记录去掉）：小模型读「指令 + 当前设计系统 + 一张改后的屏」→ 输出绝对规则（约定条目）与 / 或 token 变更 → 弹预览让用户确认 → 写入 DESIGN.md `## 约定` 节与 tokens；只改 token → 确定性回刷（零 LLM），改了约定 → 问「按新约定重生成所有屏？」（是 → 每 20 屏一个 `edit_screens` 作业，全部屏都发到，v0.78）；`⌘A` + 发送不碰设计系统。**字体来源**（v0.44）：字体 = 族名 + 来源（`google` 任意 Google Fonts 族 / `system` 本机字体、不发外链 / `url` 自定义 `@font-face` 样式表链接），改字体与改种子色同路走回刷。
 面板的组成：顶部新增**应用简介**（多行文本，`PATCH /projects/{id}`，旁注「每次生成都会带上」）与**样板屏**（显示当前样板屏名与路由，旁注「在画布上选中一屏后用工具栏「设为样板」更换」）；色板 / 字体 / 圆角 / DESIGN.md 原样；DESIGN.md 里的 `## 约定` 节在面板中单独渲染为可删的条目列表；底部新增**「用一句话改设计系统」**指令输入（`data-testid=ds-instruction`）——发送建 `propose_design_system` 作业，成功后弹出**预览对话框**（`data-testid=ds-proposal`：摘要、将写入的约定条目（可逐条取消）、token 变更（色块前后对比））；「确认写入」调 `API-EDIT-002`（带 `conventions` 与 token 变更），写入成功后才按提案的 `regenerate` 问「按新约定重生成所有屏？」（是 → `edit_screens` 全部屏 + 固定指令，**按契约上限每 20 屏拆一个作业**、一次全发出去，某一批被拒就停下并说明还剩几屏没发；只改了 token → 直接回刷）。
@@ -2471,7 +2471,7 @@ v0.32 删除：`/errors/unauthorized`、`/errors/token-expired`（无登录）�
   PGlite 的 listen 在进程内，不会断。
 - 截图最终一致：修订落库后截图允许 ≤ 10 s 延迟，期间 FE 显示上一版截图或占位，刚退出聚焦的屏显示留下的 iframe（v0.94，`PAGE-CANVAS`「退出聚焦的交接」）；`screen_screenshot_ready` 事件到达后替换（新图解码完才接班，v0.76）。
 - 项目事件不续传：画布每次 SSE 重连成功都整体重取详情与消息（`API-CORE-030`，v0.76）；签名 URL 由画布在可见期间每 4 分钟静默续取（`PAGE-CANVAS`「加载、失败与数据新鲜度」）。
-- 预览缓存：修订不可变、URL 含 revisionId，回溯创建新修订即新 URL；但预览响应本身自 v0.49 起 `no-cache`（每次下发换当前运行时，见 `API-CORE-016`），聚焦一次取一次。
+- 预览缓存：修订不可变、URL 含 revisionId，回溯换了当前版即换 URL；但预览响应本身自 v0.49 起 `no-cache`（每次下发换当前运行时，见 `API-CORE-016`），聚焦一次取一次。
 - 应用地图：随作业落库同事务重派生，`API-PROTO-001` 立即可见。
   重派生按内容比对着写（v1.29）：取这个项目现有的连线与组件引用行，与这次算出来的逐条比，只删消失的、只插新增的，没变的行原样留着。
   此前每次整项目删光重插，开发库里 `links` 一张表涨到 14 MB、有效数据约 150 KB：外部 Postgres 的自动清理只复用空间、不缩表。
@@ -2912,12 +2912,18 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
   - Consequences：按现有数据估算整屏截图从 406 MB 降到约 16 MB；多一个原生依赖（2026-10-22 实测 macOS arm64 的预编译包装上后 18 MB）；旧版本的整屏截图要用时多一次约 1–3 s 的重拍；共用对象的修订都在同一屏前缀下，删屏、删项目照旧按前缀删，`storage.gc` 与归档按键去重。
   - **v1.29 修订（压缩档取 4）**：原定最高档 6。2026-10-22 用开发实例全部 116 张当前版截图离线复测（逐张解码后同一份像素各编一次）：档 4 合计 15.43 MB、20.5 s，档 6 合计 15.33 MB、26.6 s，体积只大 0.69%，编码时间少 22.7%（单张最差大 12.4%）；达到事先定的「体积差 < 2% 且省时 ≥ 15%」才改
 
+  - **v1.43 修订**：③ 不再适用。回到旧版改为只换 current 指针（`ADR-039`），没有新修订可以共用对象；那一版的截图照 `API-CORE-015` 的三条判断能不能直接用。
 - **`ADR-038` 协作显示：进程内广播，每个浏览器一个名字，不做账号、不落库** — Status: Accepted（2026-10-22 用户定：画布与草稿本都要；光标、选中、头像与跟随、拖动实时同步、正在改，屏内光标也同步；第一次打开时填名字；「正在改」只在对方在线时显示；持续跟随）
   - Context：v1.30 起本机 Quilt 可以开放给局域网里的人（§15「局域网访问」），几个人同时改一个项目时互相看不到对方在做什么。本地版没有账号（`ADR-016`），所有人在服务端都是同一个用户。
   - Decision：每个浏览器自己记一个名字与颜色。浏览器把光标、选中、视野、拖动与自己发出的作业作为在线状态发给本机服务，服务只放在内存里，经已有的项目事件流（`API-CORE-030`）转给同一项目的其他连接，15 s 收不到就当离开。
     不经 `pg_notify`：它是给「有变化」这种提示用的，每秒十几条的光标会挤满通知队列，而本地版只有一个进程。事件流改为有事件就写。屏内的光标由预览运行时转发指针位置（`quilt:pointer`）。
   - Alternatives：WebSocket 双向通道（被否：多一种长连接，Vite 代理也要另外配置；现有 SSE 下行加 POST 上行在局域网里延迟够低）；名字落库、按账号区分（被否：要先有账号体系，SaaS 阶段再做）；作业上记下发起人（被否：用户选只在对方在线时显示）；多人同时编辑同一屏（不做：仍是同一屏同一时间一个作业）。
   - Consequences：服务重启后在线状态清空，各浏览器下一次心跳（至多 5 s）重新出现；名字是自己填的，不防冒名；将来多进程部署要换成跨进程广播，本地版不涉及。
+- **`ADR-039` 回到旧版只换当前版，不建新修订** — Status: Accepted（2026-10-25 用户定：「回到第 N 版的时候又会衍生出一个新的版本，这是错误的，直接就回到那一版就行」，v1.43）
+  - Context：回到旧版（`API-CORE-015`）原先以旧版内容建一版新修订（`source_kind=restore`）。草稿本「版本」里回到第 3 版，列表多出第 11 版；按 ⌘Z 一路往回走，每按一次多一版，版本号越走越大，「回到第 3 版」之后的当前版却不叫第 3 版。
+  - Decision：回到旧版与采用候选（`API-CORE-025`）一样只改 `screens.current_revision_id`，不建修订；之后在这一版上改，新修订的父修订就是它。`expectedRevisionId` 守卫、作业在跑时拒绝、重派生应用地图照旧。那一版的整屏截图已被清掉或是按别的呈现方式、画框拍的，回到它时重拍（`API-CORE-015`）。
+  - Alternatives：保留建新修订、只在列表里把它和原版并成一行（被否：版本号与列表行仍对不上，⌘Z 还要跳过这些行）；回到旧版时删掉它之后的各版（被否：之后的版本找不回来，修订树的回溯需求就没了）。
+  - Consequences：回到旧版不再写 HTML 与截图对象；之后各版留在树里，在「版本」或修订面板里随时能再回去；`ADR-012` 的历史指令沿 current 的父链取，回到第 3 版后自然不带第 4 版以后的指令；v1.43 之前建出的 `restore` 修订不回填，⌘Z 遇到它时先退到它的父修订（`PAGE-SKETCH`）；画布检查器直改的 ⌘Z 不再记「接替」关系。
 ## 19. 验收 / 测试
 
 人工评审门（M1 出口）：同一 5 个需求在 Stitch 与 Quilt 各生成一次，Owner 盲评一致性、完成度、画布手感，Quilt ≥ 3/5 不输 Stitch 方可进入 M2。以下为 AI 与人工共用的可执行口径。
@@ -3286,8 +3292,8 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
 场景: 回溯到任意历史版本 (REQ-CORE-007)
   Given 某屏有 seq 1..6 六个修订，当前为 6
   When 调用 API-CORE-015 restore revision seq=2
-  Then 创建 seq=7 的新修订，内容等于 seq=2，source_kind=restore，parentRevisionId 为 seq=2（v0.87）
-  And API-CORE-013 仍列出全部 7 个修订
+  Then 当前版是 seq=2，不建新修订（v1.43）
+  And API-CORE-013 仍列出全部 6 个修订
 
 场景: 回溯时版本已变 (REQ-CORE-007 / 竞态)
   Given expectedRevisionId 指向 seq=5 而当前已是 6
@@ -3612,7 +3618,7 @@ v0.32 删除：`agent_task.expire` / `agent_task.lease_expire`（无派活任务
 场景: MCP 与画布同面 (REQ-AGENT-002 / v0.51)
   Given agent 经 MCP 推了一屏、又对它造了 2 版候选
   When 依次调用 quilt.list_candidates、quilt.adopt_candidate 选第 2 版、quilt.get_revision 取第 1 版 HTML、quilt.restore_revision 回到第 1 版、quilt.delete_screen
-  Then 每一步与画布里做同样操作一致：current 指向第 2 版并结清同批；拿到第 1 版 HTML 文本；产生 source_kind=restore 新修订；屏消失且应用地图重派生
+  Then 每一步与画布里做同样操作一致：current 指向第 2 版并结清同批；拿到第 1 版 HTML 文本；current 指回第 1 版、不建新修订；屏消失且应用地图重派生
   When 调用 quilt.move_screens 摆 2 屏 + 1 组件、quilt.create_asset 传本机 logo 路径、quilt.export_prototype 后 quilt.get_export
   Then 位置逐张落库、组件版本不变；素材出现在设计契约 assets[] 且预览域可取；拿到 5 分钟签名下载地址且正文含全部屏
   When 调用 quilt.generate_screens 带 anchor 与 attachmentIds、quilt.regenerate_subtree、quilt.propose_design_system、quilt.edit_component、quilt.cancel_job

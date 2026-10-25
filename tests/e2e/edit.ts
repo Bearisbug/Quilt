@@ -919,12 +919,13 @@ await step('TC-EDIT-026', async () => {
     await S.check(() => expect(JSON.stringify(b4) === JSON.stringify(want4), `④ 历史块应为 ${JSON.stringify(want4)}：${JSON.stringify(b4)}`));
     await S.check(() => expect(b4 && !/data-qid|回刷|接上跳转|Apply the following/.test(b4.join('\n')), `④ 历史块里混进了 qid / 系统描述：${JSON.stringify(b4)}`));
     const rev4 = await currentOf();
-    // 5 改一轮再回溯：回溯修订的父修订是被回溯到的那一版
+    // 5 改一轮再回溯：当前版指回被回溯到的那一版（v1.43）
     const r5 = await histRound(h, { ...scr, content: 'S5 顶部加一条促销横幅' }, 'S5 顶部');
     expect(r5.job.status === 'succeeded', `⑤ S5 应成功：${r5.job.status}`);
     const rev5 = await currentOf();
-    const back = await apiJson<{ revision: { id: string; parentRevisionId: string | null } }>(`/v1/screens/${h.s1}/revisions/${rev4}/restore`, { method: 'POST', body: JSON.stringify({ expectedRevisionId: rev5 }) });
-    await S.check(() => expect(back.status === 201 && back.body.revision.parentRevisionId === rev4, `⑤ 回溯应 201 且父修订是被回溯到的那一版：${back.status} parent=${back.body.revision?.parentRevisionId} 期望 ${rev4}`));
+    const back = await apiJson<{ revision: { id: string } }>(`/v1/screens/${h.s1}/revisions/${rev4}/restore`, { method: 'POST', body: JSON.stringify({ expectedRevisionId: rev5 }) });
+    const cur5 = await currentOf();
+    await S.check(() => expect(back.status === 200 && back.body.revision?.id === rev4 && cur5 === rev4, `⑤ 回溯应 200 且当前版指回被回溯到的那一版：${back.status} current=${cur5} 期望 ${rev4}`));
     // 6 回溯之后再改：被撤销的 S5 不在
     const r6 = await histRound(h, { ...scr, content: 'S6 标题居中' }, 'S6 标题');
     const b6 = r6.hit ? historyIn(r6.hit.user, 'SCREEN') : null;
@@ -941,7 +942,7 @@ await step('TC-EDIT-026', async () => {
     await S.check(() => expect(b7?.[0] === 'S6 标题居中' && hit7 && !hit7.user.includes('S5'), `⑦ 局部重生成的历史块第 1 条应是 S6、不含 S5：${JSON.stringify(b7)}`));
   } catch (e) { S.fail(e); }
   S.done();
-  return '对话 / MCP 两类进历史、回刷与补链不进、不带 qid；回溯修订的父修订是被回溯到的那一版，撤销的那轮不在改屏与局部重生成的历史里';
+  return '对话 / MCP 两类进历史、回刷与补链不进、不带 qid；回溯把当前版指回那一版，撤销的那轮不在改屏与局部重生成的历史里';
 });
 
 // TC-EDIT-027 输出到上限被截断（§17 LLM 一行，v0.90）：桩对带 CUTME 的请求回 finish_reason=length，截断的文字不能落成一版残屏

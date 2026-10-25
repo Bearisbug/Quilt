@@ -263,16 +263,14 @@ await step('TC-CORE-014', async () => {
   expect((await page.locator('[data-testid="revision"]').count()) === 6, '修订数不是 6');
   expect((await page.locator('[data-testid="revision"]').first().getAttribute('data-seq')) === '6', '倒序首项不是 seq 6');
   await page.locator('[data-testid="revision"][data-seq="2"]').getByRole('button', { name: '回溯到此版' }).click();
-  await page.locator('[data-testid="revision"][data-seq="7"]', { hasText: '当前' }).waitFor({ timeout: 10000 });
-  const revs = await apiJson<{ items: { id: string; seq: number; sourceKind: string; htmlUrl: string; parentRevisionId: string | null }[] }>(`/v1/screens/${screens[0].id}/revisions`);
-  expect(revs.body.items.length === 7, `修订链长度 ${revs.body.items.length}`);
-  const r7 = revs.body.items.find((r) => r.seq === 7)!; const r2 = revs.body.items.find((r) => r.seq === 2)!;
-  expect(r7.sourceKind === 'restore', 'sourceKind');
-  // v0.87：回溯修订的父修订是被回溯到的那一版，面板标「派生自第 2 版」
-  expect(r7.parentRevisionId === r2.id, `回溯修订的父修订应是 seq 2，实际 seq ${revs.body.items.find((r) => r.id === r7.parentRevisionId)?.seq}`);
-  await page.locator('[data-testid="revision"][data-seq="7"]', { hasText: '派生自第 2 版' }).waitFor({ timeout: 5000 });
-  const [h7, h2] = await Promise.all([fetch(r7.htmlUrl).then((r) => r.text()), fetch(r2.htmlUrl).then((r) => r.text())]);
-  expect(h7 === h2, 'seq 7 内容不等于 seq 2');
+  // v1.43：回溯只把「当前」移到第 2 版，不多出一行
+  await page.locator('[data-testid="revision"][data-seq="2"]', { hasText: '当前' }).waitFor({ timeout: 10000 });
+  expect((await page.locator('[data-testid="revision"]').count()) === 6 && (await page.locator('[data-testid="revision"]', { hasText: '当前' }).count()) === 1, `回溯后面板应仍是 6 行、只有一行标当前：${await page.locator('[data-testid="revision"]').count()}`);
+  const revs = await apiJson<{ items: { id: string; seq: number }[] }>(`/v1/screens/${screens[0].id}/revisions`);
+  expect(revs.body.items.length === 6, `修订链长度 ${revs.body.items.length}`);
+  const r2 = revs.body.items.find((r) => r.seq === 2)!;
+  const cur = (await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${projectId}`)).body.screens[0].currentRevisionId;
+  expect(cur === r2.id, `回溯后当前版应是 seq 2，实际 ${revs.body.items.find((r) => r.id === cur)?.seq}`);
   await shot(page, 'CORE-014');
 });
 
@@ -285,8 +283,9 @@ await step('TC-CORE-015', async () => {
   expect(bad.status === 409 && bad.body.type === '/errors/revision-conflict', `冲突返回 ${bad.status}`);
   const after = await apiJson<{ items: unknown[] }>(`/v1/screens/${screens[0].id}/revisions`);
   expect(after.body.items.length === 6, '冲突时创建了修订');
-  const ok = await apiJson(`/v1/screens/${screens[0].id}/revisions/${seq(2)}/restore`, { method: 'POST', body: JSON.stringify({ expectedRevisionId: seq(6) }) });
-  expect(ok.status === 201, `正确 expected 返回 ${ok.status}`);
+  const ok = await apiJson<{ revision: { id: string } }>(`/v1/screens/${screens[0].id}/revisions/${seq(2)}/restore`, { method: 'POST', body: JSON.stringify({ expectedRevisionId: seq(6) }) });
+  expect(ok.status === 200 && ok.body.revision.id === seq(2), `正确 expected 返回 ${ok.status}`);
+  expect((await apiJson<{ items: unknown[] }>(`/v1/screens/${screens[0].id}/revisions`)).body.items.length === 6, '回溯不该建修订');
 });
 
 // ---------- 用量与恢复 ----------
