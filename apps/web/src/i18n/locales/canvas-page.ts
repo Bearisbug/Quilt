@@ -153,6 +153,10 @@ export default defineMessages('canvas-page', {
       already: '这一屏已经是样板屏',
     },
     notGenerated: '这一屏还没生成完',
+    fullview: {
+      label: '全屏看',
+      desc: '在全屏视图里按真实大小看这一屏：左栏按分组翻屏，右栏切状态',
+    },
     fork: {
       label: '到草稿本里改',
       desc: '把这一屏复制成草稿本里的一张草稿，在那里随便改，改好再写回这一屏；写回之前两边互不影响。只改其中一块：用「选择元素」点中它，再点检查器里的同名按钮',
@@ -323,6 +327,10 @@ export default defineMessages('canvas-page', {
       already: 'This screen is already the exemplar',
     },
     notGenerated: 'This screen hasn’t finished generating',
+    fullview: {
+      label: 'Full view',
+      desc: 'See this screen at real size in the full view: page through groups on the left, switch states on the right',
+    },
     fork: {
       label: 'Edit in Sketchbook',
       desc: 'Copy this screen into the Sketchbook as a draft, edit it freely there, then copy it back to this screen; until then, neither affects the other. To edit just one block, pick it with “Select element”, then click the button of the same name in the Inspector',

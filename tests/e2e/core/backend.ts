@@ -612,3 +612,72 @@ await step('TC-CORE-151', async () => {
     await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});
   }
 });
+
+// TC-CORE-166 截图浏览器闲置关掉（§17 v1.49）：用 8 s 的闲置时限重启 API，回刷一屏后它名下有一个截图浏览器，3 s 时还在，闲置过后退出；
+// 再回刷一次照常拍成，另起一个浏览器。要 QUILT_E2E_RESTART（§3）；浏览器认法同 TC-CORE-071
+await step('TC-CORE-166', async () => {
+  const S = softly();
+  const ps = () => execFileSync('ps', ['-A', '-o', 'pid=,ppid=,command='], { encoding: 'utf8', maxBuffer: 16 << 20 }).split('\n').flatMap((l) => { const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(l); return m ? [{ pid: Number(m[1]), ppid: Number(m[2]), command: m[3] }] : []; });
+  const apiPid = () => Number(execFileSync('lsof', ['-nP', `-tiTCP:${new URL(API).port}`, '-sTCP:LISTEN'], { encoding: 'utf8' }).trim().split('\n')[0]);
+  const shotBrowsers = (owner: number) => ps().filter((p) => p.ppid === owner && p.command.includes('--remote-debugging-pipe')).map((p) => p.pid);
+  const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'IdleShot', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const sid = screens[0].id;
+  /** 回刷这一屏、等作业成功，返回新的当前版有没有截图 */
+  const reapply = async (label: string) => {
+    const r = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ kind: 'apply_design_system', input: { screenIds: 'all' } }) });
+    expect(r.status === 202, `${label} 回刷 ${r.status}`);
+    const job = await waitJob(r.body.job.id, 120);
+    expect(job.status === 'succeeded', `${label} 回刷作业 ${job.status}`);
+    const cur = (await apiJson<{ screens: { id: string; currentRevisionId: string }[] }>(`/v1/projects/${pid}`)).body.screens.find((s) => s.id === sid)!.currentRevisionId;
+    const shot = async () => (await apiJson<{ revision: { screenshotUrl: string | null } }>(`/v1/screens/${sid}/revisions/${cur}`)).body.revision.screenshotUrl;
+    return eventually(async () => expect(await shot(), 'shot'), 40_000, 500).then(() => true, () => false);
+  };
+  let first: number[] = [];
+  try {
+    await restartApi({ QUILT_SCREENSHOT_IDLE_MS: '8000' });
+    const owner = apiPid();
+    // 前置：重启 3 s 后 screenshot.retry 补扫套件里缺截图的修订，也会起浏览器；等它补完、浏览器闲置关掉再开始
+    await sleep079(5000);
+    await eventually(() => expect(shotBrowsers(owner).length === 0, 'retry'), 180_000, 1000).catch(() => { throw new Error(`前置：重启后 3 分钟 API 名下仍有截图浏览器 ${shotBrowsers(owner).join(' ')}`); });
+    // 1 回刷：这一版拍出截图，API 名下有一个截图浏览器
+    await S.check(async () => expect(await reapply('①'), '① 回刷后的当前版没有截图'));
+    first = shotBrowsers(owner);
+    await S.check(() => expect(first.length === 1, `① API 名下应有 1 个截图浏览器：${first.length} 个`));
+    // 2 3 s 后还在（没到闲置时限）
+    await sleep079(3000);
+    await S.check(() => expect(first.length === 1 && shotBrowsers(owner).includes(first[0]), `② 3 s 时浏览器 ${first[0]} 应还在：${shotBrowsers(owner).join(' ') || '无'}`));
+    // 3 闲置过后浏览器退出，进程不在了
+    await S.check(() => eventually(() => expect(shotBrowsers(owner).length === 0 && !ps().some((p) => p.pid === first[0]), 'idle'), 15_000, 500)
+      .catch(() => { throw new Error(`③ 闲置 8 s 后 15 s 内浏览器还在：${shotBrowsers(owner).join(' ')}`); }));
+    // 4 再回刷：照常拍成，另起一个浏览器
+    await S.check(async () => expect(await reapply('④'), '④ 浏览器关掉后再回刷，当前版没有截图'));
+    const again = shotBrowsers(owner);
+    await S.check(() => expect(again.length === 1 && again[0] !== first[0], `④ 应另起 1 个截图浏览器：${again.join(' ') || '无'}（第一个是 ${first[0]}）`));
+  } catch (e) { S.fail(e); } finally {
+    await restartApi({}).catch(() => {});
+    await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});
+  }
+  S.done();
+  return `回刷后起截图浏览器 ${first[0]}，3 s 时还在，闲置 8 s 后退出，再回刷另起一个照常拍成`;
+});
+
+// TC-CORE-167 单屏不设大小上限（§15 v1.51）：模型回一张超过 256 KB 的屏（stub 认 [stub-pad:<字节数>]），照常落成新版、拍出截图
+await step('TC-CORE-167', async () => {
+  const { projectId: pid, screens } = seedJson<{ projectId: string; screens: { id: string }[] }>('seed:project', '--name', 'BigScreen', '--device', 'mobile', '--screens', '1', '--no-shot');
+  const sid = screens[0].id;
+  const revision = async (rid: string) => (await apiJson<{ revision: { seq: number; htmlUrl: string; screenshotUrl: string | null } }>(`/v1/screens/${sid}/revisions/${rid}`)).body.revision;
+  try {
+    const r = await apiJson<{ job: { id: string } }>(`/v1/projects/${pid}/jobs`, { method: 'POST', headers: idemKey(), body: JSON.stringify({ kind: 'edit_screens', input: { prompt: '在底部加一段很长的说明\n[stub-pad:300000]', screenIds: [sid], versions: 1, runner: STUB_RUNNER } }) });
+    expect(r.status === 202, `建改屏作业 ${r.status}`);
+    const job = await waitJob(r.body.job.id, 120);
+    expect(job.status === 'succeeded', `改屏作业应 succeeded：${job.status} ${JSON.stringify(job.output).slice(0, 200)}`);
+    const cur = (await detail082(pid)).screens.find((s) => s.id === sid)!.currentRevisionId!;
+    const rev = await revision(cur);
+    const bytes = Buffer.byteLength(await (await fetch(rev.htmlUrl)).text());
+    expect(rev.seq === 2 && bytes > 300_000, `当前版应是第 2 版且超过 300 KB：第 ${rev.seq} 版，${bytes} 字节`);
+    await eventually(async () => expect((await revision(cur)).screenshotUrl, 'shot'), 40_000, 500).catch(() => { throw new Error('第 2 版 40 s 内没拍出截图'); });
+    return `改屏作业 succeeded，第 2 版 ${Math.round(bytes / 1024)} KB，截图已拍`;
+  } finally {
+    await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {});
+  }
+});

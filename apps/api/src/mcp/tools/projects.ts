@@ -1,14 +1,15 @@
 import { z } from 'zod';
 import { eq, and, asc, desc, lt, isNull } from 'drizzle-orm';
-import { MAX_SCREENS_PER_GENERATE, MAX_VERSIONS, PRESENTATIONS, DRAFT_FRAME_CHOICES, anchorSchema, routeSchema, variantNameSchema, copyDraftSchema, createDraftSchema, type DeviceType, type Runner, type Presentation, type DraftFrameChoice } from '@quilt/core';
+import { MAX_SCREENS_PER_GENERATE, MAX_VERSIONS, PRESENTATIONS, DRAFT_FRAME_CHOICES, anchorSchema, routeSchema, variantNameSchema, copyDraftSchema, createDraftSchema, groupNameSchema, createSurfaceSchema, updateSurfaceSchema, moveDraftsSchema, MAX_SURFACES, MAX_MOVE_DRAFTS, type DeviceType, type Runner, type Presentation, type DraftFrameChoice } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
 import { problems } from '../../lib/errors.ts';
 import { createProject, getProjectDetail, listProjects, ownedProject, projectDto, designSystemDto, updateProject, deleteProject } from '../../services/projects.ts';
 import { messageDto } from '../../http/routes/projects.ts';
-import { ensureSketchbook, isSketchbook, copyDraft, createDraft } from '../../services/sketchbook.ts';
+import { ensureSketchbook, isSketchbook, copyDraft, createDraft, moveDrafts } from '../../services/sketchbook.ts';
+import { surfaceFor, createSurface, updateSurface, deleteSurface, surfaceDto } from '../../services/surfaces.ts';
 import type { ToolCtx } from '../ctx.ts';
 
-// 项目：列 / 建 / 详情 / 改名与简介 / 删；造屏与改屏两条主路（API-CORE-010 的投影）；对话记录；应用地图；草稿本（API-CORE-046～048）
+// 项目：列 / 建 / 详情 / 改名与简介 / 删；端（API-CORE-054）；造屏与改屏两条主路（API-CORE-010 的投影）；对话记录；应用地图；草稿本（API-CORE-046～048、API-CORE-055）
 export function registerProjectTools(c: ToolCtx) {
   const { server, user, wrap, read, write, prep, runJob, runnerInput, attachmentsInput, componentsInput, requestId } = c;
 
@@ -48,19 +49,58 @@ export function registerProjectTools(c: ToolCtx) {
     return (await createDraft(user, createDraftSchema.parse(a), { idempotencyKey: null, requestId })).result;
   }));
 
+  // 搬进项目（REQ-CORE-052，ADR-042）：几张草稿一次落成某一端的屏与共享组件，之后草稿删掉
+  server.registerTool('quilt.move_drafts', {
+    description: `Move up to ${MAX_MOVE_DRAFTS} sketchbook drafts (draftIds, from quilt.get_project on the sketchbook) into one surface of a project in one go: each brings only its current version (earlier versions are deleted with the draft). Page drafts become new screens of surfaceId in group (routes from the names, deduped within the surface, laid out in a row right of its rightmost screen); component drafts (frame component) become shared components (no <script>/<style>; names deduped). The drafts are then deleted. All or nothing: 404 when a draft is not in the sketchbook, 409 screen-busy while one is being generated, 400 for an empty draft or a component draft with scripts. restyle (default: true for drafts not referencing that project) starts edit jobs rewriting them to the project's design system — runner as in quilt.generate_screens; if they cannot start, restyleError says why and the moved screens stay. Returns { screens, components, jobs, restyleError? }.`,
+    inputSchema: moveDraftsSchema.shape,
+  }, wrap(async (a) => {
+    write();
+    return (await moveDrafts(user, moveDraftsSchema.parse(a), { idempotencyKey: null, requestId })).result;
+  }));
+
+  // 端（REQ-CORE-049 / REQ-CORE-051，API-CORE-054）：一个项目装一个产品的几端，各有设备与屏、共用设计系统
+  server.registerTool('quilt.create_surface', {
+    description: `Add a surface to a project — one app of the product (e.g. "Admin" on desktop next to the mobile "App") with its own device, screens and app-wide states; the design system, assets and shared components stay project-wide. At most ${MAX_SURFACES} per project; 409 surface-name-taken when the name exists (case-insensitive). The device cannot change later. Returns { surface }.`,
+    inputSchema: { projectId: z.string().uuid(), ...createSurfaceSchema.shape },
+  }, wrap(async (a) => {
+    write();
+    const { projectId, ...input } = a;
+    return { surface: surfaceDto(await createSurface(user.id, projectId as string, createSurfaceSchema.parse(input))) };
+  }));
+
+  server.registerTool('quilt.update_surface', {
+    description: 'Rename a surface or set its app-wide states. states = the full list { dims: [{ key?, name, values: [{ key?, name }] (2–8), default? (value key or index; default the first) }], events: [{ key?, name, ms? (500–10000) }] } (at most 6 dims and 6 events): keys are derived from the names when omitted and never change once set, so renaming never breaks screens; a dimension left out is retired — it disappears from the panel and screens keep showing its default. Screens show each value with data-when (see quilt.get_design_contract with surfaceId). expectedVersion = surfaces[].version from quilt.get_project; 409 version-conflict when stale. Returns { surface }.',
+    inputSchema: { surfaceId: z.string().uuid(), name: updateSurfaceSchema.shape.name, states: updateSurfaceSchema.shape.states, expectedVersion: updateSurfaceSchema.shape.expectedVersion },
+  }, wrap(async (a) => {
+    write();
+    const { surfaceId, ...patch } = a;
+    const parsed = updateSurfaceSchema.safeParse(patch);
+    if (!parsed.success) throw problems.validation(parsed.error.issues.map((i) => ({ path: i.path.join('.') || 'name', message: i.message })));
+    return { surface: surfaceDto(await updateSurface(user.id, surfaceId as string, parsed.data)) };
+  }));
+
+  server.registerTool('quilt.delete_surface', {
+    description: 'Delete a surface and all its screens (irreversible and unconfirmed). 400 when it is the project\'s last surface; 409 screen-busy while a job is running on any of its screens.',
+    inputSchema: { surfaceId: z.string().uuid() },
+  }, wrap(async (a) => {
+    write();
+    await deleteSurface(user.id, a.surfaceId as string);
+    return { surfaceId: a.surfaceId, deleted: true };
+  }));
+
   server.registerTool('quilt.create_project', {
     description: 'Create a project (mobile 390×844 or desktop 1280×800) with a seed-color-derived design system, or start from one of your design presets (presetId from quilt.list_design_presets).',
     inputSchema: { name: z.string().min(1).max(80), deviceType: z.enum(['mobile', 'desktop']), seedColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), presetId: z.string().uuid().optional() },
   }, wrap(async (a) => {
     write();
     const r = await createProject(user.id, a as { name: string; deviceType: DeviceType; seedColor?: string; presetId?: string });
-    return { project: projectDto(r.project), designSystem: designSystemDto(r.designSystem) };
+    return { project: projectDto(r.project), designSystem: designSystemDto(r.designSystem), surfaces: r.surfaces.map(surfaceDto) };
   }));
 
   // agent 用的投影（v0.65）：画布那份详情带每屏签名 URL、整份设计系统、全部链接与素材，42 屏的项目约 78 K 字符，
   // 而 agent 拿它多半只为取 currentRevisionId。链接走 get_app_map、设计系统走 get_design_contract、结构走 get_outline
   server.registerTool('quilt.get_project', {
-    description: 'Compact project overview: screens (id, name, route, currentRevisionId, presentation, variant, deviations, pending candidates, dangling link count, position), shared components, design system version and active jobs. Links are in quilt.get_app_map, the design system in quilt.get_design_contract, screen structure in quilt.get_outline.',
+    description: 'Compact project overview: surfaces (the product\'s apps — e.g. App, Web, Admin — each with its own device, screens and app-wide states), screens (id, name, route, surfaceId, group, currentRevisionId, presentation, variant, deviations, pending candidates, dangling link count, position), shared components, design system version and active jobs. Routes are unique per surface and links resolve only within one. Links are in quilt.get_app_map, the design system in quilt.get_design_contract, screen structure in quilt.get_outline.',
     inputSchema: { projectId: z.string().uuid() },
   }, wrap(async (a) => {
     read();
@@ -70,8 +110,9 @@ export function registerProjectTools(c: ToolCtx) {
     return {
       project: { id: d.project.id, name: d.project.name, kind: d.project.kind, deviceType: d.project.deviceType, brief: d.project.brief, exemplarScreenId: d.project.exemplarScreenId },
       designSystem: { version: d.designSystem.version, seedColor: d.designSystem.seedColor, colorMode: d.designSystem.colorMode },
+      ...(d.surfaces.length ? { surfaces: d.surfaces } : {}),
       screens: d.screens.map((s) => ({
-        id: s.id, name: s.name, route: s.route, currentRevisionId: s.currentRevisionId, presentation: s.presentation, ...(s.frame ? { frame: s.frame } : {}),
+        id: s.id, name: s.name, route: s.route, ...(s.surfaceId ? { surfaceId: s.surfaceId } : {}), ...(s.group ? { group: s.group } : {}), currentRevisionId: s.currentRevisionId, presentation: s.presentation, ...(s.frame ? { frame: s.frame } : {}),
         ...(s.refProjectId ? { refProjectId: s.refProjectId } : {}), ...(s.targetScreenId ? { targetScreenId: s.targetScreenId, targetQid: s.targetQid } : {}),
         ...(s.variantOf ? { variantOf: s.variantOf, variantName: s.variantName } : {}),
         deviations: s.deviations, ...(s.pendingCandidates ? { pendingCandidates: s.pendingCandidates } : {}), ...(dangling.get(s.id) ? { danglingLinks: dangling.get(s.id) } : {}),
@@ -85,7 +126,7 @@ export function registerProjectTools(c: ToolCtx) {
   // 工具名保留为公开契约；内部映射到 v0.31 的 generate（count 缺省 auto = 规划器定屏数）
   // v0.51 与 REST 同义的全部选项：anchor 定摆放位置；route + name (+ fromScreenId) 是懒生成（跳过规划器）；runner 选通道；attachmentIds 是参考图；componentIds 把共享组件的完整 HTML 带进上下文
   server.registerTool('quilt.generate_screens', {
-    description: 'Generate screens from a description using Quilt\'s server-side model: omit count to let the planner decide (4–6 for an empty project, a 2–6 screen sub-flow otherwise), or pass count 1–4. versions 1–4 = candidate versions per new screen (adopt with quilt.adopt_candidate). anchor {x,y} centers the first new screen on that canvas point (a group lays out to the right of it); route + name (+ fromScreenId as the reference screen) generates exactly that one missing screen without the planner; runner picks a channel (from quilt.list_runners; default = the account\'s default channel); attachmentIds are reference images (quilt.create_upload_url with an image mediaType); componentIds put those shared components\' full HTML in context. variantOf + variantName (both) generate a state VARIANT of that default screen (same route; e.g. variantName "empty", "error", "logged out") — no planner, the default screen is the reference. presentation "overlay" marks a lazily generated screen as a bottom sheet / dialog presented over another screen. In the sketchbook (quilt.get_sketchbook) it makes exactly one draft: only prompt, runner, attachmentIds and frame (auto = the model declares it with data-frame on the root; component | mobile | desktop) apply. Returns a job — poll quilt.get_job.',
+    description: 'Generate screens from a description using Quilt\'s server-side model: omit count to let the planner decide (4–6 for an empty project, a 2–6 screen sub-flow otherwise), or pass count 1–4. versions 1–4 = candidate versions per new screen (adopt with quilt.adopt_candidate). anchor {x,y} centers the first new screen on that canvas point (a group lays out to the right of it); route + name (+ fromScreenId as the reference screen) generates exactly that one missing screen without the planner; runner picks a channel (from quilt.list_runners; default = the account\'s default channel); attachmentIds are reference images (quilt.create_upload_url with an image mediaType); componentIds put those shared components\' full HTML in context. variantOf + variantName (both) generate a state VARIANT of that default screen (same route; e.g. variantName "empty", "error", "logged out") — no planner, the default screen is the reference. presentation "overlay" marks a lazily generated screen as a bottom sheet / dialog presented over another screen. surfaceId picks the surface (from quilt.get_project; default the first, a variant or a route + fromScreenId follows its source screen) and group names the directory group for the new screens (default: the planner picks one). In the sketchbook (quilt.get_sketchbook) it makes exactly one draft: only prompt, runner, attachmentIds and frame (auto = the model declares it with data-frame on the root; component | mobile | desktop) apply. Returns a job — poll quilt.get_job.',
     inputSchema: {
       projectId: z.string().uuid(),
       prompt: z.string().min(1).max(8000),
@@ -102,6 +143,8 @@ export function registerProjectTools(c: ToolCtx) {
       variantName: variantNameSchema.optional(),
       presentation: z.enum(PRESENTATIONS).optional(),
       frame: z.enum(DRAFT_FRAME_CHOICES).optional(),
+      surfaceId: z.string().uuid().optional(),
+      group: groupNameSchema.optional(),
     },
   }, wrap(async (a) => {
     write();
@@ -116,7 +159,7 @@ export function registerProjectTools(c: ToolCtx) {
         anchor: a.anchor as { x: number; y: number } | undefined, route: a.route as string | undefined, name: a.name as string | undefined,
         fromScreenId: a.fromScreenId as string | undefined, runner, imageKeys, componentIds: a.componentIds as string[] | undefined,
         variantOf: a.variantOf as string | undefined, variantName: a.variantName as string | undefined, presentation: a.presentation as Presentation | undefined,
-        frame: a.frame as DraftFrameChoice | undefined,
+        frame: a.frame as DraftFrameChoice | undefined, surfaceId: a.surfaceId as string | undefined, group: a.group as string | undefined,
       },
     });
   }));
@@ -164,14 +207,18 @@ export function registerProjectTools(c: ToolCtx) {
   }));
 
   server.registerTool('quilt.get_app_map', {
-    description: 'Routes and links between screens; toScreenId null = dangling link.',
-    inputSchema: { projectId: z.string().uuid() },
+    description: 'Routes and links between screens; toScreenId null = dangling link. Links resolve only within one surface; surfaceId limits the map to that surface.',
+    inputSchema: { projectId: z.string().uuid(), surfaceId: z.string().uuid().optional() },
   }, wrap(async (a) => {
     read();
     const project = await ownedProject(user.id, a.projectId as string);
-    const screens = await db.select({ screenId: schema.screens.id, route: schema.screens.route, name: schema.screens.name, purpose: schema.screens.purpose }).from(schema.screens).where(and(eq(schema.screens.projectId, project.id), isNull(schema.screens.variantOf)));
+    const surfaceId = a.surfaceId as string | undefined;
+    if (surfaceId) await surfaceFor(project.id, surfaceId);
+    const screens = await db.select({ screenId: schema.screens.id, route: schema.screens.route, name: schema.screens.name, purpose: schema.screens.purpose, surfaceId: schema.screens.surfaceId, group: schema.screens.groupName }).from(schema.screens)
+      .where(and(eq(schema.screens.projectId, project.id), isNull(schema.screens.variantOf), surfaceId ? eq(schema.screens.surfaceId, surfaceId) : undefined));
+    const ids = new Set(screens.map((s) => s.screenId));
     const links = await db.select().from(schema.links).where(eq(schema.links.projectId, project.id));
-    return { nodes: screens, edges: links.map((l) => ({ fromScreenId: l.fromScreenId, qid: l.elementQid, href: l.href, toScreenId: l.toScreenId })) };
+    return { nodes: screens, edges: links.filter((l) => !surfaceId || ids.has(l.fromScreenId)).map((l) => ({ fromScreenId: l.fromScreenId, qid: l.elementQid, href: l.href, toScreenId: l.toScreenId })) };
   }));
 
   // 对话记录（API-CORE-011）：游标分页，同一时间戳助手排在用户之前（倒序取、再 reverse 后用户在前）

@@ -57,7 +57,11 @@ export type ParentToPreview =
   | { type: 'quilt:pick'; qid: string }
   | { type: 'quilt:peek'; qid: string | null }
     // 协作者选中的块（v1.32 REQ-CORE-048，草稿本）：每块一个框加名字标签；颜色由父页按协作者色解析好给（运行时读不到父页的 CSS 变量）。空数组撤掉全部
-  | { type: 'quilt:peers'; blocks: { qid: string; name: string; color: string; on: string }[] };
+  | { type: 'quilt:peers'; blocks: { qid: string; name: string; color: string; on: string }[] }
+    // 状态（REQ-CORE-051 / ADR-041）：values 是全部取值（维度键 → 取值键），没给的维度回缺省；运行时改 <html> 上的 data-s-* 与 data-when 元素的显隐，不重载
+  | { type: 'quilt:states'; values: Record<string, string> }
+    // 播一次事件：带 data-when="@key" 的元素显示 ms 毫秒（缺省 2500），播放中再发一次从头再播
+  | { type: 'quilt:event'; key: string; ms?: number };
 
 export type ElementPathItem = z.infer<typeof elementPathItemSchema>;
 

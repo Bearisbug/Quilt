@@ -114,11 +114,22 @@ export async function archiveScreen(projectId: string, screenId: string, family:
   } catch (e) { warn(`归档屏 ${screenId}`, e); return null; }
 }
 
-/** 删项目之前：项目、设计系统、屏、修订、消息、作业与作业事件、组件、素材的行；对象是 projects/<id>/ 下的全部 */
+/** 删端之前：端的行，连同这一端的屏与全部修订的行；对象是这些屏的前缀 */
+export async function archiveSurface(projectId: string, surface: typeof schema.surfaces.$inferSelect, screenIds: string[]): Promise<PendingArchive | null> {
+  try {
+    if (!(await recordingForProject(projectId))) return null;
+    const screens = screenIds.length ? await db.select().from(schema.screens).where(inArray(schema.screens.id, screenIds)) : [];
+    const revisions = screenIds.length ? await db.select().from(schema.screenRevisions).where(inArray(schema.screenRevisions.screenId, screenIds)) : [];
+    return { name: `surface-${surface.id}`, projectId, manifest: { kind: 'surface', projectId, surface, screens, revisions }, prefixes: screenIds.map((id) => `projects/${projectId}/screens/${id}/`) };
+  } catch (e) { warn(`归档端 ${surface.id}`, e); return null; }
+}
+
+/** 删项目之前：项目、端、设计系统、屏、修订、消息、作业与作业事件、组件、素材的行；对象是 projects/<id>/ 下的全部 */
 export async function archiveProject(projectId: string): Promise<PendingArchive | null> {
   try {
     if (!(await recordingForProject(projectId))) return null;
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
+    const surfaces = await db.select().from(schema.surfaces).where(eq(schema.surfaces.projectId, projectId));
     const designSystems = await db.select().from(schema.designSystems).where(eq(schema.designSystems.projectId, projectId));
     const screens = await db.select().from(schema.screens).where(eq(schema.screens.projectId, projectId));
     const revisions = screens.length ? await db.select().from(schema.screenRevisions).where(inArray(schema.screenRevisions.screenId, screens.map((s) => s.id))) : [];
@@ -127,7 +138,7 @@ export async function archiveProject(projectId: string): Promise<PendingArchive 
     const jobEvents = jobs.length ? await db.select().from(schema.jobEvents).where(inArray(schema.jobEvents.jobId, jobs.map((j) => j.id))) : [];
     const components = await db.select().from(schema.components).where(eq(schema.components.projectId, projectId));
     const assets = await db.select().from(schema.assets).where(eq(schema.assets.projectId, projectId));
-    return { name: `project-${projectId}`, projectId, manifest: { kind: 'project', project, designSystems, screens, revisions, messages, jobs, jobEvents, components, assets }, prefixes: [`projects/${projectId}/`] };
+    return { name: `project-${projectId}`, projectId, manifest: { kind: 'project', project, surfaces, designSystems, screens, revisions, messages, jobs, jobEvents, components, assets }, prefixes: [`projects/${projectId}/`] };
   } catch (e) { warn(`归档项目 ${projectId}`, e); return null; }
 }
 

@@ -63,6 +63,8 @@ export const config = {
   screenshotChannel: process.env.SCREENSHOT_BROWSER_CHANNEL ?? '',
   // screenshot.prune 启动后多久先扫一轮（§17 v1.27，缺省 2 分钟）。QUILT_SCREENSHOT_PRUNE_FIRST_MS 只给测试用（TC-CORE-151），只在 LLM_DRIVER=stub 时认
   screenshotPruneFirstMs: llmDriver === 'stub' && process.env.QUILT_SCREENSHOT_PRUNE_FIRST_MS ? Number(process.env.QUILT_SCREENSHOT_PRUNE_FIRST_MS) : 2 * 60_000,
+  // 截图浏览器闲置多久关掉（§17 v1.49，缺省 5 分钟）。QUILT_SCREENSHOT_IDLE_MS 只给测试用（TC-CORE-166），只在 LLM_DRIVER=stub 时认
+  screenshotIdleMs: llmDriver === 'stub' && process.env.QUILT_SCREENSHOT_IDLE_MS ? Number(process.env.QUILT_SCREENSHOT_IDLE_MS) : 5 * 60_000,
   // §15 容量与限流
   workerConcurrency: Number(env('WORKER_CONCURRENCY', '20')),
   screenConcurrency: Number(env('SCREEN_CONCURRENCY', '4')),
@@ -78,7 +80,6 @@ export const config = {
   // 测试栈可调（只在 stub 驱动下生效，TEST.md §3）：stub 作业几秒一个，e2e 一分钟内就能建满 10 个，原来只能干等窗口
   rateLimitJobsPerMinute: llmDriver === 'stub' && process.env.QUILT_RATE_LIMIT_PER_MIN ? Number(process.env.QUILT_RATE_LIMIT_PER_MIN) : 10,
   maxScreensPerProject: 200,
-  maxScreenHtmlBytes: 256 * 1024,
   previewTokenMinutes: 10,
   objectUrlMinutes: 5,
   // HTML 上传位的签名 PUT 地址有效期；上传位最后一次写入后闲置这么久即由 upload.gc 删掉（§17 v0.82）

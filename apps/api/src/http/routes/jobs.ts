@@ -10,6 +10,7 @@ import { listCandidates, adoptCandidate, deriveLinks } from '../../services/scre
 import { listJobEvents, subscribeJob, notifyCanvas } from '../../lib/events.ts';
 import { problems, Problem } from '../../lib/errors.ts';
 import { storage } from '../../lib/storage.ts';
+import { surfacesOf } from '../../services/surfaces.ts';
 
 export const jobRoutes = new Hono<Env>();
 
@@ -59,10 +60,14 @@ jobRoutes.get('/v1/jobs/:jobId/export', async (c) => {
   if (job.kind !== 'export_prototype' || job.status !== 'succeeded' || !key) throw problems.jobNotFinished();
   if (c.req.query('inline') === '1') return c.redirect(await storage.signedUrl(key), 302);
   const project = await ownedProject(user.id, job.projectId);
+  // 项目有两端以上时文件名带端名（REQ-CORE-049）：取下载那一刻的名字，端已被删就只用项目名
+  const surfaceId = (job.input as { surfaceId?: string }).surfaceId;
+  const surfaces = project.kind === 'app' ? await surfacesOf(project.id) : [];
+  const surface = surfaces.length > 1 ? surfaces.find((s) => s.id === surfaceId) : undefined;
   // 导出产物超过 24 小时由 storage.gc 清掉（§17 v1.03）
   const body = await storage.get(key).catch(() => { throw new Problem(404, '/errors/not-found', L('资源不存在', 'Not found'), { detail: L('导出文件已清理（超过 24 小时），重新导出一次', 'The export file was cleaned up (older than 24 hours); export again') }); });
   c.header('Content-Type', 'text/html; charset=utf-8');
-  c.header('Content-Disposition', exportDisposition(project.name));
+  c.header('Content-Disposition', exportDisposition(surface ? `${project.name} · ${surface.name}` : project.name));
   c.header('Cache-Control', 'private, no-store');
   return c.body(new Uint8Array(body));
 });

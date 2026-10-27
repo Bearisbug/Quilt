@@ -25,7 +25,7 @@ function readView(key: string): Viewport | null {
  * 画布镜头（ADR-002 / ADR-006，v1.07 从 CanvasView.tsx 抽出）：世界层 transform 由 @xyflow/system 驱动，镜头按项目落盘，
  * 空格按住是平移就绪。onFrame 每次变换都调（平移缩放逐帧），onStop 在手势停下 200 ms 后调；两者都按调用方最近一次渲染给的取
  */
-export function useViewport(o: { projectId: string; safeAreaRef?: { current: HTMLElement | null }; onFrame: (v: Viewport) => void; onStop: (v: Viewport) => void; onUser?: () => void }) {
+export function useViewport(o: { projectId: string; viewScope?: string; safeAreaRef?: { current: HTMLElement | null }; onFrame: (v: Viewport) => void; onStop: (v: Viewport) => void; onUser?: () => void }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const panZoom = useRef<PanZoomInstance | null>(null);
@@ -33,7 +33,8 @@ export function useViewport(o: { projectId: string; safeAreaRef?: { current: HTM
   opts.current = o;
   // 平移缩放是用户手摆出来的视图偏好，按项目存、跨会话留（INT-019）。惰性初值读一次，**首帧就是终值**——
   // 用 useEffect 补会先画一帧初始位置再跳过去，用户看到的就是「刷新一次镜头自己动一下」（INT-021）。
-  const viewKey = `quilt:view:${o.projectId}`;
+  // 各端的屏位置互不相干（REQ-CORE-049）：镜头按端各记一份，第一端沿用项目那一份（有端之前存的镜头接着用）
+  const viewKey = `quilt:view:${o.projectId}${o.viewScope ? `:${o.viewScope}` : ''}`;
   const viewKeyRef = useRef(viewKey);
   viewKeyRef.current = viewKey;
   const [savedView] = useState<Viewport | null>(() => readView(viewKey));

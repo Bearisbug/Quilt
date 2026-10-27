@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from 'react';
+import { Children, isValidElement, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from 'react';
 import { useSearchParams } from 'react-router';
 import { DropdownMenu, Select } from 'radix-ui';
 import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, GripVertical, ImagePlus, MapPin, PenLine, Settings2, X } from 'lucide-react';
@@ -8,9 +8,10 @@ import { recordEvent } from '@/lib/recorder';
 import { VendorIcon } from '@/ui/VendorIcon';
 import { useT } from '@/i18n';
 import composerMessages from '@/i18n/locales/composer';
-import type { ComposerDock, DockEdge } from './useComposerDock';
+import { COMPOSER_MIN_W, type ComposerDock, type DockEdge } from './useComposerDock';
 import { JobChips, type JobChip } from './JobChips';
 import { uuid } from '@/lib/uuid';
+import type { PromptHistoryEntry } from './history';
 
 /** fill（草稿本空看板的示例，REQ-CORE-040）：只换文字、参考图留着，并聚焦输入框 */
 export type ComposerHandle = { focus: () => void; fill: (text: string) => void };
@@ -41,6 +42,8 @@ type ComposerProps = {
   onSend: (content: string, attachmentIds: string[]) => Promise<boolean>;
   /** 参考图上传（REQ-CORE-012）：返回 attachmentId */
   onUploadImage: (file: File) => Promise<string>;
+  /** ↑ / ↓ 翻发过的话（v1.46）：这个项目里发过的话与参考图，最近的在前；每次开始翻时取一次 */
+  loadHistory?: () => Promise<PromptHistoryEntry[]>;
   onError: (msg: string) => void;
   onRemoveTarget: (id: string) => void;
   onRemoveAnchor: () => void;
@@ -135,6 +138,9 @@ export function Composer(p: ComposerProps) {
   // 把正显示的那一个（输入框或胶囊）的大小、上方 chip 叠的高与两条可用段的长度报给外壳。首次在 layout effect 里量，首帧就按实际停的边画（INT-021）；之后靠 ResizeObserver。
   // 胶囊的宽顺手写进外层的 --pill-w：收起停在底边时横向 clamp 要用
   const onMeasure = p.dock.onMeasure;
+  // 改宽把手读屏用的当前宽与上限（aria-valuenow / aria-valuemax），随这里的测量更新
+  const [span, setSpan] = useState({ w: 0, max: 0 });
+  const laneProbe = p.laneRef;
   useLayoutEffect(() => {
     const el: HTMLElement | null = p.hidden ? pillRef.current : formRef.current;
     const box = dockRef.current; const stack = stackRef.current;
@@ -143,13 +149,17 @@ export function Composer(p: ComposerProps) {
     const measure = () => {
       if (!el.offsetWidth) return;
       if (el === pillRef.current) box.style.setProperty('--pill-w', `${el.offsetWidth}px`);
+      else {
+        const next = { w: el.offsetWidth, max: Math.round(laneProbe?.current?.getBoundingClientRect().width ?? el.offsetWidth) };
+        setSpan((v) => (v.w === next.w && v.max === next.max ? v : next));
+      }
       onMeasure({ w: el.offsetWidth, h: el.offsetHeight, stack: stack.offsetHeight, left: l.offsetHeight, right: r.offsetHeight });
     };
     measure();
     const ro = new ResizeObserver(measure);
     for (const x of [el, stack, l, r]) ro.observe(x);
     return () => ro.disconnect();
-  }, [p.hidden, onMeasure]);
+  }, [p.hidden, onMeasure, laneProbe]);
   // 收起时焦点若在输入框里（按 ⌘/、点了右上角「收起」），交给胶囊，不掉到 body（A11Y-013）
   useLayoutEffect(() => {
     if (p.hidden && formRef.current?.contains(document.activeElement)) pillRef.current?.focus();
@@ -257,9 +267,10 @@ export function Composer(p: ComposerProps) {
     window.addEventListener('pointerup', finish);
     window.addEventListener('pointercancel', finish);
   };
-  // 动词行的空白处才是抓手：标签上的 ×、「清空」、「收起」这些按钮照常点
+  // 动词行的空白处才是抓手：标签上的 ×、「清空」、「收起」这些按钮照常点；手指按在标签条上是横滑标签，不拖输入框
   const onRowPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
     if ((e.target as Element).closest('button, a, input, textarea, select, [role="button"]')) return;
+    if (e.pointerType === 'touch' && (e.target as Element).closest('.chip-strip')) return;
     startDrag(e);
   };
   const visionOk = p.runners.find((r) => r.id === p.runnerId)?.vision !== false;
@@ -271,6 +282,7 @@ export function Composer(p: ComposerProps) {
   const creating = p.targets.length === 0;
   const one = p.targets.length === 1 ? p.targets[0] : null;
   const over = p.targets.length > p.maxTargets;
+  const hasChips = !!p.anchor || (!p.sketch && p.targets.length > 0) || !!p.sketch?.chips?.length || p.componentTargets.length > 0;
   const all = !creating && p.totalScreens > 0 && p.targets.length >= p.totalScreens;
   // 共享组件目标（REQ-EDIT-006）：只有组件、没有屏也没有锚点 = 改组件（一次一个，多选由父组件的 blockedReason 挡）；否则只是上下文
   const comps = p.componentTargets;
@@ -305,7 +317,8 @@ export function Composer(p: ComposerProps) {
     // 输入框这一条横带有多宽：读画布的探针，不要去 parse --composer-left——自定义属性取回来是没求值的
     // calc(...)，parseFloat 得 NaN，判断会静默恒假、窄视口下工具条被裁掉够不到。也不能拿正在过渡的
     // form.offsetWidth 判，那是中间值。
-    const avail = lane?.current?.getBoundingClientRect().width ?? Infinity;
+    // 拖边改过宽（v1.45）时按改出来的宽判：比工具条一行窄就同样先截通道名、再折行
+    const avail = Math.min(lane?.current?.getBoundingClientRect().width ?? Infinity, widthRef.current ?? Infinity);
     // 差一点放不下：先截短通道名（最窄 6rem），截到头仍放不下才折行（v0.78）——为几十 px 整条折行，参考图按钮会单独掉到第二行、档位组悬在两行中间
     const short = need + chrome - avail;
     const room = trigW - RUNNER_MIN_REM * parseFloat(getComputedStyle(document.documentElement).fontSize);
@@ -350,11 +363,102 @@ export function Composer(p: ComposerProps) {
     return () => ro.disconnect();
   }, [lane, measureBar]);
 
-  // 卸载时回收 objectURL，否则贴一次图泄一块内存
-  useEffect(() => () => { shots.forEach((s) => URL.revokeObjectURL(s.url)); }, [shots]);
+  // ---- 拖边改宽（PAGE-CANVAS「停靠与收起」v1.45） ----
+  // 把手在卡片左右两条竖边上：停在底边两条都有，停在左边只有右边那条、停在右边只有左边那条（贴墙的那条没有可挪的）；窄视口不给。
+  // 对边不动：停在底边时按新宽重算 at，没拖的那条边留在原处。跟手只写外层的内联变量（拖动中关掉宽度过渡），松手或按键后提交一次（INT-021）；
+  // 提交前把内联值放回渲染时的样子，由 React 按新的 props 写——不然没被采纳的 at（侧边放不下落到底边时）会一直留在 DOM 上
+  const widthRef = useRef<number | null>(p.dock.width);
+  const resizing = useRef(false);
+  if (!resizing.current) widthRef.current = p.dock.width;
+  useLayoutEffect(() => { measureBar(); }, [p.dock.width, measureBar]);
+  const resizeDescId = useId();
+  const resizeSides: ('left' | 'right')[] = p.hidden || narrow ? [] : edge === 'left' ? ['right'] : edge === 'right' ? ['left'] : ['left', 'right'];
+  const inlineDock = () => {
+    const box = dockRef.current!;
+    return { sized: box.dataset.sized, user: box.style.getPropertyValue('--composer-user'), at: box.style.getPropertyValue('--at') };
+  };
+  const putBack = (v: ReturnType<typeof inlineDock>) => {
+    const box = dockRef.current!;
+    if (v.sized === undefined) delete box.dataset.sized; else box.dataset.sized = v.sized;
+    box.style.setProperty('--composer-user', v.user);
+    box.style.setProperty('--at', v.at);
+  };
+  const resizeTo = (side: 'left' | 'right', from: { w: number; left: number }, next: number) => {
+    const box = dockRef.current; const total = (box?.offsetParent as HTMLElement | null)?.clientWidth;
+    if (!box || !total) return null;
+    box.dataset.sized = '';
+    box.style.setProperty('--composer-user', `${Math.round(Math.max(COMPOSER_MIN_W, next))}px`);
+    // 上限由样式表的 min() 夹：读回来的才是实际的宽
+    const w = box.getBoundingClientRect().width;
+    let at: number | undefined;
+    if (edge === 'bottom') {
+      const left = side === 'right' ? from.left : from.left + from.w - w;
+      at = total > w ? clamp01(left / (total - w)) : 0.5;
+      box.style.setProperty('--at', String(at));
+    }
+    widthRef.current = w;
+    measureBar();
+    return { w: Math.round(w), at };
+  };
+  const resizeFrom = () => {
+    const box = dockRef.current!; const r = box.getBoundingClientRect();
+    return { w: r.width, left: r.left - (box.offsetParent as HTMLElement).getBoundingClientRect().left };
+  };
+  const settle = () => requestAnimationFrame(() => { if (dockRef.current) dockRef.current.style.transition = ''; });
+  const startResize = (side: 'left' | 'right') => (e: ReactPointerEvent<HTMLDivElement>) => {
+    const box = dockRef.current;
+    if (!box?.offsetParent || e.button !== 0 || !e.isPrimary) return;
+    e.preventDefault();
+    const handle = e.currentTarget; const id = e.pointerId; const sx = e.clientX;
+    const from = resizeFrom(); const before = inlineDock();
+    let last: { w: number; at?: number } | null = null;
+    try { handle.setPointerCapture(id); } catch { /* 指针已经抬起 */ }
+    resizing.current = true;
+    box.style.transition = 'none';
+    const root = document.documentElement;
+    root.dataset.composerResize = '';
+    const stop = () => {
+      handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); handle.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('keydown', esc, true);
+      resizing.current = false;
+      delete root.dataset.composerResize;
+      putBack(before);
+      settle();
+    };
+    const move = (ev: PointerEvent) => { if (ev.pointerId === id) last = resizeTo(side, from, from.w + (side === 'right' ? 1 : -1) * (ev.clientX - sx)); };
+    const up = (ev: PointerEvent) => { if (ev.pointerId !== id) return; stop(); if (last) p.dock.onResize(last.w, last.at); };
+    // 拖到一半按 Esc / 指针被系统收走：回到按下时的宽（INT-025）
+    const cancel = (ev: PointerEvent) => { if (ev.pointerId !== id) return; stop(); widthRef.current = p.dock.width; measureBar(); };
+    const esc = (ev: globalThis.KeyboardEvent) => {
+      if (ev.key !== 'Escape') return;
+      ev.preventDefault(); ev.stopPropagation();
+      try { handle.releasePointerCapture(id); } catch { /* 已经放开 */ }
+      stop(); widthRef.current = p.dock.width; measureBar();
+    };
+    handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up); handle.addEventListener('pointercancel', cancel);
+    window.addEventListener('keydown', esc, true);
+  };
+  // 键盘（WAI-ARIA Window Splitter）：← → 每次 16 px（按住 Shift 64 px），朝外是变宽；回车回到自动宽度，同双击
+  const onResizeKey = (side: 'left' | 'right') => (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter') { e.preventDefault(); p.dock.onResize(null); return; }
+    const dir = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+    const box = dockRef.current;
+    if (!dir || !box?.offsetParent) return;
+    e.preventDefault(); e.stopPropagation();
+    const from = resizeFrom(); const before = inlineDock();
+    box.style.transition = 'none';
+    const next = resizeTo(side, from, from.w + (e.shiftKey ? 64 : 16) * dir * (side === 'right' ? 1 : -1));
+    putBack(before);
+    settle();
+    if (next) p.dock.onResize(next.w, next.at);
+  };
+
   // 剩余名额读这个 ref、不读渲染闭包：两批贴得很近时，第二批还看不到第一批的渲染结果（REQ-CORE-012 v0.74）
   const shotsRef = useRef(shots);
   shotsRef.current = shots;
+  // objectURL 在图离开输入框时当场回收（移除、发出、上传失败、翻历史换掉）；卸载时把还在的（含翻历史时暂存的草稿图）一并收掉。
+  // 不能按「shots 一变就收上一份」：翻历史时暂存的草稿图还要换回来
+  useEffect(() => () => { [...shotsRef.current, ...(hist.current?.stash.shots ?? [])].forEach((s) => URL.revokeObjectURL(s.url)); }, []);
 
   // 同一批的图一次性全进缩略图（各自「上传中…」），再并行上传
   const addFiles = (files: File[]) => {
@@ -379,7 +483,7 @@ export function Composer(p: ComposerProps) {
     for (const { file, shot } of batch) {
       p.onUploadImage(file).then(
         (id) => { recordEvent('attach', undefined, { op: 'uploaded', name: file.name, attachmentId: id }); setShots((prev) => prev.map((s) => (s.key === shot.key ? { ...s, id } : s))); },
-        () => { recordEvent('attach', undefined, { op: 'failed', name: file.name }); setShots((prev) => prev.filter((s) => s.key !== shot.key)); p.onError(t('shots.failed', { name: file.name })); },
+        () => { recordEvent('attach', undefined, { op: 'failed', name: file.name }); URL.revokeObjectURL(shot.url); setShots((prev) => prev.filter((s) => s.key !== shot.key)); p.onError(t('shots.failed', { name: file.name })); },
       );
     }
   };
@@ -407,9 +511,12 @@ export function Composer(p: ComposerProps) {
       // 没发出去（撞上 409 / 限流 / 会话失效）就留着草稿与参考图，不把用户的输入吞掉（REQ-CORE-020）
       const sent = await p.onSend(content, shots.map((s) => s.id!).filter(Boolean));
       if (sent) {
-        setText((cur) => (cur.startsWith(sentText) ? cur.slice(sentText.length).trimStart() : cur));
+        // 发的是翻出来的那条：开始翻之前没发的草稿与参考图回到框里，不丢
+        const stash = hist.current?.stash;
+        hist.current = null;
+        setText((cur) => (cur.startsWith(sentText) ? cur.slice(sentText.length).trimStart() : cur) || (stash?.text ?? ''));
         shotsRef.current.filter((s) => sentKeys.has(s.key)).forEach((s) => URL.revokeObjectURL(s.url));
-        setShots((prev) => prev.filter((s) => !sentKeys.has(s.key)));
+        setShots((prev) => [...prev.filter((s) => !sentKeys.has(s.key)), ...(stash?.shots ?? [])]);
       }
     } finally { setSending(false); }
   };
@@ -427,9 +534,62 @@ export function Composer(p: ComposerProps) {
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && p.sketch?.onClimb && p.sketch.chips?.length && !text.trim()) {
       e.preventDefault(); p.sketch.onClimb(e.key === 'ArrowUp' ? 'up' : 'down'); return;
     }
+    // ↑ / ↓ 翻发过的话（v1.46）：光标在最前按 ↑、在最后按 ↓ 才翻（第一行按 ↑ 先照常跳到行首），正翻着、字没改过时直接翻；
+    // 还有图在传时不翻——传完回填 id 要找得到那张图
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !e.nativeEvent.isComposing && p.loadHistory) {
+      const el = e.currentTarget; const h = hist.current; const up = e.key === 'ArrowUp';
+      const browsing = !!h && h.idx >= 0 && el.value === h.items[h.idx].text;
+      const atEdge = el.selectionStart === el.selectionEnd && (up ? el.selectionStart === 0 : el.selectionEnd === el.value.length);
+      if ((browsing || atEdge) && (h || up) && !uploading) { e.preventDefault(); void recall(up ? 1 : -1); return; }
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); return; }
-    // 输入框内 Esc：有草稿清草稿、无草稿失焦；都不清目标标签（REQ-CORE-006）。草稿本里无草稿时是收起看板，焦点留在输入框
-    if (e.key === 'Escape') { e.stopPropagation(); if (text) clearDraft(); else if (p.sketch?.onEmptyEscape) p.sketch.onEmptyEscape(); else taRef.current?.blur(); }
+    // 输入框内 Esc：正翻着历史就换回开始翻之前的草稿；有草稿清草稿、无草稿失焦；都不清目标标签（REQ-CORE-006）。草稿本里无草稿时是收起看板，焦点留在输入框
+    if (e.key === 'Escape') { e.stopPropagation(); if (hist.current) leaveHistory(); else if (text) clearDraft(); else if (p.sketch?.onEmptyEscape) p.sketch.onEmptyEscape(); else taRef.current?.blur(); }
+  };
+  // ---- ↑ / ↓ 翻发过的话（PAGE-CANVAS 输入框，v1.46） ----
+  // 像命令行：idx 是正翻到哪一条（0 = 最近一条），stash 是开始翻之前没发的草稿与参考图，翻过最近一条再按 ↓、或按 Esc 换回来。
+  // 每次开始翻都重新取一次（刚发出去的那句也在里面）；参考图按当时的附件 id 带回，发出去时服务端照常校验。
+  // 换字走编辑命令，⌘Z 退得回翻之前的字
+  const hist = useRef<{ items: PromptHistoryEntry[]; idx: number; stash: { text: string; shots: Shot[] } } | null>(null);
+  const histLoading = useRef(0); // 正在取历史时累计按了几下 ↑（连按不丢）；0 = 没在取
+  const putText = (next: string) => {
+    const el = taRef.current;
+    if (!el) return;
+    el.select();
+    if (!(next ? document.execCommand('insertText', false, next) : document.execCommand('delete'))) setText(next);
+  };
+  const swapShots = (next: Shot[], keep: Shot[]) => {
+    shotsRef.current.filter((s) => !keep.includes(s) && !next.includes(s)).forEach((s) => URL.revokeObjectURL(s.url));
+    shotsRef.current = next;
+    setShots(next);
+  };
+  const recall = async (dir: 1 | -1) => {
+    let h = hist.current;
+    let steps: number = dir;
+    if (!h) {
+      if (histLoading.current) { if (dir > 0) histLoading.current += 1; return; }
+      if (dir < 0 || !p.loadHistory) return;
+      histLoading.current = 1;
+      const items = await p.loadHistory().catch(() => [] as PromptHistoryEntry[]);
+      steps = histLoading.current;
+      histLoading.current = 0;
+      if (!items.length) return;
+      h = hist.current = { items, idx: -1, stash: { text: taRef.current?.value ?? '', shots: shotsRef.current } };
+    }
+    const idx = Math.min(h.idx + steps, h.items.length - 1);
+    if (idx === h.idx) return;
+    if (idx < 0) { leaveHistory(); return; }
+    h.idx = idx;
+    const entry = h.items[idx];
+    swapShots(entry.images.map((im, i) => ({ key: uuid(), url: im.url, name: t('shots.recalled', { n: i + 1 }), id: im.id })), h.stash.shots);
+    putText(entry.text);
+  };
+  const leaveHistory = () => {
+    const h = hist.current;
+    if (!h) return;
+    hist.current = null;
+    swapShots(h.stash.shots, h.stash.shots);
+    putText(h.stash.text);
   };
   // 清草稿走浏览器的编辑命令：程序写 value（setText('')）会清掉原生撤销栈，⌘Z 就找不回来了（v0.74）
   const clearDraft = () => {
@@ -467,15 +627,26 @@ export function Composer(p: ComposerProps) {
     : p.anchor ? [t('phrase.anchor')]
     : IDLE_PHRASES.map((k) => t(`idle.${k}`));
 
-  // 随内容增高；上限只有一个来源——styles.css 里 .composer textarea 的 max-height，到顶后内部滚动（INT-010）
-  // 收起期间 display:none 量不到高度，叫回时要重量一次；空着时高度由原生 placeholder 撑开，占位文案换了（草稿本里「改」换回「新草稿」）也要重量
+  // 随内容增高；上限只有一个来源——styles.css 里 .composer textarea 的 max-height，到顶后内部滚动（INT-010）。
+  // 空着时只占一行：叠在上面的占位文案只显示一行，原生 placeholder 再长也不撑高、不让框可滚（styles.css 的 :placeholder-shown）。
+  // 收起期间 display:none 量不到高度，叫回时要重量一次；宽度变了（窗口、拖边改宽、工具条增减带来的宽度过渡）字会重新折行，也要重量——
+  // 只在打字时量的话，变窄之后框里藏着一截，冒出滚动条
   const placeholder = phrases[0];
-  useLayoutEffect(() => {
+  const fitInput = useCallback(() => {
     const el = taRef.current;
     if (!el || p.hidden) return;
     el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
-  }, [text, p.hidden, placeholder]);
+    if (el.value) el.style.height = `${el.scrollHeight}px`;
+  }, [p.hidden]);
+  useLayoutEffect(fitInput, [text, fitInput]);
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    let w = -1;
+    const ro = new ResizeObserver(([e]) => { if (Math.abs(e.contentRect.width - w) < 0.5) return; w = e.contentRect.width; fitInput(); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fitInput]);
 
   const CollapseIcon = edge === 'left' ? ChevronLeft : edge === 'right' ? ChevronRight : ChevronDown;
   const pillText = text.trim() ? t('pill.continue') : t('pill.write');
@@ -488,7 +659,8 @@ export function Composer(p: ComposerProps) {
     <span ref={segBottomRef} aria-hidden="true" className="composer-seg" data-side="bottom" />
     <div
       ref={dockRef} className="composer-dock z-20" data-dock={edge} data-collapsed={p.hidden ? '' : undefined} data-measured={measured ? '' : undefined}
-      style={{ '--at': at, ...(bar.need ? { '--composer-need': `${bar.need}px` } : null) } as CSSProperties}
+      data-sized={p.dock.width != null ? '' : undefined}
+      style={{ '--at': at, ...(bar.need ? { '--composer-need': `${bar.need}px` } : null), ...(p.dock.width != null ? { '--composer-user': `${p.dock.width}px` } : null) } as CSSProperties}
     >
     {/* 作业 chip（v1.17）：叠在卡片上方、不进 form——外壳的 --chrome-bottom 只量 form，chip 不占输入框的高度。展开时与卡片同宽，收起时固定宽 */}
     <div ref={stackRef} className={cn('pointer-events-none absolute bottom-full', p.jobs.length > 0 && 'pb-2', p.hidden ? cn('w-80 max-w-[calc(100dvw-1.5rem)]', stackEnd ? 'right-0' : 'left-0') : 'inset-x-0')}>
@@ -507,15 +679,17 @@ export function Composer(p: ComposerProps) {
           这一行的空白处是拖动输入框的抓手（v1.16） */}
       <div className="composer-grab mb-2.5 flex touch-none select-none items-center gap-2 px-0.5" onPointerDown={onRowPointerDown}>
         <DockGrip edge={edge} narrow={narrow} onPointerDown={startDrag} dragged={dragged} onPlace={(to) => place(to, null)} />
-        <ul className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" aria-label={t('targetsLabel')}>
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        {hasChips && (
+        <ChipStrip label={t('targetsLabel')}>
           {p.anchor && (
-            <li className="tint-link inline-flex items-center gap-1 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="anchor-chip">
+            <li className="tint-link inline-flex shrink-0 items-center gap-1 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="anchor-chip">
               <MapPin size={12} aria-hidden="true" /><span>{t('chip.anchor')}</span>
               <button type="button" aria-label={t('chip.removeAnchor')} onClick={p.onRemoveAnchor} className="grid size-5 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring"><X size={12} /></button>
             </li>
           )}
           {!p.sketch && p.targets.map((s, i) => (
-            <li key={s.id} className={`inline-flex items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium ${i < p.maxTargets ? 'tint-link' : 'tint-warning'}`} data-testid="target-chip">
+            <li key={s.id} className={`inline-flex shrink-0 items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium ${i < p.maxTargets ? 'tint-link' : 'tint-warning'}`} data-testid="target-chip">
               <span className="max-w-32 truncate">{s.name}</span>
               <button type="button" aria-label={t('chip.removeTarget', { name: s.name })} onClick={() => p.onRemoveTarget(s.id)} className="grid size-5 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
                 <X size={12} />
@@ -523,8 +697,8 @@ export function Composer(p: ComposerProps) {
             </li>
           ))}
           {p.sketch?.chips?.map((c, _, all) => (
-            <li key={c.key} className="tint-link inline-flex min-w-0 items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="draft-pick-chip" data-qid={c.key}>
-              <span className="min-w-0 max-w-64 truncate">{c.label}</span>
+            <li key={c.key} className="tint-link inline-flex shrink-0 items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="draft-pick-chip" data-qid={c.key}>
+              <span className="max-w-64 truncate">{c.label}</span>
               <button type="button" aria-label={t(all.length > 1 ? 'chip.removePickOf' : 'chip.removePick', { label: c.label })} onClick={c.onRemove} className="grid size-5 shrink-0 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
                 <X size={12} />
               </button>
@@ -532,18 +706,21 @@ export function Composer(p: ComposerProps) {
           ))}
           {/* 共享组件目标（REQ-EDIT-006）：与屏标签同一排、同一形状，前缀「组件 ·」区分 */}
           {p.componentTargets.map((c) => (
-            <li key={c.id} className="tint-link inline-flex items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="component-chip" data-name={c.name}>
+            <li key={c.id} className="tint-link inline-flex shrink-0 items-center gap-1.5 rounded-pill py-1 pl-2.5 pr-1 type-label font-medium" data-testid="component-chip" data-name={c.name}>
               <span className="max-w-40 truncate">{t('chip.component', { name: c.name })}</span>
               <button type="button" aria-label={t('chip.removeComponent', { name: c.name })} onClick={() => p.onRemoveComponentTarget(c.id)} className="grid size-5 place-items-center rounded-pill transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">
                 <X size={12} />
               </button>
             </li>
           ))}
-          {/* 动词行是变长文本：放在可截断的 flex 项里，改字不挤动旁边的按钮（RESP-010） */}
-          <li className={`min-w-0 truncate type-label ${over ? 'text-warning' : 'text-text-secondary'}`} data-testid="verb-line" aria-live="polite">
-            {over ? t('verb.over', { count: p.targets.length, max: p.maxTargets }) : verb}
-          </li>
-        </ul>
+        </ChipStrip>
+        )}
+        {/* 动词行是变长文本：放在可截断的 flex 项里，改字不挤动旁边的按钮（RESP-010）。不随标签滚动；
+            有标签时先让标签条滚动，动词行最多占这一段的六成，再长才截断 */}
+        <span className={cn('truncate type-label', hasChips ? 'max-w-[60%] shrink-0' : 'min-w-0', over ? 'text-warning' : 'text-text-secondary')} data-testid="verb-line" aria-live="polite">
+          {over ? t('verb.over', { count: p.targets.length, max: p.maxTargets }) : verb}
+        </span>
+        </div>
         {!p.sketch && (p.targets.length > 0 || p.anchor || p.componentTargets.length > 0) && (
           <button type="button" data-testid="clear-targets" onClick={p.onClearTargets} className="shrink-0 rounded-md px-1.5 py-0.5 type-label text-(--semantic-color-action-link) transition-colors duration-(--semantic-motion-duration-fast) state-layer focus-ring">{t('clear')}</button>
         )}
@@ -624,6 +801,15 @@ export function Composer(p: ComposerProps) {
         </div>
       </div>
     </form>
+    {resizeSides.map((side) => (
+      <div
+        key={side} role="separator" aria-orientation="vertical" tabIndex={0} data-testid="composer-resize" data-side={side}
+        aria-label={t('resize.label')} aria-describedby={resizeDescId} aria-valuemin={COMPOSER_MIN_W} aria-valuemax={Math.max(span.max, COMPOSER_MIN_W)} aria-valuenow={span.w}
+        onPointerDown={startResize(side)} onKeyDown={onResizeKey(side)} onDoubleClick={() => p.dock.onResize(null)}
+        className="composer-resize focus-ring rounded-pill"
+      />
+    ))}
+    {resizeSides.length > 0 && <span id={resizeDescId} className="sr-only">{t('resize.desc')}</span>}
     {/* 收起后的胶囊（v1.16）：同一条边、同一位置；点它或按 ⌘/ 展开、光标回输入区；也能像输入框一样拖。拖过之后松手的那次 click 不算点 */}
     {p.hidden && (
       <button
@@ -642,6 +828,59 @@ export function Composer(p: ComposerProps) {
 // 挪位置的把手（composer-grip，v1.16）：按住拖与拖动词行的空白处一样；聚焦后 ← / → / ↓ 停到左边 / 右边 / 底边的正中；
 // 点一下（或 Enter / 空格）开菜单选边——这是拖动的单指针替代（WCAG 2.5.7）。方向键先于菜单触发器处理：↓ 在那里本是「打开菜单」。
 // 窄视口只停底边：左右两项置灰并写明原因，← / → 只播报原因（在 place 里）
+/**
+ * 目标标签条（PAGE-CANVAS 输入框「目标区」v1.44）：标签排成一行，放不下时这一段横向滚动，不显示滚动条（RESP-016）；
+ * 竖着滚的滚轮换成横向，触控板横扫由浏览器自己滚。还藏着标签的一侧边缘渐隐（styles.css 的 .chip-strip，RESP-021），
+ * 不支持滚动驱动动画的浏览器在这里按滚动位置写同名变量。
+ * 新加的标签（React key 没见过的那一个）在 layout effect 里滚进视野，让开渐隐的那一截
+ */
+const CHIP_FADE = 24; // 与 styles.css 的 --fade-start / --fade-end 同值
+function ChipStrip({ label, children }: { label: string; children: ReactNode }) {
+  const ref = useRef<HTMLUListElement>(null);
+  // 每枚标签一个 li，按 React key 认新来的是第几枚
+  const sig = Children.toArray(children).map((c) => (isValidElement(c) ? String(c.key) : '')).join('\n');
+  const seen = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const ul = ref.current;
+    if (!ul || sig === seen.current) return;
+    const before = new Set(seen.current?.split('\n'));
+    const i = seen.current === null ? -1 : sig.split('\n').findIndex((k) => !before.has(k));
+    seen.current = sig;
+    const li = i >= 0 ? ul.children[i] : undefined;
+    if (!li) return;
+    const a = ul.getBoundingClientRect(); const b = li.getBoundingClientRect();
+    const dx = b.left < a.left + CHIP_FADE ? b.left - a.left - CHIP_FADE : b.right > a.right - CHIP_FADE ? b.right - a.right + CHIP_FADE : 0;
+    if (dx) ul.scrollLeft += dx;
+  }, [sig]);
+  useEffect(() => {
+    const ul = ref.current;
+    if (!ul) return;
+    const wheel = (e: WheelEvent) => {
+      if (e.ctrlKey || ul.scrollWidth <= ul.clientWidth || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      ul.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? ul.clientWidth : 1);
+    };
+    ul.addEventListener('wheel', wheel, { passive: false });
+    if (CSS.supports('animation-timeline: scroll()')) return () => ul.removeEventListener('wheel', wheel);
+    const fade = () => {
+      const max = ul.scrollWidth - ul.clientWidth;
+      ul.style.setProperty('--fade-start', ul.scrollLeft > 1 ? `${CHIP_FADE}px` : '0px');
+      ul.style.setProperty('--fade-end', ul.scrollLeft < max - 1 ? `${CHIP_FADE}px` : '0px');
+    };
+    const ro = new ResizeObserver(fade);
+    ro.observe(ul);
+    for (const li of ul.children) ro.observe(li);
+    ul.addEventListener('scroll', fade, { passive: true });
+    fade();
+    return () => { ro.disconnect(); ul.removeEventListener('scroll', fade); ul.removeEventListener('wheel', wheel); };
+  }, [sig]);
+  return (
+    <ul ref={ref} className="chip-strip flex min-w-0 items-center gap-1.5" aria-label={label} data-testid="chip-strip">
+      {children}
+    </ul>
+  );
+}
+
 function DockGrip({ edge, narrow, onPointerDown, dragged, onPlace }: { edge: DockEdge; narrow: boolean; onPointerDown: (e: ReactPointerEvent<HTMLElement>) => void; dragged: { current: boolean }; onPlace: (to: DockEdge) => void }) {
   const t = useT(composerMessages);
   const [open, setOpen] = useState(false);

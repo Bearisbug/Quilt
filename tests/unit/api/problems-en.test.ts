@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Hono } from 'hono';
-import { L, createMessageSchema, copyDraftSchema, fontFamilySchema, fontUrlSchema, componentNameSchema, updateComponentSchema, createChannelSchema, jobInputSchemas } from '@quilt/core';
+import { L, createMessageSchema, copyDraftSchema, fontFamilySchema, fontUrlSchema, componentNameSchema, updateComponentSchema, createChannelSchema, jobInputSchemas, surfaceStatesSchema, pageStatesSchema, updateScreenSchema, updateSurfaceSchema, moveDraftsSchema } from '@quilt/core';
 import { localeMiddleware, requestLocale, requestUiLocale, outsideRequest, tr, listJoin, countEn } from '../../../apps/api/src/lib/locale.ts';
 import { Problem, problems, problemResponse, ISSUE_EN } from '../../../apps/api/src/lib/errors.ts';
 import { setupHint, toolAvailable } from '../../../apps/api/src/lib/agentCli.ts';
@@ -16,7 +16,7 @@ const ZH: Record<keyof typeof problems, string> = {
   elementNotFound: '元素在当前修订中不存在', routeTaken: '路由在项目内已占用', screenBusy: '目标屏有进行中的作业', componentBusy: '组件「Nav」正在改，等这一轮完事',
   projectBusy: '项目有进行中的作业，先取消或等它完成', revisionConflict: '修订已被更新', componentLocked: '这个元素属于共享组件「Nav」，改组件或先脱离共享',
   componentNameTaken: '组件名在项目内已占用', versionConflict: '设计系统版本冲突', jobFinished: '作业已结束', jobNotFinished: '作业尚未完成',
-  lintFailed: 'HTML 违反设计契约', rateLimited: '请求过于频繁', providerUnavailable: 'LLM 供应商不可用',
+  lintFailed: 'HTML 违反设计契约', rateLimited: '请求过于频繁', providerUnavailable: 'LLM 供应商不可用', surfaceNameTaken: '已经有叫这个名字的一端',
 };
 const ARGS: Partial<Record<keyof typeof problems, unknown[]>> = { componentBusy: ['Nav'], componentLocked: ['Nav'], rateLimited: [3], validation: [[]], unprocessable: [[]], lintFailed: [[]] };
 const make = (name: keyof typeof problems): Problem => (problems[name] as (...a: unknown[]) => Problem)(...(ARGS[name] ?? []));
@@ -74,6 +74,7 @@ test('出口：英文请求拿到英文 title / detail / errors[].message，不�
 
 test('ISSUE_EN：core schema 里每一条中文自定义 message 都登记了英文', () => {
   const uuid = '00000000-0000-4000-8000-000000000000';
+  const dim = (key: string) => ({ key, name: key, values: [{ key: 'a', name: 'A' }, { key: 'b', name: 'B' }], default: 'a' });
   const results = [
     createMessageSchema.safeParse({ content: '' }),
     createMessageSchema.safeParse({ content: 'x', variantOf: uuid }),
@@ -85,6 +86,15 @@ test('ISSUE_EN：core schema 里每一条中文自定义 message 都登记了英
     createChannelSchema.safeParse({ kind: 'openai', label: 'x', model: 'm' }),
     createChannelSchema.safeParse({ kind: 'openai', label: 'x', model: 'm', endpoint: 'https://example.com/v1' }),
     jobInputSchemas.regenerate_subtree.safeParse({ screenId: uuid, qid: 'q1', qids: ['q2', 'q2'], prompt: 'x', expectedRevisionId: uuid }),
+    // 端与状态（REQ-CORE-049 / REQ-CORE-051）：外层的 refine 要内层先过，几种错各自一条
+    surfaceStatesSchema.safeParse({ dims: [{ ...dim('X'), key: 'X' }], events: [] }),
+    surfaceStatesSchema.safeParse({ dims: [{ ...dim('x'), values: [{ key: 'a', name: 'A' }, { key: 'a', name: 'B' }], default: 'c' }], events: [] }),
+    surfaceStatesSchema.safeParse({ dims: [dim('x'), dim('x')], events: [{ key: 'e', name: 'E' }, { key: 'e', name: 'E' }] }),
+    surfaceStatesSchema.safeParse({ dims: Array.from({ length: 7 }, (_, i) => dim(`d${i}`)), events: [] }),
+    pageStatesSchema.safeParse({ dims: Array.from({ length: 5 }, (_, i) => dim(`d${i}`)), events: [] }),
+    updateScreenSchema.safeParse({ surfaceId: uuid }),
+    updateSurfaceSchema.safeParse({ name: 'Web', deviceType: 'desktop', expectedVersion: 1 }),
+    moveDraftsSchema.safeParse({ draftIds: [uuid, uuid], projectId: uuid, surfaceId: uuid }),
   ];
   const messages = new Set(results.flatMap((r) => (r.success ? [] : r.error.issues.map((i) => i.message))).filter((m) => CJK.test(m)));
   for (const m of messages) assert.ok(ISSUE_EN[m] && !CJK.test(ISSUE_EN[m]), `没登记英文：${m}`);

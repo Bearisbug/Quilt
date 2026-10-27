@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'react-router';
-import { MAX_SUBTREE_BLOCKS, draftNameFromPrompt, failureText, type DraftFrame, type DraftFrameChoice, type JobDto, type ScreenDto } from '@quilt/core/browser';
+import { MAX_MOVE_DRAFTS, MAX_SUBTREE_BLOCKS, draftNameFromPrompt, failureText, type DraftFrame, type DraftFrameChoice, type JobDto, type ScreenDto } from '@quilt/core/browser';
 import { api, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button } from '@/ui/ui';
@@ -11,6 +11,7 @@ import type { ComposerHandle } from '@/composer/Composer';
 import { useRunnerPrefs } from '@/composer/useRunnerPrefs';
 import { useComposerDock } from '@/composer/useComposerDock';
 import { jobChips, useEndedJobs } from '@/composer/JobChips';
+import { promptHistory } from '@/composer/history';
 import { coveredScreens, jobLabel } from '@/canvas/jobs';
 import { applySelect, type ElementSelection, type SelectMessage } from '@/canvas/frameMessages';
 import { useSketchbook, type SketchEvent } from '@/sketch/useSketchbook';
@@ -19,6 +20,7 @@ import { DraftRail } from '@/sketch/DraftRail';
 import { SketchComposer } from '@/sketch/SketchComposer';
 import { useRefProjects } from '@/sketch/RefSelect';
 import { CopyDialog } from '@/sketch/CopyDialog';
+import { MoveDialog } from '@/sketch/MoveDialog';
 import { useSettingsSection } from '@/settings/sections';
 import { getLocale, tOf, useLocale, useT, type Locale } from '@/i18n';
 import sketchMessages from '@/i18n/locales/sketch';
@@ -113,6 +115,8 @@ export function SketchRoute() {
     const pend = pendingRef.current;
     // 本机会话写出的新草稿没有 screen_planned，靠带同一 jobId 的回写认领（API-CORE-030 草稿本）
     if (e.kind === 'screen') { if (pend?.jobId === e.jobId) claim(e.screenId); return; }
+    // 别的标签页把草稿搬进了项目（FLOW-SKETCH-MOVE S7）：看板上那张随后的详情里没了，按「已搬走」说，不说「已被删除」
+    if (e.kind === 'moved') { movedAt.current = Date.now(); return; }
     if (e.type === 'screen_planned' && typeof e.data.screenId === 'string') {
       planned.current.set(e.jobId, e.data.screenId);
       if (pend?.jobId === e.jobId) claim(e.data.screenId);
@@ -159,8 +163,10 @@ export function SketchRoute() {
   // 作业已经不在了却没认领到屏（事件丢了）：撤掉骨架，新草稿照常在记录栏里，不让「新草稿」一直被挡着
   useEffect(() => { if (pendingNew && !pendingNew.screenId && detail && !jobs.some((j) => j.id === pendingNew.jobId)) setPendingNew(null); }, [pendingNew, detail, jobs]);
 
-  // 地址里的草稿已被删（S9）：看板回到空并说一声。只按「d 设好之后才发起的详情」判——刚认领的新草稿可能还没进上一份详情
+  // 地址里的草稿已被删（S9）：看板回到空并说一声。只按「d 设好之后才发起的详情」判——刚认领的新草稿可能还没进上一份详情。
+  // 10 s 内来过「搬进项目」的事件就说已搬走
   const dSince = useRef({ id: d, seq: 0 });
+  const movedAt = useRef(0);
   // d 换成一张眼下详情里没有的草稿（后退回到已删的那张、别处刚删）：立刻重取一次，回来的详情里还没有它就按已删处理；刚认领的新草稿等它自己的详情
   useEffect(() => {
     dSince.current = { id: d, seq: book.detailSeq.current };
@@ -170,7 +176,7 @@ export function SketchRoute() {
     if (!detail || !d || detail.screens.some((s) => s.id === d) || book.appliedSeq.current <= dSince.current.seq) return;
     openDraft(null, 'replace');
     setPendingNew((p) => (p?.screenId === d ? null : p));
-    toast(t('page.send.deleted'), 'error');
+    toast(Date.now() - movedAt.current < 10_000 ? t('move.away') : t('page.send.deleted'), 'error');
   }, [detail, d]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 记录栏按创建时间倒序：详情里的屏按创建时间升序返回（API-CORE-004），反过来即可
@@ -340,11 +346,28 @@ export function SketchRoute() {
   }, [openDraft]);
   // Esc 的先后（PAGE-SKETCH）：下拉与弹层自己先拦下；然后一次去掉全部胶囊回到改整张；最后才按 Q-SKETCH-3 收起看板
   // 跟随中先停止跟随（v1.32），再撤选中的块，最后收起看板
-  // Esc 一下只退一层：停止跟随 → 去掉胶囊 → 关掉选元素（同 ⌘E，v1.38）→ 收起看板
-  const escape = () => { if (following) follow.stop(); else if (activePick) setPick(null); else if (picking) changePicking(false); else collapse(); };
+  // Esc 一下只退一层：停止跟随 → 退出记录栏的勾选 → 去掉胶囊 → 关掉选元素（同 ⌘E，v1.38）→ 收起看板
+  const escape = () => { if (following) follow.stop(); else if (selecting) changeSelecting(false); else if (activePick) setPick(null); else if (picking) changePicking(false); else collapse(); };
 
   const [copyFor, setCopyFor] = useState<ScreenDto | null>(null);
   const [deleting, setDeleting] = useState<ScreenDto | null>(null);
+  // 搬进项目（REQ-CORE-052）：记录栏的勾选模式与勾上的几张（按勾的先后，搬进去也按这个顺序排）；已不在草稿本里的不算
+  const [selecting, setSelecting] = useState(false);
+  const [checkedIds, setCheckedIds] = useState<string[]>([]);
+  const [moving, setMoving] = useState(false);
+  const checked = useMemo(() => checkedIds.filter((id) => screens?.some((s) => s.id === id)), [checkedIds, screens]);
+  const changeSelecting = (on: boolean) => { setSelecting(on); setCheckedIds([]); };
+  const check = (id: string) => {
+    if (checked.includes(id)) { setCheckedIds(checked.filter((x) => x !== id)); return; }
+    if (checked.length >= MAX_MOVE_DRAFTS) { toast(t('rail.max', { max: MAX_MOVE_DRAFTS }), 'error'); return; }
+    setCheckedIds([...checked, id]);
+  };
+  // 搬完（S7）：勾选清掉、退出勾选模式；看板上正是其中一张就清空
+  const onMoved = (ids: string[]) => {
+    changeSelecting(false);
+    if (dRef.current && ids.includes(dRef.current)) openDraft(null, 'replace');
+    void refresh({ quiet: true });
+  };
   const composerInput = useMemo(() => ({ get current() { return document.getElementById('chat-input'); } }), []);
   // 删除（API-CORE-018）：确认后删、不可恢复；正在生成或改的服务端回 409
   const remove = async () => {
@@ -400,7 +423,7 @@ export function SketchRoute() {
     if (code === 'KeyZ') void undoVersion();
   };
   const keyRef = useRef({ escape, toggleComposer, shortcut, blocked: false });
-  keyRef.current = { escape, toggleComposer, shortcut, blocked: !!copyFor || !!deleting || !!settingsSection };
+  keyRef.current = { escape, toggleComposer, shortcut, blocked: !!copyFor || !!deleting || moving || !!settingsSection };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.code === 'Slash' || e.code === 'KeyE')) { e.preventDefault(); keyRef.current.shortcut(e.code); return; }
@@ -469,19 +492,22 @@ export function SketchRoute() {
           presence={presence} peersHere={peersHere} editors={editors}
         />
       ) : <StagePending failure={book.failure} onRetry={book.retry} />}
-      <DraftRail open={railOpen} onToggle={toggleRail} drafts={drafts} openId={open?.id ?? null} generating={generating} viewers={viewers} onPick={(id) => { follow.stop(); if (id !== dRef.current) openDraft(id); if (narrow()) setRailOpen(false); }} onShotError={onShotError} />
+      <DraftRail open={railOpen} onToggle={toggleRail} drafts={drafts} openId={open?.id ?? null} generating={generating} viewers={viewers} onPick={(id) => { follow.stop(); if (id !== dRef.current) openDraft(id); if (narrow()) setRailOpen(false); }} onShotError={onShotError}
+        selecting={selecting} checked={checked} onSelecting={changeSelecting} onCheck={check} onMove={() => setMoving(true)} />
       <SketchComposer
         handle={composerRef} laneRef={laneRef} draft={open} jobs={chips} blockedReason={blockedReason} prefs={prefs}
         refs={refs} picking={picking} picks={picks} onRemovePick={removePick} onClimb={(dir) => climbRef.current?.(dir)}
         onSend={onSend} onCancelJob={(id) => void book.cancel(id)} onRetryJob={retryJob} onDismissJob={dismissJob}
         onUploadImage={(file) => (projectId ? api.projects.uploadImage(projectId, file) : Promise.reject(new Error(t('page.blocked.loading'))))}
+        loadHistory={projectId ? () => api.projects.messages(projectId).then((r) => promptHistory(r.items)) : undefined}
         onError={(m) => toast(m, 'error')} onEscape={escape}
         hidden={composerDock.prefs.collapsed}
-        dock={{ edge: composerDock.edge, at: composerDock.at, narrow: composerDock.narrow, onMove: composerDock.move, onToggle: toggleComposer, onMeasure: composerDock.onMeasure }}
+        dock={{ edge: composerDock.edge, at: composerDock.at, narrow: composerDock.narrow, width: composerDock.width, onMove: composerDock.move, onResize: composerDock.resize, onToggle: toggleComposer, onMeasure: composerDock.onMeasure }}
       />
       {settingsSection && <Suspense fallback={null}><SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} onCatalog={prefs.applyCatalog} /></Suspense>}
       {/* 传当前的那份：弹层开着时这一版的截图、写回目标可能刚到 */}
       {copyFor && <CopyDialog draft={detail?.screens.find((x) => x.id === copyFor.id) ?? copyFor} runner={prefs.sendRunner} onClose={() => setCopyFor(null)} onCopied={() => void refresh({ quiet: true })} />}
+      {moving && checked.length > 0 && <MoveDialog drafts={checked.map((id) => detail!.screens.find((x) => x.id === id)!)} runner={prefs.sendRunner} onClose={() => setMoving(false)} onMoved={onMoved} />}
       {deleting && <ConfirmDialog title={t('page.removeTitle', { name: deleting.name })} body={t('page.removeBody')} confirmLabel={tc('delete')} fallback={composerInput} onCancel={() => setDeleting(null)} onConfirm={remove} />}
     </div>
   );

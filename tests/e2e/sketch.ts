@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import type { BrowserContext, Frame, Page } from 'playwright';
 import sharp from 'sharp';
-import { RESTYLE_PROMPT, DRAFT_PAD, SKETCH_GENERATOR_MARK, SKETCH_REFERENCE_IMAGE_NOTE, SUBTREE_BLOCKS_HEADER, draftNameFromPrompt, forkDraftName, forkBody, extractBody, buildPrelude, quiltBlock, quiltBlocks, type Tokens } from '@quilt/core';
+import { NEEDS_OUTER_REPLY, RESTYLE_PROMPT, DRAFT_PAD, SKETCH_GENERATOR_MARK, SKETCH_REFERENCE_IMAGE_NOTE, SUBTREE_BLOCKS_HEADER, draftNameFromPrompt, forkDraftName, forkBody, extractBody, buildPrelude, quiltBlock, quiltBlocks, type Tokens } from '@quilt/core';
 import { launch, seed, seedJson, apiJson, assertTestApi, localFetch, pickOption, selectedValue, eventually, EVIDENCE, WEB, API } from './lib.ts';
 import { connectMcp, callTool } from './mcp-client.ts';
 import { startOpenAiStub, type StubHit } from './openai-stub.ts';
@@ -62,6 +62,12 @@ const DRAWER = `<div data-frame="mobile" class="min-h-dvh bg-stone-100 text-ston
 const LONGLIST = `<div data-frame="mobile" class="min-h-dvh bg-white text-zinc-900 p-6"><h1 class="text-2xl font-semibold">全部账单</h1>
 ${Array.from({ length: 30 }, (_, i) => `<p class="py-3 border-b border-zinc-100 text-sm">第 ${i + 1} 笔 · ¥${(i + 1) * 12}.00</p>`).join('\n')}
 </div>`;
+// 自带滚动条样式的长页面（TC-CORE-162）：页面给根元素与里面的横滑区各写了一套滚动条样式，选择器都比运行时的 * 具体
+const SCROLLY = `<div data-frame="mobile" class="min-h-dvh bg-zinc-950 text-zinc-100 p-6">
+<style>html{scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#a1a1aa transparent}.feed{overflow-x:auto;scrollbar-width:auto}</style>
+<h1 class="text-2xl font-semibold">动态</h1><div class="feed flex gap-3 py-3">${Array.from({ length: 12 }, (_, i) => `<span class="shrink-0 w-24 h-16 rounded-lg bg-zinc-800"></span>`).join('')}</div>
+${Array.from({ length: 30 }, (_, i) => `<p class="py-3 border-b border-zinc-800 text-sm">第 ${i + 1} 条</p>`).join('\n')}
+</div>`;
 // 交给本机会话时，脚本扮演会话写的草稿：写死的色值、没有设计系统
 const WEATHER = '<div data-frame="mobile" class="min-h-dvh bg-[#0b1020] text-white p-6 space-y-2"><h1 class="text-2xl font-semibold">东京</h1><p class="text-6xl font-light">18°</p><p class="text-sm text-[#9fb3ff]">多云 · 体感 16°</p></div>';
 const LOGIN = '<form data-frame="component" style="width:320px" class="rounded-xl bg-white p-6 space-y-3 shadow-lg"><h1 class="text-lg font-semibold">登录</h1><input class="w-full h-10 px-3 rounded-md border border-[#d4d4d8]" placeholder="邮箱"><button type="button" class="w-full h-10 rounded-md bg-[#18181b] text-white">继续</button></form>';
@@ -72,6 +78,8 @@ function draftReply(hit: StubHit): string {
   if (hit.user === 'ping') return 'OK';
   // 一次改几块（v1.26，subtreeBlocksUserPrompt）：每块原样回，根元素加 data-stub="multi"、开标签后接「已改 · 」；
   // [stub-blocks-miss] 每次都少回最后一块（补问那一轮同样少）。调用次数与提示词照常记在 draftStub.hits，按 user 里有没有 SUBTREE_BLOCKS_HEADER 认
+  // 只改选中的几块（v1.50）：[stub-needs-outer] 单块与多块都只回 <quilt-needs-outer/>，模拟指令要动外面一层
+  if (hit.user.startsWith('Within the screen') && hit.user.includes('[stub-needs-outer]')) return NEEDS_OUTER_REPLY;
   const asked = hit.user.split(`\n${SUBTREE_BLOCKS_HEADER}\n`)[1];
   if (asked !== undefined) {
     const blocks = quiltBlocks(asked).map((b) => quiltBlock(b.qid, b.html.replace(/^(<[a-zA-Z][\w-]*)([^>]*>)/, '$1 data-stub="multi"$2已改 · ')));
@@ -84,6 +92,7 @@ function draftReply(hit: StubHit): string {
   if (instr.includes('官网')) return LANDING;
   if (instr.includes('抽屉')) return DRAWER;
   if (instr.includes('长列表')) return LONGLIST;
+  if (instr.includes('自带滚动条')) return SCROLLY;
   const size = /\[size:(\d+)x(\d+)\]/.exec(instr);
   if (size) return `<div style="width:${size[1]}px;height:${size[2]}px;background:#0b1020"></div>`;
   const current = hit.user.split('\nCURRENT HTML:\n')[1];
@@ -1143,7 +1152,7 @@ await step('TC-CORE-115', async () => {
   return `主区 ${mainQid} 换成播放卡片、顶栏与 TabBar 原样；写回目标 ${t.targetQid}；按写回目标再写一次`;
 });
 
-// ---------- TC-CORE-116 写回的冲突与失败：别处改过、正在改、组件实例、元素不在、超限（§16 两条竞态，API-CORE-047） ----------
+// ---------- TC-CORE-116 写回的冲突与失败：别处改过、正在改、组件实例、元素不在；很长的草稿照常写回（§16 两条竞态，API-CORE-047） ----------
 await step('TC-CORE-116', async () => {
   const sb = await sketchbook();
   const P = seedProject('ClashApp', 'mobile', 2);
@@ -1182,7 +1191,8 @@ await step('TC-CORE-116', async () => {
   const toBook = await copy(d.id, { projectId: sb, as: 'overwrite', screenId: S, expectedRevisionId: cur });
   expect(noEl.status === 404 && noEl.body.type === '/errors/element-not-found', `qid 不在应 404 element-not-found：${noEl.status} ${noEl.body.type}`);
   expect(otherScreen.status === 404 && toBook.status === 404 && otherScreen.body.type === '/errors/not-found', `目标屏不在项目里 / 目标是草稿本应 404：${otherScreen.status} ${toBook.status}`);
-  // 5 写入后整页超过 256 KB：400，path html
+  expect((await count()) === k1 && (await revisions(S))[0].id === cur, '失败的写回改动了目标屏');
+  // 5 很长的草稿换掉 S 的标题（单屏不设大小上限，v1.51）：照常写回，S 多一版、正文带上整段长文
   const mcp = await connectMcp();
   cleanups.push(() => mcp.close());
   const bigHtml = `<div data-frame="component" class="w-[360px]"><p>${'x'.repeat(258_000)}</p></div>`;
@@ -1190,9 +1200,11 @@ await step('TC-CORE-116', async () => {
   expect(!big.isError, `前置大草稿：${big.text.slice(0, 160)}`);
   const bigId = (big.json as { screenId: string }).screenId;
   const huge = await copy(bigId, { projectId: P.projectId, as: 'overwrite', screenId: S, qid: h1, expectedRevisionId: cur });
-  expect(huge.status === 400 && huge.body.type === '/errors/validation' && paths(huge.body).includes('html') && JSON.stringify(huge.body).includes('256 KB'), `超限应 400 path html：${huge.status} ${paths(huge.body)}`);
-  expect((await count()) === k1 && (await revisions(S))[0].id === cur, '失败的写回改动了目标屏');
-  return '别处改过 409、正在改 409、组件实例 409 ×2、元素不在 404、目标不对 404 ×2、超限 400；目标屏始终不变';
+  expect(huge.status === 201 && huge.body.previousRevisionId === cur, `很长的草稿写回应 201：${huge.status} ${JSON.stringify(huge.body).slice(0, 200)}`);
+  const afterBig = await revisions(S);
+  const bigBytes = Buffer.byteLength(await revHtml(afterBig[0]));
+  expect(afterBig.length === k1 + 1 && afterBig[0].id === huge.body.revisionId && bigBytes > 258_000, `写回后 S 应多一版且超过 258,000 字节：${afterBig.length} 条，${bigBytes} 字节`);
+  return `别处改过 409、正在改 409、组件实例 409 ×2、元素不在 404、目标不对 404 ×2，目标屏都没变；很长的草稿照常写回，S 多一版 ${Math.round(bigBytes / 1024)} KB`;
 });
 
 // ---------- TC-CORE-117 草稿里只改一块（REQ-CORE-045，API-CORE-006） ----------
@@ -1431,7 +1443,8 @@ await step('TC-CORE-122', async () => {
   await clickInScaled('[data-testid="draft-iframe"]', fl.locator(`[data-qid="${pQid}"]`));
   const chip = page.getByTestId('draft-pick-chip');
   await chip.waitFor({ timeout: 5000 });
-  expect((await chip.innerText()).includes(`「${name}」里的`), `胶囊应写「「${name}」里的 …」：${await chip.innerText()}`);
+  const chipText = (await chip.innerText()).trim();
+  expect(chipText.startsWith('p') && !chipText.includes(name), `胶囊应以「p」开头、不带草稿名「${name}」：${chipText}`);
   expect((await page.getByTestId('verb-line').innerText()).includes('改这一块'), `动词行应写「改这一块」：${await page.getByTestId('verb-line').innerText()}`);
   // 2 发送：建 regenerate_subtree，目标是这张草稿与那一块；新版落库后胶囊清掉
   const r0 = (await revisions(d.id))[0].id;
@@ -1945,6 +1958,8 @@ await step('TC-EDIT-041', async () => {
     // 2 按住 Shift 点暂停按钮：两枚胶囊、「改这 2 块」，草稿里两处选中框
     await pick('button', 1, { shift: true, edge: true });
     await S.check(() => eventually(async () => expect((await chips.count()) === 2 && (await verb()).includes('改这 2 块'), `② 应两枚胶囊、动词行「改这 2 块」：${await chips.count()} 枚，「${await verb()}」`), 5000));
+    // 两枚胶囊排在同一行（v1.44），不上下叠
+    await S.check(async () => { const tops = await chips.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top))); expect(new Set(tops).size === 1, `② 两枚胶囊应在同一行：上沿 ${tops.join(' / ')}`); });
     await S.check(() => eventually(async () => expect((await boxes()) === set(`p · ${q.title}`, `button · ${q.pause}`), `② 草稿里应框住标题与暂停按钮：${await boxes()}`), 3000));
     // 3 按住 Shift 再点标题：标题那枚去掉，剩暂停按钮一枚
     await pick('p', 0, { shift: true });
@@ -2011,6 +2026,136 @@ await step('TC-EDIT-041', async () => {
   return 'Shift 加选减选、每块一枚胶囊、Shift+↑ 走到整行时合并到外层；两块一次发出（一次调用、原 HTML、一版、副标题原样）；少回一块补问后失败不落版；qids 超 8、互相包含、不含 qid 都 400';
 });
 
+// ---------- TC-EDIT-043 胶囊一出来就按 Shift+↑：从刚按着 Shift 点中的那块往上走（源自缺陷 2026-10-25） ----------
+await step('TC-EDIT-043', async () => {
+  await ensureChannel();
+  const sb = await sketchbook();
+  const d = await newDraft(sb, '一个音乐播放器的迷你控制条', { runner: CHANNEL() });
+  await openSketch(d.id);
+  await waitStage('draft', 10000);
+  await page.getByTestId('draft-pick').click();
+  await settledComponent();
+  const q = await (await draftFrame()).evaluate(() => {
+    const ps = document.querySelectorAll('p'); const bs = document.querySelectorAll('button');
+    const [sub, block, row, pause] = [ps[1], ps[0]?.parentElement, bs[0]?.parentElement, bs[1]].map((e) => e?.getAttribute('data-qid') ?? '');
+    return { sub, block, row, pause };
+  });
+  expect(Object.values(q).every(Boolean) && q.block !== q.row, `草稿结构不是播放器控制条：${JSON.stringify(q)}`);
+  const chips = page.getByTestId('draft-pick-chip');
+  const chipQids = async () => (await chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-qid') ?? ''))).sort().join(',');
+  // 同 TC-EDIT-041：按 iframe 的实际缩放换算指针位置，按钮点左缘
+  const pick = async (sel: string, i: number, o: { shift?: boolean; edge?: boolean } = {}) => {
+    const shown = (await page.getByTestId('draft-iframe').boundingBox())!;
+    const p = await (await draftFrame()).evaluate(({ s, k, edge }) => { const r = document.querySelectorAll(s)[k].getBoundingClientRect(); return { x: edge ? r.x + 3 : r.x + r.width / 2, y: r.y + r.height / 2, vw: innerWidth }; }, { s: sel, k: i, edge: !!o.edge });
+    const z = shown.width / p.vw;
+    if (o.shift) await page.keyboard.down('Shift');
+    await page.mouse.click(shown.x + p.x * z, shown.y + p.y * z);
+    if (o.shift) await page.keyboard.up('Shift');
+  };
+  // 1 点暂停按钮：一枚胶囊
+  await pick('button', 1, { edge: true });
+  await eventually(async () => expect((await chipQids()) === q.pause, `① 应一枚暂停按钮的胶囊：${await chipQids()}`), 5000);
+  // 2 第二枚胶囊插进页面的同一刻往输入框发 Shift+↑（人手快时就是这样：胶囊刚出来就按），然后按住 Shift 点副标题
+  await page.evaluate(() => {
+    const mo = new MutationObserver(() => {
+      if (document.querySelectorAll('[data-testid="draft-pick-chip"]').length < 2) return;
+      mo.disconnect();
+      document.querySelector('[data-testid="composer-input"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', code: 'ArrowUp', shiftKey: true, bubbles: true, cancelable: true }));
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  });
+  await pick('p', 1, { shift: true });
+  // 走的是副标题这一块：它往上一级是标题与副标题那一块，暂停按钮原样留着，不合并
+  const want = [q.pause, q.block].sort().join(',');
+  await eventually(async () => expect((await chipQids()) === want, `② 应是暂停按钮与标题副标题那一块：${await chipQids()}（整行是 ${q.row}）`), 5000);
+  await sleep(500);
+  expect((await chipQids()) === want && (await page.getByText('已合并到外层').count()) === 0, `② 停稳后应仍是这两块、不提示合并：${await chipQids()}`);
+  return `胶囊一出来就按 Shift+↑：副标题 ${q.sub} → ${q.block}，暂停按钮 ${q.pause} 留着`;
+});
+
+// ---------- TC-EDIT-044 只改选中的几块，要动外面一层时不改、提示选到外层（v1.50） ----------
+await step('TC-EDIT-044', async () => {
+  await ensureChannel();
+  const sb = await sketchbook();
+  const S = softly();
+  const d = await newDraft(sb, '一个音乐播放器的迷你控制条', { runner: CHANNEL() });
+  const chips = page.getByTestId('draft-pick-chip');
+  const chipQids = async () => (await chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-qid') ?? ''))).sort().join(',');
+  // 同 TC-EDIT-041：按 iframe 的实际缩放换算指针位置，按钮点左缘
+  const pick = async (sel: string, i: number, o: { shift?: boolean; edge?: boolean } = {}) => {
+    const shown = (await page.getByTestId('draft-iframe').boundingBox())!;
+    const p = await (await draftFrame()).evaluate(({ s, k, edge }) => { const r = document.querySelectorAll(s)[k].getBoundingClientRect(); return { x: edge ? r.x + 3 : r.x + r.width / 2, y: r.y + r.height / 2, vw: innerWidth }; }, { s: sel, k: i, edge: !!o.edge });
+    const z = shown.width / p.vw;
+    if (o.shift) await page.keyboard.down('Shift');
+    await page.mouse.click(shown.x + p.x * z, shown.y + p.y * z);
+    if (o.shift) await page.keyboard.up('Shift');
+  };
+  const WHY = '重做这一块失败：要改的是它外面那一层，只改选中的这块做不到。按 Shift+↑ 选到外层再说一遍';
+  /** 输入框发一句，等作业结束：返回作业、这一轮桩收到的调用 */
+  const sendAndWait = async (text: string) => {
+    const h = draftStub.hits.length;
+    await page.getByTestId('composer-input').fill(text);
+    const res = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === `/v1/projects/${sb}/jobs`, { timeout: 10000 });
+    await page.getByTestId('composer-send').click();
+    const r = await res;
+    expect(r.status() === 202, `建作业应 202，实际 ${r.status()}`);
+    const job = await waitJob(((await r.json()) as { job: JobView }).job.id, 60);
+    return { job, calls: draftStub.hits.slice(h) };
+  };
+  try {
+    await openSketch(d.id);
+    await waitStage('draft', 10000);
+    await page.getByTestId('draft-pick').click();
+    await settledComponent();
+    const q = await (await draftFrame()).evaluate(() => {
+      const ps = document.querySelectorAll('p'); const bs = document.querySelectorAll('button');
+      const [sub, row, pause] = [ps[1], bs[0]?.parentElement, bs[1]].map((e) => e?.getAttribute('data-qid') ?? '');
+      return { sub, row, pause };
+    });
+    expect(Object.values(q).every(Boolean), `草稿结构不是播放器控制条：${JSON.stringify(q)}`);
+    const revs0 = (await revisions(d.id)).length;
+    // 1 点暂停按钮，写「把它挪到标题右边 [stub-needs-outer]」发送：作业失败、原因 needs outer element，桩只收到一次调用，提示词里写着只改里面
+    await pick('button', 1, { edge: true });
+    await eventually(async () => expect((await chipQids()) === q.pause, `① 应一枚暂停按钮的胶囊：${await chipQids()}`), 5000);
+    const r1 = await sendAndWait('把它挪到标题右边 [stub-needs-outer]');
+    await S.check(() => expect(r1.job.status === 'failed' && r1.job.output.errorClass === 'validation' && r1.job.output.message === 'needs outer element', `① 作业应失败（validation · needs outer element）：${r1.job.status} ${JSON.stringify(r1.job.output)}`));
+    await S.check(() => expect(r1.calls.length === 1 && r1.calls[0].user.includes(NEEDS_OUTER_REPLY) && r1.calls[0].user.includes('do not add a <script> that moves elements'), `① 桩应只收到一次调用、提示词写着只改里面：${r1.calls.length} 次`));
+    // 2 失败的作业 chip 写原因与下一步；草稿版本数不变；胶囊还在
+    await S.check(() => eventually(async () => expect((await page.getByTestId('job-chip').filter({ hasText: WHY }).count()) === 1, `② 作业 chip 应写「${WHY}」：${(await page.getByTestId('job-chip').allInnerTexts()).join(' | ')}`), 5000));
+    await S.check(async () => expect((await revisions(d.id)).length === revs0, `② 草稿的版本数应不变：${revs0} → ${(await revisions(d.id)).length}`));
+    await S.check(() => eventually(async () => expect((await chipQids()) === q.pause, `② 胶囊应还在：${await chipQids()}`), 3000));
+    // 3 照提示按 Shift+↑：胶囊换成整行（暂停按钮的外层）
+    await page.getByTestId('composer-input').focus();
+    await page.keyboard.press('Shift+ArrowUp');
+    await S.check(() => eventually(async () => expect((await chipQids()) === q.row, `③ Shift+↑ 后应是整行：${await chipQids()}`), 5000));
+    // 4 Esc 清空；点暂停按钮、按住 Shift 点副标题，带 [stub-needs-outer] 发送：多块同样一次调用（不补问）就失败，版本数不变
+    await page.keyboard.press('Escape');
+    await eventually(async () => expect((await chips.count()) === 0, `④ Esc 应清掉胶囊：${await chipQids()}`), 3000);
+    await pick('button', 1, { edge: true });
+    await pick('p', 1, { shift: true });
+    await eventually(async () => expect((await chipQids()) === [q.pause, q.sub].sort().join(','), `④ 发送前应选中暂停按钮与副标题：${await chipQids()}`), 5000);
+    const r4 = await sendAndWait('都挪到最右边 [stub-needs-outer]');
+    await S.check(() => expect(r4.job.status === 'failed' && r4.job.output.message === 'needs outer element' && (r4.job.input.qids as string[] | undefined)?.length === 2, `④ 两块的作业应失败（needs outer element）：${r4.job.status} ${JSON.stringify(r4.job.output)}`));
+    await S.check(() => expect(r4.calls.length === 1 && r4.calls[0].user.includes(`${NEEDS_OUTER_REPLY} instead of the blocks`), `④ 桩应只收到一次多块调用：${r4.calls.length} 次`));
+    await S.check(async () => expect((await revisions(d.id)).length === revs0, `④ 草稿的版本数应不变：${revs0} → ${(await revisions(d.id)).length}`));
+  } catch (e) { S.fail(e); }
+  // 5 普通项目的屏（LLM_DRIVER=stub 的模型）经接口改标题、带 [stub-needs-outer]：作业同样失败，这一屏不变
+  const { projectId: pid, screens } = seedProject('NeedsOuter', 'mobile', 1);
+  try {
+    const sid = screens[0].id;
+    const cur = (await revisions(sid))[0];
+    const qid = /<h1[^>]*data-qid="(q\d+)"/.exec(await revHtml(cur))?.[1];
+    expect(qid, '⑤ 找不到屏标题的 qid');
+    const r5 = await post<{ job: JobView }>(`/v1/projects/${pid}/jobs`, { kind: 'regenerate_subtree', input: { screenId: sid, qid, prompt: '[stub-needs-outer] 把标题挪到右上角', expectedRevisionId: cur.id, runner: STUB } });
+    expect(r5.status === 202, `⑤ 建作业 ${r5.status}`);
+    const j5 = await waitJob(r5.body.job.id, 60);
+    await S.check(() => expect(j5.status === 'failed' && j5.output.errorClass === 'validation' && j5.output.message === 'needs outer element', `⑤ 屏上的作业应失败（validation · needs outer element）：${j5.status} ${JSON.stringify(j5.output)}`));
+    await S.check(async () => { const list = await revisions(sid); expect(list.length === 1 && list[0].id === cur.id, `⑤ 这一屏应不变：${list.length} 版，当前 ${list[0]?.id}`); });
+  } catch (e) { S.fail(e); } finally { await apiJson(`/v1/projects/${pid}`, { method: 'DELETE' }).catch(() => {}); }
+  S.done();
+  return '只改一块与两块时模型回 <quilt-needs-outer/>：作业失败、不补问、草稿与屏不变，chip 提示按 Shift+↑ 选到外层，按了走到整行';
+});
+
 // ---------- TC-CORE-158 选元素时跳过全透明的遮罩（源自缺陷 2026-10-22） ----------
 await step('TC-CORE-158', async () => {
   await ensureChannel();
@@ -2073,6 +2218,140 @@ await step('TC-CORE-160', async () => {
   const after = await boxes();
   await page.getByTestId('draft-pick').click();
   return `滚动 160 px 后悬停框跟到「${after.text}」`;
+});
+
+// ---------- TC-CORE-161 输入框没到 8 行上限时不出滚动条（源自缺陷 2026-10-25） ----------
+await step('TC-CORE-161', async () => {
+  await ensureChannel();
+  const sb = await sketchbook();
+  const d = await newDraft(sb, '一张官网首页', { runner: CHANNEL() });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  cleanups.push(() => page.setViewportSize({ width: 1440, height: 900 }));
+  await openSketch(d.id);
+  await waitStage('draft', 10000);
+  const box = page.getByTestId('composer-input');
+  // 内容比框高多少（> 1 就是框里藏着一截、出了滚动条）、框高、溢出方式
+  const fit = () => box.evaluate((el) => ({ over: el.scrollHeight - el.clientHeight, h: Math.round(el.getBoundingClientRect().height), y: getComputedStyle(el).overflowY }));
+  // ① 宽窗口下打一段折成两行的字，窗口缩到 420 宽：输入框随之变窄、字折成更多行，框跟着长高，不出滚动条
+  await box.fill('把首屏标题换成更短的一句，副标题压到一行以内，按钮改成实心深色并放大一号，底部再加一行客户标志');
+  await sleep(300);
+  const wide = await fit();
+  expect(wide.over <= 1, `① 宽窗口下就有滚动条：${JSON.stringify(wide)}`);
+  await page.setViewportSize({ width: 420, height: 900 });
+  await eventually(async () => { const f = await fit(); expect(f.over <= 1 && f.h > wide.h, `① 变窄后框应长高、不出滚动条：宽时 ${JSON.stringify(wide)}，现在 ${JSON.stringify(f)}`); }, 3000);
+  // ② 清空：占位文案很长也只占一行，框高一行、不能滚
+  await box.fill('');
+  await page.setViewportSize({ width: 360, height: 900 });
+  await eventually(async () => { const f = await fit(); expect((f.over <= 1 || f.y === 'hidden') && f.h <= 29, `② 空着时应一行高、不出滚动条：${JSON.stringify(f)}`); }, 3000);
+  // ③ 到 8 行上限才在框里滚动
+  await box.fill(Array.from({ length: 12 }, (_, i) => `第 ${i + 1} 行`).join('\n'));
+  await eventually(async () => { const f = await fit(); expect(f.over > 1 && f.y === 'auto' && f.h === 224, `③ 12 行应锁在 224 px、框内滚动：${JSON.stringify(f)}`); }, 3000);
+  await box.fill('');
+  return `变窄后框随字长高；空着一行高；12 行锁在 224 px 内滚`;
+});
+
+// ---------- TC-CORE-162 草稿自带滚动条样式时照样不显示滚动条（源自缺陷 2026-10-25） ----------
+await step('TC-CORE-162', async () => {
+  await ensureChannel();
+  const sb = await sketchbook();
+  const d = await newDraft(sb, '一张自带滚动条样式的长页面', { runner: CHANNEL() });
+  await openSketch(d.id);
+  await waitStage('draft', 10000);
+  const f = await draftFrame();
+  await f.locator('.feed').waitFor({ timeout: 10000 });
+  const bars = await f.evaluate(() => ({ root: getComputedStyle(document.documentElement).scrollbarWidth, feed: getComputedStyle(document.querySelector('.feed')!).scrollbarWidth, scrolls: document.documentElement.scrollHeight > innerHeight }));
+  expect(bars.scrolls, `草稿应比视口高、能滚：${JSON.stringify(bars)}`);
+  expect(bars.root === 'none' && bars.feed === 'none', `页面自带的滚动条样式不该压过运行时：${JSON.stringify(bars)}`);
+  return `根元素与横滑区的 scrollbar-width 都是 none，页面照样能滚`;
+});
+
+// ---------- TC-CORE-165 输入框里按 ↑ / ↓ 翻发过的话，参考图一起带回（v1.46，PAGE-CANVAS 输入框「输入区」） ----------
+await step('TC-CORE-165', async () => {
+  await ensureChannel();
+  const sb = await sketchbook();
+  // 前置：草稿本里依次发三句（中间那句带一张参考图），都用桩通道
+  const sendMsg = async (content: string, attachmentIds: string[] = []) => {
+    const r = await post<{ job: JobView }>(`/v1/projects/${sb}/messages`, { content, runner: CHANNEL(), attachmentIds });
+    expect(r.status === 202, `发「${content}」应 202：${r.status}`);
+    await waitJob(r.body.job.id, 120);
+  };
+  const A = '历史一：一张官网首页', B = '历史二：照参考图做一张记账首页', C = '历史三：一张官网首页';
+  const bImg = await uploadPng(sb);
+  await sendMsg(A); await sendMsg(B, [bImg]); await sendMsg(C);
+  const ref = path.join(EVIDENCE, `run-${RUN}-history.png`);
+  await writeFile(ref, PNG);
+  await openSketch();
+  await useStubRunner();
+  const box = page.getByTestId('composer-input');
+  const thumbs = page.locator('ul[aria-label="本次参考图"] img');
+  const state = async () => ({ text: await box.inputValue(), imgs: await thumbs.evaluateAll((els) => els.map((e) => (e as HTMLImageElement).src)) });
+  // 1 先写半句、贴一张图等传完；光标在末尾按 ↑：第一下只把光标挪到最前，第二下填回最近一条（C，没有图）
+  await box.click();
+  await box.fill('还没发的半句');
+  await page.setInputFiles('input[type=file]', ref);
+  await page.waitForFunction(`document.querySelectorAll('ul[aria-label="本次参考图"] img').length === 1 && !document.querySelector('ul[aria-label="本次参考图"] span')`, null, { timeout: 15000 });
+  const mine = await state();
+  await box.press('ArrowUp');
+  await sleep(150);
+  expect((await box.inputValue()) === '还没发的半句' && (await box.evaluate((el: HTMLTextAreaElement) => el.selectionStart)) === 0, `① 第一下 ↑ 只该把光标挪到最前：${JSON.stringify(await state())}`);
+  await box.press('ArrowUp');
+  await eventually(async () => { const s = await state(); expect(s.text === C && s.imgs.length === 0, `① 应填回「${C}」、没有图：${JSON.stringify(s)}`); }, 3000);
+  // 2 再按 ↑：B 带着它那张图；再 ↑：A
+  await box.press('ArrowUp');
+  await eventually(async () => { const s = await state(); expect(s.text === B && s.imgs.length === 1 && !s.imgs[0].startsWith('blob:'), `② 应填回「${B}」与它的参考图：${JSON.stringify(s)}`); }, 3000);
+  await box.press('ArrowUp');
+  await eventually(async () => expect((await box.inputValue()) === A, `② 应翻到「${A}」：${await box.inputValue()}`), 3000);
+  // 3 ↓ 往回：B → C → 回到开始翻之前的半句与那张图
+  await box.press('ArrowDown');
+  await eventually(async () => expect((await box.inputValue()) === B, `③ ↓ 应回到「${B}」`), 3000);
+  await box.press('ArrowDown');
+  await eventually(async () => expect((await box.inputValue()) === C, `③ ↓ 应回到「${C}」`), 3000);
+  await box.press('ArrowDown');
+  await eventually(async () => { const s = await state(); expect(s.text === mine.text && s.imgs.join() === mine.imgs.join(), `③ 翻过最近一条应回到原来的草稿与图：${JSON.stringify(s)}，原来 ${JSON.stringify(mine)}`); }, 3000);
+  // 4 光标挪到最前再 ↑ 翻到 C，按 Esc：回到原来的草稿与图
+  await box.press('Meta+ArrowUp');
+  await box.press('ArrowUp');
+  await eventually(async () => expect((await box.inputValue()) === C, `④ 应翻到「${C}」`), 3000);
+  await box.press('Escape');
+  await eventually(async () => { const s = await state(); expect(s.text === mine.text && s.imgs.join() === mine.imgs.join(), `④ Esc 应换回原来的草稿：${JSON.stringify(s)}`); }, 3000);
+  // 5 翻到 B 发出去：请求带 B 的原文与原来那张图的 id；发完框里回到原来的草稿与图
+  await box.press('Meta+ArrowUp');
+  await box.press('ArrowUp');
+  await box.press('ArrowUp');
+  await eventually(async () => expect((await box.inputValue()) === B, `⑤ 应翻到「${B}」`), 3000);
+  const req = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === `/v1/projects/${sb}/messages`);
+  await box.press('Enter');
+  const body = JSON.parse((await req).postData() ?? '{}') as { content?: string; attachmentIds?: string[] };
+  expect(body.content === B && body.attachmentIds?.join() === bImg, `⑤ 应原样发出「${B}」与图 ${bImg}：${JSON.stringify(body)}`);
+  await eventually(async () => { const s = await state(); expect(s.text === mine.text && s.imgs.length === 1, `⑤ 发完应回到原来的草稿与图：${JSON.stringify(s)}`); }, 5000);
+  // 6 一直按 ↑ 到框里不再变：停在草稿本最早发过的那句（套件里别的用例也在草稿本里发过话，不一定是 A），再按不动；Esc 回到原来的草稿
+  const listed = (await apiJson<{ items: { role: string; content: string }[] }>(`/v1/projects/${sb}/messages?limit=100`)).body.items;
+  const oldest = listed.find((m) => m.role === 'user' && m.content.trim())?.content;
+  await box.press('Meta+ArrowUp');
+  await box.press('ArrowUp');
+  await eventually(async () => expect((await box.inputValue()) === B, `⑥ 第一下应翻到刚发的「${B}」：${await box.inputValue()}`), 3000);
+  let presses = 1, last = JSON.stringify(await state());
+  for (; presses < 150; presses++) {
+    await box.press('ArrowUp');
+    await sleep(60);
+    const now = JSON.stringify(await state());
+    if (now === last) break;
+    last = now;
+  }
+  expect((await box.inputValue()) === oldest, `⑥ 应停在最早一条「${oldest}」：按了 ${presses} 下，停在「${await box.inputValue()}」`);
+  await box.press('ArrowUp');
+  await sleep(200);
+  expect((await box.inputValue()) === oldest, `⑥ 最早一条再按 ↑ 应停住：${await box.inputValue()}`);
+  await box.press('Escape');
+  await eventually(async () => { const s = await state(); expect(s.text === mine.text && s.imgs.length === 1, `⑥ Esc 应换回原来的草稿：${JSON.stringify(s)}`); }, 3000);
+  // 7 两行字、光标在末尾：↑ 照常在字里上移，不翻
+  await box.fill('第一行\n第二行');
+  await box.press('End');
+  await box.press('ArrowUp');
+  await sleep(200);
+  expect((await box.inputValue()) === '第一行\n第二行', `⑦ 光标不在最前时 ↑ 不该翻：${await box.inputValue()}`);
+  await box.fill('');
+  return `↑ / ↓ 按命令行的方式翻，图一起带回，Esc 与发完都回到原来的草稿；按 ${presses} 下到最早一条停住`;
 });
 
 await browser.close();

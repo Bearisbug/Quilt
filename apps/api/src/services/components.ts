@@ -26,6 +26,8 @@ export type ComponentResult = { component: ComponentDto; applied: string[]; skip
 const COLUMN_X = -500;
 const COLUMN_Y0 = 760;
 const COLUMN_GAP = 400;
+/** 第 n 个组件在画布左侧那一列的位置 */
+export const componentSlot = (n: number) => ({ x: COLUMN_X, y: COLUMN_Y0 + n * COLUMN_GAP });
 // 完整 HTML 进上下文的总预算（ADR-012 的 10K 里给组件的份额）
 const FULL_HTML_BUDGET = 24 * 1024;
 
@@ -177,7 +179,7 @@ export async function createComponent(ownerId: string, projectId: string, input:
   const project = await ownedProject(ownerId, projectId);
   const existing = await componentRows(project.id);
   if (existing.length >= MAX_COMPONENTS_PER_PROJECT) throw problems.validation([{ path: 'name', message: L(`每个项目最多 ${MAX_COMPONENTS_PER_PROJECT} 个共享组件`, `A project can have at most ${MAX_COMPONENTS_PER_PROJECT} shared components`) }]);
-  const pos = { x: COLUMN_X, y: COLUMN_Y0 + existing.length * COLUMN_GAP };
+  const pos = componentSlot(existing.length);
   const insert = async (values: { name: string; html: string; activeClass: string | null; inactiveClass: string | null }): Promise<Row> => {
     try {
       const [row] = await db.insert(schema.components).values({ projectId: project.id, ...values, summary: componentSummary(values.html), ...pos }).returning();

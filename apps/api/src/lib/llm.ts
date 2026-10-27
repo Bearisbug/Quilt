@@ -6,7 +6,7 @@ import { config } from '../config.ts';
 import { sha256 } from './signing.ts';
 import { codexBin } from './agentCli.ts';
 import { tr } from './locale.ts';
-import { EDIT_BLOCK, SKETCH_GENERATOR_MARK, SUBTREE_BLOCKS_HEADER, quiltBlock, quiltBlocks, type DraftFrame } from '@quilt/core';
+import { EDIT_BLOCK, NEEDS_OUTER_REPLY, SKETCH_GENERATOR_MARK, SUBTREE_BLOCKS_HEADER, quiltBlock, quiltBlocks, type DraftFrame } from '@quilt/core';
 
 // LLM 适配层（§17 Claude API）。驱动：anthropic（生产，API key）| agent-sdk（本机 Claude 订阅，仅开发）| codex（本机 Codex 订阅，v0.68）
 // | gemini | openai（兼容端点）| stub（测试故障注入/回放）。
@@ -299,6 +299,8 @@ class StubLlm implements Llm {
     // 用例靠它造出「作业在跑的那一阵」与「模型已经在回来的路上时被取消」（TEST.md §3）
     const hold = Number(/\[stub-hold:(\d+)\]/.exec(`${system}\n${prompt}`)?.[1] ?? 0);
     if (hold) await new Promise((r) => setTimeout(r, hold));
+    // 只改选中的几块（v1.50）：[stub-needs-outer] 在单块与多块的提示词里都回 NEEDS_OUTER_REPLY，模拟指令要动外面一层
+    if (prompt.startsWith('Within the screen') && prompt.includes('[stub-needs-outer]')) return { text: NEEDS_OUTER_REPLY, tokensIn: 1000, tokensOut: 10, model, ms: 5 };
     const isPlan = prompt.startsWith('App:');
     // 改屏要补丁时（提示词里有补丁块的格式说明，ADR-007 v1.05）：[stub-patch] 回一块把第一个 <h1> 的文字换成「Patched title」的补丁，
     // [stub-patch-miss] 回一块在 CURRENT HTML 里找不到的补丁（流水线随后退回整屏提示词，再来的那次回固定整屏）
@@ -322,6 +324,16 @@ class StubLlm implements Llm {
       const frame = (/\[stub-frame:(component|mobile|desktop)\]/.exec(prompt)?.[1] ?? /^FRAME: (component|mobile|desktop)\b/m.exec(system)?.[1] ?? 'component') as DraftFrame;
       return { text: fixtureDraft(frame, prompt.includes('[stub-script]')), tokensIn: 1000, tokensOut: 800, model, ms: 5 };
     }
+    // 建议状态（REQ-CORE-051）：固定两个维度一个事件，用例据此勾选保存
+    if (system.includes('app-wide STATES of one surface')) {
+      return { text: JSON.stringify({ summary: 'Stub states', dims: [{ name: 'Network', values: ['Online', 'Offline', 'Weak'] }, { name: 'Account', values: ['Signed in', 'Guest'] }], events: [{ name: 'Saved toast', ms: 1500 }] }), tokensIn: 1000, tokensOut: 100, model, ms: 5 };
+    }
+    // 在已有的 app 里加一屏（planOneScreenSystemPrompt）：回 /extra-<n>，n 取提示词里还没出现过的最小一个
+    if (system.includes('The user wants ONE additional screen')) {
+      let n = 1;
+      while (prompt.includes(`/extra-${n}`)) n++;
+      return { text: JSON.stringify({ name: `Extra ${n}`, route: `/extra-${n}`, purpose: 'Stub screen', links: [], sections: ['header', 'main content', 'primary action'], entryFrom: null, presentation: 'push' }), tokensIn: 500, tokensOut: 60, model, ms: 5 };
+    }
     const text = isPlan
       ? JSON.stringify({ screens: [
           { name: 'Home', route: '/home', purpose: 'Overview', links: ['/list', '/settings'], sections: ['header', 'hero', 'list'] },
@@ -330,13 +342,20 @@ class StubLlm implements Llm {
           { name: 'Settings', route: '/settings', purpose: 'Preferences', links: ['/home'], sections: ['header', 'toggles'] },
           { name: 'Profile', route: '/profile', purpose: 'Account', links: ['/home', '/settings'], sections: ['header', 'avatar', 'stats'] },
         ] })
-      : fixtureScreen(prompt);
+      : fixtureScreen(prompt, system);
     return { text, tokensIn: 1000, tokensOut: 800, model, ms: 5 };
   }
 }
 
-function fixtureScreen(prompt: string): string {
+// [stub-pad:<字节数>] 在 main 末尾垫一段这么长的隐藏文字，造很大的屏（单屏不设大小上限，v1.51）
+// 「补上 N 屏」（REQ-CORE-051）：指令点名了端上的一个维度时，按系统提示里那个维度的取值逐个写一段 data-when（缺省取值不写）
+function fixtureScreen(prompt: string, system = ''): string {
   const name = prompt.match(/screen "([^"]+)"/)?.[1] ?? 'Screen';
+  const pad = Number(/\[stub-pad:(\d+)\]/.exec(prompt)?.[1] ?? 0);
+  const fill = /按这一端的维度「([^」]+)」补上各取值下的显示/.exec(prompt)?.[1];
+  const dimLine = fill ? system.split('\n').find((l) => l.startsWith('  - dimension "') && l.includes(`(${fill}):`)) : undefined;
+  const dimKey = dimLine && /dimension "([^"]+)"/.exec(dimLine)?.[1];
+  const states = dimKey ? [...dimLine!.slice(dimLine!.indexOf('):') + 2).matchAll(/([a-z][a-z0-9-]*) \(([^)]*)\)( \[default\])?/g)].filter((m) => !m[3]).map((m) => `<p data-when="${dimKey}:${m[1]}" class="text-sm text-on-surface-variant">${m[2]}</p>`).join('') : '';
   const links = [...prompt.matchAll(/(\/[a-z0-9-]+) \(/g)].map((m) => m[1]).slice(0, 4);
   const nav = links.map((r) => `<a href="${r}" class="flex flex-col items-center gap-1 py-2 text-xs text-on-surface-variant"><i data-lucide="home" class="w-5 h-5"></i>${r.slice(1)}</a>`).join('');
   return `<div class="min-h-dvh flex flex-col bg-background text-on-background">
@@ -344,7 +363,7 @@ function fixtureScreen(prompt: string): string {
 <main class="flex-1 overflow-y-auto px-4 py-6 space-y-6">
 <div class="bg-surface rounded-lg border border-outline-variant p-4"><label for="q" class="text-sm font-medium">Search</label><input id="q" name="q" class="w-full h-12 px-4 rounded-md bg-surface border border-outline-variant text-on-surface placeholder:text-on-surface-variant" placeholder="Search"></div>
 <ul class="space-y-0">${[1, 2, 3].map((i) => `<li><a href="${links[0] ?? '/home'}" class="flex items-center gap-3 py-3 border-b border-outline-variant"><img src="https://picsum.photos/seed/${name}${i}/96/96" class="w-12 h-12 rounded-md object-cover" alt="item ${i}"><span class="flex-1 text-sm">Item ${i}</span><i data-lucide="chevron-right" class="w-5 h-5"></i></a></li>`).join('')}</ul>
-<button type="button" class="inline-flex items-center justify-center h-12 px-6 rounded-full bg-primary text-on-primary font-semibold">Primary action</button>
+<button type="button" class="inline-flex items-center justify-center h-12 px-6 rounded-full bg-primary text-on-primary font-semibold">Primary action</button>${states}${pad ? `\n<p class="hidden">${'x'.repeat(pad)}</p>` : ''}
 </main>
 <nav class="sticky bottom-0 mt-auto grid grid-cols-4 bg-surface border-t border-outline-variant">${nav}</nav>
 </div>`;

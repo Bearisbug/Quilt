@@ -319,7 +319,9 @@ function DraftFrameView({ draft, avail, progress, previewOrigin, onEscape, onSho
   }, [ready, readySeq, peerBlocks, themeMode]); // eslint-disable-line react-hooks/exhaustive-deps
   const [selSeq, setSelSeq] = useState(0);
   const framed = picking ? pickQids.join(',') : '';
-  useEffect(() => {
+  // 在提交时就发（layout effect）：按着 Shift 点的那块运行时不记作最后点中的，要等这条消息；胶囊一出来就按 Shift+↑ 时，
+  // 逐级选必须从它走，消息不能落在按键之后
+  useLayoutEffect(() => {
     if (!ready || !picking) return;
     const qids = framed ? framed.split(',') : [];
     post({ type: 'quilt:highlight', qid: qids[qids.length - 1] ?? null, ...(qids.length > 1 ? { qids } : null) });

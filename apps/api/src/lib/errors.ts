@@ -44,6 +44,16 @@ export const ISSUE_EN: Record<string, string> = {
   '改内容或改名要带 expectedVersion': 'Changing the content or name requires expectedVersion',
   'OpenAI 兼容的模型必须填端点': 'OpenAI-compatible models need an endpoint',
   '这类模型必须填 API Key': 'This kind of model needs an API key',
+  '键只能是小写字母开头的字母、数字与连字符，最长 24 个': 'Keys must start with a lowercase letter and contain only lowercase letters, digits and hyphens, up to 24 characters',
+  '缺省取值要是这个维度的取值之一': 'The default must be one of this dimension’s values',
+  '取值的键重复了': 'Two values have the same key',
+  '维度的键重复了': 'Two dimensions have the same key',
+  '事件的键重复了': 'Two events have the same key',
+  '屏不能换端：删了重造，或从草稿本搬进来': 'A screen cannot move to another surface: delete and regenerate it, or move it in from the Sketchbook',
+  '端的设备建好不能改': 'A surface’s device cannot be changed after it is created',
+  '草稿重复了': 'The same draft is listed twice',
+  '至多 6 个维度': 'At most 6 dimensions',
+  '至多 4 个维度': 'At most 4 dimensions',
 };
 
 export const problems = {
@@ -63,7 +73,9 @@ export const problems = {
   // 共享组件（REQ-EDIT-006）：实例里的元素不能直改，改组件或先脱离共享；名字项目内唯一
   componentLocked: (component: string) => new Problem(409, '/errors/component-locked', L(`这个元素属于共享组件「${component}」，改组件或先脱离共享`, `This element belongs to the shared component “${component}”; edit the component or detach it first`), { component }),
   componentNameTaken: () => new Problem(409, '/errors/component-name-taken', L('组件名在项目内已占用', 'The component name is already taken in this project')),
-  versionConflict: () => new Problem(409, '/errors/version-conflict', L('设计系统版本冲突', 'Design system version conflict')),
+  // 端（REQ-CORE-049）：端名项目内不重名（不分大小写）
+  surfaceNameTaken: () => new Problem(409, '/errors/surface-name-taken', L('已经有叫这个名字的一端', 'There is already a surface with this name')),
+  versionConflict: (what: Localized = L('设计系统', 'Design system')) => new Problem(409, '/errors/version-conflict', L(`${what.zh}版本冲突`, `${what.en} version conflict`)),
   jobFinished: () => new Problem(409, '/errors/job-finished', L('作业已结束', 'The job has already finished')),
   jobNotFinished: () => new Problem(409, '/errors/job-not-finished', L('作业尚未完成', 'The job has not finished yet')),
   lintFailed: (violations: unknown) => new Problem(422, '/errors/lint-failed', L('HTML 违反设计契约', 'The HTML violates the design contract'), { violations }),

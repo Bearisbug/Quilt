@@ -1,5 +1,5 @@
 #!/bin/zsh
-# 全量轮（TEST.md §5）：起测试栈 → 十三个套件依次跑 → 停栈 → install 套件（它自己起打包形态的服务）。
+# 全量轮（TEST.md §5）：起测试栈 → 十五个套件依次跑 → 停栈 → install 套件（它自己起打包形态的服务）。
 # 用法：RUN=<轮次号> scripts/e2e-all.sh [lane]（lane 缺省 main，见 e2e-stack.sh）；输出只留结果行与各套件的汇总，完整日志在 .e2e/<lane>/run-<RUN>.log。
 # 跑之前先构建前端（pnpm --filter @quilt/web build）：测试栈托管的是 apps/web/dist。
 lane=${1:-main}
@@ -13,7 +13,7 @@ eval "$($S $lane env)"
 export RUN
 : > $FULL
 F='^(✅|❌|⏭|🟡)|^=== RUN-|^最慢|^   - '
-for suite in core load canvas proto edit components agent mcp chat sketch i18n settings record; do
+for suite in core load canvas proto edit components agent mcp chat sketch i18n settings record collab surfaces; do
   echo "### $suite $(date +%T)"
   echo "### $suite $(date +%T)" >> $FULL
   npx tsx e2e/$suite.ts 2>&1 | tee -a $FULL | grep --line-buffered -E "$F"

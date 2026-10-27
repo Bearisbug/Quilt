@@ -4,6 +4,7 @@ import type canvasParts from './locales/canvas-parts';
 import type collab from './locales/collab';
 import type common from './locales/common';
 import type composer from './locales/composer';
+import type fullview from './locales/fullview';
 import type panelsDesign from './locales/panels-design';
 import type panelsInspect from './locales/panels-inspect';
 import type preview from './locales/preview';
@@ -27,6 +28,7 @@ declare module 'i18next' {
       collab: typeof collab.zh;
       common: typeof common.zh;
       composer: typeof composer.zh;
+      fullview: typeof fullview.zh;
       'panels-design': typeof panelsDesign.zh;
       'panels-inspect': typeof panelsInspect.zh;
       preview: typeof preview.zh;

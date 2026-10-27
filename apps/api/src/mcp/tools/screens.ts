@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
-import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENT_BYTES, PRESENTATIONS, applyEdits, elementOpSchema, routeSchema, type ElementOp, type Presentation, type TextEdit } from '@quilt/core';
+import { IMAGE_MEDIA_TYPES, MAX_ATTACHMENT_BYTES, PRESENTATIONS, applyEdits, elementOpSchema, routeSchema, groupNameSchema, type ElementOp, type Presentation, type TextEdit } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
 import { config } from '../../config.ts';
 import { Problem, problems, isUniqueViolation } from '../../lib/errors.ts';
@@ -72,25 +72,25 @@ export function registerScreenTools(c: ToolCtx) {
   }));
 
   server.registerTool('quilt.create_screen', {
-    description: 'Push your own HTML as a new screen. Keep html in one call under ~8 KB — a long tool argument makes your streamed response fragile ("Connection lost mid-response"); for a bigger screen use create_upload_url + append_upload in ≤ 8 KB chunks and pass uploadId. Server injects data-qid + design tokens, records any contract deviations (never rejected), stores a revision and screenshots it. presentation "overlay" = a bottom sheet / dialog the player presents over the screen it opened from (default "push"): its root must be bg-transparent — see the overlay rule in quilt.get_design_contract. componentsOverwritten in the result names shared-component instances whose edited copy was replaced by the component (change the component with quilt.update_component instead). Pass jobId (given in the prompt when Quilt launched you) so the revision counts as that job\'s output. In the sketchbook (quilt.get_sketchbook) route may be omitted, the draft\'s frame comes from data-frame on the root and nothing is checked against a design contract.',
-    inputSchema: { projectId: z.string().uuid(), name: z.string().min(1).max(80), route: routeSchema.optional(), html: z.string().optional(), uploadId: z.string().optional(), jobId: z.string().uuid().optional(), presentation: z.enum(PRESENTATIONS).optional() },
+    description: 'Push your own HTML as a new screen. Keep html in one call under ~8 KB — a long tool argument makes your streamed response fragile ("Connection lost mid-response"); for a bigger screen use create_upload_url + append_upload in ≤ 8 KB chunks and pass uploadId. Server injects data-qid + design tokens, records any contract deviations (never rejected), stores a revision and screenshots it. presentation "overlay" = a bottom sheet / dialog the player presents over the screen it opened from (default "push"): its root must be bg-transparent — see the overlay rule in quilt.get_design_contract. componentsOverwritten in the result names shared-component instances whose edited copy was replaced by the component (change the component with quilt.update_component instead). Pass jobId (given in the prompt when Quilt launched you) so the revision counts as that job\'s output. surfaceId puts it in that surface (default the first; the route must be free within that surface) and group in that directory group. In the sketchbook (quilt.get_sketchbook) route may be omitted, the draft\'s frame comes from data-frame on the root and nothing is checked against a design contract.',
+    inputSchema: { projectId: z.string().uuid(), name: z.string().min(1).max(80), route: routeSchema.optional(), html: z.string().optional(), uploadId: z.string().optional(), jobId: z.string().uuid().optional(), presentation: z.enum(PRESENTATIONS).optional(), surfaceId: z.string().uuid().optional(), group: groupNameSchema.optional() },
   }, wrap(async (a) => {
     write();
-    return ingestScreen(user.id, a.projectId as string, { name: a.name as string, route: a.route as string | undefined, html: a.html as string | undefined, uploadId: a.uploadId as string | undefined, jobId: a.jobId as string | undefined, presentation: a.presentation as Presentation | undefined });
+    return ingestScreen(user.id, a.projectId as string, { name: a.name as string, route: a.route as string | undefined, html: a.html as string | undefined, uploadId: a.uploadId as string | undefined, jobId: a.jobId as string | undefined, presentation: a.presentation as Presentation | undefined, surfaceId: a.surfaceId as string | undefined, group: a.group as string | undefined });
   }));
 
   // v0.51：name / route 可选——只换 HTML 不必重传它们，缺省沿用该屏当前值
   server.registerTool('quilt.update_screen', {
-    description: 'Replace an existing screen\'s HTML (new revision). To change part of a screen use quilt.patch_screen instead of resending it; a full rewrite over ~8 KB goes through create_upload_url + append_upload chunks and uploadId. name and route are optional and default to the screen\'s current ones. expectedRevisionId guards against concurrent edits and is REQUIRED when jobId is given (use the revision id from the prompt, quilt.get_outline or quilt.get_project; on 409 call quilt.get_screen and redo on the current version).',
+    description: 'Replace an existing screen\'s HTML (new revision). To change part of a screen use quilt.patch_screen instead of resending it; a full rewrite over ~8 KB goes through create_upload_url + append_upload chunks and uploadId. name and route are optional and default to the screen\'s current ones. expectedRevisionId guards against concurrent edits and is REQUIRED when jobId is given (use the revision id from the prompt, quilt.get_outline or quilt.get_project; on 409 call quilt.get_screen and redo on the current version). group moves it (and its variants) to that directory group; null clears it. A screen cannot change surface.',
     inputSchema: {
       projectId: z.string().uuid(), screenId: z.string().uuid(), name: z.string().min(1).max(80).optional(), route: routeSchema.optional(),
       html: z.string().optional(), uploadId: z.string().optional(), expectedRevisionId: z.string().uuid().optional(), jobId: z.string().uuid().optional(),
-      presentation: z.enum(PRESENTATIONS).optional(),
+      presentation: z.enum(PRESENTATIONS).optional(), group: groupNameSchema.nullable().optional(),
     },
   }, wrap(async (a) => {
     write();
     const { screen } = await ownedScreen(user.id, a.screenId as string);
-    return ingestScreen(user.id, a.projectId as string, {
+    return ingestScreen(user.id, a.projectId as string, { group: a.group as string | null | undefined,
       name: (a.name as string | undefined) ?? screen.name, route: (a.route as string | undefined) ?? screen.route,
       html: a.html as string | undefined, uploadId: a.uploadId as string | undefined, screenId: screen.id,
       expectedRevisionId: a.expectedRevisionId as string | undefined, jobId: a.jobId as string | undefined, presentation: a.presentation as Presentation | undefined,
@@ -126,7 +126,6 @@ export function registerScreenTools(c: ToolCtx) {
       // 按位置续写：重试同一段（上次其实写成功了、只是回包丢了）时 offset 对不上，报出当前长度让调用方接着写
       if (a.offset !== before.length) throw new Problem(409, '/errors/upload-offset', `upload has ${before.length} chars, offset was ${a.offset}`, { chars: before.length });
       const next = before + (a.chunk as string);
-      if (Buffer.byteLength(next) > config.maxScreenHtmlBytes) throw problems.unprocessable([{ path: 'chunk', message: `upload would be ${Buffer.byteLength(next)} bytes, the screen limit is ${config.maxScreenHtmlBytes}` }]);
       await storage.put(key, next, 'text/html');
       return { uploadId: a.uploadId, chars: next.length };
     });

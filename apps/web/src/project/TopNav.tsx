@@ -26,3 +26,15 @@ export function TopNav({ children, right, floating }: { children?: ReactNode; ri
     </header>
   );
 }
+
+// 视图切换（PAGE-FULLVIEW，ADR-042）：画布与全屏是同一个项目的两个视图，顶栏端切换器后面一组两枚，⌥F 来回切。
+// 压在设计稿上，轨道用 chrome 材质（.seg 的透明填充会透出底下的设计稿）
+export function ViewToggle({ full, onChange, label, canvasLabel, fullLabel, hint }: { full: boolean; onChange: (full: boolean) => void; label: string; canvasLabel: string; fullLabel: string; hint: string }) {
+  const item = (on: boolean) => cn('focus-ring inline-flex h-7 items-center rounded-sm px-2.5 type-label font-medium', on ? 'bg-surface-raised text-text-primary shadow-(--semantic-elevation-raised)' : 'state-layer text-text-secondary');
+  return (
+    <div role="group" aria-label={label} aria-description={hint} data-testid="view-toggle" className="chrome inline-flex h-8 shrink-0 items-center gap-0.5 rounded-md p-0.5">
+      <button type="button" aria-pressed={!full} aria-keyshortcuts="Alt+F" data-testid="view-canvas" className={item(!full)} onClick={() => { if (full) onChange(false); }}>{canvasLabel}</button>
+      <button type="button" aria-pressed={full} aria-keyshortcuts="Alt+F" data-testid="view-full" className={item(full)} onClick={() => { if (!full) onChange(true); }}>{fullLabel}</button>
+    </div>
+  );
+}

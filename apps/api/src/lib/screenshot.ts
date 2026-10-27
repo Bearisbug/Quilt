@@ -139,11 +139,27 @@ async function useVendorCache(context: BrowserContext) {
 
 // 一次截图 / 抽 CSS 的整条链分段设上限（§17 Chromium 一行）：建上下文 ≤ 5 s，载入到拍完 ≤ capMs，关上下文 ≤ 5 s。
 // 任何一段超时都抛错交给调用方的重试，调用方（作业里的回刷、截图队列）不跟着挂住；建或关上下文超时说明浏览器本身卡住了，换掉它
+// 闲置关掉（§17 v1.49）：截图、缩略图、抽样式都做完，config.screenshotIdleMs（5 分钟）内没有新的，就关掉浏览器，下一张再起（多等 1–2 s）。
+// 单例当场清掉，关的过程中进来的截图另起一个，不会拿到正在关的这个
+let busy = 0;
+let idleTimer: NodeJS.Timeout | undefined;
+function closeIdle() {
+  if (busy) return;
+  const p = browser;
+  browser = null;
+  void p?.then((b) => b.close(), () => {}).catch(() => {});
+}
 async function inPage<T>(options: BrowserContextOptions, capMs: number, fn: (page: Page) => Promise<T>): Promise<T> {
-  const b = await getBrowser();
-  const context = await within(b.newContext(options), 5_000, '建上下文').catch((e: Error) => { discard(b); throw e; });
-  try { return await within(useVendorCache(context).then(() => context.newPage()).then(fn), capMs, '载入与拍摄'); }
-  finally { await within(context.close(), 5_000, '关上下文').catch(() => discard(b)); }
+  busy++;
+  clearTimeout(idleTimer);
+  try {
+    const b = await getBrowser();
+    const context = await within(b.newContext(options), 5_000, '建上下文').catch((e: Error) => { discard(b); throw e; });
+    try { return await within(useVendorCache(context).then(() => context.newPage()).then(fn), capMs, '载入与拍摄'); }
+    finally { await within(context.close(), 5_000, '关上下文').catch(() => discard(b)); }
+  } finally {
+    if (--busy === 0) idleTimer = setTimeout(closeIdle, config.screenshotIdleMs).unref();
+  }
 }
 
 // Tailwind Play CDN 与 lucide 都是「脚本跑完才改 DOM / 注样式」，networkidle 只保证请求停了、

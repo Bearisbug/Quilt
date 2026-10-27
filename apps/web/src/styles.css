@@ -171,6 +171,14 @@ body { background: var(--semantic-color-surface-canvas); color: var(--semantic-c
     right var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard), top var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard);
 }
 .composer-dock[data-collapsed] { --card-w: var(--pill-w, 7rem); width: auto; }
+/* 拖边改过宽（v1.45，Composer 写 data-sized 与 --composer-user）：用改出来的宽代替量出来的宽，上限同样是让开左右浮层之后的可用宽 */
+.composer-dock[data-sized] { --composer-w: min(var(--composer-user), calc(100% - var(--lane-left) - var(--side-right))); }
+/* 改宽把手：贴在卡片左右两条竖边上、一半在框外，避开圆角；平时只有指针形状提示，悬停、键盘聚焦或拖动中露出一道短竖条 */
+.composer-resize { position: absolute; top: 0.75rem; bottom: 0.75rem; z-index: 1; display: grid; width: 0.75rem; place-items: center; cursor: ew-resize; touch-action: none; }
+.composer-resize[data-side="left"] { left: -0.375rem; }
+.composer-resize[data-side="right"] { right: -0.375rem; }
+.composer-resize::before { content: ''; width: 3px; height: 1.5rem; border-radius: 9999px; background: var(--semantic-color-border-strong); opacity: 0; transition: opacity var(--semantic-motion-duration-fast) var(--semantic-motion-easing-standard); }
+.composer-resize:is(:hover, :focus-visible)::before, :root[data-composer-resize] .composer-resize::before { opacity: 1; }
 /* 停在底边：横向落点 at 按整条底边算，缺省 0.5 = 压在视口正中；只有当侧边浮层真会压住它时才让位，且只让到不重叠为止。
    不要写成「在两个浮层之间的空白里居中」——那样开合一次侧边浮层就把用户正在打字的框横向搬走。
    clamp 的三个参数正好是「左浮层内边界 / 视口上的 at 处 / 右浮层内边界」，宽视口下中间那项获胜，于是开合面板时它一动不动。胶囊同一算法 */
@@ -195,12 +203,16 @@ body { background: var(--semantic-color-surface-canvas); color: var(--semantic-c
    父页就收不到 move / up（与 .viewport[data-pointer-drag] 同一个原因） */
 :root[data-composer-drag], :root[data-composer-drag] * { cursor: grabbing !important; }
 :root[data-composer-drag] iframe { pointer-events: none !important; }
+/* 拖边改宽中：全页保持左右箭头指针、不选中文字（把手抓着指针，iframe 吃不到事件） */
+:root[data-composer-resize], :root[data-composer-resize] * { cursor: ew-resize !important; user-select: none; }
 /* 收起（⌘/ / 右上角「收起」/ 聚焦某屏时自动）：不卸载，草稿留着；作者样式会压过 UA 的 [hidden]，这里显式兜底（COMP-008） */
 .composer[hidden] { display: none; }
 /* 拖着图片经过输入框时给出可放置的提示（REQ-CORE-012） */
 .composer[data-dropping] { border-color: var(--semantic-color-action-link); border-style: dashed; }
 .composer:has(textarea:focus-visible) { outline: 2px solid transparent; outline-offset: 2px; }
 .composer textarea { max-height: 224px; } /* 8 行 × 28px 行高，到顶后内部滚动 */
+/* 空着时框高一行（Composer 不按 placeholder 量高）：原生 placeholder 是透明的、只留给读屏，它折成几行也不能让框可滚 */
+.composer textarea:placeholder-shown { overflow-y: hidden; }
 /* 工具条空闲时略退后，聚焦、有内容或生成中回到全亮 */
 .composer-bar { opacity: 0.78; transition: opacity var(--semantic-motion-duration-base) var(--semantic-motion-easing-standard); }
 /* 工具条默认不折行：宽度是按它一行排满量出来的，终态必然装得下。动画中途外壳比终态窄，nowrap 让它
@@ -259,6 +271,21 @@ body { background: var(--semantic-color-surface-canvas); color: var(--semantic-c
 textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-strong) transparent; }
 .scroll-nav { overflow-y: auto; scrollbar-width: none; }
 .scroll-nav::-webkit-scrollbar { display: none; }
+/* 输入框里的目标标签条（PAGE-CANVAS 输入框「目标区」v1.44）：一行，放不下时横向滚动、不显示滚动条；竖向滚轮由 Composer 换成横向。
+   还藏着标签的一侧边缘渐隐 24 px，滚到头的一侧、放得下时不渐隐（RESP-021）。渐隐是遮罩、只改透明度不上色，界面「不用渐变」的唯一例外（DESIGN §13.1）；
+   渐隐量由滚动驱动动画改，不支持的浏览器由 Composer 按滚动位置写同名变量 */
+@property --fade-start { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --fade-end { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@keyframes chip-fade-start { to { --fade-start: 24px; } }
+@keyframes chip-fade-end { from { --fade-end: 24px; } to { --fade-end: 0px; } }
+.chip-strip {
+  overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none;
+  mask-image: linear-gradient(to right, transparent, black var(--fade-start), black calc(100% - var(--fade-end)), transparent);
+}
+.chip-strip::-webkit-scrollbar { display: none; }
+@supports (animation-timeline: scroll()) {
+  .chip-strip { animation: chip-fade-start linear both, chip-fade-end linear both; animation-timeline: scroll(self inline), scroll(self inline); animation-range: 0px 24px, calc(100% - 24px) 100%; }
+}
 
 /* 画布 */
 /* 指针：平时是箭头（空白处按下是框选）；按住空格进入平移就绪才是抓手，平移中是握拳 */
@@ -480,6 +507,46 @@ textarea { scrollbar-width: thin; scrollbar-color: var(--semantic-color-border-s
 .variant-chips { position: absolute; left: 50%; top: 36px; z-index: 3; display: flex; gap: 2px; padding: 2px; border-radius: var(--semantic-radius-pill); transform: translateX(-50%); pointer-events: auto; }
 .variant-chip { pointer-events: auto; border: 0; border-radius: var(--semantic-radius-pill); background: transparent; color: var(--semantic-color-text-secondary); font-size: var(--semantic-typography-caption-font-size); font-weight: var(--primitive-font-weight-medium); padding: 3px 10px; cursor: pointer; }
 .variant-chip[aria-pressed="true"] { background: var(--semantic-color-surface-raised); color: var(--semantic-color-text-primary); box-shadow: var(--semantic-elevation-raised); }
+
+/* 全屏视图（PAGE-FULLVIEW，REQ-CORE-050）：左栏屏目录 240 px、右栏状态栏 280 px，各自可收起；中栏是设备台，输入框缺省停在中栏底边正中。
+   宽度不到 1100 px 时右栏收成抽屉、不占中栏的宽，不到 48rem 时左栏也收成抽屉。输入框读同名的 --composer-left / --side-right，停在左右边时贴着两栏的内侧 */
+.fullview-shell {
+  --fv-dir-w: 15rem;
+  --fv-states-w: 17.5rem;
+  --fv-left: calc(var(--fv-dir-w) + 1.5rem);
+  --fv-right: calc(var(--fv-states-w) + 1.5rem);
+  --side-left: var(--fv-left);
+  --side-right: var(--fv-right);
+  --composer-left: var(--fv-left);
+  --lane-left: var(--composer-left);
+  --chrome-left: var(--side-left);
+  --chrome-right: var(--side-right);
+  --chrome-top: 3.5rem;
+  --chrome-bottom: 11.5rem;  /* 首帧默认值，输入框量到实际高度后由页面用内联变量覆盖 */
+  --seg-left-top: 3.5rem;
+  --seg-left-bottom: 1rem;
+  --seg-right-top: 3.5rem;
+  --seg-right-bottom: 1rem;
+  background-color: var(--semantic-color-surface-canvas);
+}
+.fullview-shell[data-dir="closed"] { --fv-left: 0.75rem; }
+.fullview-shell[data-states="closed"] { --fv-right: 0.75rem; }
+@media (max-width: 68.75rem) { .fullview-shell { --fv-right: 0.75rem; } }
+@media (max-width: 48rem) { .fullview-shell { --fv-left: 0.75rem; } }
+.fullview-shell:is([data-dock="left"], [data-dock="right"]) { --chrome-bottom: 1rem; }
+.fullview-shell[data-dock="left"] { --chrome-left: calc(var(--fv-left) + var(--dock-span, 0px) + 1rem); }
+.fullview-shell[data-dock="right"] { --chrome-right: calc(var(--fv-right) + var(--dock-span, 0px) + 1rem); }
+.fullview-shell :is(.composer-dock[data-dock="left"], .composer-seg[data-side="left"]) { left: var(--fv-left); }
+/* 两栏：高度有界、各自滚动（RESP-017）；抽屉形态压在中栏上 */
+.fv-col { position: absolute; top: var(--chrome-top); bottom: 0.75rem; z-index: 20; display: flex; flex-direction: column; overflow: hidden; border-radius: var(--semantic-radius-lg); }
+.fv-col[data-side="left"] { left: 0.75rem; width: var(--fv-dir-w); }
+.fv-col[data-side="right"] { right: 0.75rem; width: var(--fv-states-w); }
+.fv-col > .fv-body { min-height: 0; flex: 1; }
+/* 设备台：中栏里工具条以下、输入框以上；屏放到能放下的最大、最大 1:1，放不下用 zoom 等比缩小（同草稿本看板） */
+.fv-stage { position: absolute; left: var(--chrome-left); right: var(--chrome-right); top: calc(var(--chrome-top) + 3rem); bottom: var(--chrome-bottom); display: flex; align-items: center; justify-content: center; }
+/* 工具栏的提示气泡朝下弹，压在中栏的设备上：工具栏叠在中栏之上、两侧栏之下 */
+.fv-toolbar { position: absolute; left: var(--chrome-left); right: var(--chrome-right); top: var(--chrome-top); z-index: 10; display: flex; justify-content: center; pointer-events: none; }
+.fv-toolbar > * { pointer-events: auto; }
 
 /* 小地图（REQ-CORE-024 v0.61）：顶栏下方左侧，左缘与项目切换器 chip 对齐（12 px）；canvas 绘制（Minimap.tsx），颜色取本元素上的 tokens 变量，切外观时重读 */
 .minimap { position: absolute; left: 0.75rem; top: 4rem; z-index: 20; border-radius: var(--semantic-radius-lg); cursor: crosshair; touch-action: none; }

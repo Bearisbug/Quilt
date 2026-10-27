@@ -8,10 +8,11 @@ import { progressText } from '@/canvas/jobTracker';
 import { tOf, useLocale, type Locale } from '@/i18n';
 import sketchMessages from '@/i18n/locales/sketch';
 
-/** 项目事件流里草稿本页关心的两类（API-CORE-030）：作业事件按 jobId，屏回写按 screenId（本机会话写出的新草稿带 jobId） */
+/** 项目事件流里草稿本页关心的三类（API-CORE-030）：作业事件按 jobId，屏回写按 screenId（本机会话写出的新草稿带 jobId），几张草稿被搬进了项目（API-CORE-055） */
 export type SketchEvent =
   | { kind: 'job'; jobId: string; type: JobEventDto['type']; data: Record<string, unknown>; job: JobDto | undefined }
-  | { kind: 'screen'; screenId: string; jobId: string | null };
+  | { kind: 'screen'; screenId: string; jobId: string | null }
+  | { kind: 'moved' };
 
 // 签名续取（同画布 v0.76）：截图签名至少 5 分钟、预览签名至少 10 分钟有效，页面可见时距上次取到详情满 4 分钟就静默重取
 const RENEW_MS = 4 * 60_000;
@@ -125,8 +126,12 @@ export function useSketchbook(onEvent: (e: SketchEvent) => void, presenceRef?: {
   onEventRef.current = onEvent;
   useEffect(() => projectId ? subscribeProjectEvents(projectId, (e) => {
     scheduleRefresh();
-    const p = e.data as { jobId?: string; type?: JobEventDto['type']; screenId?: string; data?: unknown } | undefined;
-    if (e.type === 'screen_changed') { if (p?.screenId) onEventRef.current({ kind: 'screen', screenId: p.screenId, jobId: p.jobId ?? null }); return; }
+    const p = e.data as { jobId?: string; type?: JobEventDto['type']; screenId?: string; reason?: string; data?: unknown } | undefined;
+    if (e.type === 'screen_changed') {
+      if (p?.reason === 'moved') onEventRef.current({ kind: 'moved' });
+      else if (p?.screenId) onEventRef.current({ kind: 'screen', screenId: p.screenId, jobId: p.jobId ?? null });
+      return;
+    }
     if (!p?.jobId || !p.type) return;
     const jobId = p.jobId;
     const data = (p.data ?? {}) as Record<string, unknown>;

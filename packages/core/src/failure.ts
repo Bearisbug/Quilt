@@ -8,8 +8,9 @@ const WHAT: Record<JobKind, Localized> = {
   generate: L('造屏失败', 'Generation failed'), edit_screens: L('改屏失败', 'Edit failed'), edit_component: L('改组件失败', 'Component edit failed'),
   regenerate_subtree: L('重做这一块失败', 'Regenerating this block failed'), apply_design_system: L('回刷失败', 'Re-apply failed'),
   propose_design_system: L('提炼约定失败', 'Distilling conventions failed'), export_prototype: L('导出失败', 'Export failed'),
-  ingest_screen: L('写入失败', 'Write failed'), chat: L('回答失败', 'Reply failed'),
+  ingest_screen: L('写入失败', 'Write failed'), chat: L('回答失败', 'Reply failed'), propose_states: L('建议状态失败', 'Suggesting states failed'),
 };
+const NEEDS_OUTER = /^needs outer element\.?$/i;
 // 流水线里的英文内部原因（pipeline.ts 的 JobFailure）
 const KNOWN: [RegExp, Localized][] = [
   [/^revision conflict$/, L('这一屏在作业跑的时候被改过', 'this screen was changed while the job was running')],
@@ -20,7 +21,9 @@ const KNOWN: [RegExp, Localized][] = [
   [/^route space exhausted$/, L('没有可用的新路由了', 'no new routes are left')],
   [/^variantOf must be a default screen/, L('变体只能给还在的默认屏出', 'variants can only be made from a default screen that still exists')],
   [/^project has no screens to export$/, L('项目里还没有屏', 'the project has no screens yet')],
-  [/^screen html too large/, L('生成的屏超过大小上限', 'the generated screen is over the size limit')],
+  [/^surface not found$/, L('这一端已被删除', 'this surface was deleted')],
+  // 只改选中的几块时指令要动它们外面一层（v1.50）：模型通道判 validation，本机会话以 finish_job 的 summary 报同一句，errorClass 是 agent
+  [NEEDS_OUTER, L('要改的是它外面那一层，只改选中的这块做不到', 'this change needs the element around it, so it cannot be done on the selected block alone')],
 ];
 const CJK = /[\u3400-\u9fff]/;
 // 中文原因的英文（英文界面用）：中文版把中文原因原样写进文案，英文版按这张表换；表里没有的退回按失败类别的通用原因，
@@ -112,7 +115,7 @@ export function failureText(kind: JobKind | null | undefined, errorClass?: Error
     why = t('超过时限没做完', 'it did not finish within the time limit');
     if (kind === 'generate' || kind === 'edit_screens') next = t('点「重试」；屏数或版数多时先减少再发', 'click “Retry”, or if there were many screens or versions, send again with fewer');
   } else if (errorClass === 'agent') {
-    why = cjk ?? t('本机会话没有完成', 'the local session did not finish');
+    why = known ?? cjk ?? t('本机会话没有完成', 'the local session did not finish');
     next = again
       ? t(`在本机 agent 面板看详情，或换成一个模型，然后${again}`, `see the details in the Local agents panel, or switch to a model, then ${again}`)
       : t('在本机 agent 面板看详情，或换成一个模型再发', 'see the details in the Local agents panel, or send again with a model');
@@ -120,6 +123,8 @@ export function failureText(kind: JobKind | null | undefined, errorClass?: Error
     why = known ?? cjk ?? (errorClass === 'system' ? t('Quilt 内部出错', 'Quilt hit an internal error') : t('模型产出不合格', 'the model output did not pass the checks'));
     next = errorClass === 'system' ? t(`${retry}；反复出现时看 API 日志`, `${retry}; if it keeps happening, check the API log`) : again ?? t('点「重试」，或换个说法再发', 'click “Retry”, or rephrase and send again');
   }
+  // 下一步不是再发一次：同一句话再发还是要动外面，先选到外层
+  if (NEEDS_OUTER.test(msg)) next = t('按 Shift+↑ 选到外层再说一遍', 'press Shift+↑ to select the element around it and send again');
   const what = kind ? WHAT[kind][locale] : t('作业失败', 'Job failed');
   const reason = why.replace(/[。．.]$/, '');
   if (!en) return `${what}${reason ? `：${reason}` : ''}${kept > 0 ? `，已保留 ${kept} 屏` : ''}。${next}`;

@@ -7,7 +7,8 @@ import { archiveProject, saveArchive } from './record.ts';
 import { notifyCanvas } from '../lib/events.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
 import { requestLocale, sketchbookName } from '../lib/locale.ts';
-import { tokensFromSeed, newProjectDesign, shotSpecFor, L, type DeviceType, type ProjectDto, type ProjectDetailDto, type DesignSystemDto, type ScreenDto, type LinkDto, type JobDto, type JobRunner, RADIUS_SCALES, type Palette, type ColorMode, type FontSource, type Presentation, type ProjectKind, type DraftFrame } from '@quilt/core';
+import { tokensFromSeed, newProjectDesign, shotSpecFor, L, type DeviceType, type ProjectDto, type ProjectDetailDto, type DesignSystemDto, type ScreenDto, type LinkDto, type JobDto, type JobRunner, RADIUS_SCALES, type Palette, type ColorMode, type FontSource, type Presentation, type ProjectKind, type DraftFrame, type RevisionStates } from '@quilt/core';
+import { insertFirstSurface, surfacesOf, surfaceDto, type SurfaceRow } from './surfaces.ts';
 
 export type ProjectRow = typeof schema.projects.$inferSelect;
 export type ScreenRow = typeof schema.screens.$inferSelect;
@@ -37,7 +38,9 @@ export async function createProject(ownerId: string, input: { name: string; devi
       designMd: preset?.designMd ?? fresh!.designMd,
       components: preset?.components ?? fresh!.components,
     }).returning();
-    return { project, designSystem: ds };
+    // 第一端（REQ-CORE-049 / API-CORE-003）：同一事务里建出来，草稿本没有端（INV-CORE-008）
+    const surfaces: SurfaceRow[] = kind === 'app' ? [await insertFirstSurface(tx, project.id, input.deviceType)] : [];
+    return { project, designSystem: ds, surfaces };
   });
   if (preset) await copyPresetAssets(preset.id, created.project.id).catch(() => {});
   return created;
@@ -93,7 +96,7 @@ export const projectDto = (p: ProjectRow): ProjectDto => ({ id: p.id, name: p.ki
 export const designSystemDto = (d: typeof schema.designSystems.$inferSelect): DesignSystemDto => ({ id: d.id, projectId: d.projectId, seedColor: d.seedColor, tokens: d.tokens, palette: (d.palette as DesignSystemDto['palette']) ?? null, colorMode: d.colorMode as DesignSystemDto['colorMode'], designMd: d.designMd, components: d.components, version: d.version });
 export const jobDto = (j: JobRow): JobDto => ({ id: j.id, projectId: j.projectId, kind: j.kind as JobDto['kind'], status: j.status as JobDto['status'], runner: j.runner as JobRunner, input: j.input, output: j.output, createdAt: j.createdAt.toISOString(), startedAt: j.startedAt?.toISOString() ?? null, finishedAt: j.finishedAt?.toISOString() ?? null });
 
-export async function screenDtos(project: ProjectRow, rows: ScreenRow[]): Promise<ScreenDto[]> {
+export async function screenDtos(project: ProjectRow, rows: ScreenRow[], surfaces?: SurfaceRow[]): Promise<ScreenDto[]> {
   const revIds = rows.map((s) => s.currentRevisionId).filter((x): x is string => !!x);
   const revs = revIds.length ? await db.select().from(schema.screenRevisions).where(inArray(schema.screenRevisions.id, revIds)) : [];
   const byId = new Map(revs.map((r) => [r.id, r]));
@@ -112,10 +115,12 @@ export async function screenDtos(project: ProjectRow, rows: ScreenRow[]): Promis
   const targetRows = targetIds.length ? await db.select({ id: schema.screens.id, screenName: schema.screens.name, projectId: schema.projects.id, projectName: schema.projects.name })
     .from(schema.screens).innerJoin(schema.projects, eq(schema.projects.id, schema.screens.projectId)).where(inArray(schema.screens.id, targetIds)) : [];
   const targets = new Map(targetRows.map(({ id, ...t }) => [id, t]));
+  // 视口按屏所在端的设备（REQ-CORE-049）；草稿按画框
+  const deviceOf = new Map((surfaces ?? (rows.some((s) => s.surfaceId) ? await surfacesOf(project.id) : [])).map((f) => [f.id, f.deviceType]));
   return Promise.all(rows.map(async (s) => {
     const rev = s.currentRevisionId ? byId.get(s.currentRevisionId) : undefined;
     // 草稿按画框给尺寸（REQ-CORE-040），与截图同一出处；普通屏仍是项目的设备形态
-    const { size } = shotSpecFor(project, s);
+    const { size } = shotSpecFor({ kind: project.kind, deviceType: (s.surfaceId && deviceOf.get(s.surfaceId)) || project.deviceType }, s);
     const n = rev?.jobId && rev.candidateIndex !== null && !rev.candidateSettledAt ? counts.get(`${s.id}|${rev.jobId}`) ?? 0 : 0;
     return {
       id: s.id, projectId: s.projectId, name: s.name, route: s.route, purpose: s.purpose, x: s.x, y: s.y, width: size.w, height: size.h,
@@ -131,6 +136,7 @@ export async function screenDtos(project: ProjectRow, rows: ScreenRow[]): Promis
       variantOf: s.variantOf ?? null, variantName: s.variantName ?? null, presentation: s.presentation as Presentation, frame: (s.frame as DraftFrame | null) ?? null,
       refProjectId: s.refProjectId ?? null, targetScreenId: s.targetScreenId ?? null, targetQid: s.targetQid ?? null,
       target: s.targetScreenId ? targets.get(s.targetScreenId) ?? null : null,
+      surfaceId: s.surfaceId ?? null, group: s.groupName ?? null, states: (rev?.states as RevisionStates | null) ?? null,
       updatedAt: s.updatedAt.toISOString(),
     };
   }));
@@ -140,6 +146,7 @@ export async function getProjectDetail(ownerId: string, projectId: string): Prom
   const project = await ownedProject(ownerId, projectId);
   const [ds] = await db.select().from(schema.designSystems).where(eq(schema.designSystems.projectId, projectId));
   const rows = await db.select().from(schema.screens).where(eq(schema.screens.projectId, projectId)).orderBy(schema.screens.createdAt);
+  const surfaces = await surfacesOf(projectId);
   const linkRows = await db.select().from(schema.links).where(eq(schema.links.projectId, projectId));
   const activeJobs = await db.select().from(schema.generationJobs).where(and(eq(schema.generationJobs.projectId, projectId), inArray(schema.generationJobs.status, ['queued', 'running'])));
   const links: LinkDto[] = linkRows.map((l) => ({ fromScreenId: l.fromScreenId, qid: l.elementQid, href: l.href, toScreenId: l.toScreenId }));
@@ -147,5 +154,5 @@ export async function getProjectDetail(ownerId: string, projectId: string): Prom
   const { assetsOf } = await import('./assets.ts');
   // 素材随详情一起给（v0.35 REQ-CORE-019）：风格指南卡片与设计系统面板用的是同一份，分两次取会各刷各的
   // 共享组件也随详情走（v0.46 REQ-EDIT-006）：画布上的组件卡与输入框的目标标签都从这一份读
-  return { project: projectDto(project), designSystem: designSystemDto(ds), screens: await screenDtos(project, rows), links, activeJobs: activeJobs.map(jobDto), assets: await assetsOf(project.id), components: await componentDtos(project, await componentRows(project.id)) };
+  return { project: projectDto(project), designSystem: designSystemDto(ds), surfaces: surfaces.map(surfaceDto), screens: await screenDtos(project, rows, surfaces), links, activeJobs: activeJobs.map(jobDto), assets: await assetsOf(project.id), components: await componentDtos(project, await componentRows(project.id)) };
 }

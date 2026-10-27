@@ -32,7 +32,10 @@ test('apps/web/src/brand/ 的副本与本机 brand/ 一致（本机没有 brand/
 
 test('外壳样式表不用渐变、文字阴影；背景模糊只取 brand 的毛玻璃材质，或对话框遮罩的 6 px', () => {
   const css = read(path.join(SRC, 'styles.css')).replace(/\/\*[\s\S]*?\*\//g, '');
-  assert.doesNotMatch(css, /gradient\(/);
+  // 唯一的例外：目标标签条边缘的渐隐遮罩（DESIGN §13.1，只改透明度、不上色）
+  const fades = [...css.matchAll(/([^{}]*)\{[^{}]*mask-image:[^;}]*gradient\(/g)].map((m) => m[1].trim());
+  assert.deepEqual(fades, ['.chip-strip']);
+  assert.doesNotMatch(css.replace(/mask-image:[^;}]*;/g, ''), /gradient\(/);
   assert.doesNotMatch(css, /text-shadow/);
   const blurs = [...css.matchAll(/backdrop-filter:\s*([^;}]+)/g)].map((m) => m[1].trim());
   assert.ok(blurs.length > 0, '浮层没有接毛玻璃');

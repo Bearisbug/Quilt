@@ -1,5 +1,6 @@
 import { colorVarsCss, isDarkPalette, type Tokens } from './tokens.ts';
 import { fontFace } from './fonts.ts';
+import { withSurfaceStates, type SurfaceStates } from './states.ts';
 
 // 导出单文件原型（REQ-PROTO-004 / ADR-003）：全部屏放进 <template>，hash 路由在同一文档内换 DOM，
 // 与预览态同构；Tailwind 生成 CSS 与 lucide 内联，离线可开（字体/图片仍需网络，可接受）。
@@ -25,8 +26,26 @@ const EXPORT_RUNTIME = String.raw`(function () {
   // 模板克隆出来的脚本插进文档就执行，每次进这一屏都跑一遍：内联脚本包一层块作用域，第二次执行顶层 const/let 才不报「已声明」
   function screen(r) {
     var f = tpls[r].content.cloneNode(true);
-    f.querySelectorAll('script:not([src])').forEach(function (s) { if (s.type !== 'module') s.textContent = '{\n' + s.textContent + '\n}'; });
+    f.querySelectorAll('script:not([src])').forEach(function (s) { if (s.type !== 'module' && s.type !== 'application/json') s.textContent = '{\n' + s.textContent + '\n}'; });
     return f;
+  }
+  // 状态维度（REQ-CORE-051）：导出里一律按缺省取值显示，不带切换。端上的维度在 head 的 JSON 块里，页内的在各屏的声明块里，
+  // 页内与端上重名的不生效；data-when 成立的元素才显示，事件不播
+  function readJson(el) { try { return el ? JSON.parse(el.textContent || '') : null; } catch (e) { return null; } }
+  function states() {
+    var cur = {}; var taken = {}; var html = document.documentElement;
+    var surface = readJson(document.querySelector('script[data-quilt-surface-states]'));
+    ((surface && surface.dims) || []).forEach(function (d) { cur[d.key] = d.default; taken[d.key] = 1; });
+    ((surface && surface.events) || []).forEach(function (e) { taken[e.key] = 1; });
+    document.querySelectorAll('script[data-quilt-states]').forEach(function (s) { var p = readJson(s); ((p && p.dims) || []).forEach(function (d) { if (!taken[d.key]) cur[d.key] = d.default; }); });
+    Array.prototype.slice.call(html.attributes).forEach(function (a) { if (a.name.indexOf('data-s-') === 0 && !(a.name.slice(7) in cur)) html.removeAttribute(a.name); });
+    Object.keys(cur).forEach(function (k) { html.setAttribute('data-s-' + k, cur[k]); });
+    document.querySelectorAll('[data-when]').forEach(function (el) {
+      var on = (el.getAttribute('data-when') || '').trim().split(/\s+/).filter(Boolean).every(function (part) {
+        var at = part.indexOf(':'); return part.charAt(0) !== '@' && at > 0 && part.slice(at + 1).split('|').indexOf(cur[part.slice(0, at)]) >= 0;
+      });
+      if (on) el.setAttribute('data-quilt-on', ''); else el.removeAttribute('data-quilt-on');
+    });
   }
   function addLayer(r) {
     var layer = document.createElement('div'); layer.setAttribute('data-quilt-overlay-layer', r);
@@ -42,7 +61,7 @@ const EXPORT_RUNTIME = String.raw`(function () {
       var k = 0; while (k < layers.length && k < want.length && layers[k].route === want[k]) k++;
       while (layers.length > k) layers.pop().el.remove();
       for (; k < want.length; k++) addLayer(want[k]);
-      restore(); icons(); document.title = names[stack[stack.length - 1]] || document.title;
+      states(); restore(); icons(); document.title = names[stack[stack.length - 1]] || document.title;
     };
     if (base === shown) { sync(); return; }
     var apply = function () { while (layers.length) layers.pop().el.remove(); document.getElementById('quilt-root').replaceChildren(screen(base)); shown = base; window.scrollTo(0, 0); sync(); };
@@ -74,7 +93,7 @@ const EXPORT_RUNTIME = String.raw`(function () {
   render(location.hash.slice(1) || start);
 })();`;
 
-export function buildPrototypeDocument(args: { title: string; tokens: Tokens; screens: ExportScreen[]; tailwindCss: string; lucideJs: string; startRoute?: string }): string {
+export function buildPrototypeDocument(args: { title: string; tokens: Tokens; screens: ExportScreen[]; tailwindCss: string; lucideJs: string; startRoute?: string; states?: SurfaceStates | null }): string {
   const { tokens } = args;
   const colorVars = colorVarsCss(tokens.colors);
   const radiusVars = Object.entries(tokens.radius).map(([k, v]) => `--radius-${k}:${v}`).join(';');
@@ -82,14 +101,14 @@ export function buildPrototypeDocument(args: { title: string; tokens: Tokens; sc
   const start = args.startRoute ?? (args.screens.find((s) => s.presentation !== 'overlay') ?? args.screens[0])?.route ?? '/';
   const templates = args.screens.map((s) => `<template data-route="${escapeAttr(s.route)}" data-name="${escapeAttr(s.name)}" data-presentation="${s.presentation ?? 'push'}">${s.body}</template>`).join('\n');
   // dark: 变体按配色判（v0.89 ADR-005）：抽出来的 Tailwind CSS 是 .dark 祖先写法，暗色配色给 <html> 挂上 dark
-  return `<!doctype html>
+  return withSurfaceStates(`<!doctype html>
 <html lang="en"${isDarkPalette(tokens.colors) ? ' class="dark"' : ''}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(args.title)}</title>
 ${font.lazyLink}
-<style>:root{${colorVars};${radiusVars}}html,body{margin:0;min-height:100%;background:var(--color-background);color:var(--color-on-background);font-family:${font.stack};-webkit-font-smoothing:antialiased}::view-transition-old(root),::view-transition-new(root){animation-duration:220ms}</style>
+<style>:root{${colorVars};${radiusVars}}html,body{margin:0;min-height:100%;background:var(--color-background);color:var(--color-on-background);font-family:${font.stack};-webkit-font-smoothing:antialiased}::view-transition-old(root),::view-transition-new(root){animation-duration:220ms}[data-when]:not([data-quilt-on]){display:none!important}</style>
 <style data-quilt="tailwind">${args.tailwindCss}</style>
 <script>${args.lucideJs}</script>
 </head>
@@ -99,7 +118,7 @@ ${templates}
 <script>${EXPORT_RUNTIME}</script>
 </body>
 </html>
-`;
+`, args.states);
 }
 
 const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);

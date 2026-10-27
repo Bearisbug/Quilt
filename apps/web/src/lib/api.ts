@@ -1,4 +1,4 @@
-import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, DesignSystemDto, ElementOp, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, PresenceEventDto, Runner, ChannelDto, UsageStatsDto, UsageRange, RecordingDto, RecordEventInput, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, DraftFrame, DraftFrameChoice, SketchbookDto, CopyDraftInput, CreateDraftInput, CopyDraftResultDto } from '@quilt/core/browser';
+import type { Presentation, AssetDto, DesignPresetDto, Palette, ColorMode, ProblemDto, ConfigDto, ProjectDto, ProjectDetailDto, MessageDto, JobDto, RevisionDto, ScreenDto, DesignSystemDto, ElementOp, RunnerOptionDto, AgentSessionDto, AgentTool, ProjectEventDto, PresenceEventDto, Runner, ChannelDto, UsageStatsDto, UsageRange, RecordingDto, RecordEventInput, ChannelKind, ChannelVendor, ProbeResultDto, CandidatesDto, ScreenCount, JobRunner, ComponentDto, DraftFrame, DraftFrameChoice, SketchbookDto, CopyDraftInput, CreateDraftInput, CopyDraftResultDto, SurfaceDto, SurfaceStatesInput, DeviceType, MoveDraftsInput, MoveDraftsResultDto } from '@quilt/core/browser';
 
 import { getLocale } from '@/i18n';
 import { uuid } from '@/lib/uuid';
@@ -48,7 +48,8 @@ export const api = {
     // 动词由目标决定（API-CORE-010）：有 targetScreenIds 是改，没有是造；count / versions / anchor 是造改共用的档位。
     // targetComponentIds（REQ-EDIT-006）：只有组件没有屏 = 改这个组件；与屏 / 锚点同发 = 它们的完整 HTML 进上下文
     // frame（REQ-CORE-040）、refProjectId（REQ-CORE-042）：只对草稿本的新草稿有效
-    send: (id: string, body: { content: string; targetScreenIds?: string[]; targetComponentIds?: string[]; count?: ScreenCount; versions?: number; anchor?: { x: number; y: number }; runner?: Runner; attachmentIds?: string[]; frame?: DraftFrameChoice; refProjectId?: string }) =>
+    // surfaceId（REQ-CORE-049）：造屏落在哪一端，缺省第一端
+    send: (id: string, body: { content: string; targetScreenIds?: string[]; targetComponentIds?: string[]; count?: ScreenCount; versions?: number; anchor?: { x: number; y: number }; runner?: Runner; attachmentIds?: string[]; frame?: DraftFrameChoice; refProjectId?: string; surfaceId?: string }) =>
       call<{ userMessage: MessageDto; assistantMessage: MessageDto; job: JobDto }>(`/v1/projects/${id}/messages`, { method: 'POST', body: JSON.stringify(body), idempotencyKey: uuid() }),
     // 重试一轮（API-CORE-034）：服务端复制原作业输入，只换通道
     retry: (id: string, messageId: string, runner?: Runner) =>
@@ -78,7 +79,8 @@ export const api = {
   },
   screens: {
     // name / frame（REQ-CORE-040）：草稿就地改名、换画框；frame 只对草稿有效
-    patch: (id: string, patch: { x?: number; y?: number; name?: string; presentation?: Presentation; frame?: DraftFrame; refProjectId?: string | null }) => call<{ screen: ScreenDto }>(`/v1/screens/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    // group（REQ-CORE-050）：改分组，null = 回到未分组；变体跟着默认屏走
+    patch: (id: string, patch: { x?: number; y?: number; name?: string; presentation?: Presentation; frame?: DraftFrame; refProjectId?: string | null; group?: string | null }) => call<{ screen: ScreenDto }>(`/v1/screens/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     remove: (id: string) => call<void>(`/v1/screens/${id}`, { method: 'DELETE' }),
     revisions: (id: string) => call<{ items: RevisionDto[] }>(`/v1/screens/${id}/revisions`),
     restore: (id: string, revisionId: string, expectedRevisionId: string) => call<{ revision: RevisionDto }>(`/v1/screens/${id}/revisions/${revisionId}/restore`, { method: 'POST', body: JSON.stringify({ expectedRevisionId }) }),
@@ -124,6 +126,14 @@ export const api = {
     get: () => call<SketchbookDto>('/v1/sketchbook'),
     copyDraft: (screenId: string, body: CopyDraftInput) => call<CopyDraftResultDto>(`/v1/sketchbook/drafts/${screenId}/copy`, { method: 'POST', body: JSON.stringify(body), idempotencyKey: uuid() }),
     createDraft: (body: CreateDraftInput) => call<{ screen: ScreenDto }>('/v1/sketchbook/drafts', { method: 'POST', body: JSON.stringify(body), idempotencyKey: uuid() }),
+    // 搬进项目（API-CORE-055）：几张草稿一次落成某一端的屏或共享组件，之后草稿删掉
+    moveDrafts: (body: MoveDraftsInput) => call<MoveDraftsResultDto>('/v1/sketchbook/drafts/move', { method: 'POST', body: JSON.stringify(body), idempotencyKey: uuid() }),
+  },
+  // 端（API-CORE-054）：改名与改维度带 expectedVersion，后到的 409
+  surfaces: {
+    create: (projectId: string, body: { name: string; deviceType: DeviceType }) => call<{ surface: SurfaceDto }>(`/v1/projects/${projectId}/surfaces`, { method: 'POST', body: JSON.stringify(body) }),
+    patch: (id: string, body: { name?: string; states?: SurfaceStatesInput; expectedVersion: number }) => call<{ surface: SurfaceDto }>(`/v1/surfaces/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    remove: (id: string) => call<void>(`/v1/surfaces/${id}`, { method: 'DELETE' }),
   },
   runners: () => call<{ items: RunnerOptionDto[]; default: string }>('/v1/runners'),
   // 本机正在运行的 Claude Code 会话（API-AGENT-010）：会话下拉打开时取

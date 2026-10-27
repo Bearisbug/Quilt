@@ -112,6 +112,9 @@ export async function openApp(page: Page): Promise<void> {
 // API 直调：本地版免鉴权，所有请求都是默认用户
 export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<{ status: number; body: T; headers: Headers }> {
   await assertTestApi(); // 不经浏览器的套件（MCP / 纯接口）也要过这道闸，见 assertTestApi
+  // 先让事件循环转一圈：seed() 同步跑子进程时事件循环停着，API 关掉的空闲长连接（Keep-Alive 4 s）还没被处理，
+  // 紧接着的请求会拿到这条已关的连接、读的时候 ECONNRESET
+  await new Promise((r) => setImmediate(r));
   const res = await fetch(`${API}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(init.headers as Record<string, string>) } });
   const text = await res.text();
   return { status: res.status, body: (text ? JSON.parse(text) : null) as T, headers: res.headers };

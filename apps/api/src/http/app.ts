@@ -56,7 +56,9 @@ export function createApp() {
     if (!Object.values(c.req.param()).every((v) => UUID.test(v))) throw problems.notFound();
     await next();
   };
-  for (const p of ['projects', 'screens', 'jobs', 'components', 'assets', 'design-presets', 'channels', 'sketchbook/drafts']) app.use(`/v1/${p}/:id/*`, uuidParams);
+  for (const p of ['projects', 'screens', 'jobs', 'components', 'assets', 'design-presets', 'channels', 'surfaces']) app.use(`/v1/${p}/:id/*`, uuidParams);
+  // 搬进项目（API-CORE-055）的路径是 /sketchbook/drafts/move，与 /sketchbook/drafts/:id 同一层
+  app.use('/v1/sketchbook/drafts/:id/*', (c, next) => (c.req.param('id') === 'move' ? next() : uuidParams(c, next)));
   app.use('/v1/projects/:projectId/messages/:id/*', uuidParams);
   app.use('/v1/screens/:screenId/revisions/:id/*', uuidParams);
 

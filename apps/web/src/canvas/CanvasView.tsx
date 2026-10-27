@@ -76,6 +76,8 @@ export type CanvasProps = {
   showLinks: boolean;
   /** 视图位置按项目记（quilt:view:<projectId>），刷新回到原处 */
   projectId: string;
+  /** 第一端以外的端各记一份镜头（quilt:view:<projectId>:<viewScope>） */
+  viewScope?: string;
   /** 正在交互的共享组件卡（REQ-EDIT-006）：与屏的聚焦互斥 */
   focusedComponentId?: string | null;
   onFocusComponent?: (id: string | null) => void;
@@ -158,7 +160,7 @@ export function CanvasView(p: CanvasProps) {
   // 候选展开层的操作胶囊按 1/zoom 反向缩放，--zoom 只写在它那一层：写在世界层上的话每帧都让全部卡片重算样式（100 屏时缩放掉帧）
   const candRef = useRef<HTMLDivElement | null>(null);
   const view = useViewport({
-    projectId: p.projectId, safeAreaRef: p.safeAreaRef,
+    projectId: p.projectId, viewScope: p.viewScope, safeAreaRef: p.safeAreaRef,
     onFrame: (v) => {
       candRef.current?.style.setProperty('--zoom', String(v.zoom));
       paintEdges();

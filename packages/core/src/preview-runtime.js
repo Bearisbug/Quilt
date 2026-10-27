@@ -10,9 +10,10 @@
   var state = (win.__quiltState = win.__quiltState || {});
   // 卡片里是一台设备，桌面浏览器却会在它右缘画一条常驻滚动条——真机上没有这东西，它会被读成设计的一部分。
   // 只隐藏滚动条像素，滚动能力全留（屏内 overflow-y:auto 的区域同理，所以用 *）。
+  // 要带 !important：页面自己写的滚动条样式（如 html{scrollbar-width:thin}）选择器都比 * 具体，不加会把这条压过去
   var bars = document.createElement('style');
   bars.setAttribute('data-quilt-ui', '');
-  bars.textContent = '*{scrollbar-width:none}*::-webkit-scrollbar{display:none}';
+  bars.textContent = '*{scrollbar-width:none!important}*::-webkit-scrollbar{display:none!important}';
   document.head.appendChild(bars);
   function fields() { return /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name],textarea[name],select[name]')); }
   function snapshotForms() {
@@ -27,6 +28,56 @@
     });
   }
   function icons() { if (win.lucide && win.lucide.createIcons) win.lucide.createIcons(); }
+  // 状态（REQ-CORE-051 / ADR-041，API-CORE-016 状态条目）：每个维度的当前取值写在 <html> 的 data-s-<键> 上，带 data-when 的元素条件成立才显示。
+  // 维度来自两处：预览域下发时放进 head 的端上维度（data-quilt-surface-states），与屏里的声明块（data-quilt-states，键与端上重名的不生效）。
+  // 取值由父页发 quilt:states 给，记在 __quiltState 上（整份重写时留得住）；没收到时一律用缺省。条件判定之前 data-when 元素先隐藏，免得闪一下
+  var whenCss = document.createElement('style');
+  whenCss.setAttribute('data-quilt-ui', '');
+  whenCss.textContent = '[data-when]:not([data-quilt-on]){display:none!important}';
+  document.head.appendChild(whenCss);
+  /** @type {Record<string, ReturnType<typeof setTimeout>>} */
+  var playing = {};
+  /** @param {string} sel */
+  function readJson(sel) { var el = document.querySelector(sel); if (!el) return null; try { return JSON.parse(el.textContent || ''); } catch (e) { return null; } }
+  /** @returns {Record<string, { default: string, values: { key: string }[] }>} */
+  function stateDims() {
+    /** @type {Record<string, { default: string, values: { key: string }[] }>} */
+    var dims = {};
+    var surface = readJson('script[data-quilt-surface-states]'); var page = readJson('script[data-quilt-states]');
+    ((surface && surface.dims) || []).forEach(function (/** @type {any} */ d) { dims[d.key] = d; });
+    ((page && page.dims) || []).forEach(function (/** @type {any} */ d) { if (!dims[d.key] && !((surface && surface.events) || []).some(function (/** @type {any} */ e) { return e.key === d.key; })) dims[d.key] = d; });
+    return dims;
+  }
+  /** @param {string} expr @param {Record<string, string>} cur */
+  function holds(expr, cur) {
+    return expr.trim().split(/\s+/).filter(Boolean).every(function (part) {
+      if (part.charAt(0) === '@') return !!playing[part.slice(1)];
+      var at = part.indexOf(':'); if (at < 1) return false;
+      var v = cur[part.slice(0, at)];
+      return v !== undefined && part.slice(at + 1).split('|').indexOf(v) >= 0;
+    });
+  }
+  function applyStates() {
+    var dims = stateDims(); var sent = state.__quiltStates || {}; var html = document.documentElement;
+    /** @type {Record<string, string>} */
+    var cur = {};
+    Array.prototype.slice.call(html.attributes).forEach(function (/** @type {Attr} */ a) { if (a.name.indexOf('data-s-') === 0 && !dims[a.name.slice(7)]) html.removeAttribute(a.name); });
+    Object.keys(dims).forEach(function (k) {
+      var d = dims[k]; var v = sent[k];
+      cur[k] = v && (d.values || []).some(function (x) { return x.key === v; }) ? v : d.default;
+      html.setAttribute('data-s-' + k, cur[k]);
+    });
+    document.querySelectorAll('[data-when]').forEach(function (el) { if (holds(el.getAttribute('data-when') || '', cur)) el.setAttribute('data-quilt-on', ''); else el.removeAttribute('data-quilt-on'); });
+    return cur;
+  }
+  /** @param {string} key @param {number} ms */
+  function playEvent(key, ms) {
+    // 从头再播：先把它的元素收起来、强制一次排版，CSS 动画才会重新开始
+    if (playing[key]) { clearTimeout(playing[key]); delete playing[key]; applyStates(); void document.body.offsetWidth; }
+    playing[key] = setTimeout(function () { delete playing[key]; applyStates(); }, ms);
+    applyStates();
+    window.dispatchEvent(new CustomEvent('quilt:event', { detail: { key: key, ms: ms } }));
+  }
   // 换进来的 DOM 里的 <script> 不会执行（DOMParser 解析出的脚本是惰性的）：屏里的图表库、自写脚本（v0.43 允许）都要按原顺序重建一遍，
   // 带 src 的等它加载完再跑下一个。不做的话图表屏只有首次打开能画出来，跳转、热更新、切变体、叠层打开后都是空白。
   // 重跑的内联脚本包一层块作用域：同一个 window 里第二次执行顶层 const/let 会报「已声明」，整段脚本不跑
@@ -35,7 +86,10 @@
     var list = Array.prototype.slice.call(root.querySelectorAll('script'));
     (function next(i) {
       if (i >= list.length) return;
-      var old = list[i]; var s = document.createElement('script');
+      var old = list[i];
+      // JSON 数据块（页内状态的声明块）不是脚本：原样留着，包了块作用域就不是合法 JSON 了
+      if (old.type === 'application/json') { next(i + 1); return; }
+      var s = document.createElement('script');
       for (var k = 0; k < old.attributes.length; k++) s.setAttribute(old.attributes[k].name, old.attributes[k].value);
       if (old.src) { s.onload = s.onerror = function () { next(i + 1); }; old.replaceWith(s); }
       else { s.textContent = old.type === 'module' ? old.textContent : '{\n' + old.textContent + '\n}'; old.replaceWith(s); next(i + 1); }
@@ -69,7 +123,7 @@
     root = document.adoptNode(root);
     layer.addEventListener('click', function (e) { if (mode === 'inspect') return; if (e.target === layer || e.target === root) { e.preventDefault(); send({ type: 'quilt:overlay-dismiss' }); } });
     layer.appendChild(root);
-    document.body.appendChild(layer); overlays.push(layer); runScripts(layer); icons(); restoreForms();
+    document.body.appendChild(layer); overlays.push(layer); runScripts(layer); icons(); restoreForms(); applyStates();
   }
 
   document.addEventListener('input', snapshotForms, true);
@@ -492,6 +546,12 @@
     if (msg.type === 'quilt:mark') { applyMarks(msg); return; }
     if (msg.type === 'quilt:overlay') { if (swapping) queued.push({ html: msg.html, route: msg.route }); else openOverlay(msg.html, msg.route); return; }
     if (msg.type === 'quilt:overlay-close') { closeOverlay(); return; }
+    if (msg.type === 'quilt:states') {
+      state.__quiltStates = msg.values || {};
+      if (document.body) window.dispatchEvent(new CustomEvent('quilt:states', { detail: { values: applyStates() } }));
+      return;
+    }
+    if (msg.type === 'quilt:event') { if (document.body && msg.key) playEvent(msg.key, Math.min(10000, Math.max(500, msg.ms || 2500))); return; }
     if (msg.type !== 'quilt:swap') return;
     var route = msg.route;
     clearOverlays(); queued = []; swapping = true;
@@ -508,10 +568,14 @@
     }
     var apply = function () {
       document.title = doc.title;
+      // 端上的维度在 head 里，下发时按端上当前的给：存过维度之后父页会把这一屏原地再送一次，这里跟着换
+      var dimsNow = document.head.querySelector('script[data-quilt-surface-states]'); var dimsNew = doc.head.querySelector('script[data-quilt-surface-states]');
+      if (dimsNow) dimsNow.remove();
+      if (dimsNew) document.head.appendChild(dimsNew);
       document.body.replaceWith(doc.body);
       runScripts(document.body);
       box = null; sels = []; selEl = null; marks = {}; if (mode === 'inspect') document.body.style.cursor = 'crosshair';
-      restoreForms(); icons(); window.scrollTo(0, y);
+      restoreForms(); icons(); applyStates(); window.scrollTo(0, y);
       flushOverlays();
     };
     var done = function () { send({ type: 'quilt:swapped', route: route, title: document.title }); };
@@ -520,7 +584,7 @@
   }
   window.addEventListener('message', onMessage);
   window.addEventListener('DOMContentLoaded', function () {
-    icons(); restoreForms();
+    icons(); restoreForms(); applyStates();
     if (state.__scrollY) { window.scrollTo(0, state.__scrollY); delete state.__scrollY; }
     send({ type: 'quilt:ready', title: document.title });
     flushOverlays();

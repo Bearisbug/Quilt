@@ -1,14 +1,18 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
-import { ArrowLeft, Bot, Component, Crosshair, Download, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MousePointerClick, NotebookPen, Palette, Plus, Search, Settings, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
-import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, MAX_SUBTREE_BLOCKS, failureText, missingPagePrompt, type ComponentDto, type ProjectDetailDto, type JobDto, type JobEventDto, type ScreenDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto } from '@quilt/core/browser';
+import { ArrowLeft, Bot, Component, Crosshair, Download, Fullscreen, History, Layers, LayoutList, Link2, Map as MapIcon, Maximize2, MousePointerClick, NotebookPen, Palette, Plus, Search, Settings, SquareStack, Star, TextCursorInput, Trash2, Waypoints, X } from 'lucide-react';
+import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, DEVICE_SIZE, MAX_SUBTREE_BLOCKS, failureText, missingPagePrompt, type ComponentDto, type ProjectDetailDto, type JobDto, type JobEventDto, type ScreenDto, type Tokens, type Runner, type ScreenCount, type DesignProposalDto, type StatesProposalDto } from '@quilt/core/browser';
 import { api, ApiError, loadConfig, subscribeProjectEvents, type LiveState } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { recordEvent, recordSelection } from '@/lib/recorder';
 import { rememberLastProject } from '@/lib/lastProject';
 import { Button, Spinner } from '@/ui/ui';
-import { TopNav } from '@/project/TopNav';
+import { TopNav, ViewToggle } from '@/project/TopNav';
 import { ProjectSwitcher } from '@/project/ProjectSwitcher';
+import { SurfaceSwitcher } from '@/project/SurfaceSwitcher';
+import { useSurface } from '@/project/useSurface';
+import { NotFoundPage } from '@/pages/Projects';
+import { FullView, useFullViewColumns, withScreen } from '@/pages/FullView';
 import { CanvasView, type CanvasApi } from '@/canvas/CanvasView';
 import { ScreenFinder, type FinderPick } from '@/canvas/ScreenFinder';
 import { ScreensPanel } from '@/panels/ScreensPanel';
@@ -16,6 +20,7 @@ import { CanvasToolbar, type Tool } from '@/canvas/CanvasToolbar';
 import { useSettingsSection } from '@/settings/sections';
 import { Composer, type ComposerHandle } from '@/composer/Composer';
 import { jobChips, useEndedJobs } from '@/composer/JobChips';
+import { promptHistory } from '@/composer/history';
 import { useRunnerPrefs } from '@/composer/useRunnerPrefs';
 import { useComposerChrome } from '@/composer/useComposerChrome';
 import { CandidateStack } from '@/canvas/CandidateStack';
@@ -29,12 +34,13 @@ import { PeerAvatars } from '@/collab/PeerAvatars';
 import collabMessages from '@/i18n/locales/collab';
 import { reconcileJobs, settleJob, progressText } from '@/canvas/jobTracker';
 import { DeleteDialog, MissingDialog, NewComponentDialog, VariantDialog } from '@/canvas/dialogs';
-import { applySelect, type SelectMessage } from '@/canvas/frameMessages';
+import { applySelect, type ElementSelection, type SelectMessage } from '@/canvas/frameMessages';
 import { RevisionPanel } from '@/panels/RevisionPanel';
 import type { ElementSel, DirectEdit, InspectorKeys } from '@/panels/InspectorPanel';
 import { AgentJobsPanel } from '@/panels/AgentJobsPanel';
 import { getLocale, tOf, useLocale, useT, type Locale } from '@/i18n';
 import canvasPageMessages from '@/i18n/locales/canvas-page';
+import fullviewMessages from '@/i18n/locales/fullview';
 import commonMessages from '@/i18n/locales/common';
 import inspectMessages from '@/i18n/locales/panels-inspect';
 
@@ -81,17 +87,21 @@ const endedReason = (f: EndedFrom, locale: Locale) => failureText(f.job.kind, f.
 // PAGE-CANVAS：画布 + 输入框 + 修订/设计系统/检查器面板（面板状态进 URL，INT-020）
 
 // 画布页按项目重挂（v0.76）：/p/:projectId 是同一个路由、切项目是客户端导航，不按项目换 key 的话选中、目标、锚点、版数、
-// 聚焦 / 交互态会带进下一个项目，上一个项目在途的详情晚到还会覆盖新项目、把画布卡在加载态。外壳在新页面的第一帧就画出来
+// 聚焦 / 交互态会带进下一个项目，上一个项目在途的详情晚到还会覆盖新项目、把画布卡在加载态。外壳在新页面的第一帧就画出来。
+// 全屏视图（PAGE-FULLVIEW）是同一个页面的第二个视图 /p/:projectId/view：两个视图之间切换不重挂，选中、作业与输入框都留着；第二段是别的就是「没有这个页面」
 export function CanvasRoute() {
-  const { projectId = '' } = useParams();
+  const { projectId = '', view } = useParams();
+  if (view !== undefined && view !== 'view') return <NotFoundPage />;
   return <CanvasPage key={projectId} />;
 }
 
 function CanvasPage() {
-  const { projectId = '' } = useParams();
+  const { projectId = '', view } = useParams();
+  const fullView = view === 'view';
   const [params, setParams] = useSearchParams();
   const toast = useToast();
   const t = useT(canvasPageMessages);
+  const tf = useT(fullviewMessages);
   const tc = useT(commonMessages);
   const tk = useT(collabMessages);
   const locale = useLocale();
@@ -149,6 +159,12 @@ function CanvasPage() {
   const [candidates, setCandidates] = useState<{ jobId: string; screenId: string } | null>(null);
   // 设计系统提案（REQ-EDIT-003）：propose_design_system 作业成功后弹预览，确认才写入
   const [proposal, setProposal] = useState<DesignProposalDto | null>(null);
+  const [statesProposal, setStatesProposal] = useState<{ surfaceId: string; proposal: StatesProposalDto } | null>(null);
+  // 全屏视图（PAGE-FULLVIEW）：正看的那一屏、选元素开没开与点中的几块（记着点选时的那一版，发送时当 expectedRevisionId）
+  const [fvScreenId, setFvScreenId] = useState<string | null>(null);
+  const [fvPicking, setFvPicking] = useState(false);
+  const [fvPick, setFvPick] = useState<{ screenId: string; revisionId: string; sels: ElementSelection[] } | null>(null);
+  const fvClimbRef = useRef<((dir: 'up' | 'down') => void) | null>(null);
   // 选择元素态选中的几块（v1.26 多选 REQ-EDIT-002）：最后一个是最后点中的那一块——逐级选、检查器的路径行与单选时的直改都作用于它。
   // 运行时的回话可能一拍里连到几条（热更新后逐块重选），所以同步记一份 ref，下一条按它算
   const [elementSels, setElementSelsState] = useState<ElementSel[]>([]);
@@ -162,7 +178,8 @@ function CanvasPage() {
   const laneRef = useRef<HTMLDivElement>(null);
   // 生成通道 / 投递会话两个跨会话偏好（REQ-CORE-011 / REQ-AGENT-003）：见 useRunnerPrefs
   const { runners, runnersFailed, loadRunners, runnerId, applyCatalog, onRunnerChange, agentTool, sessionList, sessionId, loadSessions, lists, loadSessionsFor, onSessionChange, sendRunner, modelRunner } = useRunnerPrefs();
-  const panel = (params.get('panel') as Panel) ?? null;
+  // 全屏视图没有侧面板：地址里留着的 panel 不生效
+  const panel = fullView ? null : (params.get('panel') as Panel) ?? null;
   const setPanel = useCallback((v: Panel) => setParams((q) => { if (v) q.set('panel', v); else q.delete('panel'); return q; }, { replace: true }), [setParams]);
   // 设置弹层的开关与当前节都在 URL 上（?settings=<节>，INT-020）：刷新保持，旧 /settings 路径重定向到这里；旧值与不认识的值见 sections.ts
   const [settingsSection, setSettings] = useSettingsSection();
@@ -253,9 +270,9 @@ function CanvasPage() {
   // 卡片截图取不到（多半是签名过期）：静默重取，10 s 内至多一次
   const shotRetryAt = useRef(0);
   const onShotError = useCallback(() => { if (Date.now() - shotRetryAt.current < 10_000) return; shotRetryAt.current = Date.now(); void refresh({ quiet: true }); }, [refresh]);
-  // 浏览器标签页写项目名：多个项目开在不同标签页时靠它分辨
+  // 浏览器标签页写项目名：多个项目开在不同标签页时靠它分辨；全屏视图写正看的那一屏（FullView 里）
   const projectName = detail?.project.name;
-  useEffect(() => { document.title = projectName ? `${projectName} · Quilt` : 'Quilt'; return () => { document.title = 'Quilt'; }; }, [projectName]);
+  useEffect(() => { if (fullView) return; document.title = projectName ? `${projectName} · Quilt` : 'Quilt'; return () => { document.title = 'Quilt'; }; }, [projectName, fullView]);
   // 草稿本（REQ-CORE-040）：地址是草稿本的 id 时换到 /sketch，画布不摆它；普通项目记成「上次打开的项目」（「写回项目…」的缺省目标，REQ-CORE-041）
   const navigate = useNavigate();
   const projectKind = detail?.project.kind;
@@ -264,9 +281,12 @@ function CanvasPage() {
     else if (projectKind) rememberLastProject(projectId);
   }, [projectKind, projectId, navigate]);
 
-  const screens = detail?.screens ?? NONE;
-  const screensRef = useRef(screens);
-  screensRef.current = screens;
+  // 端（REQ-CORE-049）：画布与全屏视图一次只看一端（screens）；作业、设计系统、找屏这些项目级的事看全部屏（allScreens）
+  const { surface, setSurface } = useSurface(projectId, detail?.surfaces);
+  const allScreens = detail?.screens ?? NONE;
+  const screens = useMemo(() => (surface ? allScreens.filter((s) => s.surfaceId === surface.id) : allScreens), [allScreens, surface]);
+  const screensRef = useRef(allScreens);
+  screensRef.current = allScreens;
 
   // 作业事件（API-CORE-008）：变更即刷新项目（防抖）；导出作业成功后自动下载；
   // 造完自动选中新屏（追加指令直接是改）；设计系统提案成功后弹预览
@@ -324,9 +344,9 @@ function CanvasPage() {
       setProgress((m) => { const next = { ...m }; delete next[job.id]; return next; });
       refresh();
       // 作业 chip：失败的变成警告色 chip 留着（写原因、可重试），成功的写「完成」后淡出，取消的直接消失
-      const from: EndedFrom = { job, screens, components, errorClass: d.errorClass as string | undefined, message: d.message as string | undefined };
+      const from: EndedFrom = { job, screens: allScreens, components, errorClass: d.errorClass as string | undefined, message: d.message as string | undefined };
       if (e.type !== 'cancelled') endedFrom.current.set(job.id, from);
-      const chip = { id: job.id, createdAt: job.createdAt, label: jobLabel(job, screens, components), kind: job.kind };
+      const chip = { id: job.id, createdAt: job.createdAt, label: jobLabel(job, allScreens, components), kind: job.kind };
       // 失败只在 chip 上说（v1.17）：chip 留到用户关掉，再弹一条提示条是同一件事说两遍
       if (e.type === 'failed') endJob({ ...chip, state: 'failed', reason: endedReason(from, getLocale()) });
       if (e.type === 'succeeded') endJob({ ...chip, state: 'succeeded' });
@@ -343,6 +363,14 @@ function CanvasPage() {
           const proposal = (full.output as { proposal?: DesignProposalDto } | null)?.proposal;
           if (proposal) { setProposal(proposal); setPanel('design'); }
         }).catch(() => toast(t('jobs.proposalLost'), 'error'));
+      }
+      // 状态建议（REQ-CORE-051）同理：取回来记着是哪一端的，全屏视图的状态栏在那一端时列出来
+      if (e.type === 'succeeded' && job.kind === 'propose_states') {
+        const surfaceId = (job.input as { surfaceId: string }).surfaceId;
+        void api.jobs.get(job.id).then(({ job: done }) => {
+          const proposal = (done.output as { proposal?: StatesProposalDto } | null)?.proposal;
+          if (proposal) setStatesProposal({ surfaceId, proposal });
+        }).catch(() => toast(tf('page.proposalLost'), 'error'));
       }
     }
   };
@@ -398,9 +426,9 @@ function CanvasPage() {
   }, [detail?.activeJobs, activeJobs]);
   // 哪些屏被在跑作业占着；哪个作业占着项目级的造屏名额
   const busyScreens = useMemo(() => {
-    const ids = screens.map((s) => s.id);
+    const ids = allScreens.map((s) => s.id);
     return new Set(guardJobs.flatMap((j) => coveredScreens(j, ids, components)));
-  }, [guardJobs, screens, components]);
+  }, [guardJobs, allScreens, components]);
   // ---- 协作显示（v1.32 REQ-CORE-048）：把自己的选中、聚焦与发出的作业发出去；别人的作业覆盖了哪些卡；跟随的开停 ----
   useEffect(() => {
     const sel = [...selectedIds, ...selectedComponentIds];
@@ -415,20 +443,28 @@ function CanvasPage() {
     const mine = activeJobs.filter((j) => mineJobs.current.has(j.id)).map((j) => j.id);
     presence?.set({ jobs: mine.length ? mine.slice(0, 20) : undefined });
   }, [presence, activeJobs]);
+  // 在哪一端、全屏视图里正看哪一屏（PAGE-FULLVIEW「协作者」）；进全屏视图时画布上的指针、视野与拖动撤掉
+  useEffect(() => { presence?.set({ surface: surface?.id, screen: fullView ? fvScreenId ?? undefined : undefined }); }, [presence, surface?.id, fullView, fvScreenId]);
+  useEffect(() => { if (fullView) presence?.set({ cursor: undefined, view: undefined, drag: undefined }); }, [presence, fullView]);
   const jobTargets = useCallback((jobId: string) => {
     const j = guardJobs.find((x) => x.id === jobId);
     if (!j) return [];
     const comp = j.kind === 'edit_component' ? (j.input as { componentId?: string } | null)?.componentId : undefined;
-    return [...coveredScreens(j, screens.map((x) => x.id), components), ...(comp ? [comp] : [])];
-  }, [guardJobs, screens, components]);
+    return [...coveredScreens(j, allScreens.map((x) => x.id), components), ...(comp ? [comp] : [])];
+  }, [guardJobs, allScreens, components]);
   const describePeer = useCallback((x: Peer) => {
     const g = x.state.following;
     if (g) return g.id === me?.id ? tk('doing.followingYou') : tk('doing.following', { name: people.find((y) => y.person.id === g.id)?.person.name ?? '' });
+    // 他在全屏视图里、或在另一端（PAGE-FULLVIEW「协作者」）：写他在哪一端、看哪一屏，他在那边的选中与聚焦不在这一端
+    const at = detail?.surfaces.find((s) => s.id === x.state.surface);
+    const seeing = x.state.screen ? allScreens.find((s) => s.id === x.state.screen) : undefined;
+    if (at && seeing) return tf('collab.viewing', { surface: at.name, screen: seeing.name });
+    if (at && at.id !== surface?.id) return tf('collab.onSurface', { surface: at.name });
     const f = x.state.focus;
     if (f) return f.mode === 'inspect' ? tk('doing.inspect', { route: f.route ?? '' }).trim() : tk('doing.interact', { route: f.route ?? '' }).trim();
     const n = x.state.selected?.length ?? 0;
     return n ? tk('doing.selected', { count: n }) : tk('doing.idle');
-  }, [tk, me?.id, people]);
+  }, [tk, tf, me?.id, people, detail?.surfaces, allScreens, surface?.id]);
   const followed = follow.target;
   // 正在被 edit_component 作业改的组件：改它的元素会撞版本，检查器先挡住（与屏的 busyScreens 同义）
   const busyComponents = useMemo(() => new Set(guardJobs.filter((j) => j.kind === 'edit_component').map((j) => (j.input as { componentId?: string } | null)?.componentId).filter(Boolean) as string[]), [guardJobs]);
@@ -460,14 +496,14 @@ function CanvasPage() {
     return jobChips(runningJobs.map((j) => {
       const p = progress[j.id];
       const text = !p ? t('progress.queued') : p.type === 'progress' ? progressText(j.kind, p.data) : p.type === 'screen_planned' ? t('progress.planned', { name: p.data.name }) : t('progress.screenshotting');
-      return { id: j.id, createdAt: j.createdAt, label: jobLabel(j, screens, components), progress: text };
+      return { id: j.id, createdAt: j.createdAt, label: jobLabel(j, allScreens, components), progress: text };
     }), ended.map((x) => {
       const f = endedFrom.current.get(x.id);
       if (!f) return x;
       const label = jobLabel(f.job, f.screens, f.components);
       return x.state === 'failed' ? { ...x, label, reason: endedReason(f, locale) } : { ...x, label };
     }));
-  }, [runningJobs, screens, components, progress, ended, t, locale]);
+  }, [runningJobs, allScreens, components, progress, ended, t, locale]);
 
   const handleJobError = (e: unknown, fallback: string) => {
     if (e instanceof ApiError && e.type === '/errors/screen-busy') toast(t('jobs.screenBusy'), 'error');
@@ -495,8 +531,9 @@ function CanvasPage() {
     }
   };
   // 一轮建好（发送 / 重试）：交给本机 agent 的已投递到会话，切到 agent 面板看状态，其余成一枚作业 chip
+  // 全屏视图没有 agent 面板：只说一声投递到了哪个会话
   const roundStarted = (job: JobDto) => {
-    if (job.runner === 'agent') { refresh(); setPanel('agent'); }
+    if (job.runner === 'agent') { refresh(); if (fullView) toast((job.input as { runner?: { tool?: string } })?.runner?.tool === 'codex' ? t('jobs.deliveredCodex') : t('jobs.deliveredClaude')); else setPanel('agent'); }
     else trackJob(job);
   };
   // 失败 chip 的「重试」（REQ-CORE-026，API-CORE-034）：原样再发一轮——服务端复制原作业输入，这里只给通道：输入框此刻选的那条。
@@ -518,18 +555,28 @@ function CanvasPage() {
   };
   // 发送（REQ-CORE-006）：有目标 = 改（targetScreenIds），没有 = 造（count / anchor）；版数两边都带。
   // 返回是否发出去了：没发出去时输入框保留草稿与参考图（REQ-CORE-020）
-  // 共享组件目标（REQ-EDIT-006）：随消息带上——只有组件没有屏也没有锚点时服务端建的是 edit_component，其余是上下文
+  // 共享组件目标（REQ-EDIT-006）：随消息带上——只有组件没有屏也没有锚点时服务端建的是 edit_component，其余是上下文。造屏发到当前端（REQ-CORE-049）。
+  // 全屏视图里选元素点中了几块（FLOW-FULLVIEW S8）：只改这几块（API-CORE-006，同草稿本），expectedRevisionId 取点选时的那一版
   const onSend = async (content: string, attachmentIds: string[] = []): Promise<boolean> => {
+    const block = fullView && fvPick?.screenId === fvScreenId ? fvPick : null;
     const targets = targetScreens.length ? targetScreens.slice(0, MAX_TARGETS).map((s) => s.id) : undefined;
     const compTargets = targetComponents.length ? targetComponents.map((c) => c.id) : undefined;
     try {
-      const r = await api.projects.send(projectId, { content, targetScreenIds: targets, targetComponentIds: compTargets, count: targets ? undefined : count, versions, anchor: targets ? undefined : anchor ?? undefined, runner: sendRunner, attachmentIds: attachmentIds.length ? attachmentIds : undefined });
+      if (block) {
+        const qids = block.sels.map((x) => x.qid);
+        const { job } = await api.projects.createJob(projectId, { kind: 'regenerate_subtree', input: { screenId: block.screenId, qid: qids[qids.length - 1], ...(qids.length > 1 ? { qids } : null), prompt: content, expectedRevisionId: block.revisionId, runner: sendRunner }, attachmentIds: attachmentIds.length ? attachmentIds : undefined });
+        roundStarted(job);
+        return true;
+      }
+      const r = await api.projects.send(projectId, { content, targetScreenIds: targets, targetComponentIds: compTargets, count: targets ? undefined : count, versions, anchor: targets ? undefined : anchor ?? undefined, runner: sendRunner, attachmentIds: attachmentIds.length ? attachmentIds : undefined, surfaceId: surface?.id });
       roundStarted(r.job);
       if (!targets) setAnchor(null);
       return true;
     } catch (e) {
       // 记住的会话在发送前关掉了：说清楚并重取列表，下拉会回到「选择会话」
       if (e instanceof ApiError && e.type === '/errors/validation' && JSON.stringify(e.problem).includes('sessionId')) { toast(t('jobs.sessionGone'), 'error'); void loadSessions(); }
+      // 点选之后这一屏已出了新一版：点中的几块作废，重新点
+      else if (block && e instanceof ApiError && e.type === '/errors/revision-conflict') { setFvPick(null); toast(tf('page.pickStale'), 'error'); void refresh(); }
       // 预判之外真撞上了（别处刚建的作业、多屏改屏的后端缺口）：problem 体不带屏信息，重取项目后用本轮目标 ∩ 覆盖屏集点名
       else if (e instanceof ApiError && e.type === '/errors/screen-busy') {
         const d = await refresh();
@@ -624,7 +671,7 @@ function CanvasPage() {
     setAnchor(world); setSelectedIds([]); setTargetIds([]);
     showComposer();
   };
-  const exportPrototype = () => startJob({ kind: 'export_prototype', input: {} }, t('jobs.exportFailed'));
+  const exportPrototype = () => startJob({ kind: 'export_prototype', input: { surfaceId: surface?.id } }, t('jobs.exportFailed'));
   // REQ-PROTO-002：连线开关（本机记忆）与「接上跳转」修复轮（edit_screens 固定指令，按屏计费）
   const [showLinks, setShowLinks] = useState(() => { try { return localStorage.getItem('quilt:links') !== '0'; } catch { return true; } });
   const toggleLinks = () => setShowLinks((v) => { try { localStorage.setItem('quilt:links', v ? '0' : '1'); } catch { /* 无痕模式等写不了，退化为仅本次会话有效 */ } return !v; });
@@ -697,23 +744,23 @@ function CanvasPage() {
       return false;
     }
   };
-  // 写入之后的收尾：按新约定重生成全部屏，或只改了 token 就确定性回刷。
+  // 写入之后的收尾：按新约定重生成全部屏（设计系统各端共用，所以是各端的屏），或只改了 token 就确定性回刷。
   // 重生成按契约上限每 20 屏一个作业、全部发出（v0.78）；某一批被拒（限流等，startJob 已说原因）就停下，说清还剩几屏没发
   const finishProposal = async (regenerate: boolean, tokensChanged: boolean) => {
     setProposal(null);
-    if (!screens.length) return;
+    if (!allScreens.length) return;
     if (!regenerate) { if (tokensChanged) await applyDesignSystem(); return; }
     let sent = 0;
-    for (let i = 0; i < screens.length; i += MAX_TARGETS) {
-      const batch = screens.slice(i, i + MAX_TARGETS);
+    for (let i = 0; i < allScreens.length; i += MAX_TARGETS) {
+      const batch = allScreens.slice(i, i + MAX_TARGETS);
       if (!(await startJob({ kind: 'edit_screens', input: { prompt: CONVENTIONS_REGENERATE_PROMPT, screenIds: batch.map((s) => s.id), versions: 1 } }, t('jobs.regenerateFailed')))) break;
       sent += batch.length;
     }
-    if (sent < screens.length) toast(t('jobs.regeneratePartial', { sent, rest: screens.length - sent }), 'error');
+    if (sent < allScreens.length) toast(t('jobs.regeneratePartial', { sent, rest: allScreens.length - sent }), 'error');
   };
 
-  // 输入框的停靠与收起（useComposerChrome）：输入框停的边与大小换算成画布安全区（--chrome-*）
-  const { composerVisible, showComposer, toggleComposer, composerDock } = useComposerChrome(focusedId, composerRef);
+  // 输入框的停靠与收起（useComposerChrome）：输入框停的边与大小换算成画布安全区（--chrome-*）；全屏视图的停靠与收起单独记一份（PAGE-FULLVIEW）
+  const { composerVisible, showComposer, toggleComposer, composerDock } = useComposerChrome(fullView ? null : focusedId, composerRef, fullView ? 'fullview' : 'canvas');
   const openDesign = () => { if (panel === 'design') setPanel(null); else { setSelectedIds([]); setPanel('design'); } };
   // 交互态与选择元素态互斥，退出任一都回到静态截图（卡片本来的样子）。
   // 从交互态切进来时若已在屏内跳转过，先把 iframe 拉回这张卡片自己的那一屏——
@@ -725,6 +772,93 @@ function CanvasPage() {
     if (selected) { canvasApi.current?.focus(selected.id); setPanel('inspect'); return; }
     setPanel('inspect');                                                // 没选中屏也能开：点哪一屏就进哪一屏
   };
+
+  // ---- 端与全屏视图（REQ-CORE-049、REQ-CORE-050，PAGE-FULLVIEW）----
+  const cols = useFullViewColumns();
+  const screenCounts = useMemo(() => { const m: Record<string, number> = {}; for (const s of allScreens) if (s.surfaceId) m[s.surfaceId] = (m[s.surfaceId] ?? 0) + 1; return m; }, [allScreens]);
+  // 画布只画这一端：连线从这一端的屏出发；共享组件卡摆这一端的屏用到的与谁都没用的
+  const surfaceLinks = useMemo(() => { const ids = new Set(screens.map((s) => s.id)); return (detail?.links ?? NONE).filter((l) => ids.has(l.fromScreenId)); }, [detail?.links, screens]);
+  const canvasComponents = useMemo(() => { const ids = new Set(screens.map((s) => s.id)); return components.filter((c) => !c.usedBy.length || c.usedBy.some((id) => ids.has(id))); }, [components, screens]);
+  const firstSurfaceId = detail?.surfaces[0]?.id;
+  const surfacePeers = useMemo(() => peers.filter((x) => (x.state.surface ?? firstSurfaceId) === surface?.id), [peers, firstSurfaceId, surface?.id]);
+  // 换端：选中、目标、聚焦、锚点、候选与全屏视图点中的块都属于上一端，一并清掉；screen 给了就在全屏视图里打开它
+  const switchSurface = (id: string, screen?: string) => {
+    setSelectedIds([]); setTargetIds([]); setSelectedComponentIds([]); setTargetComponentIds([]);
+    setFocusedId(null); setFocusedComponentId(null); setAnchor(null); setCandidates(null); setFvPick(null);
+    setSurface(id, screen);
+  };
+  // 画布 ↔ 全屏（ADR-042）：同一个页面换视图，地址带着端走。进全屏时侧面板与聚焦撤掉，画布上恰好选中一屏就先打开它；
+  // 回画布时去掉全屏的屏与取值，镜头摆到刚才看的那一屏并选中它（全屏视图里选中一直跟着正看的那一屏）
+  const pendingReveal = useRef<FinderPick | null>(null);
+  const setView = (full: boolean) => {
+    if (full === fullView) return;
+    const q = new URLSearchParams(params);
+    if (full) {
+      q.delete('panel');
+      if (selected) q.set('screen', selected.id);
+      setFocusedId(null); setFocusedComponentId(null); setCandidates(null); setAnchor(null);
+    } else {
+      q.delete('screen'); q.delete('state');
+      setFvPicking(false); setFvPick(null);
+      if (fvScreenId) pendingReveal.current = { kind: 'screen', id: fvScreenId };
+    }
+    const qs = q.toString();
+    navigate(`/p/${projectId}${full ? '/view' : ''}${qs ? `?${qs}` : ''}`);
+  };
+  // ⌘K 跳屏列全部端（PAGE-CANVAS「端」）：选了别的端的屏先换端，画布按端重挂之后再把镜头摆过去；全屏视图里直接打开它
+  const pickFound = (pick: FinderPick) => {
+    const at = pick.kind === 'screen' ? allScreens.find((s) => s.id === pick.id)?.surfaceId : surface?.id;
+    if (at && at !== surface?.id) { if (!fullView) pendingReveal.current = pick; switchSurface(at, fullView ? pick.id : undefined); return; }
+    if (fullView && surface) setParams((q) => withScreen(q, pick.id, surface));
+    else reveal(pick);
+  };
+  // 跟随到另一端、或他在全屏视图里换了屏（PAGE-CANVAS / PAGE-FULLVIEW「协作者」）：跟着切过去；画布上镜头怎么跟在 CanvasView
+  const leadSurface = follow.leader?.state.surface;
+  const leadScreen = follow.leader?.state.screen;
+  useEffect(() => {
+    if (!leadSurface || !detail?.surfaces.some((s) => s.id === leadSurface)) return;
+    const screen = fullView && leadScreen && allScreens.some((s) => s.id === leadScreen && s.surfaceId === leadSurface) ? leadScreen : undefined;
+    if (leadSurface !== surface?.id) switchSurface(leadSurface, screen);
+    else if (screen && screen !== fvScreenId && surface) setParams((q) => withScreen(q, screen, surface), { replace: true });
+  }, [leadSurface, leadScreen, fullView]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 全屏视图里选元素（FLOW-FULLVIEW S8）：规则同草稿本——点在屏根上等于改整屏、不出胶囊；按住 Shift 加选减选按 applySelect；换一屏就去掉
+  useEffect(() => { setFvPick(null); }, [fvScreenId]);
+  const fvShown = fullView ? screens.find((s) => s.id === fvScreenId) ?? null : null;
+  const fvSels = fvPick?.sels ?? NONE;
+  const fvQids = useMemo(() => fvSels.map((x) => x.qid), [fvSels]);
+  const onFvPick = (m: SelectMessage) => {
+    if (!fvShown?.currentRevisionId) return;
+    if (m.path?.length && m.path[0].qid === m.qid) { setFvPick(null); showComposer(); return; }
+    const { list, note } = applySelect(fvSels, m);
+    if (note === 'merged') toast(tInspect('inspector.multi.merged'));
+    else if (note === 'max') toast(tInspect('inspector.multi.max', { max: MAX_SUBTREE_BLOCKS }));
+    setFvPick(list.length ? { screenId: fvShown.id, revisionId: fvShown.currentRevisionId, sels: list } : null);
+    showComposer();
+  };
+  const changeFvPicking = (on: boolean) => { setFvPicking(on); setFvPick(null); };
+  const removeFvPick = (qid: string) => {
+    const rest = fvSels.filter((x) => x.qid !== qid);
+    setFvPick(fvPick && rest.length ? { ...fvPick, sels: rest } : null);
+    composerRef.current?.focus();
+  };
+  // 全屏视图的 Esc 由近及远（PAGE-FULLVIEW）：停止跟随 → 去掉点中的块 → 关掉选元素 → 收起窄窗口下的抽屉；返回是否接住了，没接住才轮到取消最新的作业
+  const fvEscape = () => {
+    if (following) { follow.stop(); return true; }
+    if (fvPick) { setFvPick(null); return true; }
+    if (fvPicking) { setFvPicking(false); return true; }
+    if ((cols.narrowDir && cols.showDir) || (cols.narrowStates && cols.showStates)) { cols.closeDrawers(); return true; }
+    return false;
+  };
+  // 点中了块时输入框按草稿本的样子写（只改这几块，胶囊代替目标标签）
+  const fvAction = fvSels.length > 1 ? tf('composer.editBlocks', { n: fvSels.length }) : tf('composer.editBlock');
+  const fvComposer = fullView && fvSels.length ? {
+    verb: sendRunner?.kind === 'agent' ? tf('composer.withAgent', { verb: fvAction }) : fvAction,
+    phrases: [fvSels.length > 1 ? tf('composer.pickPhraseMany') : tf('composer.pickPhrase')],
+    chips: fvSels.map((x) => ({ key: x.qid, label: x.text ? tf('composer.chipText', { tag: x.tag, text: x.text.length > 16 ? `${x.text.slice(0, 16)}…` : x.text }) : tf('composer.chip', { tag: x.tag }), onRemove: () => removeFvPick(x.qid) })),
+    onEmptyEscape: () => void fvEscape(),
+    onClimb: (dir: 'up' | 'down') => fvClimbRef.current?.(dir),
+  } : undefined;
+  const fvAlted: Record<string, (() => void) | undefined> = { KeyF: () => setView(false) };
 
   // 画布快捷键分两档防误触（工具栏提示上标的就是这里实现的键）：
   // 单键只给「一眼看得出、再按一次即撤销」的视图操作；会弹出/收起面板的一律要 Alt。
@@ -756,20 +890,23 @@ function CanvasPage() {
     KeyC: detail ? () => setNewComponentOpen(true) : undefined,
     KeyS: () => setPanel(panel === 'screens' ? null : 'screens'),
     KeyV: selected && !selected.variantOf && !focusedId ? () => { if (generating) toast(generateBusy, 'error'); else setVariantFor(selected); } : undefined,
+    KeyF: () => setView(true),
   };
   // busy = 有任何作业在跑（导出、接上跳转等仍按这个语义走）
   const busy = activeJobs.length > 0;
   // 回刷所有屏、按新约定重生成要改全部屏，与任何在跑作业都冲突：挡住时写出是哪个作业（PAGE-CANVAS「作业进行中时的面板」）
-  const busyReason = runningJobs.length ? t('blocked.jobRunning', { label: jobLabel(runningJobs[0], screens, components) }) : false;
+  const busyReason = runningJobs.length ? t('blocked.jobRunning', { label: jobLabel(runningJobs[0], allScreens, components) }) : false;
+  // 全屏视图（PAGE-FULLVIEW）：单键与 ⌥ 键只有 ⌥F 回画布，⌘E 开关选元素，没有画布上的撤销与全选，Esc 走 fvEscape
   const keyState = {
-    plain, alted, toggleInspect, toggleComposer, undo: undoStack.undo, saveElement, blocked, closeModals, openFinder: () => setFinderOpen(true), expanded: !!candidates, busy, cancel: cancelNewest,
+    plain: fullView ? {} : plain, alted: fullView ? fvAlted : alted, toggleInspect: fullView ? () => changeFvPicking(!fvPicking) : toggleInspect, toggleComposer,
+    undo: fullView ? async () => {} : undoStack.undo, saveElement, blocked, closeModals, openFinder: () => setFinderOpen(true), expanded: !!candidates, busy, cancel: cancelNewest,
     focused: !!focusedId || !!focusedComponentId, exitFocus: () => { setFocusedId(null); setFocusedComponentId(null); },
-    inspecting: inspectMode, climb: (dir: 'up' | 'down') => canvasApi.current?.climb(dir),
+    inspecting: fullView ? fvSels.length > 0 : inspectMode, climb: (dir: 'up' | 'down') => (fullView ? fvClimbRef.current?.(dir) : canvasApi.current?.climb(dir)),
     panel: !!panel, closePanel: () => setPanel(null),
-    following: !!following, stopFollow: follow.stop,
+    following: !!following, stopFollow: follow.stop, fullEscape: fullView ? fvEscape : undefined,
     selection: selectedIds.length > 0 || selectedComponentIds.length > 0, clearSelection: () => { setSelectedIds([]); setSelectedComponentIds([]); },
     // ⌘A 全选屏与共享组件卡（组件卡与屏一样进选中集合，REQ-EDIT-006）
-    selectAll: () => { setSelectedIds(screens.map((x) => x.id)); setSelectedComponentIds(components.map((c) => c.id)); },
+    selectAll: fullView ? () => {} : () => { setSelectedIds(screens.map((x) => x.id)); setSelectedComponentIds(canvasComponents.map((c) => c.id)); },
   };
   const keyRef = useRef(keyState);
   keyRef.current = keyState;
@@ -786,6 +923,7 @@ function CanvasPage() {
         // 面板里的输入框（检查器、设计系统……）只失焦，草稿留着；底部输入框自己处理 Esc 并拦下冒泡
         const field = (e.target as HTMLElement | null)?.closest<HTMLElement>('input, textarea, select, [contenteditable]');
         if (field) { field.blur(); return; }
+        if (k.fullEscape) { if (!k.fullEscape() && k.busy) { e.preventDefault(); k.cancel(); } return; }
         if (k.following) { k.stopFollow(); return; }
         if (k.expanded) { setCandidates(null); return; }
         if (k.focused) { k.exitFocus(); return; }
@@ -838,7 +976,14 @@ function CanvasPage() {
   };
 
   // 外壳常驻（v0.76）：顶栏、输入框、工具栏在加载与失败时照样画，只有画布区换成加载 / 失败态
-  const ready = !!detail && !!tokens && !!previewOrigin && detail.project.kind !== 'sketchbook';
+  const ready = !!detail && !!tokens && !!previewOrigin && !!surface && detail.project.kind !== 'sketchbook';
+  // 从全屏视图回到画布、或 ⌘K 选了别的端的屏：画布挂上（换端时按端重挂）之后把镜头摆到那一屏
+  useEffect(() => {
+    const pick = pendingReveal.current;
+    if (fullView || !ready || !pick) return;
+    pendingReveal.current = null;
+    reveal(pick);
+  });
   const failure: LoadFailure = loadFailure ?? (configFailed ? { kind: 'failed', reason: t('load.configMissing') } : null);
   const jobBlocked = busy ? t('blocked.waitForJob') : screens.length === 0 ? t('blocked.noScreens') : false;
 
@@ -867,6 +1012,7 @@ function CanvasPage() {
   if (selectedScreens.length > 0 && !focusedId) tools.push([
     ...(selected ? [
       interact(false, () => canvasApi.current?.focus(selected.id)),
+      { id: 'fullview', label: t('tools.fullview.label'), hint: `${ALT}F`, desc: t('tools.fullview.desc'), icon: <Fullscreen size={ICON} />, testId: 'open-fullview', onSelect: () => setView(true) } satisfies Tool,
       { id: 'revisions', label: t('tools.revisions.label'), hint: `${ALT}R`, desc: t('tools.revisions.desc'), icon: <History size={ICON} />, active: panel === 'revisions', onSelect: () => setPanel(panel === 'revisions' ? null : 'revisions') } satisfies Tool,
       { id: 'variant', label: t('tools.variant.label'), hint: `${ALT}V`, desc: t('tools.variant.desc'), icon: <SquareStack size={ICON} />, testId: 'new-variant', unavailable: selected.variantOf ? t('tools.variant.fromDefault') : generating ? generateBusy : false, onSelect: () => setVariantFor(selected) } satisfies Tool,
       { id: 'presentation', label: selected.presentation === 'overlay' ? t('tools.presentation.toFull') : t('tools.presentation.toOverlay'), desc: selected.presentation === 'overlay' ? t('tools.presentation.overlayDesc') : t('tools.presentation.fullDesc'), icon: <Layers size={ICON} />, testId: 'toggle-presentation', active: selected.presentation === 'overlay', onSelect: () => void togglePresentation() } satisfies Tool,
@@ -890,15 +1036,15 @@ function CanvasPage() {
 
   const panelBody = !detail ? null
     : panel === 'revisions' && selected ? <RevisionPanel screen={selected} onClose={() => setPanel(null)} onRestored={refresh} />
-    : panel === 'design' ? <DesignPanel ds={detail.designSystem} project={detail.project} screens={screens} assets={detail.assets} busyReason={busyReason} onClose={() => setPanel(null)} onSaved={refresh} onApplyAll={applyDesignSystem} onPropose={(i) => propose(i)} />
-    : panel === 'screens' ? <ScreensPanel screens={screens} links={detail.links} busy={busyScreens} onPick={(id) => reveal({ kind: 'screen', id })} onClose={() => setPanel(null)} />
-    : panel === 'agent' ? <AgentJobsPanel projectId={projectId} screens={screens} components={components} runners={runners} onClose={() => setPanel(null)} onChanged={refresh} />
+    : panel === 'design' ? <DesignPanel ds={detail.designSystem} project={detail.project} screens={allScreens} assets={detail.assets} busyReason={busyReason} onClose={() => setPanel(null)} onSaved={refresh} onApplyAll={applyDesignSystem} onPropose={(i) => propose(i)} />
+    : panel === 'screens' ? <ScreensPanel screens={screens} links={surfaceLinks} busy={busyScreens} onPick={(id) => reveal({ kind: 'screen', id })} onClose={() => setPanel(null)} />
+    : panel === 'agent' ? <AgentJobsPanel projectId={projectId} screens={allScreens} components={components} runners={runners} onClose={() => setPanel(null)} onChanged={refresh} />
     : panel === 'inspect' && focusedComponent ? <InspectorPanel component={focusedComponent} sel={elementSel} sels={elementSels} onRemoveSel={deselectElement} routes={screens.map((s) => s.route)} busy={busyComponents.has(focusedComponent.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} tokens={tokens} onPathPick={(qid) => canvasApi.current?.pick(qid)} onPathPeek={(qid) => canvasApi.current?.peek(qid)} onClose={() => setPanel(null)} onEdited={() => { setElementSels([]); refresh(); }} />
     : panel === 'inspect' && shownScreen ? <InspectorPanel screen={shownScreen} sel={elementSel} sels={elementSels} onRemoveSel={deselectElement} routes={screens.map((s) => s.route)} busy={busyScreens.has(shownScreen.id)} keysRef={inspectorKeys} onDirectEdit={onDirectEdit} onUndo={() => void undoStack.undo()} tokens={tokens} onPathPick={(qid) => canvasApi.current?.pick(qid)} onPathPeek={(qid) => canvasApi.current?.peek(qid)} runners={runners} composerRunnerId={runnerId} sessionLists={lists} onSessionsOpen={(tool) => void loadSessionsFor(tool)} workingQids={workingSubtrees.filter((w) => w.screenId === shownScreen.id).map((w) => w.qid)} onClose={() => setPanel(null)} onEdited={(qid) => { canvasApi.current?.markDone([qid]); refresh(); }} onRegenerate={regenerateSubtree} onEditComponent={onEditComponent} onForkToSketch={(qid) => void forkToSketch(shownScreen.id, qid)} forking={forking} />
     : null;
 
   return (
-    <div className="canvas-shell relative h-full" style={composerDock.shellStyle} data-panel={panelBody ? 'open' : 'closed'} data-dock={composerDock.edge} data-minimap={minimapOn && !focusedId && !focusedComponentId ? 'on' : 'off'}>
+    <div className={`${fullView ? 'fullview-shell' : 'canvas-shell'} relative h-full`} style={composerDock.shellStyle} data-panel={panelBody ? 'open' : 'closed'} data-dock={composerDock.edge} data-minimap={minimapOn && !focusedId && !focusedComponentId ? 'on' : 'off'} {...(fullView ? cols.attrs : null)}>
       {/* 可用区探针：四边跟着浮层占位的 CSS 变量走，画布只负责测量它，避免两处各写一套数 */}
       <div ref={safeAreaRef} aria-hidden="true" data-testid="safe-area" className="pointer-events-none absolute bottom-[var(--chrome-bottom)] left-[var(--chrome-left)] right-[var(--chrome-right)] top-[var(--chrome-top)]" />
       <div ref={laneRef} aria-hidden="true" data-testid="composer-lane" className="pointer-events-none absolute bottom-0 left-[var(--lane-left)] right-[var(--side-right)] h-0" />
@@ -914,6 +1060,8 @@ function CanvasPage() {
         )}
       </>}>
         <ProjectSwitcher current={detail?.project ?? null} placeholder={failure?.kind === 'not-found' ? t('switcher.notFound') : failure ? t('load.failed') : t('switcher.loading')} onRenamed={(id) => { if (id === projectId) refresh(); }} />
+        {detail && surface && <SurfaceSwitcher projectId={projectId} surfaces={detail.surfaces} current={surface} screenCounts={screenCounts} onSwitch={(id) => switchSurface(id)} onChanged={() => refresh()} />}
+        {detail && <ViewToggle full={fullView} onChange={setView} label={tf('view.label')} canvasLabel={tf('view.canvas')} fullLabel={tf('view.full')} hint={tf('view.hint', { key: `${ALT}F` })} />}
       </TopNav>
       {/* 协作者头像（v1.32 REQ-CORE-048）：顶栏右侧那一行、工具栏上方；跟随时视口四周描他的颜色，顶部中央写正在跟随谁 */}
       <PeerAvatars className="absolute right-3 top-3 z-30" people={people} following={following} onFollow={follow.toggle} describe={describePeer} />
@@ -927,13 +1075,28 @@ function CanvasPage() {
       )}
       {!me && <NameDialog taken={peers.map((x) => x.person.color)} />}
       <div className="absolute inset-0">
-        {ready && detail && tokens && previewOrigin ? (
-          <CanvasView
-            projectId={projectId} safeAreaRef={safeAreaRef}
-            projectName={detail.project.name} tokens={tokens} palette={detail.designSystem.palette} colorMode={detail.designSystem.colorMode} assets={detail.assets} screens={screens} links={detail.links} previewOrigin={previewOrigin}
+        {ready && detail && tokens && previewOrigin && surface ? fullView ? (
+          <FullView key={surface.id}
+            projectName={detail.project.name} surface={surface} screens={screens} links={surfaceLinks} previewOrigin={previewOrigin} busy={busyScreens} cols={cols}
+            onCurrent={(s) => { setFvScreenId(s?.id ?? null); if (s) { setSelectedIds([s.id]); setSelectedComponentIds([]); } }}
+            picking={fvPicking} onPicking={changeFvPicking} pickQids={fvQids} onPick={onFvPick} climbRef={fvClimbRef}
+            onFillComposer={(text) => { showComposer(); setTimeout(() => composerRef.current?.fill(text), 0); }}
+            onNavigateMissing={(fromScreenId, href) => setMissing({ fromScreenId, hrefs: [href] })}
+            onToCanvas={() => setView(false)}
+            onEscape={() => { if (!blocked && !fvEscape() && busy) cancelNewest(); }}
+            onShortcut={(code, alt) => { if (blocked) return; if (alt) fvAlted[code]?.(); else if (code === 'KeyE') changeFvPicking(!fvPicking); else if (code === 'Slash') toggleComposer(); else if (code === 'KeyK') setFinderOpen(true); }}
+            onStale={() => refresh({ quiet: true })} refresh={refresh} startJob={startJob} modelRunner={modelRunner}
+            proposal={statesProposal?.surfaceId === surface.id ? statesProposal.proposal : null}
+            proposing={guardJobs.some((j) => j.kind === 'propose_states' && (j.input as { surfaceId?: string }).surfaceId === surface.id)}
+            onDismissProposal={() => setStatesProposal(null)}
+          />
+        ) : (
+          <CanvasView key={surface.id}
+            projectId={projectId} safeAreaRef={safeAreaRef} viewScope={surface.id === firstSurfaceId ? undefined : surface.id}
+            projectName={detail.project.name} tokens={tokens} palette={detail.designSystem.palette} colorMode={detail.designSystem.colorMode} assets={detail.assets} screens={screens} links={surfaceLinks} previewOrigin={previewOrigin}
             selectedIds={selectedIds} focusedId={focusedId} styleGuideSelected={panel === 'design'} inspectMode={inspectMode} armed={inspectArmed} showLinks={showLinks}
-            presence={presence} peers={peers} jobTargets={jobTargets} following={follow.leader?.person.id ?? null} onUserCamera={follow.stop}
-            anchor={anchor} screenSize={DEVICE_SIZE[detail.project.deviceType]} exemplarScreenId={detail.project.exemplarScreenId}
+            presence={presence} peers={surfacePeers} jobTargets={jobTargets} following={follow.leader?.person.id ?? null} onUserCamera={follow.stop}
+            anchor={anchor} screenSize={DEVICE_SIZE[surface.deviceType]} exemplarScreenId={detail.project.exemplarScreenId}
             onSelect={setSelectedId}
             onSelectMany={(ids, compIds, additive) => { setSelectedIds((prev) => (additive ? [...new Set([...prev, ...ids])] : ids)); setSelectedComponentIds((prev) => (additive ? [...new Set([...prev, ...compIds])] : compIds)); }}
             onSelectStyleGuide={() => { setSelectedIds([]); setSelectedComponentIds([]); setPanel('design'); }}
@@ -941,7 +1104,7 @@ function CanvasPage() {
             focusedComponentId={focusedComponentId}
             onFocusComponent={(id) => { setFocusedComponentId(id); if (id) { setFocusedId(null); setSelectedComponentIds([id]); setSelectedIds([]); } }}
             onMove={onMove}
-            components={components} selectedComponentIds={selectedComponentIds} onSelectComponent={setSelectedComponentId}
+            components={canvasComponents} selectedComponentIds={selectedComponentIds} onSelectComponent={setSelectedComponentId}
             onNavigateMissing={(fromScreenId, href) => setMissing({ fromScreenId, hrefs: [href] })}
             onDanglingClick={(screenId, hrefs) => setMissing({ fromScreenId: screenId, hrefs })}
             onDeadLink={() => toast(t('screen.deadLink'))}
@@ -963,7 +1126,7 @@ function CanvasPage() {
         ) : <CanvasPending failure={failure} onRetry={retryLoad} />}
       </div>
       {/* 多选排列条（REQ-CORE-018）：选中 ≥ 2 屏且没聚焦时出现在画布顶部中央；候选就地展开时让位。排版与键盘在 ArrangeBar，算位在 arrange.ts，落库在 positions.ts */}
-      {selectedScreens.length >= 2 && !focusedId && !inspectArmed && !candidates && <ArrangeBar count={selectedScreens.length} yieldToPanel={!!panelBody} onArrange={(k) => void arrange(k, selectedScreens)} />}
+      {!fullView && selectedScreens.length >= 2 && !focusedId && !inspectArmed && !candidates && <ArrangeBar count={selectedScreens.length} yieldToPanel={!!panelBody} onArrange={(k) => void arrange(k, selectedScreens)} />}
       {settingsSection && <Suspense fallback={null}><SettingsModal section={settingsSection} onSection={setSettings} onClose={() => setSettings(null)} returnTo={settingsTool} onCatalog={applyCatalog} /></Suspense>}
       <Composer
         handle={composerRef} laneRef={laneRef} jobs={chips} blockedReason={blockedReason} targets={targetScreens} totalScreens={screens.length} anchor={anchor} maxTargets={MAX_TARGETS}
@@ -971,20 +1134,22 @@ function CanvasPage() {
         onRemoveComponentTarget={(id) => { setTargetComponentIds((prev) => prev.filter((x) => x !== id)); setSelectedComponentIds((prev) => prev.filter((x) => x !== id)); }}
         count={count} versions={versions} onCount={setCount} onVersions={setVersions}
         onSend={onSend} onCancelJob={(id) => void cancelJob(id)} onRetryJob={retryJob} onDismissJob={dismissJob} onUploadImage={(file) => api.projects.uploadImage(projectId, file)} onError={(m) => toast(m, 'error')}
+        loadHistory={() => api.projects.messages(projectId).then((r) => promptHistory(r.items))}
         onRemoveTarget={(id) => { setTargetIds((prev) => prev.filter((x) => x !== id)); setSelectedIds((prev) => prev.filter((x) => x !== id)); }}
         onRemoveAnchor={() => setAnchor(null)}
         onClearTargets={() => { setTargetIds([]); setSelectedIds([]); setTargetComponentIds([]); setSelectedComponentIds([]); setAnchor(null); }}
         runners={runners} runnersFailed={runnersFailed} onReloadRunners={() => void loadRunners()} runnerId={runnerId} onRunnerChange={onRunnerChange}
         sessions={sessionList.items} sessionsReason={sessionList.reason} sessionTool={agentTool} sessionId={sessionId} onSessionChange={onSessionChange} onSessionsOpen={loadSessions}
         hidden={!composerVisible}
-        dock={{ edge: composerDock.edge, at: composerDock.at, narrow: composerDock.narrow, onMove: composerDock.move, onToggle: toggleComposer, onMeasure: composerDock.onMeasure }}
+        dock={{ edge: composerDock.edge, at: composerDock.at, narrow: composerDock.narrow, width: composerDock.width, onMove: composerDock.move, onResize: composerDock.resize, onToggle: toggleComposer, onMeasure: composerDock.onMeasure }}
+        sketch={fvComposer}
       />
-      {/* 项目没到手时只留三个本机开关与设置可用，其余写明为什么用不了 */}
-      <CanvasToolbar groups={ready ? tools : tools.map((g) => g.map((t) => (['composer', 'minimap', 'links', 'settings'].includes(t.id) ? t : { ...t, unavailable: pendingReason })))} />
+      {/* 项目没到手时只留三个本机开关与设置可用，其余写明为什么用不了；全屏视图没有工具栏，工具在设备台上方那一行 */}
+      {!fullView && <CanvasToolbar groups={ready ? tools : tools.map((g) => g.map((t) => (['composer', 'minimap', 'links', 'settings'].includes(t.id) ? t : { ...t, unavailable: pendingReason })))} />}
       {panelBody && <div key={panel} ref={panelRef} className="chrome slide-in-right absolute bottom-4 right-[var(--rail-w)] top-16 z-20 flex w-[var(--panel-w)] flex-col overflow-hidden rounded-lg"><Suspense fallback={<PanelLoading />}>{panelBody}</Suspense></div>}
-      {proposal && detail && <Suspense fallback={null}><ProposalDialog proposal={proposal} ds={detail.designSystem} busyReason={busyReason} screenCount={screens.length} batches={Math.ceil(screens.length / MAX_TARGETS)} onWrite={writeProposal} onFinish={finishProposal} onClose={() => setProposal(null)} /></Suspense>}
+      {proposal && detail && <Suspense fallback={null}><ProposalDialog proposal={proposal} ds={detail.designSystem} busyReason={busyReason} screenCount={allScreens.length} batches={Math.ceil(allScreens.length / MAX_TARGETS)} onWrite={writeProposal} onFinish={finishProposal} onClose={() => setProposal(null)} /></Suspense>}
       {newComponentOpen && <NewComponentDialog onCreate={createComponent} onClose={() => setNewComponentOpen(false)} />}
-      {finderOpen && detail && <ScreenFinder screens={screens} components={components} links={detail.links} busy={busyScreens} onPick={(pick) => { setFinderOpen(false); reveal(pick); }} onClose={() => setFinderOpen(false)} />}
+      {finderOpen && detail && <ScreenFinder screens={allScreens} components={fullView ? NONE : canvasComponents} links={detail.links} busy={busyScreens} surfaces={detail.surfaces} currentSurfaceId={surface?.id ?? null} onPick={(pick) => { setFinderOpen(false); pickFound(pick); }} onClose={() => setFinderOpen(false)} />}
       {variantFor && <VariantDialog base={variantFor} onCreate={createVariant} onClose={() => setVariantFor(null)} />}
       {confirmDelete && (selectedScreens.length > 0 || selectedComponents.length > 0) && <DeleteDialog screens={selectedScreens} components={selectedComponents} selected={selected} variantCount={screens.filter((s) => s.variantOf && selectedIds.includes(s.variantOf) && !selectedIds.includes(s.id)).length} onConfirm={onDelete} onClose={() => setConfirmDelete(false)} />}
       {missing && <MissingDialog missing={missing} busyReason={generating ? generateBusy : false} onGenerate={generateMissing} onClose={() => setMissing(null)} />}

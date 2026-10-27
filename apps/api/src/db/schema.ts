@@ -35,6 +35,23 @@ export const projects = pgTable('projects', {
   uniqueIndex('projects_sketchbook_uq').on(t.ownerId).where(sql`kind = 'sketchbook'`),
 ]);
 
+// 端（REQ-CORE-049 / ADR-040）：项目下的一端，有自己的名字、设备与一组屏；设计系统、素材、共享组件整个项目共用。
+// states 是端上的状态维度与事件（REQ-CORE-051 / ADR-041），形状见 core 的 surfaceStatesSchema；草稿本没有端
+export const surfaces = pgTable('surfaces', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  deviceType: text('device_type').notNull(),
+  position: integer('position').notNull().default(0),
+  states: jsonb('states').notNull().default(sql`'{"dims":[],"events":[]}'::jsonb`),
+  version: integer('version').notNull().default(1),
+  createdAt: ts('created_at').notNull().default(now()),
+  updatedAt: ts('updated_at').notNull().default(now()),
+}, (t) => [
+  index('surfaces_project_idx').on(t.projectId, t.position),
+  uniqueIndex('surfaces_project_name_uq').on(t.projectId, sql`lower(${t.name})`),
+]);
+
 export const designSystems = pgTable('design_systems', {
   id: uuid('id').primaryKey().defaultRandom(),
   projectId: uuid('project_id').notNull().unique().references(() => projects.id, { onDelete: 'cascade' }),
@@ -72,12 +89,18 @@ export const screens = pgTable('screens', {
   // 写回目标（REQ-CORE-044）：只在草稿上有值；不建外键——那一屏删了就当没有目标。target_qid 空 = 整屏
   targetScreenId: uuid('target_screen_id'),
   targetQid: text('target_qid'),
+  // 所属端（REQ-CORE-049）：普通项目的每一屏恰好属于本项目的一端，删端时级联删屏；草稿为空（INV-CORE-009）
+  surfaceId: uuid('surface_id').references(() => surfaces.id, { onDelete: 'cascade' }),
+  // 分组（REQ-CORE-050）：全屏视图左栏按它分组；空 = 未分组；元数据，不进修订
+  groupName: text('group_name'),
   createdAt: ts('created_at').notNull().default(now()),
   updatedAt: ts('updated_at').notNull().default(now()),
 }, (t) => [
-  // 路由唯一只对默认屏生效：变体与默认屏共用 route
-  uniqueIndex('screens_project_route_uq').on(t.projectId, t.route).where(sql`variant_of is null`),
+  // 路由唯一只对默认屏生效（变体与默认屏共用 route）：普通屏按端（INV-CORE-010），草稿按草稿本
+  uniqueIndex('screens_surface_route_uq').on(t.surfaceId, t.route).where(sql`variant_of is null and surface_id is not null`),
+  uniqueIndex('screens_draft_route_uq').on(t.projectId, t.route).where(sql`variant_of is null and surface_id is null`),
   index('screens_variant_of_idx').on(t.variantOf),
+  index('screens_surface_idx').on(t.surfaceId),
 ]);
 
 export const screenRevisions = pgTable('screen_revisions', {
@@ -95,6 +118,8 @@ export const screenRevisions = pgTable('screen_revisions', {
   sourceKind: text('source_kind').notNull(),
   jobId: uuid('job_id'),
   lintReport: jsonb('lint_report').notNull(),
+  // 页内状态（ADR-041）：落修订时解析的声明块与这一版写到的维度取值 { dims, events, uses }；旧修订为空
+  states: jsonb('states'),
   createdAt: ts('created_at').notNull().default(now()),
 }, (t) => [uniqueIndex('screen_revisions_screen_seq_uq').on(t.screenId, t.seq), index('screen_revisions_job_idx').on(t.jobId)]);
 

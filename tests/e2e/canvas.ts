@@ -1029,6 +1029,132 @@ await stepOf('TC-CORE-152', async () => {
   return '画布、接上跳转、参考图、复制在非安全上下文里都正常';
 });
 
+// ---------- TC-CORE-163 输入框里的目标标签排成一行、放不下时横向滚动（v1.44，PAGE-CANVAS 输入框「目标区」） ----------
+const chipsPid = seedProject('Chips', '--device', 'mobile', '--screens', '8', '--no-shot').projectId;
+type Strip = { n: number; tops: number; sw: number; cw: number; sl: number; gutter: number; bar: string; left: string; right: string; verb: string; verbCut: boolean; last: string; lastIn: boolean };
+// 标签条的几何：一共几枚、有几种不同的上沿（1 = 排成一行）、内容宽对可见宽、滚动条槽、两侧的渐隐量、动词行截没截、最后一枚在不在可见区
+const strip = (page: Page) => page.evaluate(() => {
+  const ul = document.querySelector('[data-testid="chip-strip"]') as HTMLElement | null;
+  const verb = document.querySelector('[data-testid="verb-line"]') as HTMLElement;
+  const lis = ul ? [...ul.children] as HTMLElement[] : [];
+  const a = ul?.getBoundingClientRect(); const z = lis.at(-1)?.getBoundingClientRect();
+  return { n: lis.length, tops: new Set(lis.map((li) => Math.round(li.getBoundingClientRect().top))).size, sw: ul?.scrollWidth ?? 0, cw: ul?.clientWidth ?? 0, sl: Math.round(ul?.scrollLeft ?? 0), gutter: ul ? ul.offsetHeight - ul.clientHeight : -1, bar: ul ? getComputedStyle(ul).scrollbarWidth : '', left: ul ? getComputedStyle(ul).getPropertyValue('--fade-start').trim() : '', right: ul ? getComputedStyle(ul).getPropertyValue('--fade-end').trim() : '', verb: verb.innerText.trim(), verbCut: verb.scrollWidth > verb.clientWidth, last: lis.at(-1)?.innerText.trim() ?? '', lastIn: !!a && !!z && z.left >= a.left - 1 && z.right <= a.right + 1 };
+}) as Promise<Strip>;
+
+await step('TC-CORE-163', '1', async () => {
+  // 1 选中 8 屏：只选 1 屏时放得下、两侧不渐隐；8 枚标签同一行，放不下、横向可滚，不显示滚动条；最后加的那枚在视野里，左侧渐隐、右侧不渐隐；动词行完整
+  const page = await open(chipsPid);
+  await page.getByRole('button', { name: '适配视图' }).click();
+  await sleep(600);
+  const cards = page.locator('[data-testid="screen-card"]');
+  await cards.nth(0).locator('.gesture').click();
+  let st = await strip(page);
+  await eventually(async () => { st = await strip(page); expect(st.n === 1 && st.left === '0px' && st.right === '0px', `① 1 枚放得下时两侧都不该渐隐：${JSON.stringify(st)}`); }, 2000);
+  for (let i = 1; i < 8; i++) await cards.nth(i).locator('.gesture').click({ modifiers: ['Shift'] });
+  await eventually(async () => expect((await page.getByTestId('target-chip').count()) === 8, '应有 8 枚目标标签'), 3000);
+  await eventually(async () => { st = await strip(page); expect(st.lastIn && st.left === '24px' && st.right === '0px', `① 最后一枚应在视野里、左侧渐隐、右侧不渐隐：${JSON.stringify(st)}`); }, 2000);
+  expect(st.n === 8 && st.tops === 1 && st.sw > st.cw + 20, `① 8 枚应排成一行且放不下：${JSON.stringify(st)}`);
+  expect(st.gutter === 0 && st.bar === 'none', `① 标签条不该有滚动条：${JSON.stringify(st)}`);
+  expect(st.verb.startsWith('改全部 8 屏') && !st.verbCut, `① 动词行应以「改全部 8 屏」开头且没有截断：${JSON.stringify(st)}`);
+  // 2 指针停在标签条上滚轮往上滚：标签条横着滚到最左，箭头换到右侧；动词行不动
+  const verbBox = (await page.getByTestId('verb-line').boundingBox())!;
+  const ul = (await page.getByTestId('chip-strip').boundingBox())!;
+  await page.mouse.move(ul.x + ul.width / 2, ul.y + ul.height / 2);
+  await page.mouse.wheel(0, -2000);
+  await eventually(async () => { st = await strip(page); expect(st.sl === 0 && st.left === '0px' && st.right === '24px', `② 滚轮应把标签条滚到最左、渐隐换到右侧：${JSON.stringify(st)}`); }, 2000);
+  const verbAfter = (await page.getByTestId('verb-line').boundingBox())!;
+  expect(Math.abs(verbAfter.x - verbBox.x) < 1, `② 动词行不该跟着动：${verbBox.x} → ${verbAfter.x}`);
+  // 3 Shift 点掉第 8 屏、标签条滚回最左，再加回来：标签按屏的先后排，「Screen 8」回到最后一枚，标签条自己滚到它
+  await cards.nth(7).locator('.gesture').click({ modifiers: ['Shift'] });
+  await eventually(async () => expect((await page.getByTestId('target-chip').count()) === 7, '③ 点掉后应剩 7 枚'), 3000);
+  const ul7 = (await page.getByTestId('chip-strip').boundingBox())!;
+  await page.mouse.move(ul7.x + ul7.width / 2, ul7.y + ul7.height / 2);
+  await page.mouse.wheel(0, -2000);
+  await eventually(async () => { st = await strip(page); expect(st.sl === 0, `③ 滚轮应把 7 枚的标签条滚到最左：${JSON.stringify(st)}`); }, 2000);
+  await cards.nth(7).locator('.gesture').click({ modifiers: ['Shift'] });
+  await eventually(async () => { st = await strip(page); expect(st.n === 8 && st.last === 'Screen 8' && st.lastIn && st.sl > 0 && st.right === '0px', `③ 加回的「Screen 8」应滚进视野、右侧不再渐隐：${JSON.stringify(st)}`); }, 3000);
+  // 4 清空：标签条不再出现，动词行回到「造」
+  await page.getByTestId('clear-targets').click();
+  await eventually(async () => { const n = await page.getByTestId('chip-strip').count(); const v = (await page.getByTestId('verb-line').innerText()).trim(); expect(n === 0 && v.startsWith('造'), `④ 清空后不该有标签条、动词行应是造：${n} 条，「${v}」`); }, 2000);
+  return `8 枚一行、内容宽 ${st.sw} px；滚轮横滚、新加的滚进视野`;
+});
+
+// ---------- TC-CORE-164 拖输入框的左右两边改宽（v1.45，PAGE-CANVAS「停靠与收起」） ----------
+const widthPid = seedProject('Width', '--device', 'mobile', '--screens', '3', '--no-shot').projectId;
+const storedWidth = (page: Page) => page.evaluate(() => (JSON.parse(localStorage.getItem('quilt:composer:canvas') ?? 'null') as { width?: number | null } | null)?.width ?? null);
+const cardBox = async (page: Page) => { await sleep(300); return (await page.locator('form.composer').boundingBox())!; };
+async function dragHandle(page: Page, side: 'left' | 'right', dx: number, opts: { esc?: boolean } = {}) {
+  const h = (await page.locator(`[data-testid="composer-resize"][data-side="${side}"]`).boundingBox())!;
+  const sx = h.x + h.width / 2, sy = h.y + h.height / 2;
+  await page.mouse.move(sx, sy);
+  await page.mouse.down();
+  for (let i = 1; i <= 10; i++) { await page.mouse.move(sx + dx * i / 10, sy); await sleep(16); }
+  if (opts.esc) await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await sleep(300);
+}
+
+await step('TC-CORE-164', '1', async () => {
+  // 1 停在底边：两条把手；右把手往外拖 200 px，宽 +200、左缘不动；记在本机；刷新后一样
+  const page = await open(widthPid);
+  expect((await page.getByTestId('composer-resize').count()) === 2, `底边应有两条把手：${await page.getByTestId('composer-resize').count()}`);
+  const b0 = await cardBox(page);
+  await dragHandle(page, 'right', 200);
+  const b1 = await cardBox(page);
+  expect(Math.abs(b1.width - b0.width - 200) <= 2 && Math.abs(b1.x - b0.x) <= 2, `① 右把手拖 200：宽 ${b0.width} → ${b1.width}，左缘 ${b0.x} → ${b1.x}`);
+  const w1 = await storedWidth(page);
+  expect(w1 !== null && Math.abs(w1 - b1.width) <= 1, `① 本机应记下 ${b1.width}：${w1}`);
+  await page.reload();
+  await page.locator('[data-testid="screen-card"]').first().waitFor();
+  const b1r = await cardBox(page);
+  expect(Math.abs(b1r.width - b1.width) <= 2 && Math.abs(b1r.x - b1.x) <= 2, `① 刷新后应同宽同位：${JSON.stringify(b1)} → ${JSON.stringify(b1r)}`);
+  // 2 左把手往外拖 100 px：宽 +100、右缘不动
+  await dragHandle(page, 'left', -100);
+  const b2 = await cardBox(page);
+  expect(Math.abs(b2.width - b1r.width - 100) <= 2 && Math.abs(b2.x + b2.width - (b1r.x + b1r.width)) <= 2, `② 左把手拖 100：宽 ${b1r.width} → ${b2.width}，右缘 ${b1r.x + b1r.width} → ${b2.x + b2.width}`);
+  // 3 拖到一半按 Esc：回到按下时的宽，本机记录不变
+  const saved = await storedWidth(page);
+  await dragHandle(page, 'right', -150, { esc: true });
+  const b3 = await cardBox(page);
+  expect(Math.abs(b3.width - b2.width) <= 2 && (await storedWidth(page)) === saved, `③ Esc 应回到 ${b2.width}：${b3.width}，记录 ${saved} → ${await storedWidth(page)}`);
+  // 4 键盘：聚焦右把手按两次 ←，窄 32 px，读屏值等于宽；按回车回到自动宽度
+  const right = page.locator('[data-testid="composer-resize"][data-side="right"]');
+  await right.focus();
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  const b4 = await cardBox(page);
+  const now = Number(await right.getAttribute('aria-valuenow'));
+  expect(Math.abs(b4.width - (b2.width - 32)) <= 2 && Math.abs(now - b4.width) <= 1, `④ 两次 ← 应窄 32：${b2.width} → ${b4.width}，aria-valuenow ${now}`);
+  await page.keyboard.press('Enter');
+  const b5 = await cardBox(page);
+  expect(Math.abs(b5.width - b0.width) <= 2 && (await storedWidth(page)) === null, `④ 回车应回到自动宽 ${b0.width}：${b5.width}，记录 ${await storedWidth(page)}`);
+  // 5 往里拖过头：停在下限 384；双击把手回到自动宽度
+  await dragHandle(page, 'right', -600);
+  const b6 = await cardBox(page);
+  expect(Math.abs(b6.width - 384) <= 1, `⑤ 宽度下限应是 384：${b6.width}`);
+  await page.locator('[data-testid="composer-resize"][data-side="right"]').dblclick();
+  const b7 = await cardBox(page);
+  expect(Math.abs(b7.width - b0.width) <= 2, `⑤ 双击应回到自动宽 ${b0.width}：${b7.width}`);
+  // 6 两行字时往里拖：框随字长高，不出滚动条
+  const input = page.getByTestId('composer-input');
+  await input.fill('把首页顶部的问候语改短一点，余额卡片改成深色并加一条本月预算进度，下面的列表按日期分组');
+  await sleep(200);
+  await dragHandle(page, 'right', -200);
+  const fit = await input.evaluate((el) => el.scrollHeight - el.clientHeight);
+  expect(fit <= 1, `⑥ 变窄后框里不该藏着一截：${fit} px`);
+  await input.fill('');
+  // 7 停到左边只剩右边那条；窄视口没有把手
+  await page.getByTestId('composer-grip').focus();
+  await page.keyboard.press('ArrowLeft');
+  await sleep(400);
+  const sides = await page.getByTestId('composer-resize').evaluateAll((els) => els.map((e) => e.getAttribute('data-side')).join());
+  expect(sides === 'right', `⑦ 停在左边应只有右边那条把手：${sides}`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await sleep(400);
+  expect((await page.getByTestId('composer-resize').count()) === 0, '⑦ 窄视口不该有把手');
+  return `拖宽、对边不动、Esc 撤回、键盘与双击复位、下限 384 都对`;
+});
+
 await (ctx as BrowserContext | null)?.close().catch(() => {});
 const counts = summary();
 await browser.close();

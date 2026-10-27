@@ -8,7 +8,7 @@ import { verifyPreview } from '../lib/signing.ts';
 import { storage } from '../lib/storage.ts';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { withCurrentRuntime, withPaletteDarkMode, withOverlayStyle, withDraftComponentStyle, withLocalVendor, buildPrelude, pickLocale, SCREEN_CSP, VENDOR, type Tokens } from '@quilt/core';
+import { withCurrentRuntime, withPaletteDarkMode, withOverlayStyle, withDraftComponentStyle, withLocalVendor, withSurfaceStates, buildPrelude, pickLocale, SCREEN_CSP, VENDOR, type Tokens, type SurfaceStates } from '@quilt/core';
 import { sketchbookName } from '../lib/locale.ts';
 import { readAsset } from '../services/assets.ts';
 import { componentPreviewDocument } from '../services/components.ts';
@@ -55,13 +55,15 @@ previewApp.get('/p/:projectId/:screenId', async (c) => {
   const rev = c.req.query('rev') ?? '';
   const token = c.req.query('t') ?? '';
   if (!verifyPreview(token, projectId)) return problem(c, 403, '/errors/preview-token-invalid', '预览签名无效或过期');
-  const [row] = await db.select({ htmlKey: schema.screenRevisions.htmlKey, presentation: schema.screens.presentation, frame: schema.screens.frame, kind: schema.projects.kind, name: schema.screens.name })
+  const [row] = await db.select({ htmlKey: schema.screenRevisions.htmlKey, presentation: schema.screens.presentation, frame: schema.screens.frame, kind: schema.projects.kind, name: schema.screens.name, states: schema.surfaces.states })
     .from(schema.screenRevisions).innerJoin(schema.screens, eq(schema.screens.id, schema.screenRevisions.screenId))
     .innerJoin(schema.projects, eq(schema.projects.id, schema.screens.projectId))
+    .leftJoin(schema.surfaces, eq(schema.surfaces.id, schema.screens.surfaceId))
     .where(and(eq(schema.screenRevisions.id, rev), eq(schema.screenRevisions.screenId, screenId), eq(schema.screens.projectId, projectId)));
   if (!row) return problem(c, 404, '/errors/not-found', '修订不存在');
   // 叠层屏（v0.63）：呈现方式是元数据，下发时临时注入透明背景，压在别的屏上时露出底下那一屏
-  const raw = withLocalVendor(withPaletteDarkMode(withCurrentRuntime((await storage.get(row.htmlKey)).toString('utf8'))));
+  // 端上的维度（REQ-CORE-051）放进 head，运行时按它取缺省值；屏的修订里不存它——端上的维度会变
+  const raw = withSurfaceStates(withLocalVendor(withPaletteDarkMode(withCurrentRuntime((await storage.get(row.htmlKey)).toString('utf8')))), row.states as SurfaceStates | null);
   // 组件画框的草稿（REQ-CORE-040）：看板按根元素的大小摆它；画框还没定（null）的按组件量。手机页 / 桌面页由父页按画框给视口，不报。
   // 它同样注入透明背景：看板上组件四周露出看板底色，而不是草稿本设计系统的背景色
   const draftComponent = row.kind === 'sketchbook' && (row.frame === 'component' || row.frame === null);

@@ -98,3 +98,17 @@ test('newProjectDesign：中性色板对比度、sharp 圆角、配方无胶囊�
     assert.ok(d.designMd.includes('No pill buttons') && d.designMd.includes(d.components.map((r) => r.name).join(', ')), device);
   }
 });
+
+test('只改选中的几块（REQ-EDIT-002 v1.50）：单块与多块的提示词都要求只改里面、不用脚本挪元素，要动外面时只回 <quilt-needs-outer/>', async () => {
+  const { subtreeUserPrompt, subtreeBlocksUserPrompt, NEEDS_OUTER_REPLY, NEEDS_OUTER_RE } = await import('@quilt/core');
+  const one = subtreeUserPrompt('Home', '/home', '<p>x</p>', '挪到右边');
+  const many = subtreeBlocksUserPrompt('Home', '/home', [{ qid: 'q1', html: '<p>a</p>' }, { qid: 'q2', html: '<p>b</p>' }], '挪到右边');
+  for (const p of [one, many]) {
+    assert.ok(p.includes(NEEDS_OUTER_REPLY) && /do not add a <script> that moves elements/.test(p) && /parents?, (?:its |their )?siblings/.test(p), p);
+    // 规则写在原 HTML 之前，原 HTML 照旧是提示词末尾
+    assert.ok(p.indexOf(NEEDS_OUTER_REPLY) < p.indexOf('<p>'), p);
+  }
+  assert.ok(many.includes(`${NEEDS_OUTER_REPLY} instead of the blocks`), many);
+  for (const reply of [NEEDS_OUTER_REPLY, '<quilt-needs-outer />', '```html\n<quilt-needs-outer>\n```']) assert.ok(NEEDS_OUTER_RE.test(reply), reply);
+  assert.ok(!NEEDS_OUTER_RE.test('<quilt-block qid="q1">\n<p>a</p>\n</quilt-block>'));
+});

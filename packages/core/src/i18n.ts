@@ -46,7 +46,7 @@ export function jobLocale(job: { input: unknown }): Locale | null {
 
 // 生成内容跟界面语言（REQ-CORE-046）：只有这几种作业写屏上的可见文字（造屏、改屏、改组件、重生成一块；草稿本的新稿与改稿也是它们），
 // 提示词只给它们补语言要求；input.locale 每种作业都记，回执、进度与失败文案按它写
-export const LOCALE_JOB_KINDS: readonly string[] = ['generate', 'edit_screens', 'edit_component', 'regenerate_subtree'];
+export const LOCALE_JOB_KINDS: readonly string[] = ['generate', 'edit_screens', 'edit_component', 'regenerate_subtree', 'propose_states'];
 const LANGUAGE_NAME: Record<Locale, string> = { zh: 'Simplified Chinese', en: 'English' };
 /** 提示词末尾那一句语言要求；排在其它「跟着请求的语言写」的规则之后，以它为准 */
 export const uiLanguageRule = (locale: Locale): string =>

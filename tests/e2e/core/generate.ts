@@ -487,19 +487,20 @@ await step('TC-CORE-023', async () => {
     expect(!(a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height), `${an} 与 ${bn} 重叠`);
   }
 
-  // 2 顶栏不铺底（v1.10，§13.1）：没有底色、边线与模糊，盒子只包住左上角的项目切换器 chip；chip 是毛玻璃（v1.15），左缘与小地图对齐；
-  //   chip 右边同一高度的位置指针落到画布上，不被顶栏拦住
+  // 2 顶栏不铺底（v1.10，§13.1）：没有底色、边线与模糊，盒子只包住左上角那几枚 chip（v1.52 起项目切换器后面是端切换器与「画布 / 全屏」）；
+  //   项目切换器是毛玻璃（v1.15），左缘与小地图对齐；最后一枚 chip 右边同一高度的位置指针落到画布上，不被顶栏拦住
   const hd = await page.locator('header').first().evaluate((el) => {
     const cs = getComputedStyle(el); const r = el.getBoundingClientRect();
     const chip = document.querySelector('[data-testid="project-switcher"]')!; const c = chip.getBoundingClientRect();
     const probe = document.createElement('div'); probe.style.color = 'var(--semantic-material-chrome-tint)'; document.body.appendChild(probe);
     const panel = getComputedStyle(probe).color; probe.remove();
     const mini = document.querySelector('[data-testid="minimap"]')?.getBoundingClientRect();
-    const right = document.elementFromPoint(c.right + 120, c.top + c.height / 2);
+    const last = document.querySelector('[data-testid="view-toggle"]')!.getBoundingClientRect();
+    const right = document.elementFromPoint(last.right + 120, c.top + c.height / 2);
     return { bg: cs.backgroundColor, filter: cs.backdropFilter, border: cs.borderBottomWidth, width: r.width, chipBg: getComputedStyle(chip).backgroundColor, chipFilter: getComputedStyle(chip).backdropFilter, panel, chipLeft: c.left, miniLeft: mini?.left ?? null, rightIsHeader: !!right?.closest('header') };
   });
   expect(/rgba\(0, 0, 0, 0\)|transparent/.test(hd.bg) && hd.filter === 'none' && hd.border === '0px', `顶栏应不铺底、无边线、不模糊：${JSON.stringify(hd)}`);
-  expect(hd.chipBg === hd.panel && hd.chipFilter.includes('blur') && !hd.rightIsHeader && hd.width < 400, `项目切换器应是毛玻璃 chip、顶栏只包住它：${JSON.stringify(hd)}`);
+  expect(hd.chipBg === hd.panel && hd.chipFilter.includes('blur') && !hd.rightIsHeader && hd.width < 400, `项目切换器应是毛玻璃 chip、顶栏只包住那几枚 chip：${JSON.stringify(hd)}`);
   expect(hd.miniLeft === null || Math.abs(hd.miniLeft - hd.chipLeft) <= 0.5, `项目切换器 chip 与小地图左缘没对齐：${hd.chipLeft} vs ${hd.miniLeft}`);
 
   // 3 工具栏命中区与 roving tabindex

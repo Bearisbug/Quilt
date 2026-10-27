@@ -650,12 +650,14 @@ await step('TC-CORE-036', async () => {
     expect(!!spot, '找不到画布空白点');
     await page.mouse.click(spot!.x, spot!.y);
     await page.keyboard.press('Escape');
-    await page.waitForFunction(() => document.querySelectorAll('[data-testid="job-chip"]').length === 1, null, { timeout: 10000 });
+    // 第 6 步那条落地后的「任务完成」chip 要 10 s 才收起，只数在跑的
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="job-chip"][data-state="running"]').length === 1, null, { timeout: 10000 });
+    await chipOf(editJob).waitFor({ state: 'detached', timeout: 5000 });
     expect((await jobOf(editJob)).status === 'cancelled', 'Esc 没取消最新那个作业');
     expect((await jobOf(genJob)).status === 'running', 'Esc 把另一个作业也取消了（应按一次取消一个）');
     // 9 chip 上的取消键只取消那一个；造屏名额一松，无目标发送立刻恢复
     await chipOf(genJob).getByTestId('cancel-job').click();
-    await page.waitForFunction(() => document.querySelectorAll('[data-testid="job-chips"]').length === 0, null, { timeout: 10000 });
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="job-chips"]').length === 0, null, { timeout: 15000 });
     expect((await jobOf(genJob)).status === 'cancelled', '点 chip 上的取消键没取消那个作业');
     await page.getByTestId('clear-targets').click();
     await page.fill('#chat-input', '再造一屏设置页');

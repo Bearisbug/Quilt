@@ -28,22 +28,27 @@ const MCP_SETUP: Record<AgentTool, (url: string) => string> = {
 };
 
 // 子树重生成（REQ-EDIT-002）只动那一块：屏与草稿（REQ-CORE-045）同一句。按住 Shift 选的几块（v1.26 qids）全部列出，
-// 一次 patch_screen 每块一条 edit，这一屏只多一版
-const subtreeScope = (qids: string[], target: 'screen' | 'draft') => qids.length > 1
+// 一次 patch_screen 每块一条 edit，这一屏只多一版。只改这几块里面（v1.50，同 contract.ts 的 INSIDE_ONE）：非动外面不可时不写，
+// 以 finish_job 的 summary「needs outer element」收口，chip 上提示选到外层
+const insideOnly = (target: 'screen' | 'draft') => `Change only what is inside the selected element(s): do not change their parents, siblings or anything else on the ${target}, and do not add a <script> that moves elements, reparents them or edits anything outside them. If the instruction can only be done by changing something outside them (moving one to another place in the page, changing the layout of a parent or sibling), do not write anything: call quilt.finish_job with status "failed" and summary "needs outer element".`;
+const subtreeScope = (qids: string[], target: 'screen' | 'draft') => `${qids.length > 1
   ? `Scope: rewrite ONLY these ${qids.length} elements (each with its subtree) on the target ${target}, applying the one instruction to each of them: ${qids.map((q) => `data-qid="${q}"`).join(', ')}. Keep every other element identical: change them in ONE quilt.patch_screen call with one edit per element (find = that element's current HTML from quilt.get_screen, replace = its new HTML), so the ${target} gets a single new version, instead of resending the whole ${target}.`
-  : `Scope: rewrite ONLY the element with data-qid="${qids[0]}" (and its subtree) on the target ${target}. Keep every other element identical: change it with quilt.patch_screen (find = that element's current HTML from quilt.get_screen, replace = the new HTML) instead of resending the whole ${target}.`;
+  : `Scope: rewrite ONLY the element with data-qid="${qids[0]}" (and its subtree) on the target ${target}. Keep every other element identical: change it with quilt.patch_screen (find = that element's current HTML from quilt.get_screen, replace = the new HTML) instead of resending the whole ${target}.`} ${insideOnly(target)}`;
 
 async function buildPrompt(job: JobRow): Promise<string> {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, job.projectId));
   if (job.kind === 'edit_component') return componentPrompt(job, project);
   if (project.kind === 'sketchbook') return sketchPrompt(job, project);
   // generate / edit_screens 带 screenIds；regenerate_subtree 带单个 screenId + qid（只重写该子树），一次改几块时另有 qids
-  const input = job.input as { prompt: string; screenIds?: string[]; screenId?: string; qid?: string; qids?: string[] };
+  const input = job.input as { prompt: string; screenIds?: string[]; screenId?: string; qid?: string; qids?: string[]; surfaceId?: string; group?: string };
   const ids = input.screenIds?.length ? input.screenIds : input.screenId ? [input.screenId] : [];
   const screens = ids.length ? await db.select().from(schema.screens).where(inArray(schema.screens.id, ids)) : [];
+  // 这一轮落在哪一端（REQ-CORE-049）：造屏取输入里的端（建作业时已定），改屏取目标屏所在的端；会话建新屏要带上它，否则落进第一端
+  const surfaceId = input.surfaceId ?? screens[0]?.surfaceId ?? null;
+  const [surface] = surfaceId ? await db.select().from(schema.surfaces).where(eq(schema.surfaces.id, surfaceId)) : [];
   const targets = screens.length
     ? screens.map((s) => `- ${s.name} (${s.route}) screenId=${s.id} expectedRevisionId=${s.currentRevisionId ?? 'none'}${s.presentation === 'overlay' ? ' — an OVERLAY screen: keep its root transparent (bg-transparent) and its close action linking back' : ''}`).join('\n')
-    : '- none: create new screen(s) with quilt.create_screen (pick routes that do not collide with the app map)';
+    : `- none: create new screen(s) with quilt.create_screen (pick routes that do not collide with this surface's app map${surface ? `; pass surfaceId="${surface.id}"${input.group ? ` and group="${input.group}"` : ''}` : ''})`;
   const scope = job.kind === 'regenerate_subtree' && input.qid ? subtreeScope(input.qids ?? [input.qid], 'screen') : '';
   // 每个目标屏此前已生效的用户指令（ADR-012 v0.87）：别的通道、MCP 改过的轮次不在这个会话的记忆里
   const history = job.kind === 'edit_screens' || job.kind === 'regenerate_subtree'
@@ -51,7 +56,8 @@ async function buildPrompt(job: JobRow): Promise<string> {
     : '';
   return [
     `[Quilt] The Quilt canvas delivered a job to this session (job ${job.id}).`,
-    `You are working on the Quilt project "${project.name}" (projectId ${project.id}, ${project.deviceType}) through the Quilt MCP server "quilt" at ${mcpUrl()}. ${MCP_SETUP[toolOf(job)](mcpUrl())}`,
+    `You are working on the Quilt project "${project.name}" (projectId ${project.id}, ${surface?.deviceType ?? project.deviceType}) through the Quilt MCP server "quilt" at ${mcpUrl()}. ${MCP_SETUP[toolOf(job)](mcpUrl())}`,
+    surface ? `Surface: "${surface.name}" (surfaceId ${surface.id}, ${surface.deviceType}) — read the contract with quilt.get_design_contract { projectId, surfaceId: "${surface.id}" }: its routes, viewport and app-wide states are this surface's.` : '',
     project.brief ? `App brief: ${project.brief}` : '',
     `Instruction from the user:\n${input.prompt}`,
     history,

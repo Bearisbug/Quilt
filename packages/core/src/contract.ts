@@ -3,15 +3,19 @@ import { EDIT_BLOCK } from './edits.ts';
 import { DEVICE_SIZE, type DeviceType, type Presentation } from './device.ts';
 import { componentPlacement, sharedComponentsSection, type SharedComponentCard } from './component-meta.ts';
 import type { DraftFrameChoice } from './schemas.ts';
+import { EVENT_MS, MAX_PAGE_DIMS, MAX_PAGE_EVENTS, type SurfaceStates } from './states.ts';
 
 // 设计契约（ADR-005 / ADR-012）：每次生成都带，体积与屏幕数无关。组件配方来自设计系统 components。
 export type ComponentRecipe = { name: string; html: string; note?: string };
-export type PlannedScreen = { name: string; route: string; purpose: string; links: string[]; sections: string[]; presentation?: Presentation };
+// group（REQ-CORE-050）：规划器给的分组名，已有的分组优先沿用
+export type PlannedScreen = { name: string; route: string; purpose: string; links: string[]; sections: string[]; presentation?: Presentation; group?: string };
 // 整组规划（REQ-CORE-003）：brief 只在空项目首轮扩写；entryFrom 是既有哪一屏进入新组（反向连线的靶子）
 export type Plan = { screens: PlannedScreen[]; brief?: string; entryFrom?: string | null };
 export type AppContext = { name: string; description: string; brief?: string };
 /** 屏注册表条目（ADR-012 稳定前缀）：每屏 route / name / purpose */
 export type RegistryEntry = { route: string; name: string; purpose?: string };
+/** 项目里其他端的屏注册表（REQ-CORE-049）：规划器只作参照、不连线 */
+export type OtherSurface = { name: string; device: DeviceType; registry: (RegistryEntry & { group?: string })[] };
 /** 情境层参考屏（ADR-012）：样板屏 / 来源屏 */
 export type ReferenceScreen = { label: string; body: string };
 
@@ -94,7 +98,7 @@ const routeList = (registry: RegistryEntry[]) => registry.map((r) => `${r.route}
 const fontNote = (tokens: Tokens) => `${tokens.typography.fontFamily} is ${tokens.typography.fontSource === 'system' ? 'the device font (installed locally, no webfont to load)' : 'preloaded'}`;
 
 // shared（REQ-EDIT-006）：项目的共享组件卡——每张都进前缀（名字 / 摘要 / 占位写法），与本次相关的附完整 HTML
-export function screenSystemPrompt(app: AppContext, device: DeviceType, tokens: Tokens, designMd: string, components: ComponentRecipe[], registry: RegistryEntry[], refs: ReferenceScreen[], assets: ProjectAsset[] = [], shared: SharedComponentCard[] = []): string {
+export function screenSystemPrompt(app: AppContext, device: DeviceType, tokens: Tokens, designMd: string, components: ComponentRecipe[], registry: RegistryEntry[], refs: ReferenceScreen[], assets: ProjectAsset[] = [], shared: SharedComponentCard[] = [], states: SurfaceStates | null = null): string {
   const size = DEVICE_SIZE[device];
   const deviceRules = device === 'mobile'
     ? `- Device: mobile, viewport ${size.w}×${size.h}. No device status bar. Main screens have a top AppBar and a bottom TabBar linking to the 4 main routes. Detail/flow screens have a back-arrow AppBar (<a href="/previous-route">) and no TabBar.`
@@ -139,7 +143,26 @@ ${sharedComponentsSection(shared)}${assetList}${brief}
 APP CONTEXT
 - App: ${app.name} — ${app.description}
 - ALLOWED ROUTES: ${routes}
-${references}`;
+${references}${statesSection(states)}`;
+}
+
+// 状态（REQ-CORE-051 / ADR-041，API-CORE-016 状态条目）：端上的维度与事件进出屏、改屏、只改一块的提示词；写法是运行时认的 data-when / data-s-*。
+// 端上没有维度时只讲写法，给「给这一页加状态」那一轮用
+export function statesSection(states: SurfaceStates | null): string {
+  // 不在某一端里（草稿本、没有端的调用方）不带这一段；端上还没有维度时照样带，页内状态的写法要用
+  if (!states) return '';
+  const dims = (states?.dims ?? []).filter((d) => !d.retired);
+  const events = states?.events ?? [];
+  const list = dims.length || events.length
+    ? `This surface defines these app-wide states; every screen should show the right thing for each value:\n${dims.map((d) => `  - dimension "${d.key}" (${d.name}): ${d.values.map((v) => `${v.key} (${v.name})${v.key === d.default ? ' [default]' : ''}`).join(', ')}`).join('\n')}${events.length ? `\n${events.map((e) => `  - event "@${e.key}" (${e.name}), plays for ${e.ms ?? EVENT_MS.default} ms then goes away`).join('\n')}` : ''}\n`
+    : 'This surface has no app-wide states yet.\n';
+  return `
+STATES (switched live by the designer; switching never reloads the screen)
+${list}- Show an element only for some values with data-when="dim:value" (one of several: data-when="net:offline|weak"; parts separated by spaces must all hold: data-when="net:offline login:guest"). An element with data-when="@event" shows only while that event plays (toasts, banners, success flashes).
+- The current value of every dimension is also on <html> as data-s-<dim>="<value>", so your <style> or classes can react: html[data-s-net="offline"] .x { … }. Screen scripts can listen for the window events quilt:states and quilt:event.
+- The default value is the screen as it normally looks: write it without data-when; add data-when blocks only for the other values and for events. Elements without data-when always show.
+- A state that belongs to this screen only (a tab, an empty list, an error on one form) is declared inside the root element as <script type="application/json" data-quilt-states>{"dims":[{"key":"list","name":"List","values":[{"key":"full","name":"Full"},{"key":"empty","name":"Empty"}],"default":"full"}],"events":[]}</script> (at most ${MAX_PAGE_DIMS} dimensions and ${MAX_PAGE_EVENTS} events; keys are lowercase kebab-case and must not reuse the surface's keys above), then used with data-when the same way.
+`;
 }
 
 // 整组规划（REQ-CORE-003 v0.31）：count 是屏数档位——auto 时空项目 4–6 屏主流程、非空项目 2–6 屏子流程；
@@ -152,12 +175,24 @@ export function planSystemPrompt(opts: { count: number | 'auto'; empty: boolean 
     ? `"brief" is 3–5 sentences describing the app for future generations: what it is, who uses it, the tone and the main flows (written from the description, do not invent features the description rules out).`
     : `"entryFrom" is the route of the EXISTING screen that should link into this new group (the natural entry point), or null if none is obvious.`;
   return `You are Quilt's app planner. Given an app description${opts.empty ? '' : ' and the screens that already exist'}, output a JSON object (no markdown fences, no prose) with this exact shape:
-{${opts.empty ? '"brief":"…",' : '"entryFrom":"/existing-route",'}"screens":[{"name":"Home","route":"/home","purpose":"one sentence","links":["/other-route"],"sections":["section 1","section 2"],"presentation":"push"}]}
-Rules: ${countRule}; ${PRESENTATION_RULE} routes are lowercase kebab-case starting with "/" and MUST NOT collide with EXISTING ROUTES; every screen links to at least one other screen and all links use routes from this plan or from EXISTING ROUTES; sections are 3–5 short phrases describing what the screen contains, top to bottom; ${extra} Strictly valid JSON: double quotes, no trailing commas, no comments.`;
+{${opts.empty ? '"brief":"…",' : '"entryFrom":"/existing-route",'}"screens":[{"name":"Home","route":"/home","purpose":"one sentence","links":["/other-route"],"sections":["section 1","section 2"],"presentation":"push","group":"Main"}]}
+Rules: ${countRule}; ${PRESENTATION_RULE} ${GROUP_RULE} routes are lowercase kebab-case starting with "/" and MUST NOT collide with EXISTING ROUTES; every screen links to at least one other screen and all links use routes from this plan or from EXISTING ROUTES; sections are 3–5 short phrases describing what the screen contains, top to bottom; ${extra} Strictly valid JSON: double quotes, no trailing commas, no comments.`;
 }
-export function planUserPrompt(app: AppContext, description: string, existing: RegistryEntry[]): string {
+export function planUserPrompt(app: AppContext, description: string, existing: RegistryEntry[], ctx: PlanContext = {}): string {
   const list = existing.map((r) => `${r.route} (${r.name}${r.purpose ? `: ${r.purpose}` : ''})`).join(', ') || '(none)';
-  return `App: ${app.name}${app.brief ? ` — ${app.brief}` : ''}\nEXISTING ROUTES: ${list}\nRequest: ${description}`;
+  return `App: ${app.name}${app.brief ? ` — ${app.brief}` : ''}\nEXISTING ROUTES: ${list}${planContextLines(ctx)}\nRequest: ${description}`;
+}
+
+// 分组（REQ-CORE-050）与其他端（REQ-CORE-049）：规划器给每张新屏一个分组名，已有的优先沿用；其他端的页面表只作参照——
+// 同一个产品的另一端（手机 App 之于网页版），功能与叫法对齐，但不连线、路由不必避开
+export type PlanContext = { groups?: string[]; others?: OtherSurface[]; surface?: string };
+const GROUP_RULE = '"group" is a short name (1–3 words, at most 20 characters, in the language of the screen names) for the part of the app the screen belongs to, e.g. "Onboarding", "Orders", "Settings"; reuse an EXISTING GROUP when one fits;';
+function planContextLines(ctx: PlanContext): string {
+  const groups = ctx.groups?.length ? `\nEXISTING GROUPS: ${ctx.groups.join(', ')}` : '';
+  const others = ctx.others?.length
+    ? `\nOTHER SURFACES OF THIS PRODUCT (reference only: align features and naming with them, but never link to their routes; this request is for the ${ctx.surface ? `"${ctx.surface}" ` : ''}surface):\n${ctx.others.map((o) => `  - ${o.name} (${o.device}): ${o.registry.map((r) => `${r.route} (${r.name}${r.group ? `, group ${r.group}` : ''})`).join(', ') || '(no screens yet)'}`).join('\n')}`
+    : '';
+  return groups + others;
 }
 
 // 参考图说明（REQ-CORE-012）。必须写清它是「风格参照」而不是「照着抄」，否则模型会去复刻
@@ -230,12 +265,12 @@ export const SKETCH_REFERENCE_IMAGE_NOTE = `The user attached reference image(s)
 // 再走同一条出屏路径。路由不许撞现有的；链接只许指向现有的、且可以为空——交互还没想好时先把屏设计出来，不强迫它连到谁。
 export function planOneScreenSystemPrompt(): string {
   return `You are Quilt's screen planner. The user wants ONE additional screen for an existing app. Output a JSON object (no markdown fences, no prose) with this exact shape:
-{"name":"Profile Detail","route":"/profile-detail","purpose":"one sentence","links":["/existing-route"],"sections":["section 1","section 2","section 3"],"entryFrom":"/existing-route","presentation":"push"}
-Rules: ${PRESENTATION_RULE} route is lowercase kebab-case starting with "/" and MUST NOT be one of the EXISTING ROUTES; links is a subset of EXISTING ROUTES — only include a route when this screen obviously navigates there, and leave it an empty array when the flow is not decided yet (empty is the normal case, do not force links); entryFrom is the EXISTING route that would naturally link INTO this screen, or null when none is obvious; sections are 3–5 short phrases describing what the screen contains, top to bottom; name is 1–3 words in the same language as the existing screen names. Strictly valid JSON: double quotes, no trailing commas, no comments.`;
+{"name":"Profile Detail","route":"/profile-detail","purpose":"one sentence","links":["/existing-route"],"sections":["section 1","section 2","section 3"],"entryFrom":"/existing-route","presentation":"push","group":"Profile"}
+Rules: ${PRESENTATION_RULE} ${GROUP_RULE} route is lowercase kebab-case starting with "/" and MUST NOT be one of the EXISTING ROUTES; links is a subset of EXISTING ROUTES — only include a route when this screen obviously navigates there, and leave it an empty array when the flow is not decided yet (empty is the normal case, do not force links); entryFrom is the EXISTING route that would naturally link INTO this screen, or null when none is obvious; sections are 3–5 short phrases describing what the screen contains, top to bottom; name is 1–3 words in the same language as the existing screen names. Strictly valid JSON: double quotes, no trailing commas, no comments.`;
 }
-export function planOneScreenUserPrompt(app: AppContext, description: string, existing: RegistryEntry[]): string {
+export function planOneScreenUserPrompt(app: AppContext, description: string, existing: RegistryEntry[], ctx: PlanContext = {}): string {
   const list = existing.map((r) => `${r.route} (${r.name}${r.purpose ? `: ${r.purpose}` : ''})`).join(', ') || '(none)';
-  return `App: ${app.name}${app.brief ? ` — ${app.brief}` : ` — ${app.description}`}\nEXISTING ROUTES: ${list}\nRequested screen: ${description}`;
+  return `App: ${app.name}${app.brief ? ` — ${app.brief}` : ` — ${app.description}`}\nEXISTING ROUTES: ${list}${planContextLines(ctx)}\nRequested screen: ${description}`;
 }
 
 export function screenUserPrompt(s: PlannedScreen, all: PlannedScreen[], opts: { variant?: { ofName: string; name: string } } = {}): string {
@@ -269,6 +304,8 @@ export const CONVENTIONS_REGENERATE_PROMPT = 'Rework this screen so it follows e
 export const RESTYLE_PROMPT = 'This screen was copied in from a free-form sketch that ignored this project\'s design system. Restyle it to THIS project\'s design system: replace hardcoded colours (hex, rgb, arbitrary values, inline styles) with the token classes, use the project\'s typography, radius and elevation rules, and swap hand-made controls for the matching COMPONENT RECIPES. Keep the layout, content, copy, images, links and interactions as they are; do not add or remove sections.';
 // 懒生成补屏（REQ-PROTO-003）与出变体（REQ-CORE-025）的提示词：画布发起与「修改」重发共用
 export const missingPagePrompt = (route: string): string => `Screen for route ${route}`;
+// 「补上 N 屏」（REQ-CORE-051）：按端上的一个维度补写各屏；系统提示里的 STATES 一段列着这个维度的键与取值，这里只点名
+export const statesFillPrompt = (dimName: string): string => `按这一端的维度「${dimName}」补上各取值下的显示：缺省取值保持现在的样子，其余每个取值用 data-when 写出这一屏该显示什么`;
 export const variantPrompt = (name: string): string => `The ${name} state`;
 // 系统代发轮次的提示词底稿（REQ-CORE-026 v0.74）：「修改」重发时用户写的字作为附加要求接在底稿之后；
 // presetNote 从提示词里反解出附加要求（没有附加要求为空串），不是这份底稿时返回 null
@@ -413,9 +450,15 @@ export function componentUserPrompt(args: { name: string; instruction: string; c
   const where = args.usedBy.length ? `It is used on ${args.usedBy.length} screen${args.usedBy.length > 1 ? 's' : ''}: ${args.usedBy.join(', ')}.` : 'No screen uses it yet.';
   return `Revise the shared component "${args.name}" according to this instruction:\n${args.instruction}\n${where}\n${priorInstructionsBlock('THIS COMPONENT', args.prior ?? [])}Return the complete revised root element HTML only.\n\nCURRENT HTML:\n${args.currentHtml}`;
 }
+// 只改选中的几块里面（REQ-EDIT-002 v1.50）：不改外层与旁边的元素，也不用脚本挪元素——就地换块时脚本在整页就位后才跑、刷新时边解析边跑，
+// 量出来的位置不同，看着对、刷新就变。非动外面不可时模型只回 NEEDS_OUTER_REPLY，流水线据此判失败、提示用户选到外层
+export const NEEDS_OUTER_REPLY = '<quilt-needs-outer/>';
+export const NEEDS_OUTER_RE = /<quilt-needs-outer\s*\/?>/i;
+const INSIDE_ONE = `Change only what is inside this element: do not change its parent, its siblings or anything else on the screen, and do not add a <script> that moves elements, reparents them or edits anything outside it. If the instruction can only be done by changing something outside it (moving it to another place in the page, changing the layout of its parent or siblings), change nothing and reply with exactly ${NEEDS_OUTER_REPLY}`;
+const INSIDE_MANY = `Change only what is inside these elements: do not change their parents, their siblings or anything else on the screen, and do not add a <script> that moves elements, reparents them or edits anything outside them. If the instruction can only be done by changing something outside them (moving one of them to another place in the page, changing the layout of a parent or sibling), change nothing and reply with exactly ${NEEDS_OUTER_REPLY} instead of the blocks`;
 export function subtreeUserPrompt(screenName: string, route: string, fragment: string, instruction: string, priorInstructions: string[] = []): string {
   const prior = priorInstructions.length ? `\n${priorInstructionsBlock('THIS SCREEN', priorInstructions)}` : '';
-  return `Within the screen "${screenName}" at route ${route}, regenerate ONLY the following element according to this instruction:\n${instruction}\n${prior}\nReturn the complete replacement HTML for this single element (one root element, same role in the layout), nothing else. Keep the design system, recipes and any links intact unless the instruction says otherwise.\n\nCURRENT ELEMENT:\n${fragment}`;
+  return `Within the screen "${screenName}" at route ${route}, regenerate ONLY the following element according to this instruction:\n${instruction}\n${prior}\nReturn the complete replacement HTML for this single element (one root element, same role in the layout), nothing else. Keep the design system, recipes and any links intact unless the instruction says otherwise. ${INSIDE_ONE}.\n\nCURRENT ELEMENT:\n${fragment}`;
 }
 // 一次改几块（REQ-EDIT-002 v1.26）：一次调用拿到这几块的原 HTML（片段里不带 data-qid，qid 写在块头），每块回一段 <quilt-block>，
 // 按给的顺序、别的不回；回包由 parseQuiltBlocks（blocks.ts）收，对不上时补问一轮，补问的提示词末尾接 subtreeBlocksRetryNote 说上次哪里不对。
@@ -429,7 +472,7 @@ export const SUBTREE_BLOCKS_HEADER = 'CURRENT ELEMENTS:';
 export function subtreeBlocksUserPrompt(screenName: string, route: string, blocks: QuiltBlock[], instruction: string, priorInstructions: string[] = []): string {
   const prior = priorInstructions.length ? `\n${priorInstructionsBlock('THIS SCREEN', priorInstructions)}` : '';
   const n = blocks.length;
-  return `Within the screen "${screenName}" at route ${route}, regenerate ONLY the following ${n} elements according to this instruction (it applies to each of them):\n${instruction}\n${prior}\nReturn exactly ${n} blocks, one per element, in the order given below (${blocks.map((b) => b.qid).join(', ')}), and nothing else — no other element, not the rest of the screen, no explanation:\n<quilt-block qid="…">\nthe complete replacement HTML for that element (one root element, same role in the layout)\n</quilt-block>\nCopy each qid exactly as given. Keep the design system, recipes and any links intact unless the instruction says otherwise.\n\n${SUBTREE_BLOCKS_HEADER}\n${blocks.map((b) => quiltBlock(b.qid, b.html)).join('\n\n')}`;
+  return `Within the screen "${screenName}" at route ${route}, regenerate ONLY the following ${n} elements according to this instruction (it applies to each of them):\n${instruction}\n${prior}\nReturn exactly ${n} blocks, one per element, in the order given below (${blocks.map((b) => b.qid).join(', ')}), and nothing else — no other element, not the rest of the screen, no explanation:\n<quilt-block qid="…">\nthe complete replacement HTML for that element (one root element, same role in the layout)\n</quilt-block>\nCopy each qid exactly as given. Keep the design system, recipes and any links intact unless the instruction says otherwise. ${INSIDE_MANY}.\n\n${SUBTREE_BLOCKS_HEADER}\n${blocks.map((b) => quiltBlock(b.qid, b.html)).join('\n\n')}`;
 }
 export function subtreeBlocksRetryNote(qids: readonly string[], error: string): string {
   return `\n\nYour previous reply was rejected: ${error}. Return exactly ${qids.length} <quilt-block> blocks with qid ${qids.join(', ')}, in that order, and nothing else.`;
@@ -467,6 +510,19 @@ Strictly valid JSON: double quotes, no trailing commas, no comments.`;
 export function proposeDesignSystemUserPrompt(args: { instruction: string; designMd: string; tokens: Tokens; existing: string[]; sampleBody?: string }): string {
   const sample = args.sampleBody ? `\nA SCREEN AFTER THE INSTRUCTION WAS APPLIED (take actual values from here):\n${args.sampleBody}` : '';
   return `INSTRUCTION:\n${args.instruction}\n\nCURRENT CONVENTIONS:\n${args.existing.length ? args.existing.map((c) => `- ${c}`).join('\n') : '(none)'}\n\nCURRENT TOKENS: seedColor=${args.tokens.colors.primary} fontFamily=${args.tokens.typography.fontFamily} radius.md=${args.tokens.radius.md}\n\nDESIGN.md:\n${args.designMd.trim()}${sample}`;
+}
+
+// 建议状态（REQ-CORE-051，作业 propose_states）：读这一端的页面表、应用简介与已有维度，建议几个全端共用的维度与事件；只产出提案，不落库
+export function proposeStatesSystemPrompt(): string {
+  return `You help a designer define the app-wide STATES of one surface of an app in Quilt: dimensions every screen reacts to (signed in or not, network, plan tier, theme of data such as empty vs full) and short events (a toast after saving, a push notification). Output a JSON object (no markdown fences, no prose) with this exact shape:
+{"summary":"one sentence in the language of the screen names","dims":[{"name":"Network","values":["Online","Offline","Weak"]}],"events":[{"name":"Saved toast","ms":2500}]}
+Rules: suggest only states that change what MANY screens show; a state of one screen (a tab, a form error) is not app-wide; at most 4 dimensions and 3 events; each dimension has 2–6 values and the FIRST value is how the app normally looks; event ms between ${EVENT_MS.min} and ${EVENT_MS.max}; names are short (at most 20 characters) and in the language of the screen names; skip dimensions that already exist. Strictly valid JSON: double quotes, no trailing commas, no comments.`;
+}
+export function proposeStatesUserPrompt(args: { app: AppContext; surface: string; device: DeviceType; registry: RegistryEntry[]; existing: SurfaceStates }): string {
+  const screens = args.registry.map((r) => `${r.route} (${r.name}${r.purpose ? `: ${r.purpose}` : ''})`).join(', ') || '(no screens yet — go by the app brief)';
+  const dims = args.existing.dims.filter((d) => !d.retired).map((d) => `${d.name}: ${d.values.map((v) => v.name).join(' / ')}`).join('; ') || '(none)';
+  const events = args.existing.events.map((e) => e.name).join(', ') || '(none)';
+  return `App: ${args.app.name}${args.app.brief ? ` — ${args.app.brief}` : ''}\nSurface: ${args.surface} (${args.device})\nSCREENS: ${screens}\nEXISTING DIMENSIONS: ${dims}\nEXISTING EVENTS: ${events}`;
 }
 
 // 新建项目的 DESIGN.md（ADR-028 v0.92）：与新配方、中性色板、sharp 圆角档同一口径；DESIGN.md 在提示词里压过美学基线，两边不能打架。

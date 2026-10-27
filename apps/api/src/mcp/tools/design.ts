@@ -14,11 +14,11 @@ export function registerDesignTools(c: ToolCtx) {
   const { server, user, wrap, read, write, idem, requestId, runJob } = c;
 
   server.registerTool('quilt.get_design_contract', {
-    description: 'Machine-checkable design contract: tokens, allowed color classes, component recipes, shared components (place them by reference — see sharedComponents[].placement), rules, routes, DESIGN.md.',
-    inputSchema: { projectId: z.string().uuid() },
+    description: 'Machine-checkable design contract: tokens, allowed color classes, component recipes, shared components (place them by reference — see sharedComponents[].placement), rules, routes, DESIGN.md. Per surface (surfaceId, default the first): its device and viewport, its routes, and its app-wide states with the data-when rule for writing them.',
+    inputSchema: { projectId: z.string().uuid(), surfaceId: z.string().uuid().optional() },
   }, wrap(async (a) => {
     read();
-    return designContract(user.id, a.projectId as string);
+    return designContract(user.id, a.projectId as string, a.surfaceId as string | undefined);
   }));
 
   // 改设计系统（v0.42）：此前 MCP 只能读契约——本机 agent 按截图手写了 42 屏却没法让画布的色板对齐真机，

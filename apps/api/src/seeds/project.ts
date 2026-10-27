@@ -21,7 +21,7 @@ const shot = !flag('no-shot');
 const nav = Number(arg('nav', '0'));
 const grid = Number(arg('grid', '0'));
 
-const { project, designSystem } = await createProject(owner.id, { name, deviceType: device });
+const { project, designSystem, surfaces } = await createProject(owner.id, { name, deviceType: device });
 const prelude = buildPrelude(designSystem.tokens as Tokens);
 const size = DEVICE_SIZE[device];
 const routes = Array.from({ length: count }, (_, i) => `/s${i + 1}`);
@@ -55,7 +55,7 @@ ${form}${unlinkedBtn}
 
 const created: { id: string; route: string }[] = [];
 for (let i = 0; i < count; i++) {
-  const [screen] = await db.insert(schema.screens).values({ projectId: project.id, name: `Screen ${i + 1}`, route: routes[i], x: (grid ? i % grid : i) * (size.w + 80), y: grid ? Math.floor(i / grid) * (size.h + 120) : 0 }).returning();
+  const [screen] = await db.insert(schema.screens).values({ projectId: project.id, surfaceId: surfaces[0].id, name: `Screen ${i + 1}`, route: routes[i], x: (grid ? i % grid : i) * (size.w + 80), y: grid ? Math.floor(i / grid) * (size.h + 120) : 0 }).returning();
   created.push({ id: screen.id, route: screen.route });
   for (let r = 1; r <= revisions; r++) {
     const body = injectQids(fixtureBody(i, r));

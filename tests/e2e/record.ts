@@ -437,6 +437,8 @@ await step('TC-CORE-149', async () => {
     const got = await filesUnder(archiveDir(`project-${projectId}`));
     const missing = objs.filter((f) => !got.includes(f));
     expect(got.includes('manifest.json') && missing.length === 0, `④ 项目归档应有清单与全部 ${objs.length} 个对象：缺 ${missing.slice(0, 5).join(', ')}${got.includes('manifest.json') ? '' : '；没有清单'}`);
+    const surfaces = ((await manifestOf(`project-${projectId}`)) as { surfaces?: { projectId: string }[] }).surfaces ?? [];
+    expect(surfaces.length >= 1 && surfaces.every((x) => x.projectId === projectId), `④ 项目清单里应带这个项目的端：${JSON.stringify(surfaces).slice(0, 200)}`);
   });
   // 5 关掉开关，另建一个项目再删：不留归档
   await setRecording(false);
@@ -459,8 +461,28 @@ await step('TC-CORE-149', async () => {
     const lost = kept.filter((f) => !now.includes(f));
     expect(kept.length > 0 && lost.length === 0, `⑥ storage.gc 之后 records/ 下少了 ${lost.length} 个文件：${lost.slice(0, 5).join(', ')}（之前 ${kept.length} 个）`);
   });
+  // 7 删一端（v1.52）：清单带端的行、这一端的屏与修订，对象是这些屏的前缀
+  await S.check(async () => {
+    await setRecording(true);
+    const p7 = seedJson<Seeded>('seed:project', '--name', 'ArchSurface', '--device', 'mobile', '--screens', '1', '--no-shot');
+    cleanups.push(() => apiJson(`/v1/projects/${p7.projectId}`, { method: 'DELETE' }));
+    const add = await apiJson<{ surface: { id: string } }>(`/v1/projects/${p7.projectId}/surfaces`, { method: 'POST', body: JSON.stringify({ name: '后台', deviceType: 'desktop' }) });
+    expect(add.status === 201, `⑦ 加一端 ${add.status}`);
+    const sid = add.body.surface.id;
+    const mcp = await connectMcp();
+    cleanups.push(() => mcp.close());
+    const made = await callTool(mcp, 'quilt.create_screen', { projectId: p7.projectId, surfaceId: sid, name: '概览', route: '/dashboard', html: '<main class="p-8"><h1 class="text-2xl">概览</h1></main>' });
+    expect(!made.isError, `⑦ create_screen：${made.text.slice(0, 200)}`);
+    const screenId = (made.json as { screenId: string }).screenId;
+    const d7 = await apiJson(`/v1/surfaces/${sid}`, { method: 'DELETE' });
+    expect(d7.status === 204, `⑦ 删端应 204：${d7.status}`);
+    const m = (await manifestOf(`surface-${sid}`)) as { kind?: string; surface?: { id: string }; screens?: { id: string }[]; revisions?: { htmlKey: string }[] };
+    expect(m.kind === 'surface' && m.surface?.id === sid && m.screens?.length === 1 && m.screens[0].id === screenId && (m.revisions?.length ?? 0) >= 1, `⑦ 端的清单应带端的行、这一屏与修订：${JSON.stringify(m).slice(0, 300)}`);
+    const missing = []; for (const r of m.revisions ?? []) if (!(await exists(path.join(archiveDir(`surface-${sid}`), r.htmlKey.slice(`projects/${p7.projectId}/`.length))))) missing.push(r.htmlKey);
+    expect(missing.length === 0, `⑦ 归档里缺这屏的 HTML：${missing.join(', ')}`);
+  });
   S.done();
-  return `删屏、空草稿、删项目都留归档；写不进去照常删；关着不留；gc 不碰 records/`;
+  return `删屏、空草稿、删项目、删端都留归档；写不进去照常删；关着不留；gc 不碰 records/`;
 });
 
 const counts = summary();

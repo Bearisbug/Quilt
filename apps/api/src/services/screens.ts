@@ -7,7 +7,7 @@ import { thumbnailOf, losslessWebp } from '../lib/screenshot.ts';
 import { imageHead, canReuseShot } from '../lib/shots.ts';
 import { config } from '../config.ts';
 import { signPreview, stableExpiry } from '../lib/signing.ts';
-import { extractLinks, extractBody, outlineBody, componentNamesIn, screenInstructionHistory, shotSpecFor, type RevisionDto, type SourceKind, type CandidatesDto, DEVICE_SIZE, type DeviceType, type Presentation, type DraftFrame } from '@quilt/core';
+import { extractLinks, extractBody, outlineBody, componentNamesIn, screenInstructionHistory, shotSpecFor, parseStates, shadowedStateKeys, type SurfaceStates, type LintReport, type RevisionDto, type SourceKind, type CandidatesDto, DEVICE_SIZE, type DeviceType, type Presentation, type DraftFrame } from '@quilt/core';
 import { ownedProject, type ScreenRow, type RevisionRow, type ProjectRow } from './projects.ts';
 import { archiveScreen, saveArchive } from './record.ts';
 import { diffRows } from '../lib/rowDiff.ts';
@@ -42,8 +42,16 @@ export async function createRevision(tx: Tx, args: {
   const id = crypto.randomUUID();
   const htmlKey = objectKeys.revisionHtml(args.projectId, args.screenId, id);
   await storage.put(htmlKey, args.html, 'text/html; charset=utf-8');
+  // 页内状态（ADR-041）：落修订时解析声明块与 data-when / data-s-* 写法；键与端上维度重名的页内那个不生效，偏离报告记一条
+  const states = parseStates(extractBody(args.html));
+  let lintReport = args.lintReport as LintReport;
+  if (screen.surfaceId && (states.dims.length || states.events.length) && Array.isArray(lintReport?.violations)) {
+    const [surface] = await tx.select({ states: schema.surfaces.states }).from(schema.surfaces).where(eq(schema.surfaces.id, screen.surfaceId));
+    const shadowed = surface ? shadowedStateKeys(states, surface.states as SurfaceStates) : [];
+    if (shadowed.length) lintReport = { ...lintReport, passed: false, violations: [...lintReport.violations, { rule: 'state-shadowed', message: `页内状态 ${shadowed.join('、')} 与端上的维度重名，页内这个不生效`, sample: shadowed.join(' ') }] };
+  }
   const [rev] = await tx.insert(schema.screenRevisions).values({
-    id, screenId: args.screenId, seq, htmlKey, sourceKind: args.sourceKind, jobId: args.jobId ?? null, lintReport: args.lintReport as object,
+    id, screenId: args.screenId, seq, htmlKey, sourceKind: args.sourceKind, jobId: args.jobId ?? null, lintReport: lintReport as object, states,
     parentRevisionId: args.parentRevisionId === undefined ? screen.currentRevisionId : args.parentRevisionId,
     candidateIndex: args.candidateIndex ?? null,
   }).returning();
@@ -99,11 +107,13 @@ export async function adoptCandidate(tx: Tx, screen: ScreenRow, revisionId: stri
 
 // 候选就地展开的数据（API-CORE-026）：按屏分组、按 candidateIndex 排版；每版带预览 URL，展开层里每格是活 iframe
 export async function listCandidates(project: ProjectRow, jobId: string): Promise<CandidatesDto> {
-  const rows = await db.select({ r: schema.screenRevisions, s: schema.screens }).from(schema.screenRevisions)
+  const rows = await db.select({ r: schema.screenRevisions, s: schema.screens, device: schema.surfaces.deviceType }).from(schema.screenRevisions)
     .innerJoin(schema.screens, eq(schema.screens.id, schema.screenRevisions.screenId))
+    .leftJoin(schema.surfaces, eq(schema.surfaces.id, schema.screens.surfaceId))
     .where(and(eq(schema.screenRevisions.jobId, jobId), isNotNull(schema.screenRevisions.candidateIndex), eq(schema.screens.projectId, project.id)))
     .orderBy(schema.screens.createdAt, schema.screenRevisions.candidateIndex);
-  const size = DEVICE_SIZE[project.deviceType as DeviceType];
+  // 视口按屏所在端的设备（REQ-CORE-049）
+  const size = DEVICE_SIZE[(rows[0]?.device ?? project.deviceType) as DeviceType];
   const byScreen = new Map<string, CandidatesDto['screens'][number]>();
   const previewToken = signPreview(project.id, stableExpiry(config.previewTokenMinutes));
   let versions = 0;
@@ -133,15 +143,18 @@ function rememberRevisionLinks(revisionId: string, html: string): RevisionLinks 
 // 顺手重算哪些屏放着哪个共享组件（REQ-EDIT-006 component_uses）：同一趟读 HTML，不另跑一遍
 export async function deriveLinks(tx: Tx, projectId: string): Promise<void> {
   const screens = await tx.select().from(schema.screens).where(eq(schema.screens.projectId, projectId));
-  // 路由只解析到默认屏（v0.62 REQ-CORE-025）：变体与默认屏同路由，播放与地图都指向默认屏；变体自己发出的链接照常入图
-  const byRoute = new Map(screens.filter((s) => !s.variantOf).map((s) => [s.route, s.id]));
+  // 路由只解析到默认屏（v0.62 REQ-CORE-025）：变体与默认屏同路由，播放与地图都指向默认屏；变体自己发出的链接照常入图。
+  // 链接只连同一端里的屏（REQ-CORE-049）：路由只在一端里不重复，另一端的同名路由不是去处
+  const at = (surfaceId: string | null, route: string) => `${surfaceId ?? ''}|${route}`;
+  const byRoute = new Map(screens.filter((s) => !s.variantOf).map((s) => [at(s.surfaceId, s.route), s.id]));
+  const surfaceOf = new Map(screens.map((s) => [s.id, s.surfaceId]));
   const revIds = screens.map((s) => s.currentRevisionId).filter((x): x is string => !!x);
   const revs = revIds.length ? await tx.select().from(schema.screenRevisions).where(inArray(schema.screenRevisions.id, revIds)) : [];
   const rows: (typeof schema.links.$inferInsert)[] = [];
   const uses: (typeof schema.componentUses.$inferInsert)[] = [];
   for (const rev of revs) {
     const { links, names } = linksByRevision.get(rev.id) ?? rememberRevisionLinks(rev.id, (await storage.get(rev.htmlKey)).toString('utf8'));
-    for (const l of links) rows.push({ projectId, fromScreenId: rev.screenId, elementQid: l.qid, href: l.href, toScreenId: byRoute.get(l.href) ?? null });
+    for (const l of links) rows.push({ projectId, fromScreenId: rev.screenId, elementQid: l.qid, href: l.href, toScreenId: byRoute.get(at(surfaceOf.get(rev.screenId) ?? null, l.href)) ?? null });
     for (const name of names) uses.push({ projectId, screenId: rev.screenId, name });
   }
   // 按内容差量写（v1.29）：没变的行原样留着。此前每次整项目删光重插，表一直膨胀（外部 Postgres 的自动清理只复用空间、不缩表）

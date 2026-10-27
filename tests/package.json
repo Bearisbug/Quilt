@@ -22,6 +22,7 @@
     "e2e:settings": "tsx e2e/settings.ts",
     "e2e:record": "tsx e2e/record.ts",
     "e2e:collab": "tsx e2e/collab.ts",
+    "e2e:surfaces": "tsx e2e/surfaces.ts",
     "mcp:call": "tsx e2e/mcp-call.ts"
   },
   "devDependencies": {

@@ -19,14 +19,16 @@ import { timeoutFor, modelAborts, enqueueScreenshot } from '../services/jobs.ts'
 import { runChatTurn, ChatFailure } from './chat.ts';
 import { failJob } from './failJob.ts';
 import { sharedComponentsOf, componentCards, reflowComponent, componentInstructions } from '../services/components.ts';
+import { surfacesOf, type SurfaceRow } from '../services/surfaces.ts';
 import { nextDraftRoute, draftReference, DRAFT_LINT_REPORT } from '../services/sketchbook.ts';
 import {
   buildPrelude, lintScreenBody, injectQids, reconcileQids, applyEdits, parseEditBlocks, assembleDocument, extractBody, stripFences, buildPrototypeDocument, replaceSubtree, extractLinks,
   expandComponents, validateComponentHtml, classifyComponentHtml, componentSummary, componentSystemPrompt, componentUserPrompt,
   type ProjectAsset, type SketchReference,
-  OVERLAY_SCREEN_NOTE, screenSystemPrompt, planSystemPrompt, planUserPrompt, planOneScreenSystemPrompt, planOneScreenUserPrompt, screenUserPrompt, editUserPrompt, editPatchUserPrompt, subtreeUserPrompt, subtreeBlocksUserPrompt, subtreeBlocksRetryNote, parseQuiltBlocks, type QuiltBlock, linkRepairPrompt,
+  OVERLAY_SCREEN_NOTE, screenSystemPrompt, planSystemPrompt, planUserPrompt, planOneScreenSystemPrompt, planOneScreenUserPrompt, screenUserPrompt, editUserPrompt, editPatchUserPrompt, subtreeUserPrompt, subtreeBlocksUserPrompt, subtreeBlocksRetryNote, NEEDS_OUTER_RE, parseQuiltBlocks, type QuiltBlock, linkRepairPrompt,
   proposeDesignSystemSystemPrompt, proposeDesignSystemUserPrompt, parseConventions, REFERENCE_IMAGE_NOTE, FONT_FAMILIES, RADIUS_SCALES, MAX_CONVENTIONS,
-  sketchSystemPrompt, SKETCH_REFERENCE_IMAGE_NOTE, draftNameFromPrompt, frameFromBody, shotSpecFor,
+  proposeStatesSystemPrompt, proposeStatesUserPrompt, type StatesProposalDto, type SurfaceStates, type OtherSurface, MAX_DIM_VALUES, MIN_DIM_VALUES, EVENT_MS,
+  sketchSystemPrompt, SKETCH_REFERENCE_IMAGE_NOTE, draftNameFromPrompt, frameFromBody, shotSpecFor, withSurfaceStates,
   VENDOR, inputOf, jobInputSchemas, type ModelCallPurpose, withUiLanguage, jobLocale, DEVICE_SIZE, type DeviceType, type Tokens, type ComponentRecipe, type Plan, type PlannedScreen, type LintReport, type ErrorClass, type RegistryEntry, type ReferenceScreen, type DesignProposalDto, type CreateJobInput, type JobKind, type JobInputOf, type Presentation, type DraftFrame, failureText,
 } from '@quilt/core';
 
@@ -38,8 +40,9 @@ async function lucideJs(): Promise<string> {
 }
 
 // REQ-PROTO-004：导出单文件原型（确定性，不调 LLM）
+// 端（REQ-CORE-049）：只导出这一端的屏（缺省第一端），状态维度按缺省取值（API-PROTO-002）
 async function runExportPrototype(ctx: Ctx): Promise<string> {
-  const screens = await db.select().from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id)).orderBy(schema.screens.createdAt);
+  const screens = await db.select().from(schema.screens).where(screensOf(ctx)).orderBy(schema.screens.createdAt);
   const exportScreens: { route: string; name: string; body: string; presentation: 'push' | 'overlay' }[] = [];
   for (const s of screens) {
     if (!s.currentRevisionId) continue;
@@ -50,7 +53,7 @@ async function runExportPrototype(ctx: Ctx): Promise<string> {
   }
   if (!exportScreens.length) throw new JobFailure('validation', 'project has no screens to export');
   const [tailwindCss, lucide] = await Promise.all([extractTailwindCss(ctx.prelude, exportScreens.map((s) => s.body)), lucideJs()]);
-  const html = buildPrototypeDocument({ title: `${ctx.project.name} · prototype`, tokens: ctx.tokens, screens: exportScreens, tailwindCss, lucideJs: lucide });
+  const html = buildPrototypeDocument({ title: `${ctx.project.name}${ctx.surface && (await surfacesOf(ctx.project.id)).length > 1 ? ` · ${ctx.surface.name}` : ''} · prototype`, tokens: ctx.tokens, screens: exportScreens, tailwindCss, lucideJs: lucide, states: (ctx.surface?.states as SurfaceStates | undefined) ?? null });
   const key = objectKeys.exportHtml(ctx.project.id, ctx.job.id);
   await storage.put(key, html, 'text/html; charset=utf-8');
   await emitJobEvent(ctx.job.id, 'progress', { stage: 'exported', screens: exportScreens.length, bytes: Buffer.byteLength(html) });
@@ -61,6 +64,8 @@ type JobRow = typeof schema.generationJobs.$inferSelect;
 type Ctx = {
   job: JobRow; project: typeof schema.projects.$inferSelect; ds: typeof schema.designSystems.$inferSelect;
   device: DeviceType; tokens: Tokens; prelude: string; signal: AbortSignal;
+  // 这一轮落在哪一端（REQ-CORE-049）：造屏取 input.surfaceId，改屏取目标屏所在的端；草稿本为 null。device 取它的设备
+  surface: SurfaceRow | null;
   usage: { tokensIn: number; tokensOut: number; screens: number; cacheRead: number; cacheWrite: number };
   // 本作业用哪个驱动 / 模型 / 凭据（REQ-CORE-011 / 013）；缺省取 .env 的 LLM_DRIVER 与凭据
   runner: { driver?: LlmDriver; model?: string; apiKey?: string; baseUrl?: string };
@@ -80,6 +85,10 @@ type Ctx = {
 };
 
 class JobFailure extends Error { constructor(public errorClass: ErrorClass, msg: string) { super(msg); } }
+
+// 这一轮看得到的屏：有端时只是这一端的（路由、注册表、排版、lint 都按端，INV-CORE-010），草稿本是整个草稿本
+const screensOf = (ctx: Ctx) => (ctx.surface ? eq(schema.screens.surfaceId, ctx.surface.id) : eq(schema.screens.projectId, ctx.project.id));
+const surfaceStates = (ctx: Ctx): SurfaceStates | null => (ctx.surface ? ctx.surface.states as SurfaceStates : null);
 
 // 取消或超时之后回来的模型产出不落库（§11 running→cancelled）：屏锁此刻已释放，用户可能已在这屏上继续改了。
 // 每处写修订 / 组件行之前都要过这一道——模型调用本身不一定理会中止（stub、重试退避里的调用）
@@ -172,8 +181,9 @@ function parseOne(text: string): PlannedScreen & { entryFrom?: string | null } {
 // ---- 上下文（ADR-012 v0.31）：稳定前缀里的屏注册表 + 情境层的参考屏 ----
 // projectId 缺省是本作业的项目；草稿取的是参照项目的（REQ-CORE-042）
 async function registry(ctx: Ctx, projectId = ctx.project.id): Promise<RegistryEntry[]> {
-  // 变体不进注册表（v0.62）：路由已由默认屏占着，列两份只会让规划器与 ALLOWED ROUTES 重复
-  const rows = await db.select({ route: schema.screens.route, name: schema.screens.name, purpose: schema.screens.purpose }).from(schema.screens).where(and(eq(schema.screens.projectId, projectId), isNull(schema.screens.variantOf))).orderBy(schema.screens.createdAt);
+  // 变体不进注册表（v0.62）：路由已由默认屏占着，列两份只会让规划器与 ALLOWED ROUTES 重复；有端时只取这一端（REQ-CORE-049）
+  const scope = projectId === ctx.project.id ? screensOf(ctx) : eq(schema.screens.projectId, projectId);
+  const rows = await db.select({ route: schema.screens.route, name: schema.screens.name, purpose: schema.screens.purpose }).from(schema.screens).where(and(scope, isNull(schema.screens.variantOf))).orderBy(schema.screens.createdAt);
   return rows.map((r) => ({ route: r.route, name: r.name, purpose: r.purpose || undefined }));
 }
 // 参考屏合计 ≤ 40 KB（≈ 10K token 预算里给参考屏的份额），超了先丢排在后面的：一般是来源屏；
@@ -182,8 +192,8 @@ const REF_BUDGET = 40 * 1024;
 // omitScreenId（ADR-012 v1.05）：只改样板屏这一屏时，它的当前 HTML 已在用户提示的 CURRENT HTML 里，参考屏里不重复放
 async function references(ctx: Ctx, opts: { sourceScreenId?: string | null; variant?: boolean; omitScreenId?: string } = {}): Promise<ReferenceScreen[]> {
   const out: ReferenceScreen[] = [];
-  const ex = await exemplarBody(ctx.project);
-  if (ex && ex.screenId !== opts.omitScreenId) out.push({ label: 'exemplar screen (the project\'s style anchor)', body: ex.body });
+  const ex = await referenceScreen(ctx);
+  if (ex && ex.screenId !== opts.omitScreenId) out.push({ label: ex.elsewhere ? 'exemplar screen from ANOTHER surface of this product (possibly another device): match its visual language only — colours, type, density — and do not copy its layout' : 'exemplar screen (the project\'s style anchor)', body: ex.body });
   if (opts.sourceScreenId && opts.sourceScreenId !== ex?.screenId) {
     const b = await currentBody(opts.sourceScreenId);
     if (b && opts.variant) out.unshift({ label: 'default screen (the new screen is this same screen in another state)', body: b });
@@ -193,6 +203,37 @@ async function references(ctx: Ctx, opts: { sourceScreenId?: string | null; vari
   return out;
 }
 const app = (ctx: Ctx, description: string) => ({ name: ctx.project.name, description, brief: ctx.project.brief });
+
+// 参考屏（API-CORE-006 端条目）：样板屏在这一端时照旧取它；不在时取这一端最早的一张整屏默认屏；这一端还没有屏时用样板屏，注明只学视觉
+async function referenceScreen(ctx: Ctx): Promise<{ screenId: string; body: string; elsewhere: boolean } | null> {
+  if (!ctx.surface) { const ex = await exemplarBody(ctx.project); return ex && { ...ex, elsewhere: false }; }
+  if (ctx.project.exemplarScreenId) {
+    const [pinned] = await db.select({ surfaceId: schema.screens.surfaceId }).from(schema.screens).where(eq(schema.screens.id, ctx.project.exemplarScreenId));
+    if (pinned?.surfaceId === ctx.surface.id) { const ex = await exemplarBody(ctx.project); if (ex) return { ...ex, elsewhere: false }; }
+  }
+  const [row] = await db.select({ htmlKey: schema.screenRevisions.htmlKey, screenId: schema.screenRevisions.screenId })
+    .from(schema.screens).innerJoin(schema.screenRevisions, eq(schema.screenRevisions.id, schema.screens.currentRevisionId))
+    .where(and(eq(schema.screens.surfaceId, ctx.surface.id), isNull(schema.screens.variantOf), eq(schema.screens.presentation, 'push')))
+    .orderBy(schema.screens.createdAt).limit(1);
+  if (row) return { screenId: row.screenId, body: extractBody((await storage.get(row.htmlKey)).toString('utf8')), elsewhere: false };
+  const ex = await exemplarBody(ctx.project);
+  return ex && { ...ex, elsewhere: true };
+}
+
+// 规划器的参照（REQ-CORE-049 / REQ-CORE-050）：这一端已有的分组名，与其他端的页面表（只作参照、不连线）
+async function planContext(ctx: Ctx, rows: (typeof schema.screens.$inferSelect)[]) {
+  const groups = Array.from(new Set(rows.map((r) => r.groupName).filter((g): g is string => !!g)));
+  if (!ctx.surface) return { groups };
+  const others: OtherSurface[] = [];
+  for (const f of (await surfacesOf(ctx.project.id)).filter((f) => f.id !== ctx.surface!.id)) {
+    const list = await db.select({ route: schema.screens.route, name: schema.screens.name, purpose: schema.screens.purpose, group: schema.screens.groupName }).from(schema.screens)
+      .where(and(eq(schema.screens.surfaceId, f.id), isNull(schema.screens.variantOf))).orderBy(schema.screens.createdAt);
+    others.push({ name: f.name, device: f.deviceType as DeviceType, registry: list.map((r) => ({ route: r.route, name: r.name, purpose: r.purpose || undefined, group: r.group ?? undefined })) });
+  }
+  return { groups, others, surface: ctx.surface.name };
+}
+// 规划器给的分组名：去掉首尾空白，截到 20 字；空的当没给
+const cleanGroup = (g: unknown): string | null => (typeof g === 'string' && g.trim() ? Array.from(g.trim()).slice(0, 20).join('') : null);
 
 // 改草稿与只改一块的系统提示词（REQ-CORE-040 / REQ-CORE-045）：草稿规则 + 这张草稿的画框；有参照项目时（REQ-CORE-042 / ADR-033）
 // 再带它的 DESIGN.md、token 类、组件配方与路由表，这一轮落库也换成它的 prelude。参照项目已被删就按自由风格
@@ -221,12 +262,11 @@ async function produceScreen(ctx: Ctx, args: { screenId: string; system: string;
   // 草稿（REQ-CORE-040）没有设计契约可偏离，记空报告
   let report: LintReport = DRAFT_LINT_REPORT;
   if (!sketch) {
-    const routes = (await db.select({ route: schema.screens.route }).from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id))).map((r) => r.route);
+    const routes = (await db.select({ route: schema.screens.route }).from(schema.screens).where(screensOf(ctx))).map((r) => r.route);
     report = lintScreenBody(body, routes, true);
     report = lintScreenBody(withQids, routes, report.firstTry); // 违规带上 qid
   }
   const html = assembleDocument(withQids, ctx.prelude, `${ctx.project.name} · ${screen.name}`);
-  if (Buffer.byteLength(html) > config.maxScreenHtmlBytes) throw new JobFailure('validation', `screen html too large (${Buffer.byteLength(html)} bytes)`);
   assertNotAborted(ctx);
   const rev = await db.transaction(async (tx) => {
     const created = await createRevision(tx, { projectId: ctx.project.id, screenId: args.screenId, html, sourceKind: args.sourceKind, jobId: ctx.job.id, lintReport: report, expectedRevisionId: args.expectedRevisionId, parentRevisionId: args.parentRevisionId, candidateIndex: args.candidateIndex, advanceCurrent: args.advanceCurrent });
@@ -247,11 +287,12 @@ async function produceScreen(ctx: Ctx, args: { screenId: string; system: string;
 
 async function screenshotRevision(ctx: Ctx, screenId: string, revisionId: string, html: string) {
   try {
-    const [row] = await db.select({ presentation: schema.screens.presentation, frame: schema.screens.frame }).from(schema.screens).where(eq(schema.screens.id, screenId));
+    const [row] = await db.select({ presentation: schema.screens.presentation, frame: schema.screens.frame, device: schema.surfaces.deviceType, states: schema.surfaces.states })
+      .from(schema.screens).leftJoin(schema.surfaces, eq(schema.surfaces.id, schema.screens.surfaceId)).where(eq(schema.screens.id, screenId));
     const presentation = (row?.presentation ?? 'push') as Presentation;
-    // 尺寸按项目类型与画框（REQ-CORE-040）：草稿按画框拍，组件画框只拍根元素的框；普通屏照旧按设备形态
-    const shot = shotSpecFor(ctx.project, { frame: row?.frame ?? null });
-    const png = await screenshotHtml(html, shot.size, { overlay: presentation === 'overlay', rootOnly: shot.rootOnly });
+    // 尺寸按项目类型与画框（REQ-CORE-040）：草稿按画框拍，组件画框只拍根元素的框；普通屏按它所在端的设备形态，状态取缺省（API-CORE-016）
+    const shot = shotSpecFor({ kind: ctx.project.kind, deviceType: row?.device ?? ctx.project.deviceType }, { frame: row?.frame ?? null });
+    const png = await screenshotHtml(withSurfaceStates(html, row?.states as SurfaceStates | null), shot.size, { overlay: presentation === 'overlay', rootOnly: shot.rootOnly });
     const key = await storeRevisionShot(ctx.project.id, screenId, revisionId, png, presentation, row?.frame ?? null);
     if (!key) return;
     await emitJobEvent(ctx.job.id, 'screen_screenshot_ready', { screenId, revisionId, screenshotUrl: await storage.signedUrl(key) });
@@ -271,8 +312,8 @@ async function pool<T>(items: T[], n: number, fn: (t: T) => Promise<void>) {
   if (first !== null) throw first;
 }
 
-async function uniqueRoute(projectId: string, route: string): Promise<string> {
-  const taken = new Set((await db.select({ route: schema.screens.route }).from(schema.screens).where(eq(schema.screens.projectId, projectId))).map((r) => r.route));
+async function uniqueRoute(ctx: Ctx, route: string): Promise<string> {
+  const taken = new Set((await db.select({ route: schema.screens.route }).from(schema.screens).where(screensOf(ctx))).map((r) => r.route));
   if (!taken.has(route)) return route;
   for (let k = 2; k < 100; k++) if (!taken.has(`${route}-${k}`)) return `${route}-${k}`;
   throw new JobFailure('validation', 'route space exhausted');
@@ -286,7 +327,8 @@ async function runGenerate(ctx: Ctx) {
   const input = inputOf(ctx.job, 'generate');
   if (ctx.project.kind === 'sketchbook') return runGenerateDraft(ctx, input);
   const versions = Math.max(1, input.versions ?? 1);
-  const existingRows = await db.select().from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id)).orderBy(schema.screens.createdAt);
+  const existingRows = await db.select().from(schema.screens).where(screensOf(ctx)).orderBy(schema.screens.createdAt);
+  const planCtx = await planContext(ctx, existingRows);
   const existing: RegistryEntry[] = existingRows.filter((s) => !s.variantOf).map((s) => ({ route: s.route, name: s.name, purpose: s.purpose || undefined }));
   const existingRoutes = new Set(existing.map((r) => r.route));
   const empty = existingRows.length === 0;
@@ -298,15 +340,15 @@ async function runGenerate(ctx: Ctx) {
   if (input.variantOf && (!base || base.variantOf)) throw new JobFailure('validation', 'variantOf must be a default screen of this project');
   if (base && input.variantName) {
     const baseLinks = (await db.select({ href: schema.links.href }).from(schema.links).where(eq(schema.links.fromScreenId, base.id))).map((l) => l.href);
-    planned = [{ name: `${base.name} · ${input.variantName}`, route: base.route, purpose: `The "${input.variantName}" state of "${base.name}"${base.purpose ? ` (${base.purpose})` : ''}`, links: Array.from(new Set(baseLinks.filter((h) => existingRoutes.has(h)))), sections: [], presentation: base.presentation as 'push' | 'overlay' }];
+    planned = [{ name: `${base.name} · ${input.variantName}`, route: base.route, purpose: `The "${input.variantName}" state of "${base.name}"${base.purpose ? ` (${base.purpose})` : ''}`, links: Array.from(new Set(baseLinks.filter((h) => existingRoutes.has(h)))), sections: [], presentation: base.presentation as 'push' | 'overlay', group: base.groupName ?? undefined }];
   } else if (input.route) {
     if (existingRoutes.has(input.route)) throw new JobFailure('validation', 'route already exists');
     const from = existingRows.find((s) => s.id === input.fromScreenId);
     const name = input.name ?? (input.route.split('/').filter(Boolean).map((p) => p.replace(/-/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())).join(' ') || 'Screen');
-    planned = [{ name, route: input.route, purpose: `Screen reached from "${from?.name ?? 'another screen'}" via link ${input.route}`, links: from ? [from.route] : [], sections: ['header with back arrow', 'main content matching the route name', 'primary action'], presentation: input.presentation ?? 'push' }];
+    planned = [{ name, route: input.route, purpose: `Screen reached from "${from?.name ?? 'another screen'}" via link ${input.route}`, links: from ? [from.route] : [], sections: ['header with back arrow', 'main content matching the route name', 'primary action'], presentation: input.presentation ?? 'push', group: from?.groupName ?? undefined }];
     entryFrom = from?.route ?? null;
   } else if (input.count === 1) {
-    const planPrompt = planOneScreenUserPrompt(a, input.prompt, existing);
+    const planPrompt = planOneScreenUserPrompt(a, input.prompt, existing, planCtx);
     let one: ReturnType<typeof parseOne>;
     try { one = parseOne(await llmCall(ctx, 'plan', planOneScreenSystemPrompt(), planPrompt, undefined, false, { effort: 'low' })); }
     catch { one = parseOne(await llmCall(ctx, 'plan', planOneScreenSystemPrompt(), planPrompt + '\nReturn strictly valid JSON.', undefined, false, { effort: 'low' })); }
@@ -314,7 +356,7 @@ async function runGenerate(ctx: Ctx) {
     entryFrom = one.entryFrom ?? null;
   } else {
     const system = planSystemPrompt({ count: input.count, empty });
-    const planPrompt = planUserPrompt(a, input.prompt, existing);
+    const planPrompt = planUserPrompt(a, input.prompt, existing, planCtx);
     let plan: Plan;
     try { plan = parsePlan(await llmCall(ctx, 'plan', system, planPrompt, undefined, false, { effort: 'low' })); }
     catch { plan = parsePlan(await llmCall(ctx, 'plan', system, planPrompt + '\nReturn strictly valid JSON.', undefined, false, { effort: 'low' })); }
@@ -333,8 +375,10 @@ async function runGenerate(ctx: Ctx) {
 
   const created: { screenId: string; s: PlannedScreen }[] = [];
   for (const s of planned) {
-    const route = base ? s.route : await uniqueRoute(ctx.project.id, s.route);
-    const [screen] = await db.insert(schema.screens).values({ projectId: ctx.project.id, name: s.name, route, purpose: s.purpose ?? '', x: 0, y: 0, presentation: s.presentation ?? 'push', variantOf: base?.id ?? null, variantName: base ? input.variantName ?? null : null }).returning();
+    const route = base ? s.route : await uniqueRoute(ctx, s.route);
+    // 新屏落在这一端（INV-CORE-009），分组取请求给的、否则规划器给的；变体与默认屏同一端同一组
+    const groupName = base ? base.groupName : input.group ?? cleanGroup(s.group);
+    const [screen] = await db.insert(schema.screens).values({ projectId: ctx.project.id, surfaceId: ctx.surface?.id ?? null, groupName, name: s.name, route, purpose: s.purpose ?? '', x: 0, y: 0, presentation: s.presentation ?? 'push', variantOf: base?.id ?? null, variantName: base ? input.variantName ?? null : null }).returning();
     created.push({ screenId: screen.id, s: { ...s, route } });
     await emitJobEvent(ctx.job.id, 'screen_planned', { screenId: screen.id, name: s.name, route, purpose: s.purpose });
   }
@@ -344,7 +388,7 @@ async function runGenerate(ctx: Ctx) {
   const reg = await registry(ctx);
   const sourceId = base?.id ?? input.fromScreenId ?? existingRows.find((s) => s.route === entryFrom)?.id ?? null;
   // 共享组件卡（REQ-EDIT-006）：每个组件一张卡，框选的那些附完整 HTML
-  const system = screenSystemPrompt(a, ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], reg, await references(ctx, { sourceScreenId: sourceId, variant: !!base }), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds }));
+  const system = screenSystemPrompt(a, ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], reg, await references(ctx, { sourceScreenId: sourceId, variant: !!base }), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds }), surfaceStates(ctx));
   const tasks = created.flatMap((c) => Array.from({ length: versions }, (_, i) => ({ c, i })));
   ctx.planned = tasks.length;
   try {
@@ -431,7 +475,7 @@ async function runEditScreens(ctx: Ctx) {
   // 草稿（REQ-CORE-040）换草稿提示词，不带屏注册表、参考屏与组件卡；草稿本的改恰好一张（INV-CORE-003），画框与参照项目取这张的
   const system = ctx.project.kind === 'sketchbook'
     ? await draftSystem(ctx, targets[0])
-    : screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], await registry(ctx), await references(ctx, { omitScreenId: targets.length === 1 ? targets[0].id : undefined }), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds, screenIds: targets.map((s) => s.id) }));
+    : screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], await registry(ctx), await references(ctx, { omitScreenId: targets.length === 1 ? targets[0].id : undefined }), ctx.assets, await componentCards(ctx.project.id, { ids: input.componentIds, screenIds: targets.map((s) => s.id) }), surfaceStates(ctx));
   const prepared = await Promise.all(targets.map(async (screen) => {
     const [rev] = await db.select().from(schema.screenRevisions).where(eq(schema.screenRevisions.id, screen.currentRevisionId!));
     const body = extractBody((await storage.get(rev.htmlKey)).toString('utf8'));
@@ -485,6 +529,32 @@ async function runProposeDesignSystem(ctx: Ctx): Promise<DesignProposalDto> {
   };
 }
 
+// REQ-CORE-051：按这一端的屏注册表与应用简介建议维度与事件，只产出提案，不落库（用户勾选后经 API-CORE-054 保存）
+async function runProposeStates(ctx: Ctx): Promise<StatesProposalDto> {
+  const surface = ctx.surface!;
+  const existing = surface.states as SurfaceStates;
+  const system = proposeStatesSystemPrompt();
+  const user = proposeStatesUserPrompt({ app: app(ctx, 'existing app'), surface: surface.name, device: ctx.device, registry: await registry(ctx), existing });
+  let raw: { summary?: unknown; dims?: unknown; events?: unknown };
+  try { raw = parseJsonObject(await llmCall(ctx, 'propose', system, user, undefined, false, { effort: 'low' })); }
+  catch { raw = parseJsonObject(await llmCall(ctx, 'propose', system, user + '\nReturn strictly valid JSON.', undefined, false, { effort: 'low' })); }
+  const name = (v: unknown) => (typeof v === 'string' ? Array.from(v.trim()).slice(0, 20).join('') : '');
+  // 已有的维度与事件不再建议（按名字比，大小写不敏感）；名字空的、取值不够两个的丢掉
+  const taken = new Set([...existing.dims.filter((d) => !d.retired).map((d) => d.name.toLowerCase()), ...existing.events.map((e) => e.name.toLowerCase())]);
+  const dims = (Array.isArray(raw.dims) ? raw.dims : []).flatMap((d: { name?: unknown; values?: unknown }) => {
+    const n = name(d?.name);
+    const values = Array.from(new Set((Array.isArray(d?.values) ? d.values : []).map(name).filter(Boolean))).slice(0, MAX_DIM_VALUES);
+    return n && !taken.has(n.toLowerCase()) && values.length >= MIN_DIM_VALUES ? [{ name: n, values }] : [];
+  }).slice(0, 4);
+  const events = (Array.isArray(raw.events) ? raw.events : []).flatMap((e: { name?: unknown; ms?: unknown }) => {
+    const n = name(e?.name);
+    if (!n || taken.has(n.toLowerCase())) return [];
+    const ms = typeof e?.ms === 'number' ? Math.min(EVENT_MS.max, Math.max(EVENT_MS.min, Math.round(e.ms))) : undefined;
+    return [{ name: n, ...(ms !== undefined ? { ms } : {}) }];
+  }).slice(0, 3);
+  return { summary: typeof raw.summary === 'string' ? raw.summary : '', dims, events };
+}
+
 // REQ-EDIT-002：子树重生成——只发选中元素（+ 这屏的历史指令，ADR-012 v0.87），整段替换，兄弟节点 qid 不变（ADR-007）。
 // 草稿里只改一块（REQ-CORE-045）：提示词换成草稿规则与参照项目，落库不做 lint
 async function runRegenerateSubtree(ctx: Ctx) {
@@ -499,7 +569,7 @@ async function runRegenerateSubtree(ctx: Ctx) {
   const routes = reg.map((r) => r.route);
   const system = sketch
     ? await draftSystem(ctx, screen)
-    : screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], reg, [], ctx.assets, await componentCards(ctx.project.id, { screenIds: [screen.id] }));
+    : screenSystemPrompt(app(ctx, 'existing app being revised'), ctx.device, ctx.tokens, ctx.ds.designMd, ctx.ds.components as ComponentRecipe[], reg, [], ctx.assets, await componentCards(ctx.project.id, { screenIds: [screen.id] }), surfaceStates(ctx));
   const { parseHTML } = await import('linkedom');
   const { document } = parseHTML(`<!doctype html><html><body>${body}</body></html>`);
   const qids = input.qids ?? [input.qid];
@@ -510,13 +580,19 @@ async function runRegenerateSubtree(ctx: Ctx) {
     current.push({ qid, html: el.outerHTML.replace(/ data-qid="q\d+"/g, '') });
   }
   const prior = await priorInstructions(screen.id, screen.currentRevisionId);
+  // 模型说这一改要动选中几块外面的东西（v1.50）：一块都不换，作业失败，chip 上提示选到外层；不补问——同一句话再问一遍还是要动外面
+  const call = async (prompt: string) => {
+    const text = await llmCall(ctx, 'subtree', system, prompt, undefined, true);
+    if (NEEDS_OUTER_RE.test(text)) throw new JobFailure('validation', 'needs outer element');
+    return text;
+  };
   let fresh: QuiltBlock[];
-  if (!input.qids) fresh = [{ qid: input.qid, html: stripFences(await llmCall(ctx, 'subtree', system, subtreeUserPrompt(screen.name, screen.route, current[0].html, input.prompt, prior), undefined, true)) }];
+  if (!input.qids) fresh = [{ qid: input.qid, html: stripFences(await call(subtreeUserPrompt(screen.name, screen.route, current[0].html, input.prompt, prior))) }];
   else {
     // 几块一次改完（v1.26）：一次调用、每块回一段；块数或 qid 对不上补问一轮并说明上次哪里不对，仍不对作业失败、这一屏不变
     const prompt = subtreeBlocksUserPrompt(screen.name, screen.route, current, input.prompt, prior);
-    let parsed = parseQuiltBlocks(await llmCall(ctx, 'subtree', system, prompt, undefined, true), qids);
-    if ('error' in parsed) parsed = parseQuiltBlocks(await llmCall(ctx, 'subtree', system, prompt + subtreeBlocksRetryNote(qids, parsed.error), undefined, true), qids);
+    let parsed = parseQuiltBlocks(await call(prompt), qids);
+    if ('error' in parsed) parsed = parseQuiltBlocks(await call(prompt + subtreeBlocksRetryNote(qids, parsed.error)), qids);
     if ('error' in parsed) throw new JobFailure('validation', `blocks did not match the selected elements: ${parsed.error}`);
     fresh = parsed.blocks;
   }
@@ -621,7 +697,7 @@ async function runChat(ctx: Ctx): Promise<{ reply: string }> {
 // 所以不会压住已有的屏（只看这一家族时，默认屏右边紧挨着的别的屏会被整张盖住）
 async function layoutVariant(ctx: Ctx, id: string, baseId: string) {
   const size = DEVICE_SIZE[ctx.device];
-  const others = await db.select({ id: schema.screens.id, x: schema.screens.x, y: schema.screens.y }).from(schema.screens).where(and(eq(schema.screens.projectId, ctx.project.id), ne(schema.screens.id, id)));
+  const others = await db.select({ id: schema.screens.id, x: schema.screens.x, y: schema.screens.y }).from(schema.screens).where(and(screensOf(ctx), ne(schema.screens.id, id)));
   const b = others.find((s) => s.id === baseId)!;
   const x = others.filter((s) => s.y < b.y + size.h && b.y < s.y + size.h).reduce((m, s) => Math.max(m, s.x + size.w + 80), b.x + size.w + 80);
   await db.update(schema.screens).set({ x, y: b.y }).where(eq(schema.screens.id, id));
@@ -631,7 +707,8 @@ async function layoutVariant(ctx: Ctx, id: string, baseId: string) {
 async function layoutNewScreens(ctx: Ctx, ids: string[], anchor?: { x: number; y: number }) {
   const size = DEVICE_SIZE[ctx.device];
   const gap = 80;
-  const existing = (await db.select({ x: schema.screens.x, y: schema.screens.y, id: schema.screens.id }).from(schema.screens).where(eq(schema.screens.projectId, ctx.project.id))).filter((e) => !ids.includes(e.id));
+  // 画布一次只摆一端（PAGE-CANVAS 端），新屏只避开这一端的屏
+  const existing = (await db.select({ x: schema.screens.x, y: schema.screens.y, id: schema.screens.id }).from(schema.screens).where(screensOf(ctx))).filter((e) => !ids.includes(e.id));
   let x: number; let y: number;
   if (anchor) {
     x = Math.round(anchor.x - size.w / 2); y = Math.round(anchor.y - size.h / 2);
@@ -698,7 +775,10 @@ async function runClaimed(claimed: JobRow): Promise<void> {
   const job = claimed; const jobId = claimed.id;
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, job.projectId));
   const [ds] = await db.select().from(schema.designSystems).where(eq(schema.designSystems.projectId, job.projectId));
-  const device = project.deviceType as DeviceType;
+  // 这一轮落在哪一端（REQ-CORE-049）：造屏、导出、建议状态取输入里的 surfaceId（建作业时已定），改屏取目标屏所在的端；
+  // 其余作业（套设计系统、改组件、聊天）不落在某一端。领取时端已被删 → 作业失败，不在别的端里造
+  const surface = project.kind === 'app' ? await jobSurface(claimed) : null;
+  const device = ((surface || null)?.deviceType ?? project.deviceType) as DeviceType;
   const tokens = ds.tokens as Tokens;
   const abort = new AbortController();
   const outputChars = job.kind === 'edit_screens' ? await editOutputChars(claimed) : 0;
@@ -715,7 +795,7 @@ async function runClaimed(claimed: JobRow): Promise<void> {
   }
   const images = await loadForModel((claimed.input as { imageKeys?: string[] }).imageKeys);
   const assets = await assetsForPrompt(project.id);
-  const ctx: Ctx = { job: claimed, project, ds, device, tokens, prelude: buildPrelude(tokens), signal: abort.signal, usage: { tokensIn: 0, tokensOut: 0, screens: 0, cacheRead: 0, cacheWrite: 0 }, runner, images, assets, produced: [], entryRepair: null, calls: 0 };
+  const ctx: Ctx = { job: claimed, project, ds, device, surface: surface || null, tokens, prelude: buildPrelude(tokens), signal: abort.signal, usage: { tokensIn: 0, tokensOut: 0, screens: 0, cacheRead: 0, cacheWrite: 0 }, runner, images, assets, produced: [], entryRepair: null, calls: 0 };
   await emitJobEvent(jobId, 'progress', { stage: 'running' });
   const timer = setTimeout(() => abort.abort(new Error('timeout')), timeoutMs);
   modelAborts.set(jobId, abort);
@@ -723,6 +803,7 @@ async function runClaimed(claimed: JobRow): Promise<void> {
   let extraOutput: Record<string, unknown> = {};
   try {
     if (runnerError) throw new JobFailure('validation', runnerError);
+    if (surface === false) throw new JobFailure('validation', 'surface not found');
     switch (job.kind) {
       case 'generate': await runGenerate(ctx); break;
       case 'edit_screens': await runEditScreens(ctx); break;
@@ -732,6 +813,7 @@ async function runClaimed(claimed: JobRow): Promise<void> {
       case 'propose_design_system': extraOutput = { proposal: await runProposeDesignSystem(ctx) }; break;
       case 'chat': extraOutput = await runChat(ctx); break;
       case 'edit_component': extraOutput = await runEditComponent(ctx); break;
+      case 'propose_states': extraOutput = { proposal: await runProposeStates(ctx) }; break;
       default: throw new JobFailure('validation', `${job.kind} is not available yet`);
     }
     // v0.43：偏离设计契约不再是作业失败的理由（ADR-005 修订）。产出照样落地，偏离逐屏可见
@@ -778,7 +860,7 @@ async function runClaimed(claimed: JobRow): Promise<void> {
     const entry = ctx.entryRepair;
     const entryNote = entry ? tr(`；已把「${entry.name}」接到新屏${entry.added.length ? `（${listJoin(entry.added, locale)}）` : ''}`, `; linked “${entry.name}” to the new screens${entry.added.length ? ` (${listJoin(entry.added, locale)})` : ''}`, locale) : '';
     const skipped = (extraOutput.skipped as string[] | undefined) ?? [];
-    const proposal = extraOutput.proposal as DesignProposalDto | undefined;
+    const proposal = extraOutput.proposal as DesignProposalDto | StatesProposalDto | undefined;
     const content = failure
       ? failureText(job.kind as JobKind, failure.errorClass, failure.message, screenIds.length, locale)
       // 聊天回执就是助手最后一段文字；它只动手没说话时至少报出改了哪几屏
@@ -788,6 +870,7 @@ async function runClaimed(claimed: JobRow): Promise<void> {
       : job.kind === 'edit_component' ? tr(`已更新组件「${extraOutput.component}」，同步 ${screens.length} 屏${names ? `：${names}` : ''}${skipped.length ? `；${listJoin(skipped, locale)} 正在改、落地后自动用新版` : ''}`,
         `Updated component “${extraOutput.component}” and synced ${countEn(screens.length, 'screen')}${names ? `: ${names}` : ''}${skipped.length ? `; ${listJoin(skipped, locale)} ${skipped.length === 1 ? 'is' : 'are'} being edited and will use the new version when done` : ''}`, locale)
       : job.kind === 'apply_design_system' ? tr(`设计系统已回刷 ${screens.length} 屏`, `Re-applied the design system to ${countEn(screens.length, 'screen')}`, locale)
+      : job.kind === 'propose_states' ? ((n) => n ? tr(`建议了 ${n} 项状态${proposal?.summary ? `：${proposal.summary}` : ''}，在右栏勾选后保存`, `Suggested ${countEn(n, 'state')}${proposal?.summary ? `: ${proposal.summary}` : ''}; tick the ones you want in the right panel and save`, locale) : tr('没有可建议的新状态', 'No new states to suggest', locale))((proposal as StatesProposalDto).dims.length + (proposal as StatesProposalDto).events.length)
       : job.kind === 'propose_design_system' ? tr(`设计系统提案已生成${proposal?.summary ? `：${proposal.summary}` : ''}，在设计系统面板预览后确认写入`, `Design system proposal ready${proposal?.summary ? `: ${proposal.summary}` : ''}; preview it in the design system panel, then confirm to write it`, locale)
       : job.kind === 'regenerate_subtree' ? ((n) => n > 1 ? tr(`已重生成「${names}」的 ${n} 块`, `Regenerated ${n} blocks of “${names}”`, locale) : tr(`已重生成「${names}」的一块`, `Regenerated one block of “${names}”`, locale))((job.input as { qids?: string[] }).qids?.length ?? 1)
       : job.kind === 'edit_screens' ? tr(`已更新 ${screens.length} 屏：${names}${candidateNote}`, `Updated ${countEn(screens.length, 'screen')}: ${names}${candidateNote}`, locale)
@@ -799,6 +882,21 @@ async function runClaimed(claimed: JobRow): Promise<void> {
   const rows = screenIds.length ? await db.select().from(schema.screens).where(and(eq(schema.screens.projectId, project.id), sql`${schema.screens.id} = any(${sql.raw(`array[${screenIds.map((s) => `'${s}'::uuid`).join(',')}]`)})`)) : [];
   const [projectNow] = await db.select().from(schema.projects).where(eq(schema.projects.id, project.id));
   await emitJobEvent(jobId, failure ? 'failed' : 'succeeded', { errorClass: failure?.errorClass, message: failure?.message, screens: await screenDtos(projectNow, rows), ...(extraOutput.proposal ? { proposal: extraOutput.proposal } : {}) });
+}
+
+// 作业落在哪一端：null 是不落在某一端，false 是落的那一端已被删
+async function jobSurface(job: JobRow): Promise<SurfaceRow | null | false> {
+  const input = job.input as { surfaceId?: string; screenIds?: unknown; screenId?: string };
+  let id = input.surfaceId;
+  if (!id && ['edit_screens', 'regenerate_subtree'].includes(job.kind)) {
+    const target = job.kind === 'regenerate_subtree' ? input.screenId : Array.isArray(input.screenIds) ? input.screenIds[0] as string : undefined;
+    if (!target) return null;
+    const [s] = await db.select({ surfaceId: schema.screens.surfaceId }).from(schema.screens).where(eq(schema.screens.id, target));
+    id = s?.surfaceId ?? undefined;
+  }
+  if (!id) return null;
+  const [row] = await db.select().from(schema.surfaces).where(and(eq(schema.surfaces.id, id), eq(schema.surfaces.projectId, job.projectId)));
+  return row ?? false;
 }
 
 async function deriveIfProduced(ctx: Ctx) {

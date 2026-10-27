@@ -1,9 +1,9 @@
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, or, isNull } from 'drizzle-orm';
 import { db, schema } from '../db/client.ts';
 import { problems, isUniqueViolation } from '../lib/errors.ts';
-import { config } from '../config.ts';
 import { storage } from '../lib/storage.ts';
-import { assembleDocument, buildPrelude, extractBody, injectQids, reconcileQids, overwrittenInstances, lintScreenBody, expandComponents, OVERLAY_SCREEN_NOTE, PICSUM_PHOTO_NOTE, craftRules, COLOR_CLASS_NAMES, DEVICE_SIZE, L, type DeviceType, type Tokens, type LintReport, type Presentation } from '@quilt/core';
+import { assembleDocument, buildPrelude, extractBody, injectQids, reconcileQids, overwrittenInstances, lintScreenBody, expandComponents, OVERLAY_SCREEN_NOTE, PICSUM_PHOTO_NOTE, craftRules, statesSection, COLOR_CLASS_NAMES, DEVICE_SIZE, L, type DeviceType, type Tokens, type LintReport, type Presentation, type SurfaceStates } from '@quilt/core';
+import { surfaceFor } from './surfaces.ts';
 import { assetsForPrompt } from './assets.ts';
 import { ownedProject } from './projects.ts';
 import { createRevision, deriveLinks, hasActiveJob, setFamilyPresentation } from './screens.ts';
@@ -17,9 +17,10 @@ import { isSketchbook, nextDraftRoute, draftFrame, draftReference, DRAFT_LINT_RE
 // 带 jobId（派活任务载荷里的作业，ADR-015）时修订即算该工单产出；改既有屏时 expectedRevisionId 必填——
 // 租约过期期间用户可能已改过这张屏，旧基线回写会顶掉他的改动，所以用 409 兜底。
 // 草稿本（REQ-CORE-040）：新草稿的路由可省（服务端取 /draft-<n>），不做设计契约 lint，画框按作业选定的或根元素的 data-frame 定
-export async function ingestScreen(ownerId: string, projectId: string, input: { name: string; route?: string; html?: string; uploadId?: string; screenId?: string; expectedRevisionId?: string; jobId?: string; presentation?: Presentation }) {
+export async function ingestScreen(ownerId: string, projectId: string, input: { name: string; route?: string; html?: string; uploadId?: string; screenId?: string; expectedRevisionId?: string; jobId?: string; presentation?: Presentation; surfaceId?: string; group?: string | null }) {
   const project = await ownedProject(ownerId, projectId);
   const sketch = isSketchbook(project);
+  if (sketch && (input.surfaceId || input.group)) throw problems.validation([{ path: input.surfaceId ? 'surfaceId' : 'group', message: L('草稿本没有端与分组', 'The Sketchbook has no surfaces or groups') }]);
   let jobFrame: string | undefined;
   if (input.jobId) {
     const [job] = await db.select({ id: schema.generationJobs.id, status: schema.generationJobs.status, input: schema.generationJobs.input }).from(schema.generationJobs).where(and(eq(schema.generationJobs.id, input.jobId), eq(schema.generationJobs.projectId, project.id)));
@@ -36,9 +37,14 @@ export async function ingestScreen(ownerId: string, projectId: string, input: { 
   }
   const raw = input.html ?? (input.uploadId ? (await storage.get(`uploads/${input.uploadId}.html`).catch(() => null))?.toString('utf8') : null);
   if (!raw) throw problems.validation([{ path: 'html', message: 'html or a valid uploadId is required' }]);
-  // 单屏上限（§15）：模型生成那条路在 pipeline 里查，agent 写入同样要查——超了截图与导出都会被拖垮
-  if (Buffer.byteLength(raw) > config.maxScreenHtmlBytes) throw problems.unprocessable([{ path: 'html', message: `screen html is ${Buffer.byteLength(raw)} bytes, the limit is ${config.maxScreenHtmlBytes}` }]);
-  const screens = await db.select().from(schema.screens).where(eq(schema.screens.projectId, project.id));
+  const all = await db.select().from(schema.screens).where(eq(schema.screens.projectId, project.id));
+  // 端（REQ-CORE-049）：改既有屏落在它自己的端（屏不能换端）；新屏落在给定的端，缺省第一端。路由、lint 与排位只看这一端的屏
+  const own = input.screenId ? all.find((x) => x.id === input.screenId) : undefined;
+  if (input.screenId && !own) throw problems.notFound();
+  if (own && input.surfaceId && input.surfaceId !== own.surfaceId) throw problems.unprocessable([{ path: 'surfaceId', message: L('屏不能换端：删了重造，或从草稿本搬进来', 'A screen cannot change surface: delete and recreate it, or move it in from the Sketchbook') }]);
+  if (own?.variantOf && input.group !== undefined) throw problems.unprocessable([{ path: 'group', message: L('变体跟默认屏在同一组，改分组请改默认屏', 'A variant stays in the group of its default screen; change the group on the default screen') }]);
+  const surface = sketch ? null : own ? (own.surfaceId ? await surfaceFor(project.id, own.surfaceId) : null) : await surfaceFor(project.id, input.surfaceId);
+  const screens = surface ? all.filter((s) => s.surfaceId === surface.id) : all;
   const route = input.route ?? (sketch && !input.screenId ? nextDraftRoute(screens.map((s) => s.route)) : undefined);
   if (!route) throw problems.validation([{ path: 'route', message: 'route is required' }]);
   // 共享组件（REQ-EDIT-006）：agent 写进来的占位（或它手抄的副本）在这里展开成正式 HTML。
@@ -54,7 +60,7 @@ export async function ingestScreen(ownerId: string, projectId: string, input: { 
   // 改的是有参照项目的草稿（REQ-CORE-042 / ADR-033）：按参照项目的 prelude 拼装，与模型通道改稿落库一致；参照项目已被删就用草稿本自己的
   const ref = sketch && input.screenId ? await draftReference(screens.find((x) => x.id === input.screenId)?.refProjectId ?? null) : null;
   const html = assembleDocument(body, ref?.prelude ?? buildPrelude(ds.tokens as Tokens), `${project.name} · ${input.name}`);
-  const size = DEVICE_SIZE[project.deviceType as DeviceType];
+  const size = DEVICE_SIZE[(surface?.deviceType ?? project.deviceType) as DeviceType];
   let reshoot: string[] = [];
   const result = await db.transaction(async (tx) => {
     try {
@@ -71,6 +77,7 @@ export async function ingestScreen(ownerId: string, projectId: string, input: { 
       if (s.variantOf && route !== s.route) throw problems.unprocessable([{ path: 'route', message: L('变体与默认屏同路由，改路由请改默认屏', 'A variant shares the route of its default screen; change the route on the default screen') }]);
       if (s.variantOf && input.presentation && input.presentation !== s.presentation) throw problems.unprocessable([{ path: 'presentation', message: L('变体随默认屏的呈现方式，改呈现方式请改默认屏', 'A variant follows the presentation of its default screen; change it on the default screen') }]);
       if (route !== s.route || input.name !== s.name) await tx.update(schema.screens).set({ route, name: input.name }).where(eq(schema.screens.id, screenId));
+      if (input.group !== undefined && input.group !== s.groupName) await tx.update(schema.screens).set({ groupName: input.group }).where(or(eq(schema.screens.id, screenId), eq(schema.screens.variantOf, screenId)));
       if (input.presentation && input.presentation !== s.presentation) reshoot = await setFamilyPresentation(tx, screenId, input.presentation);
       // 默认屏改路由，它的变体跟着改（v0.62 变体与默认屏同路由）
       if (route !== s.route) await tx.update(schema.screens).set({ route }).where(eq(schema.screens.variantOf, screenId));
@@ -79,13 +86,14 @@ export async function ingestScreen(ownerId: string, projectId: string, input: { 
     } else {
       if (screens.some((s) => s.route === route)) throw problems.routeTaken();
       const x = screens.reduce((m, s) => Math.max(m, s.x + size.w + 80), 0);
-      const [s] = await tx.insert(schema.screens).values({ projectId: project.id, name: input.name, route, x, y: 0, presentation: input.presentation ?? 'push', frame: sketch ? draftFrame(jobFrame, body) : null }).returning();
+      const [s] = await tx.insert(schema.screens).values({ projectId: project.id, surfaceId: surface?.id ?? null, groupName: input.group ?? null, name: input.name, route, x, y: 0, presentation: input.presentation ?? 'push', frame: sketch ? draftFrame(jobFrame, body) : null }).returning();
       screenId = s.id;
     }
     const rev = await createRevision(tx, { projectId: project.id, screenId, html, sourceKind: 'agent_ingest', jobId: input.jobId ?? null, lintReport: report, expectedRevisionId: input.screenId ? (input.expectedRevisionId ?? screens.find((x) => x.id === input.screenId)?.currentRevisionId ?? null) : null });
     if (!rev) throw problems.revisionConflict();
     await deriveLinks(tx, project.id);
-    return { screenId, revisionId: rev.id };
+    // 回存进修订的那份：落修订时可能多记一条（页内状态与端上维度重名）
+    return { screenId, revisionId: rev.id, lintReport: rev.lintReport as LintReport };
     } catch (e) { if (isUniqueViolation(e)) throw problems.routeTaken(); throw e; }
   });
   // 用过的上传位清掉：不清的话同一个 uploadId 再 append 会拼到上一屏后面
@@ -95,7 +103,7 @@ export async function ingestScreen(ownerId: string, projectId: string, input: { 
   // 本机会话 / 外部 agent 经 MCP 写进来的屏没有作业事件可订阅，项目级事件让画布立刻刷新（API-CORE-030）
   await emitProjectEvent(project.id, 'screen_changed', { screenId: result.screenId, revisionId: result.revisionId, jobId: input.jobId ?? null }).catch(() => {});
   // componentsOverwritten：写进来的共享组件实例里改过的内容已被组件正式 HTML 盖回，要改它得改组件本身（quilt.update_component）
-  return { ...result, lintReport: report, danglingRoutes: report.danglingRoutes, ...(componentsOverwritten.length ? { componentsOverwritten } : {}) };
+  return { ...result, danglingRoutes: report.danglingRoutes, ...(componentsOverwritten.length ? { componentsOverwritten } : {}) };
 }
 
 export async function validateScreenHtml(ownerId: string, projectId: string, html: string): Promise<LintReport> {
@@ -107,18 +115,24 @@ export async function validateScreenHtml(ownerId: string, projectId: string, htm
 }
 
 // 设计契约的机器可判定投影（quilt.get_design_contract / resources）
-export async function designContract(ownerId: string, projectId: string) {
+export async function designContract(ownerId: string, projectId: string, surfaceId?: string) {
   const project = await ownedProject(ownerId, projectId);
   const [ds] = await db.select().from(schema.designSystems).where(eq(schema.designSystems.projectId, project.id));
+  // 按端给（REQ-CORE-049，ADR-041）：设备形态、路由表与维度都是这一端的，缺省第一端；草稿本没有端
+  const surface = project.kind === 'app' ? await surfaceFor(project.id, surfaceId) : null;
+  const device = (surface?.deviceType ?? project.deviceType) as DeviceType;
+  const states = (surface?.states ?? null) as SurfaceStates | null;
   // 变体不进契约的路由表（v0.62）：路由已由默认屏占着，agent 看到两份只会撞路由
-  const screens = await db.select({ id: schema.screens.id, name: schema.screens.name, route: schema.screens.route, purpose: schema.screens.purpose, presentation: schema.screens.presentation }).from(schema.screens).where(and(eq(schema.screens.projectId, project.id), isNull(schema.screens.variantOf)));
+  const screens = await db.select({ id: schema.screens.id, name: schema.screens.name, route: schema.screens.route, purpose: schema.screens.purpose, presentation: schema.screens.presentation, group: schema.screens.groupName }).from(schema.screens)
+    .where(and(surface ? eq(schema.screens.surfaceId, surface.id) : eq(schema.screens.projectId, project.id), isNull(schema.screens.variantOf)));
   // 素材清单随契约走（REQ-CORE-019）：本机会话这条链只读契约，不读 prompt 里的 PROJECT ASSETS 段，
   // 契约不给素材就只能拿 picsum 占位块糊品牌位
   const assets = await assetsForPrompt(project.id);
   // 共享组件（REQ-EDIT-006）：agent 按 placement 放占位、不手写副本；改外观走 quilt.update_component
   const sharedComponents = await contractComponents(project.id);
   return {
-    projectId: project.id, name: project.name, brief: project.brief, deviceType: project.deviceType, viewport: DEVICE_SIZE[project.deviceType as DeviceType],
+    projectId: project.id, name: project.name, brief: project.brief, deviceType: device, viewport: DEVICE_SIZE[device],
+    ...(surface ? { surfaceId: surface.id, surface: surface.name, states } : {}),
     tokens: ds.tokens, colorClasses: COLOR_CLASS_NAMES, components: ds.components, sharedComponents, designMd: ds.designMd, version: ds.version, assets,
     rules: [
       ...(sharedComponents.length ? [`Shared components (sharedComponents[]) are project-level fragments every screen places by reference: emit exactly the "placement" tag (empty except data-slot content) wherever that component belongs — Quilt fills in the HTML and overwrites any hand-written copy on the next write. To change how one looks everywhere, call quilt.update_component; to make a new one, quilt.create_component.`] : []),
@@ -127,7 +141,8 @@ export async function designContract(ownerId: string, projectId: string) {
       `Radius: rounded-sm/md/lg/full; icons via <i data-lucide="…">; images: ${assets.length ? 'wherever a logo or brand mark belongs use the exact url of the matching entry in assets[] (these are the project\'s real files), other photos via https://picsum.photos/seed/…' : 'via https://picsum.photos/seed/…'} in a fixed frame (w-*/h-*, aspect-square or aspect-video) — ${PICSUM_PHOTO_NOTE} Avatars are initials unless assets[] has the photo; logos come only from assets[], else the app name alone as a text wordmark (no letter tile); navigation via <a href="/route"> with routes from the app map, href="#" for destinations that have no screen yet.`,
       `Overlay screens (routes[].presentation = "overlay", or create_screen with presentation "overlay"): ${OVERLAY_SCREEN_NOTE}`,
       // 做工规则（ADR-027）：与出屏提示词同一段，本机会话与外部 agent 只读契约
-      craftRules(project.deviceType as DeviceType),
+      craftRules(device),
+      ...(surface ? [statesSection(states).trim()] : []),
       'Component recipes are the house defaults — reuse them for consistency, diverge where the design calls for it. <script> tags and any https: CDN are allowed (Chart.js, ECharts, your own component library); keep the screen renderable when the CDN is slow.',
     ],
     routes: screens,

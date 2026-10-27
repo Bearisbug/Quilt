@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { and, eq, desc, asc, lt, inArray, isNull } from 'drizzle-orm';
-import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, ROUND_PRESET_PROMPTS, missingPagePrompt, variantPrompt, presetPrompt, presetNote, createProjectSchema, createJobRequestSchema, jobInputSchemas, createMessageSchema, retryMessageSchema, createAttachmentSchema, updateProjectSchema, cursorQuerySchema, listJobsQuerySchema, type MessageDto, type LinkDto, type CreateJobInput, type JobKind, type ProjectEventDto, type Runner, createPresetSchema, applyPresetSchema, L, presenceInputSchema } from '@quilt/core';
+import { LINK_REPAIR_PROMPT, CONVENTIONS_REGENERATE_PROMPT, ROUND_PRESET_PROMPTS, missingPagePrompt, variantPrompt, presetPrompt, presetNote, createProjectSchema, createJobRequestSchema, jobInputSchemas, createMessageSchema, retryMessageSchema, createAttachmentSchema, updateProjectSchema, cursorQuerySchema, listJobsQuerySchema, type MessageDto, type LinkDto, type CreateJobInput, type JobKind, type ProjectEventDto, type Runner, createPresetSchema, applyPresetSchema, L, presenceInputSchema, createSurfaceSchema, updateSurfaceSchema } from '@quilt/core';
 import { db, schema } from '../../db/client.ts';
 import { parseBody, parseQuery, requireUser, type Env } from '../app.ts';
 import { createProject, deleteProject, getProjectDetail, listProjects, ownedProject, updateProject, projectDto, designSystemDto, jobDto } from '../../services/projects.ts';
@@ -10,6 +10,7 @@ import { createUpload, dtos as attachmentDtos, resolveForMessage, type StoredAtt
 import { createAsset, deleteAsset, listAssets } from '../../services/assets.ts';
 import { applyPreset, createPreset, deletePreset, listPresets } from '../../services/presets.ts';
 import { listChannels } from '../../services/channels.ts';
+import { createSurface, updateSurface, deleteSurface, surfaceDto, surfaceFor } from '../../services/surfaces.ts';
 import { assertSketchbookMessage, isSketchbook } from '../../services/sketchbook.ts';
 // 聊天通道（REQ-CORE-023）：Agent SDK 只认 Claude——必须是 agent-sdk 通道；缺省取第一条已验证的，一条都没有就点名去设置页加
 const CHAT_CHANNEL_HINT = L('聊天需要「本机 Claude 订阅」的模型：去设置页添加并验证一个', 'Chat needs a Local Claude subscription model: add and verify one in Settings');
@@ -49,8 +50,24 @@ export const projectRoutes = new Hono<Env>();
 projectRoutes.post('/v1/projects', async (c) => {
   const user = requireUser(c);
   const input = await parseBody(c, createProjectSchema);
-  const { project, designSystem } = await createProject(user.id, input);
-  return c.json({ project: projectDto(project), designSystem: designSystemDto(designSystem) }, 201);
+  const { project, designSystem, surfaces } = await createProject(user.id, input);
+  return c.json({ project: projectDto(project), designSystem: designSystemDto(designSystem), surfaces: surfaces.map(surfaceDto) }, 201);
+});
+
+// API-CORE-054：端的增删改（REQ-CORE-049、REQ-CORE-051）
+projectRoutes.post('/v1/projects/:projectId/surfaces', async (c) => {
+  const user = requireUser(c);
+  const input = await parseBody(c, createSurfaceSchema);
+  return c.json({ surface: surfaceDto(await createSurface(user.id, c.req.param('projectId'), input)) }, 201);
+});
+projectRoutes.patch('/v1/surfaces/:surfaceId', async (c) => {
+  const user = requireUser(c);
+  const patch = await parseBody(c, updateSurfaceSchema);
+  return c.json({ surface: surfaceDto(await updateSurface(user.id, c.req.param('surfaceId'), patch)) });
+});
+projectRoutes.delete('/v1/surfaces/:surfaceId', async (c) => {
+  await deleteSurface(requireUser(c).id, c.req.param('surfaceId'));
+  return c.body(null, 204);
 });
 
 // API-CORE-005
@@ -96,6 +113,7 @@ function describeJob(input: CreateJobInput): string | null {
       : tr(`把最新设计系统回刷到 ${input.input.screenIds.length} 屏`, `Re-apply the latest design system to ${countEn(input.input.screenIds.length, 'screen')}`);
     case 'propose_design_system': return tr(`提炼设计系统约定：${input.input.instruction}`, `Distill design system conventions: ${input.input.instruction}`);
     case 'export_prototype': return tr('导出单文件原型', 'Export a single-file prototype');
+    case 'propose_states': return tr('建议这一端的状态', 'Suggest states for this surface');
     case 'edit_screens': {
       const n = input.input.screenIds.length;
       const link = presetNote(input.input.prompt, LINK_REPAIR_PROMPT);
@@ -141,7 +159,9 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
   assertSketchbookMessage(project, body);
   // 新草稿的参照项目（REQ-CORE-042）：规则同 API-CORE-012，得是本人的普通项目
   if (body.refProjectId && (await ownedProject(user.id, body.refProjectId)).kind !== 'app') throw problems.notFound();
-  const screenCount = (await db.select({ id: schema.screens.id }).from(schema.screens).where(eq(schema.screens.projectId, project.id))).length;
+  // 新屏落在哪一端（REQ-CORE-049）：这一端还没有屏时一句话出一组（count auto）
+  const surfaceId = !isSketchbook(project) ? (await surfaceFor(project.id, body.surfaceId)).id : undefined;
+  const screenCount = (await db.select({ id: schema.screens.id }).from(schema.screens).where(surfaceId ? eq(schema.screens.surfaceId, surfaceId) : eq(schema.screens.projectId, project.id))).length;
   const targets = body.targetScreenIds?.length ? body.targetScreenIds : null;
   // 共享组件目标（REQ-EDIT-006）：只有组件、没有屏也没有锚点 = 改这个组件（恰好 1 个）；其余情况它们的完整 HTML 进上下文
   const compTargets = body.mode !== 'chat' && body.targetComponentIds?.length ? body.targetComponentIds : null;
@@ -173,8 +193,8 @@ projectRoutes.post('/v1/projects/:projectId/messages', async (c) => {
     : body.variantOf
     ? { kind: 'generate', input: { prompt: body.content || variantPrompt(body.variantName!), count: 1, versions, variantOf: body.variantOf, variantName: body.variantName, runner, imageKeys, componentIds } }
     : body.route
-    ? { kind: 'generate', input: { prompt: presetPrompt(missingPagePrompt(body.route), body.content), count: 1, versions, route: body.route, fromScreenId: body.fromScreenId, runner, imageKeys, componentIds } }
-    : { kind: 'generate', input: { prompt: body.content, count: body.count ?? (screenCount === 0 && !isSketchbook(project) ? 'auto' : 1), versions, anchor: body.anchor, runner, imageKeys, componentIds, frame: body.frame, refProjectId: body.refProjectId } };
+    ? { kind: 'generate', input: { prompt: presetPrompt(missingPagePrompt(body.route), body.content), count: 1, versions, route: body.route, fromScreenId: body.fromScreenId, runner, imageKeys, componentIds, surfaceId: body.surfaceId } }
+    : { kind: 'generate', input: { prompt: body.content, count: body.count ?? (screenCount === 0 && !isSketchbook(project) ? 'auto' : 1), versions, anchor: body.anchor, runner, imageKeys, componentIds, frame: body.frame, refProjectId: body.refProjectId, surfaceId } };
   // 带隐藏参数的轮次，消息正文按 API-CORE-006 的口径写成描述（正文是提示词还是附加要求，由作业输入反解）
   const content = pinned || preset ? describeJob(input)! : body.content;
   // 通道选「交给本机 Claude Code」（REQ-CORE-011 / ADR-015 v0.34）：同样是作业（runner=agent），由 agentDelivery 投递到选中的会话，
@@ -385,12 +405,17 @@ projectRoutes.get('/v1/projects/:projectId/messages', async (c) => {
 projectRoutes.get('/v1/projects/:projectId/app-map', async (c) => {
   const user = requireUser(c);
   const project = await ownedProject(user.id, c.req.param('projectId'));
-  // 地图节点只有默认屏（v0.62）：变体与默认屏同路由，边的目标也只解析到默认屏
-  const screens = await db.select({ id: schema.screens.id, route: schema.screens.route }).from(schema.screens).where(and(eq(schema.screens.projectId, project.id), isNull(schema.screens.variantOf)));
+  // 地图节点只有默认屏（v0.62）：变体与默认屏同路由，边的目标也只解析到默认屏。
+  // 端（REQ-CORE-049）：链接只在同一端里解析，边天然不跨端；带 ?surfaceId= 只取这一端
+  const surfaceId = c.req.query('surfaceId');
+  if (surfaceId) await surfaceFor(project.id, surfaceId);
+  const screens = await db.select({ id: schema.screens.id, route: schema.screens.route, surfaceId: schema.screens.surfaceId }).from(schema.screens)
+    .where(and(eq(schema.screens.projectId, project.id), isNull(schema.screens.variantOf), surfaceId ? eq(schema.screens.surfaceId, surfaceId) : undefined));
+  const ids = new Set(screens.map((s) => s.id));
   const links = await db.select().from(schema.links).where(eq(schema.links.projectId, project.id));
-  const edges: LinkDto[] = links.map((l) => ({ fromScreenId: l.fromScreenId, qid: l.elementQid, href: l.href, toScreenId: l.toScreenId }));
+  const edges: LinkDto[] = links.filter((l) => !surfaceId || ids.has(l.fromScreenId)).map((l) => ({ fromScreenId: l.fromScreenId, qid: l.elementQid, href: l.href, toScreenId: l.toScreenId }));
   c.header('Cache-Control', 'no-store');
-  return c.json({ nodes: screens.map((s) => ({ screenId: s.id, route: s.route })), edges });
+  return c.json({ nodes: screens.map((s) => ({ screenId: s.id, route: s.route, surfaceId: s.surfaceId })), edges });
 });
 
 // 附件 URL 是签名的、会过期，所以每次出 DTO 现签——与 screenDtos 同一惯例，因此是 async。

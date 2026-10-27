@@ -111,3 +111,14 @@ test('failureText 英文版：没有「重试」的作业写各自再发一次�
     assert.match(t, /\. [A-Z]/, t);
   }
 });
+
+test('failureText：只改选中的几块要动外面一层（v1.50）——模型通道与本机会话同一句，下一步是选到外层', () => {
+  for (const cls of ['validation', 'agent'] as const) {
+    assert.equal(failureText('regenerate_subtree', cls, 'needs outer element'), '重做这一块失败：要改的是它外面那一层，只改选中的这块做不到。按 Shift+↑ 选到外层再说一遍');
+    assert.equal(failureText('regenerate_subtree', cls, 'needs outer element', 0, 'en'), 'Regenerating this block failed: this change needs the element around it, so it cannot be done on the selected block alone. Press Shift+↑ to select the element around it and send again');
+  }
+  // 会话写的 summary 带句号、大小写不同也认
+  assert.ok(failureText('regenerate_subtree', 'agent', 'Needs outer element.').includes('选到外层'));
+  // 别的本机会话失败照旧
+  assert.ok(failureText('regenerate_subtree', 'agent', 'gave up').startsWith('重做这一块失败：本机会话没有完成'));
+});

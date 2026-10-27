@@ -8,21 +8,23 @@ import { storeRevisionShot, storeThumb, deleteUnreferenced } from '../services/s
 import { archiveAttachment } from '../services/record.ts';
 import { screenshotHtml, losslessWebp, loadWebpEncoder } from '../lib/screenshot.ts';
 import { SHOT_KEEP_MS, keepsScreenshot, prunePlan, shotKeyVariant } from '../lib/shots.ts';
-import { shotSpecFor, type Presentation } from '@quilt/core';
+import { shotSpecFor, withSurfaceStates, type Presentation, type SurfaceStates } from '@quilt/core';
 import { runJob } from './pipeline.ts';
 import { startAgentDelivery, deliverAgentJob } from './agentDelivery.ts';
 import { finishFailed } from './failJob.ts';
 
 export async function renderRevisionScreenshot(revisionId: string): Promise<boolean> {
-  const [r] = await db.select({ id: schema.screenRevisions.id, htmlKey: schema.screenRevisions.htmlKey, screenshotKey: schema.screenRevisions.screenshotKey, screenId: schema.screens.id, presentation: schema.screens.presentation, frame: schema.screens.frame, projectId: schema.projects.id, deviceType: schema.projects.deviceType, kind: schema.projects.kind })
+  const [r] = await db.select({ id: schema.screenRevisions.id, htmlKey: schema.screenRevisions.htmlKey, screenshotKey: schema.screenRevisions.screenshotKey, screenId: schema.screens.id, presentation: schema.screens.presentation, frame: schema.screens.frame, projectId: schema.projects.id, deviceType: schema.projects.deviceType, kind: schema.projects.kind, surfaceDevice: schema.surfaces.deviceType, states: schema.surfaces.states })
     .from(schema.screenRevisions)
     .innerJoin(schema.screens, eq(schema.screens.id, schema.screenRevisions.screenId))
     .innerJoin(schema.projects, eq(schema.projects.id, schema.screens.projectId))
+    .leftJoin(schema.surfaces, eq(schema.surfaces.id, schema.screens.surfaceId))
     .where(eq(schema.screenRevisions.id, revisionId));
   if (!r || r.screenshotKey) return false;
-  const html = (await storage.get(r.htmlKey)).toString('utf8');
-  // 尺寸同出屏时（REQ-CORE-040）：草稿按画框拍，组件画框只拍根元素的框
-  const shot = shotSpecFor({ kind: r.kind, deviceType: r.deviceType }, { frame: r.frame });
+  // 截图一律按缺省取值（REQ-CORE-051）：端上的维度同预览下发时放进 head
+  const html = withSurfaceStates((await storage.get(r.htmlKey)).toString('utf8'), r.states as SurfaceStates | null);
+  // 尺寸同出屏时（REQ-CORE-040）：草稿按画框拍，组件画框只拍根元素的框；普通屏按所在端的设备（REQ-CORE-049）
+  const shot = shotSpecFor({ kind: r.kind, deviceType: r.surfaceDevice ?? r.deviceType }, { frame: r.frame });
   const png = await screenshotHtml(html, shot.size, { overlay: r.presentation === 'overlay', rootOnly: shot.rootOnly });
   if (!(await storeRevisionShot(r.projectId, r.screenId, r.id, png, r.presentation as Presentation, r.frame))) return false;
   // 截图就绪：非作业路径（MCP 回写、直改）没有 screen_screenshot_ready 事件，项目频道补一条让卡片换图

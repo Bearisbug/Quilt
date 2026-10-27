@@ -29,11 +29,15 @@ screenRoutes.patch('/v1/screens/:screenId', async (c) => {
   // 参照项目只对草稿有效（REQ-CORE-042）：得是本人的普通项目，null 回到自由风格；不建修订，从下一轮出稿、改稿起生效（ADR-033）
   if (patch.refProjectId !== undefined && !isSketchbook(project)) throw problems.unprocessable([{ path: 'refProjectId', message: L('参照项目只对草稿有效', 'Reference projects only apply to drafts') }]);
   if (patch.refProjectId && (await ownedProject(user.id, patch.refProjectId)).kind !== 'app') throw problems.notFound();
-  const { presentation, frame, ...rest } = patch;
+  // 分组（REQ-CORE-050）：元数据、不建修订；变体的分组跟默认屏，草稿没有分组
+  if (patch.group !== undefined && screen.variantOf) throw problems.unprocessable([{ path: 'group', message: L('变体跟默认屏同一组，移分组请移默认屏', 'A variant is in the same group as its default screen; move the default screen instead') }]);
+  if (patch.group !== undefined && isSketchbook(project)) throw problems.unprocessable([{ path: 'group', message: L('草稿没有分组', 'Drafts have no groups') }]);
+  const { presentation, frame, group, surfaceId: _surfaceId, ...rest } = patch;
   let reshoot: string[] = [];
   try {
     await db.transaction(async (tx) => {
-      await tx.update(schema.screens).set({ ...rest, updatedAt: new Date() }).where(eq(schema.screens.id, screen.id));
+      await tx.update(schema.screens).set({ ...rest, ...(group !== undefined ? { groupName: group } : {}), updatedAt: new Date() }).where(eq(schema.screens.id, screen.id));
+      if (group !== undefined) await tx.update(schema.screens).set({ groupName: group }).where(eq(schema.screens.variantOf, screen.id));
       if (presentation && presentation !== screen.presentation) reshoot = await setFamilyPresentation(tx, screen.id, presentation);
       if (frame && frame !== screen.frame) reshoot = [...reshoot, ...await setDraftFrame(tx, screen.id, frame)];
       if (patch.route && patch.route !== screen.route) {

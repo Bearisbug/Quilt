@@ -143,7 +143,7 @@ export function CopyDialog({ draft, runner, onClose, onCopied }: { draft: Screen
         if (needsScreens) void loadDetail(projectId);
         return;
     }
-    // 400 validation：名字不合规落到名字框；其余（写回后超过 256 KB、组件放不下脚本或样式表……）用服务端的原话
+    // 400 validation：名字不合规落到名字框；其余（组件放不下脚本或样式表……）用服务端的原话
     if (first?.path === 'name') { setNameError(first.message); focusField('copy-name'); return; }
     setError(first?.message ?? t('copy.error.title', { reason: p.title }));
   };

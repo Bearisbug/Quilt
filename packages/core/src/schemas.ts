@@ -4,10 +4,12 @@ import { TOKEN_COLOR_KEYS } from './tokens.ts';
 import { COMPONENT_NAME_RE, MAX_COMPONENT_HTML_BYTES } from './component-meta.ts';
 import { ROUND_PRESETS } from './contract.ts';
 import { localeSchema } from './i18n.ts';
+import { surfaceNameSchema, groupNameSchema, surfaceStatesInputSchema, type SurfaceStates, type RevisionStates } from './states.ts';
 
 // 契约 schema（§8 / §9 / §24）：服务端校验与前端类型的唯一出处。
 // v0.31：三种 generate 合一（整组 / 单屏 / 懒生成都是 `generate`）；历史行里的旧 kind 只读保留
-export const JOB_KINDS = ['generate', 'edit_screens', 'regenerate_subtree', 'apply_design_system', 'propose_design_system', 'export_prototype', 'ingest_screen', 'chat', 'edit_component'] as const;
+// propose_states（REQ-CORE-051）：按这一端的屏建议维度与事件，只产出提案（output.proposal），由用户勾选后经 API-CORE-054 保存
+export const JOB_KINDS = ['generate', 'edit_screens', 'regenerate_subtree', 'apply_design_system', 'propose_design_system', 'export_prototype', 'ingest_screen', 'chat', 'edit_component', 'propose_states'] as const;
 // 一次「造」最多几张不同的屏（屏数档位 1–4 / auto）与同一屏最多几版候选（REQ-CORE-003 / REQ-CORE-015）
 export const MAX_SCREENS_PER_GENERATE = 4;
 export const MAX_VERSIONS = 4;
@@ -114,6 +116,9 @@ export const jobInputSchemas = {
     frame: z.enum(DRAFT_FRAME_CHOICES).optional(),
     // 参照项目（REQ-CORE-042）：新草稿从第一版起就参照它，同样只对草稿本的新草稿有效
     refProjectId: z.uuid().optional(),
+    // 端（REQ-CORE-049）：新屏落在哪一端，缺省第一端；group 是给新屏的分组（REQ-CORE-050），整组规划时规划器逐屏给、这里给了就都用它
+    surfaceId: z.uuid().optional(),
+    group: groupNameSchema.optional(),
     locale: jobLocaleSchema,
   }).refine((v) => !!v.variantOf === !!v.variantName, { path: ['variantName'], message: 'variantOf 与 variantName 要一起给' }),
   edit_screens: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).min(1).max(20), versions: versionsSchema.default(1), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(), componentIds: componentIdsSchema, locale: jobLocaleSchema }),
@@ -129,10 +134,12 @@ export const jobInputSchemas = {
   apply_design_system: z.object({ screenIds: z.union([z.literal('all'), z.array(z.uuid()).min(1)]) }),
   // 设计系统提炼（REQ-EDIT-003）：只产出提案（output.proposal），写入由 API-EDIT-002 在预览确认后完成
   propose_design_system: z.object({ instruction: z.string().trim().min(1).max(4000), screenId: z.uuid().optional(), runner: runnerSchema.optional() }),
-  export_prototype: z.object({}),
-  ingest_screen: z.object({ name: z.string().trim().min(1).max(80), route: routeSchema, html: z.string().min(1).max(262144), screenId: z.uuid().optional(), expectedRevisionId: z.uuid().optional() }),
+  // 端（REQ-CORE-049）：只导出这一端的屏，缺省第一端
+  export_prototype: z.object({ surfaceId: z.uuid().optional() }),
+  ingest_screen: z.object({ name: z.string().trim().min(1).max(80), route: routeSchema, html: z.string().min(1), screenId: z.uuid().optional(), expectedRevisionId: z.uuid().optional() }),
   // 聊天（REQ-CORE-023 v0.45）：screenIds 是「用户此刻选中的屏」这一条上下文提示，不是目标锁——助手自己定范围
   chat: z.object({ prompt: z.string().trim().min(1).max(8000), screenIds: z.array(z.uuid()).max(20).optional(), runner: runnerSchema.optional(), imageKeys: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional() }),
+  propose_states: z.object({ surfaceId: z.uuid(), runner: runnerSchema.optional(), locale: jobLocaleSchema }),
 } as const;
 
 // 作业输入按种类的类型（CH-2 v1.06）：读点用 inputOf(job, kind) 取，schema 加字段、改字段时 tsc 能指出每个读点
@@ -157,6 +164,7 @@ export const createJobSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('ingest_screen'), input: jobInputSchemas.ingest_screen }),
   z.object({ kind: z.literal('chat'), input: jobInputSchemas.chat }),
   z.object({ kind: z.literal('edit_component'), input: jobInputSchemas.edit_component }),
+  z.object({ kind: z.literal('propose_states'), input: jobInputSchemas.propose_states }),
 ]);
 export type CreateJobInput = z.infer<typeof createJobSchema>;
 // 建作业请求（API-CORE-006）：作业之外可带参考图 id，服务端解析成 input.imageKeys
@@ -180,6 +188,7 @@ export function estimateJob(input: CreateJobInput, allScreens: number): { calls:
     case 'chat': return { calls: 8, screens: 0 };
     // 改组件只有一次模型调用；之后的回刷是确定性的，不占调用
     case 'edit_component': return { calls: 1, screens: 0 };
+    case 'propose_states': return { calls: 1, screens: 0 };
     case 'apply_design_system': return { calls: 0, screens: 0 };
     default: void allScreens; return { calls: 0, screens: 0 };
   }
@@ -210,6 +219,8 @@ export const createMessageSchema = z.object({
   frame: z.enum(DRAFT_FRAME_CHOICES).optional(),
   // 参照项目（REQ-CORE-042）：只对草稿本的新草稿有效；改稿的参照在草稿上设（API-CORE-012）
   refProjectId: z.uuid().optional(),
+  // 端（REQ-CORE-049）：造屏时新屏落在哪一端，透传给 generate；草稿本里带它由草稿本规则拒掉
+  surfaceId: z.uuid().optional(),
 }).refine((v) => !!v.variantOf === !!v.variantName, { path: ['variantName'], message: 'variantOf 与 variantName 要一起给' })
   .refine((v) => v.content.length > 0 || (v.mode !== 'chat' && !!(v.variantOf || v.route || v.preset)), { path: ['content'], message: '先写点什么' });
 // 重试一轮（REQ-CORE-026 v0.72 / API-CORE-034）：只换通道，其余照原作业
@@ -236,7 +247,55 @@ export const updateScreenSchema = z.object({
   frame: z.enum(DRAFT_FRAMES).optional(),
   // 参照项目只对草稿有效（REQ-CORE-042 / ADR-033）：本人的普通项目，null 回到自由风格；元数据，从下一轮起生效
   refProjectId: z.uuid().nullable().optional(),
+  // 分组（REQ-CORE-050）：元数据，不建修订；null = 未分组。变体的分组跟默认屏，在路由层判
+  group: groupNameSchema.nullable().optional(),
+  // 屏不能换端（API-CORE-012）：要换就删了重造，或从草稿本搬
+  surfaceId: z.never({ error: '屏不能换端：删了重造，或从草稿本搬进来' }).optional(),
 }).refine((v) => Object.keys(v).length > 0, 'empty patch');
+
+// 端（REQ-CORE-049 / API-CORE-054）：设备建好不能改；states 整份替换，删掉的维度由服务端标 retired 留着
+export const createSurfaceSchema = z.object({ name: surfaceNameSchema, deviceType: deviceTypeSchema });
+export const updateSurfaceSchema = z.object({
+  name: surfaceNameSchema.optional(),
+  states: surfaceStatesInputSchema.optional(),
+  deviceType: z.never({ error: '端的设备建好不能改' }).optional(),
+  expectedVersion: z.number().int().min(1),
+}).refine((v) => v.name !== undefined || v.states !== undefined, 'empty patch');
+export type SurfaceDto = { id: string; projectId: string; name: string; deviceType: (typeof DEVICE_TYPES)[number]; position: number; states: SurfaceStates; version: number };
+/** propose_states 作业的产出（output.proposal）：建议的维度与事件，不落库 */
+export type StatesProposalDto = { summary: string; dims: { name: string; values: string[] }[]; events: { name: string; ms?: number }[] };
+
+// 草稿搬进项目（REQ-CORE-052 / API-CORE-055）：每张只搬当前这一版，页面草稿成这一端的屏、组件草稿成共享组件，之后草稿删掉
+export const MAX_MOVE_DRAFTS = 20;
+export const moveDraftsSchema = z.object({
+  draftIds: z.array(z.uuid()).min(1).max(MAX_MOVE_DRAFTS).refine((a) => new Set(a).size === a.length, '草稿重复了'),
+  projectId: z.uuid(),
+  surfaceId: z.uuid(),
+  group: groupNameSchema.optional(),
+  restyle: z.boolean().optional(),
+  runner: runnerSchema.optional(),
+});
+export type MoveDraftsInput = z.infer<typeof moveDraftsSchema>;
+// 草稿落进项目时的名字（API-CORE-047 / API-CORE-055；搬进项目的弹层按同一套规则预先写出来）。
+// 放成屏的路由：名字转 kebab-case（先去掉变音符号），全是中文这类转不出来的用 /screen；在这一端内去重
+export function draftRoute(name: string, taken: string[]): string {
+  const slug = name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+  const base = `/${slug || 'screen'}`;
+  const used = new Set(taken);
+  if (!used.has(base)) return base;
+  let k = 2;
+  while (used.has(`${base}-${k}`)) k++;
+  return `${base}-${k}`;
+}
+// 组件名：只留组件名允许的字符（字母、数字、空格、下划线、连字符），转不出来的叫 Component；与项目里已有的撞了（不分大小写）加序号
+export function draftComponentName(name: string, taken: string[]): string {
+  const base = Array.from(name.replace(/[^\p{L}\p{N} _-]/gu, ' ').replace(/\s+/g, ' ').replace(/^[^\p{L}\p{N}]+/u, '').trim()).slice(0, 37).join('').trim() || 'Component';
+  const used = new Set(taken.map((t) => t.toLowerCase()));
+  if (!used.has(base.toLowerCase())) return base;
+  let k = 2;
+  while (used.has(`${base} ${k}`.toLowerCase())) k++;
+  return `${base} ${k}`;
+}
 
 // 草稿写回项目（REQ-CORE-041 / REQ-CORE-044，API-CORE-047）：screen / component 是一次性快照，restyle 时再发一次按设计系统改写的作业；
 // overwrite 把草稿原样写成目标屏 screenId 的一条新修订，带 qid 只换那一块（ADR-032）。restyle 不给时由服务端按草稿的参照项目定
@@ -406,6 +465,10 @@ export type ScreenDto = {
   refProjectId: string | null; targetScreenId: string | null; targetQid: string | null;
   /** 写回目标那一屏所在的项目与屏名（服务端派生）；没有写回目标或那一屏已被删时为 null */
   target: { projectId: string; projectName: string; screenName: string } | null;
+  /** 所属端（REQ-CORE-049）：草稿为 null；group 是分组（REQ-CORE-050），null = 未分组 */
+  surfaceId: string | null; group: string | null;
+  /** 当前修订里的页内状态与写到的取值（ADR-041）；没有修订或旧修订为 null */
+  states: RevisionStates | null;
   updatedAt: string;
 };
 export type LinkDto = { fromScreenId: string; qid: string; href: string; toScreenId: string | null };
@@ -491,6 +554,9 @@ export const presenceStateSchema = z.object({
   /** 草稿本：正看的草稿与草稿里选中的块 */
   draft: z.uuid().optional(),
   blocks: z.array(z.string().min(1).max(40)).max(8).optional(),
+  /** 正在看的那一端（REQ-CORE-049）与全屏视图里正看的那一屏（PAGE-FULLVIEW） */
+  surface: z.uuid().optional(),
+  screen: z.uuid().optional(),
   /** 正在跟随的人（person.id）与开始跟随的时刻（ms）：顺着它找跟随链的领头人，连成一圈时按它决定谁停下 */
   following: z.object({ id: z.uuid(), since: z.number().int().nonnegative() }).optional(),
 });
@@ -515,7 +581,9 @@ export type ProjectDto = { id: string; name: string; deviceType: (typeof DEVICE_
 export type SketchbookDto = { projectId: string };
 /** 草稿写回的结果（API-CORE-047）：screen / component 二选一，restyle 时带改写作业；覆盖时带新修订与覆盖前那一版（回溯用） */
 export type CopyDraftResultDto = { screen?: ScreenDto; component?: ComponentDto; job?: JobDto; revisionId?: string; previousRevisionId?: string };
-export type ProjectDetailDto = { project: ProjectDto; designSystem: DesignSystemDto; screens: ScreenDto[]; links: LinkDto[]; activeJobs: JobDto[]; assets: AssetDto[]; components: ComponentDto[] };
+export type ProjectDetailDto = { project: ProjectDto; designSystem: DesignSystemDto; surfaces: SurfaceDto[]; screens: ScreenDto[]; links: LinkDto[]; activeJobs: JobDto[]; assets: AssetDto[]; components: ComponentDto[] };
+/** 搬进项目的结果（API-CORE-055）：改写作业建不出来时不回滚，带 restyleError */
+export type MoveDraftsResultDto = { screens: ScreenDto[]; components: ComponentDto[]; jobs: JobDto[]; restyleError?: string };
 export type RevisionDto = { id: string; screenId: string; seq: number; sourceKind: SourceKind; jobId: string | null; parentRevisionId: string | null; candidateIndex: number | null; candidateSettledAt: string | null; htmlUrl: string; screenshotUrl: string | null; thumbUrl: string | null; lintReport: unknown; createdAt: string };
 /** 候选覆盖层的数据（API-CORE-026）：列 = 版本、行 = 屏 */
 export type CandidatesDto = { jobId: string; versions: number; screens: { screenId: string; name: string; route: string; width: number; height: number; currentRevisionId: string | null; settled: boolean; revisions: { id: string; index: number; seq: number; screenshotUrl: string | null; thumbUrl: string | null; htmlUrl: string; previewUrl: string }[] }[] };

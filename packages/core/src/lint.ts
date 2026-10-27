@@ -20,7 +20,8 @@ export function lintScreenBody(bodyHtml: string, allowedRoutes: string[], firstT
   const body = document.body;
   const roots = Array.from(body.children).filter((el) => el.tagName !== 'SCRIPT');
   if (roots.length !== 1) violations.push({ rule: 'single-root', message: t(`body 顶层元素数为 ${roots.length}，应为 1`, `The body has ${roots.length} top-level elements; it should have 1`) });
-  if (body.querySelector('script')) violations.push({ rule: 'no-script', message: t('含 <script>：可以用（图表库等），但离线或 CDN 失效时这块会退化', 'Contains <script>: allowed (chart libraries and the like), but this part degrades offline or when the CDN is down') });
+  // 页内状态的声明块（ADR-041）是数据，不是脚本
+  if (body.querySelector('script:not([type="application/json"])')) violations.push({ rule: 'no-script', message: t('含 <script>：可以用（图表库等），但离线或 CDN 失效时这块会退化', 'Contains <script>: allowed (chart libraries and the like), but this part degrades offline or when the CDN is down') });
   if (body.querySelector('style')) violations.push({ rule: 'no-style', message: t('含 <style>：可以用，但里面的颜色与尺寸不随设计系统变', 'Contains <style>: allowed, but the colors and sizes in it do not follow the design system') });
 
   for (const el of Array.from(body.querySelectorAll('*'))) {

@@ -45,6 +45,7 @@ export function jobLabel(job: JobDto, screens: Pick<ScreenDto, 'id' | 'name'>[],
     case 'regenerate_subtree': return i.qids && i.qids.length > 1 ? t('jobs.regenerateBlocks', { name: name(i.screenId), n: i.qids.length }) : t('jobs.regenerateBlock', { name: name(i.screenId) });
     case 'apply_design_system': return i.screenIds === 'all' ? t('jobs.applyAll') : t('jobs.applyN', { count: (i.screenIds ?? []).length });
     case 'propose_design_system': return t('jobs.propose');
+    case 'propose_states': return t('jobs.proposeStates');
     case 'export_prototype': return t('jobs.export');
     case 'ingest_screen': return t('jobs.ingest', { name: name(i.screenId) });
     // 聊天（REQ-CORE-023）：范围要等助手看完才知道，行上只写这句话的开头

@@ -4,6 +4,7 @@ import { Composer, type ComposerHandle } from '@/composer/Composer';
 import type { useRunnerPrefs } from '@/composer/useRunnerPrefs';
 import type { ComposerDock } from '@/composer/useComposerDock';
 import type { JobChip } from '@/composer/JobChips';
+import type { PromptHistoryEntry } from '@/composer/history';
 import { ChoiceGroup } from '@/sketch/ChoiceGroup';
 import { RefSelect, type RefProjects } from '@/sketch/RefSelect';
 import { useT } from '@/i18n';
@@ -26,7 +27,7 @@ type DraftPick = { qid: string; tag: string; text: string };
 // 选元素点中了一块（REQ-CORE-045）：目标区多一枚胶囊、动词行写「改这一块」，× 或输入框空着时 Esc 去掉它回到改整张。
 // 按住 Shift 点了几块（v1.26）：每块一枚胶囊、各自能 ×，动词行写「改这 N 块」，Esc 一次清掉全部。
 // 发送被挡的原因由页面按 REQ-CORE-020 的规则给
-export function SketchComposer({ handle, laneRef, draft, jobs, blockedReason, prefs, refs, picking, picks, onRemovePick, onClimb, onSend, onCancelJob, onRetryJob, onDismissJob, onUploadImage, onError, onEscape, hidden, dock }: {
+export function SketchComposer({ handle, laneRef, draft, jobs, blockedReason, prefs, refs, picking, picks, onRemovePick, onClimb, onSend, onCancelJob, onRetryJob, onDismissJob, onUploadImage, loadHistory, onError, onEscape, hidden, dock }: {
   handle: Ref<ComposerHandle>;
   laneRef: { current: HTMLElement | null };
   /** 看板上打开的草稿：有 = 改它，没有 = 新草稿 */
@@ -46,6 +47,7 @@ export function SketchComposer({ handle, laneRef, draft, jobs, blockedReason, pr
   onRetryJob: (jobId: string) => Promise<void>;
   onDismissJob: (jobId: string) => void;
   onUploadImage: (file: File) => Promise<string>;
+  loadHistory?: () => Promise<PromptHistoryEntry[]>;
   onError: (msg: string) => void;
   /** 输入框空着时按 Esc：先去胶囊、再收起看板，由页面定 */
   onEscape: () => void;
@@ -65,7 +67,7 @@ export function SketchComposer({ handle, laneRef, draft, jobs, blockedReason, pr
     : picks.length ? [t('composer.pickPhrase')]
     : picking ? [t('composer.pickTool', { name: draft.name })]
     : [t('composer.editPhrase', { name: draft.name })];
-  const chips = draft ? picks.map((p) => ({ key: p.qid, label: p.text ? t('composer.chipText', { name: draft.name, tag: p.tag, text: short(p.text, 16) }) : t('composer.chip', { name: draft.name, tag: p.tag }), onRemove: () => onRemovePick(p.qid) })) : undefined;
+  const chips = draft ? picks.map((p) => ({ key: p.qid, label: p.text ? t('composer.chipText', { tag: p.tag, text: short(p.text, 16) }) : t('composer.chip', { tag: p.tag }), onRemove: () => onRemovePick(p.qid) })) : undefined;
   return (
     <Composer
       handle={handle} laneRef={laneRef} jobs={jobs} blockedReason={blockedReason}
@@ -80,7 +82,7 @@ export function SketchComposer({ handle, laneRef, draft, jobs, blockedReason, pr
       }}
       targets={draft ? [draft] : []} componentTargets={[]} onRemoveComponentTarget={noop} totalScreens={0} anchor={null} maxTargets={1}
       count={1} versions={1} onCount={noop} onVersions={noop}
-      onSend={(content, ids) => onSend(content, ids, frame, refProjectId)} onCancelJob={onCancelJob} onRetryJob={onRetryJob} onDismissJob={onDismissJob} onUploadImage={onUploadImage} onError={onError}
+      onSend={(content, ids) => onSend(content, ids, frame, refProjectId)} onCancelJob={onCancelJob} onRetryJob={onRetryJob} onDismissJob={onDismissJob} onUploadImage={onUploadImage} loadHistory={loadHistory} onError={onError}
       onRemoveTarget={noop} onRemoveAnchor={noop} onClearTargets={noop}
       runners={prefs.runners} runnersFailed={prefs.runnersFailed} onReloadRunners={() => void prefs.loadRunners()} runnerId={prefs.runnerId} onRunnerChange={prefs.onRunnerChange}
       sessions={prefs.sessionList.items} sessionsReason={prefs.sessionList.reason} sessionTool={prefs.agentTool} sessionId={prefs.sessionId} onSessionChange={prefs.onSessionChange} onSessionsOpen={prefs.loadSessions}

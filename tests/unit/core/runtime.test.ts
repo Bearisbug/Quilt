@@ -273,3 +273,32 @@ test('isPreviewMessage：形状不对的 quilt:* 消息一律不认（屏脚本�
   assert.equal(isPreviewMessage({ type: 'quilt:wheel', deltaY: -3, x: 1, y: 2 }), true);
   assert.equal(isPreviewMessage({ type: 'quilt:component-size', componentId: 'c1', x: 0, y: 0, w: 320, h: 64 }), true);
 });
+
+// 端上的状态维度（REQ-CORE-051，ADR-041）：缺省取值下 data-when 不成立的元素隐藏，quilt:states 切取值不建修订、不重载；
+// 页内与端上重名的维度不生效；quilt:event 播一次就收回
+test('状态：缺省取值、切取值、页内维度、重名不生效、事件播完收回', async () => {
+  const surface = '<script type="application/json" data-quilt-surface-states>{"dims":[{"key":"net","name":"Net","values":[{"key":"online","name":"On"},{"key":"offline","name":"Off"}],"default":"online"}],"events":[{"key":"saved","name":"Saved"}]}</script>';
+  const page = '<script type="application/json" data-quilt-states>{"dims":[{"key":"list","name":"List","values":[{"key":"full","name":"Full"},{"key":"empty","name":"Empty"}],"default":"full"},{"key":"net","name":"Shadow","values":[{"key":"x","name":"X"},{"key":"y","name":"Y"}],"default":"x"}],"events":[]}</script>';
+  const p = preview(`${surface}<main data-qid="q1">${page}<p id="off" data-when="net:offline">离线</p><p id="empty" data-when="list:empty net:offline">空</p><p id="toast" data-when="@saved">已保存</p><p id="plain">正文</p></main>`);
+  const on = (id: string) => p.$(`#${id}`).hasAttribute('data-quilt-on');
+  const html = p.win.document.documentElement;
+  assert.equal(html.getAttribute('data-s-net'), 'online', '端上的缺省');
+  assert.equal(html.getAttribute('data-s-list'), 'full', '页内的缺省');
+  assert.deepEqual([on('off'), on('empty'), on('toast')], [false, false, false]);
+  let heard: unknown = null;
+  p.win.addEventListener('quilt:states', (e) => { heard = JSON.parse(JSON.stringify((e as unknown as { detail: unknown }).detail)); });
+  p.post({ type: 'quilt:states', values: { net: 'offline', list: 'empty', nope: 'x' } });
+  assert.equal(html.getAttribute('data-s-net'), 'offline');
+  assert.deepEqual([on('off'), on('empty')], [true, true]);
+  assert.deepEqual(heard, { values: { net: 'offline', list: 'empty' } }, '重名的页内维度不生效，不认识的键丢掉');
+  // 取值不在维度里：回到缺省
+  p.post({ type: 'quilt:states', values: { net: 'mars' } });
+  assert.equal(html.getAttribute('data-s-net'), 'online');
+  assert.equal(on('off'), false);
+  p.post({ type: 'quilt:event', key: 'saved', ms: 500 });
+  assert.equal(on('toast'), true);
+  await new Promise((r) => setTimeout(r, 650));
+  assert.equal(on('toast'), false, '播完收回');
+  for (const m of p.sent) assert.ok(previewMessageSchema.safeParse(m).success, JSON.stringify(m));
+  await p.close();
+});

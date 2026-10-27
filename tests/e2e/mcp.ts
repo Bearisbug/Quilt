@@ -27,7 +27,7 @@ type Detail = { project: { exemplarScreenId: string | null }; screens: Screen[];
 seed('seed');
 await writeFile(PNG_PATH, PNG);
 const mcp = await connectMcp();
-const NEW_TOOLS = ['delete_screen', 'delete_component', 'delete_project', 'get_revision', 'restore_revision', 'list_candidates', 'adopt_candidate', 'move_screens', 'edit_element', 'regenerate_subtree', 'edit_component', 'propose_design_system', 'export_prototype', 'get_export', 'list_runners', 'create_upload_url', 'list_jobs', 'cancel_job', 'get_job_events', 'list_assets', 'create_asset', 'delete_asset', 'list_design_presets', 'create_design_preset', 'apply_design_preset', 'delete_design_preset', 'list_messages', 'patch_screen', 'append_upload', 'get_sketchbook', 'copy_draft', 'create_draft'].map((t) => `quilt.${t}`);
+const NEW_TOOLS = ['delete_screen', 'delete_component', 'delete_project', 'get_revision', 'restore_revision', 'list_candidates', 'adopt_candidate', 'move_screens', 'edit_element', 'regenerate_subtree', 'edit_component', 'propose_design_system', 'export_prototype', 'get_export', 'list_runners', 'create_upload_url', 'list_jobs', 'cancel_job', 'get_job_events', 'list_assets', 'create_asset', 'delete_asset', 'list_design_presets', 'create_design_preset', 'apply_design_preset', 'delete_design_preset', 'list_messages', 'patch_screen', 'append_upload', 'get_sketchbook', 'copy_draft', 'create_draft', 'create_surface', 'update_surface', 'delete_surface', 'move_drafts'].map((t) => `quilt.${t}`);
 // 工具调用助手：成功要 JSON、失败要错误类型
 const call = async <T = Record<string, unknown>>(name: string, args: Record<string, unknown>, what = name): Promise<T> => { const r = await callTool(mcp, name, args); expect(!r.isError, `${what} 出错：${r.text.slice(0, 300)}`); return r.json as T; };
 const fail = async (name: string, args: Record<string, unknown>, type: string, what = name) => { const r = await callTool(mcp, name, args); expect(r.isError, `${what} 应失败（${type}），实际成功：${r.text.slice(0, 200)}`); const t = (r.json as { type?: string }).type; expect(t === type, `${what} 应 ${type}，实际 ${t}：${r.text.slice(0, 200)}`); };
@@ -41,12 +41,13 @@ await step('TC-AGENT-011', async () => {
   const pid = r.projectId; const [s1, s2] = r.screens.map((s) => s.id);
   const footer = (await apiJson<{ component: { id: string; version: number } }>(`/v1/projects/${pid}/components`, { method: 'POST', body: JSON.stringify({ name: 'Footer', html: '<footer class="p-4 text-sm">Footer</footer>' }) })).body.component;
 
-  // 1 工具面：53 个工具（v0.60 合并两对、v0.64 增 patch_screen / append_upload、v1.13 增 get_sketchbook / copy_draft、v1.14 增 create_draft、v1.23 删 4 个批注工具），
+  // 1 工具面：57 个工具（v0.60 合并两对、v0.64 增 patch_screen / append_upload、v1.13 增 get_sketchbook / copy_draft、v1.14 增 create_draft、v1.23 删 4 个批注工具、
+  // v1.52 增 create_surface / update_surface / delete_surface / move_drafts），
   // 名字里都没有 annotation；7 类资源；list_runners 不含密钥
   const tools = (await mcp.listTools()).tools.map((t) => t.name);
   const missing = NEW_TOOLS.filter((t) => !tools.includes(t));
   expect(missing.length === 0, `缺工具：${missing.join(',')}`);
-  expect(tools.length === 53, `工具数应为 53，实际 ${tools.length}`);
+  expect(tools.length === 57, `工具数应为 57，实际 ${tools.length}`);
   const annoTools = tools.filter((t) => t.includes('annotation'));
   expect(annoTools.length === 0, `不该再有批注工具：${annoTools.join(',')}`);
   const resources = (await mcp.listResourceTemplates()).resourceTemplates.length;
@@ -171,7 +172,7 @@ await step('TC-AGENT-011', async () => {
   expect(badId.isError, '非法 uploadId 应被拒');
   notes.push('patch_screen 改一处 / 缺锚点与多处匹配 422 不落库 / all 全换 / 旧基线 409；append_upload 三段建屏');
 
-  // 7c 写入口收口（v0.65）：qid 对齐（插入元素后旧号不动）、重发同一段 409、超过单屏上限 422、上传位用后即清、组件副本被盖回要报出来、详情是紧凑投影
+  // 7c 写入口收口（v0.65）：qid 对齐（插入元素后旧号不动）、重发同一段 409、上传位用后即清、很大的屏照常写入（v1.51）、组件副本被盖回要报出来、详情是紧凑投影
   const before7c = (await callTool(mcp, 'quilt.get_screen', { screenId: agent })).text;
   const lastQ = Math.max(...[...before7c.matchAll(/data-qid="q(\d+)"/g)].map((m) => Number(m[1])));
   const lastTag = before7c.match(new RegExp(`<[a-z0-9]+[^>]*data-qid="q${lastQ}"[^>]*>`))![0];
@@ -188,13 +189,23 @@ await step('TC-AGENT-011', async () => {
   const viaUpload = await call<{ screenId: string }>('quilt.create_screen', { projectId: pid, name: '上传位', route: '/slot', uploadId: slot2.uploadId });
   await fail('quilt.create_screen', { projectId: pid, name: '再用', route: '/slot-again', uploadId: slot2.uploadId }, '/errors/validation', '上传位用过即清');
   await call('quilt.delete_screen', { screenId: viaUpload.screenId });
-  await fail('quilt.create_screen', { projectId: pid, name: '太大', route: '/huge', html: `<div>${'x'.repeat(300 * 1024)}</div>` }, '/errors/validation', '超过单屏上限');
+  // 单屏不设大小上限（v1.51）：直接写 300 KB、分块累计 272,000 字符，都照常建屏、取回全文
+  const huge = await call<{ screenId: string }>('quilt.create_screen', { projectId: pid, name: '很大', route: '/huge', html: `<div>${'x'.repeat(300 * 1024)}</div>` });
+  expect((await callTool(mcp, 'quilt.get_screen', { screenId: huge.screenId })).text.length > 300 * 1024, '直接写的 300 KB 屏取回来不全');
+  await call('quilt.delete_screen', { screenId: huge.screenId });
+  const longHtml = `<div>${'x'.repeat(272_000)}</div>`;
+  const slot3 = await call<{ uploadId: string }>('quilt.create_upload_url', { projectId: pid });
+  let longChars = 0;
+  while (longChars < longHtml.length) longChars = (await call<{ chars: number }>('quilt.append_upload', { uploadId: slot3.uploadId, offset: longChars, chunk: longHtml.slice(longChars, longChars + 16_000) })).chars;
+  const hugeUp = await call<{ screenId: string }>('quilt.create_screen', { projectId: pid, name: '很大分块', route: '/huge-chunked', uploadId: slot3.uploadId });
+  expect((await callTool(mcp, 'quilt.get_screen', { screenId: hugeUp.screenId })).text.length > 272_000, '分块写的 272,000 字符屏取回来不全');
+  await call('quilt.delete_screen', { screenId: hugeUp.screenId });
   const hacked = await call<{ screenId: string; componentsOverwritten?: string[] }>('quilt.create_screen', { projectId: pid, name: '改副本', route: '/hacked', html: OK_HTML.replace('</main>', '</main><footer data-component="Footer"><p>hand edited</p></footer>') });
   expect(hacked.componentsOverwritten?.includes('Footer'), `改了组件副本应在 componentsOverwritten 里报出：${JSON.stringify(hacked).slice(0, 200)}`);
   await call('quilt.delete_screen', { screenId: hacked.screenId });
   const compact = await callTool(mcp, 'quilt.get_project', { projectId: pid });
   expect(!compact.text.includes('previewUrl') && !compact.text.includes('screenshotUrl') && !compact.text.includes('"links"') && !compact.text.includes('\n'), `get_project 应是紧凑投影：${compact.text.slice(0, 160)}`);
-  notes.push(`qid 对齐 / offset 409 / 上传位清 / 超限 422 / 组件副本报出 / 详情紧凑 ${compact.text.length} 字符`);
+  notes.push(`qid 对齐 / offset 409 / 上传位清 / 300 KB 直写与分块都建成 / 组件副本报出 / 详情紧凑 ${compact.text.length} 字符`);
 
   // 8 作业：造（anchor + 参考图 + 组件上下文）、懒生成、子树重生成、提炼、AI 改组件、导出 + 下载、列表 / 事件 / 取消、通道校验
   const gen = await call<Job>('quilt.generate_screens', { projectId: pid, prompt: 'Onboarding flow', count: 2, anchor: { x: 5000, y: 0 }, attachmentIds: [upl.attachmentId], componentIds: [footer.id] });

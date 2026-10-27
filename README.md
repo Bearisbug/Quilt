@@ -47,7 +47,7 @@ Quilt runs on your machine: one process, no account, no cloud backend, data in `
 - **History.** Every generation, edit and agent write is a revision you can roll back to.
 - **Together.** People on your network who open the same project see each other's cursors, selections and views, and can follow one another.
 - **Settings.** Generation channels (keys encrypted at rest), a usage dashboard by day, model, project and task, an optional local record of UI actions and model calls, and a Chinese or English interface.
-- **MCP, both ways.** Your coding agent gets 53 tools and 7 resources at `http://127.0.0.1:3100/mcp`. Quilt can also hand a job to a running Claude Code session.
+- **MCP, both ways.** Your coding agent gets 57 tools and 7 resources at `http://127.0.0.1:3100/mcp`. Quilt can also hand a job to a running Claude Code session.
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/e6b776b4-c8b8-4900-91bc-9d9c906f5da6" width="900" alt="Picking an element inside a focused screen and editing it in place" />
@@ -123,12 +123,12 @@ Read with `get_outline` (a compact summary of every screen) before `get_screen`.
 The other direction: choose "hand to local Claude Code" as the channel in the composer and pick a running session. Quilt delivers the prompt there; the session writes back over the same MCP and closes the job.
 
 <details>
-<summary>All 53 tools and 7 resources</summary>
+<summary>All 57 tools and 7 resources</summary>
 
-- Projects: `quilt.list_projects`, `create_project`, `get_project`, `update_project`, `delete_project`
+- Projects: `quilt.list_projects`, `create_project`, `get_project`, `update_project`, `delete_project`, `create_surface`, `update_surface`, `delete_surface`
 - Reading: `get_outline`, `get_screen`, `get_screenshot`, `get_revision`, `list_revisions`, `list_candidates`, `get_design_contract`, `get_app_map`, `list_assets`, `list_messages`, `list_jobs`, `get_job`, `get_job_events`, `list_runners`, `list_design_presets`
 - Writing screens: `validate_screen`, `create_screen`, `update_screen`, `patch_screen`, `create_upload_url`, `append_upload`, `link_screens`, `move_screens`, `edit_element`, `restore_revision`, `adopt_candidate`, `delete_screen`
-- Sketchbook: `get_sketchbook`, `create_draft`, `copy_draft`
+- Sketchbook: `get_sketchbook`, `create_draft`, `copy_draft`, `move_drafts`
 - Shared components: `create_component`, `update_component`, `delete_component`
 - Design system: `update_design_system`, `create_design_preset`, `apply_design_preset`, `delete_design_preset`, `create_asset`, `delete_asset`
 - Model jobs: `generate_screens`, `edit_screens`, `regenerate_subtree`, `edit_component`, `propose_design_system`, `export_prototype`, `get_export`, `cancel_job`, `finish_job`

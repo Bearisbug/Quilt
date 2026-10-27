@@ -105,12 +105,12 @@ export function registerJobTools(c: ToolCtx) {
   }));
 
   server.registerTool('quilt.export_prototype', {
-    description: 'Build a single offline HTML prototype of all screens (hash routing, no model calls). Returns a job; when it succeeds call quilt.get_export for the download URL.',
-    inputSchema: { projectId: z.string().uuid() },
+    description: 'Build a single offline HTML prototype of one surface\'s screens (surfaceId, default the first; hash routing, states at their defaults, no model calls). Returns a job; when it succeeds call quilt.get_export for the download URL.',
+    inputSchema: { projectId: z.string().uuid(), surfaceId: z.string().uuid().optional() },
   }, wrap(async (a) => {
     write();
     const project = await ownedProject(user.id, a.projectId as string);
-    return runJob(project.id, { kind: 'export_prototype', input: {} });
+    return runJob(project.id, { kind: 'export_prototype', input: { surfaceId: a.surfaceId as string | undefined } });
   }));
 
   server.registerTool('quilt.get_export', {

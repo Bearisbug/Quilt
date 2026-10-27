@@ -11,6 +11,7 @@ import { findCodexThread } from '../lib/codexSessions.ts';
 import { runnerCatalog, listChannels } from './channels.ts';
 import { driverSupportsVision } from '../lib/llm.ts';
 import { hasActiveJob } from './screens.ts';
+import { surfaceFor } from './surfaces.ts';
 import { estimateJob, createJobSchema, L, subtreeBlockIssues, extractBody, type CreateJobInput, type JobRunner, type Locale, type Runner } from '@quilt/core';
 import { requestUiLocale, tr } from '../lib/locale.ts';
 import type { UserRow } from './user.ts';
@@ -89,6 +90,19 @@ async function assertTargets(projectId: string, input: CreateJobInput) {
     const [base] = await db.select({ variantOf: schema.screens.variantOf }).from(schema.screens).where(and(eq(schema.screens.id, input.input.variantOf), eq(schema.screens.projectId, projectId)));
     if (!base || base.variantOf) throw problems.unprocessable([{ path: 'variantOf', message: L('变体只能从本项目的默认屏出', 'State variants can only be made from a default screen in this project') }]);
   }
+  // 端（REQ-CORE-049）：普通项目的造屏、导出与建议状态都落在一端——变体随默认屏、懒生成没指定端时随来源屏，其余缺省第一端；
+  // 定下来写回 input.surfaceId，worker 只认它。草稿本没有端（assertSketchbookJob 已拒带端的输入）
+  if (input.kind === 'generate' || input.kind === 'export_prototype' || input.kind === 'propose_states') {
+    const [project] = await db.select({ kind: schema.projects.kind }).from(schema.projects).where(eq(schema.projects.id, projectId));
+    if (project?.kind !== 'app') return;
+    const inp = input.input as { surfaceId?: string; variantOf?: string; fromScreenId?: string };
+    const from = inp.variantOf ?? (inp.surfaceId ? undefined : inp.fromScreenId);
+    if (from) {
+      const [s] = await db.select({ surfaceId: schema.screens.surfaceId }).from(schema.screens).where(and(eq(schema.screens.id, from), eq(schema.screens.projectId, projectId)));
+      if (s?.surfaceId) inp.surfaceId = s.surfaceId;
+    }
+    inp.surfaceId = (await surfaceFor(projectId, inp.surfaceId)).id;
+  }
 }
 
 const jobByKey = async (projectId: string, key: string): Promise<JobRow | undefined> =>
@@ -130,7 +144,7 @@ export async function createJob(args: { user: UserRow; projectId: string; input:
   else delete withLocale.locale;
   const releaseRate = assertRate(user.id);
   // 没带通道的 LLM 作业（MCP 建的、辅助作业）用用户自己配的默认通道；一条都没有才回落到 .env 的驱动
-  if (runner === 'model' && ['generate', 'edit_screens', 'regenerate_subtree', 'propose_design_system', 'edit_component'].includes(input.kind)) {
+  if (runner === 'model' && ['generate', 'edit_screens', 'regenerate_subtree', 'propose_design_system', 'edit_component', 'propose_states'].includes(input.kind)) {
     const inp = input.input as { runner?: unknown };
     if (!inp.runner) {
       const cat = await runnerCatalog(user);
@@ -148,6 +162,7 @@ export async function createJob(args: { user: UserRow; projectId: string; input:
     if (!exists) throw problems.validation([{ path: 'runner.sessionId', message: L('会话已关闭或不存在，重新选一个', 'The session is closed or gone; pick another') }]);
     // 本机会话拿到的是一段文字指令，钉死路由的懒生成、造变体、叠层屏这三种它没有对应的写法，与其静默当普通造屏做，不如当场拒
     if (input.kind === 'generate' && (input.input.route || input.input.variantOf || input.input.presentation)) throw problems.validation([{ path: 'runner', message: L('懒生成、出变体、叠层屏请换成一个模型，本机会话不接这类作业', 'Local sessions do not take missing pages, state variants or overlay screens; switch to a model') }]);
+    if (input.kind === 'propose_states') throw problems.validation([{ path: 'runner', message: L('建议状态请换成一个模型，本机会话不接这类作业', 'Local sessions do not suggest states; switch to a model') }]);
   }
   if (input.kind === 'regenerate_subtree') await assertSubtreeTarget(projectId, input.input);
   const targetScreenId = targetScreenOf(input);
